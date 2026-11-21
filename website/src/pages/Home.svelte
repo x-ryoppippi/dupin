@@ -14,7 +14,8 @@
 		<div class="container hero-inner">
 			<h1 class="display hero-title rise" style="--d: 0ms">Press ⌘Space. It's there.</h1>
 			<p class="hero-sub rise" style="--d: 100ms">
-				A fast, simple and beautiful app launcher for your mac.
+				A fast, simple and beautiful app launcher for your mac.<br />
+				The simplicity of Alfred, with Raycast-style extensions on the way.
 			</p>
 			<div class="cta rise" style="--d: 200ms">
 				<div class="cta-buttons">
