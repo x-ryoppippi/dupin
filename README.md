@@ -8,6 +8,8 @@ A lightweight, resident launcher for Apple silicon Macs, built with [Rune](https
 
 Homepage: <https://dupin.app>
 
+<a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
+
 Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred.
 
 - Fuzzy-search and open apps, by any name macOS knows them by
