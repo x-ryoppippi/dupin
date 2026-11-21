@@ -66,6 +66,7 @@ rustPlatform.buildRustPackage (
     meta = {
       description = "A lightweight resident launcher for Apple silicon Macs";
       homepage = "https://dupin.app";
+      license = lib.licenses.gpl3Plus;
       mainProgram = "dupin";
       platforms = [ "aarch64-darwin" ];
     };
