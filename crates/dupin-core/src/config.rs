@@ -27,9 +27,9 @@ pub struct Config {
 #[serde(from = "String", into = "String")]
 pub enum Backdrop {
     /// The built-in shader: the accent color flowing.
-    #[default]
     Flow,
     /// Nothing; the panel draws no frames of its own while it rests.
+    #[default]
     Off,
     /// A user's WGSL file.
     File(String),
@@ -110,7 +110,7 @@ impl Default for Config {
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
-            backdrop: Backdrop::Flow,
+            backdrop: Backdrop::Off,
         }
     }
 }
@@ -177,7 +177,7 @@ mod tests {
 
     #[test]
     fn reads_the_backdrop() {
-        assert_eq!(Config::default().backdrop, Backdrop::Flow);
+        assert_eq!(Config::default().backdrop, Backdrop::Off);
         let read = |v: &str| Config::parse(&format!("backdrop = \"{v}\"")).unwrap().backdrop;
         assert_eq!(read("off"), Backdrop::Off);
         assert_eq!(read("flow"), Backdrop::Flow);

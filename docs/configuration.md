@@ -10,7 +10,7 @@ file_limit = 200 # the most files a Spotlight search shows
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
-backdrop = "flow" # "flow", "off", or the path to a WGSL shader
+backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
@@ -52,7 +52,7 @@ Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while t
 
 ## Backdrop
 
-A shader animates behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"` draws nothing. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
+A shader can animate behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"`, the default, draws nothing and leaves the panel plain glass. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
 
 Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the Shaders folder row on the Appearance page opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
 

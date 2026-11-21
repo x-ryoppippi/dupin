@@ -16,7 +16,7 @@
 - Fuzzy-search and open apps, by any name macOS knows them by
 - Space on an empty query searches files with Spotlight; `in` and Space search inside them
 - A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
-- A shader animates behind the panel and reacts to typing; bring your own WGSL, as with Ghostty's custom shaders ([examples](./examples/shaders))
+- An optional shader animates behind the panel and reacts to typing; bring your own WGSL, as with Ghostty's custom shaders ([examples](./examples/shaders))
 
 ## Quick start
 
