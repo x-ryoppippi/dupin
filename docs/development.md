@@ -32,7 +32,7 @@ cargo run -p dupin-mac --example search -- in invoice # a provider from the term
 | `nix/treefmt.nix`   | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
 | `nix/dev-shell.nix` | The development shell                                                                                                       |
 
-The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI.
+The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
 ## Formatting
 
@@ -69,3 +69,17 @@ Scripts in this repository are written in Nushell.
 ## Logo
 
 `assets/logo/dupin.svg` is the app icon and `assets/logo/dupin-mark.svg` a monochrome `currentColor` mark, for template images such as a menu-bar item. They are the only tracked logo sources: the Nix build draws every icon size from `dupin.svg` with resvg and packs them with icnsutil, so no generated PNG or icns is committed.
+
+## Website
+
+`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+
+```sh
+just website::install # dependencies from the lockfile
+just website::dev     # local server (ox-content's dev server uses its default theme, not website/theme/)
+just website::preview # build, then serve the real page with the redirects
+just website::lint    # oxlint, type-aware and type-checked through tsrs
+just website::deploy  # cf build, then upload the result as Cloudflare static assets
+```
+
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.

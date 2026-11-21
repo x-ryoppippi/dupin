@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"jsx": "react-jsx",
+		"jsxImportSource": "@ox-content/vite-plugin",
+		"types": ["vite/client", "node"]
+	},
+	"include": [
+		"theme/**/*.tsx",
+		"theme/**/*.ts",
+		"vite.config.ts",
+		"cloudflare.config.ts",
+		"oxlint.config.ts"
+	]
+}

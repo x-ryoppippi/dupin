@@ -11,6 +11,9 @@
             rustfmt
             rust-analyzer
             nushell
+            nodejs
+            config.packages.pnpm
+            just
             nufmt
             config.treefmt.build.wrapper
             typos

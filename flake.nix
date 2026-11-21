@@ -27,6 +27,7 @@
         inputs.git-hooks.flakeModule
         ./nix/git-hooks.nix
         ./nix/packages.nix
+        ./nix/pnpm.nix
         ./nix/treefmt.nix
         ./nix/checks.nix
         ./nix/dev-shell.nix

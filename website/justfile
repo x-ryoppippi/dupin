@@ -1,0 +1,27 @@
+[private]
+default:
+    @just --list
+
+# Install the site's dependencies from the lockfile
+install:
+    pnpm install --frozen-lockfile
+
+# Start the dev server
+dev:
+    pnpm run dev
+
+# Build the static site into dist/
+build:
+    pnpm run build
+
+# Serve the built site locally
+preview:
+    pnpm run preview
+
+# Lint with oxlint, type-aware and type-checked through tsrs
+lint:
+    pnpm run lint
+
+# Build, then upload dist/ to Cloudflare as static assets
+deploy:
+    pnpm run deploy
