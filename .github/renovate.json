@@ -1,0 +1,43 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+	"automerge": true,
+	"platformAutomerge": true,
+	"branchConcurrentLimit": 0,
+	"dependencyDashboard": {
+		"enabled": false
+	},
+	"gitIgnoredAuthors": ["114827586+autofix-ci[bot]@users.noreply.github.com"],
+	"labels": ["dependencies", "renovate"],
+	"lockFileMaintenance": {
+		"enabled": true
+	},
+	"minimumReleaseAge": "3 days",
+	"packageRules": [
+		{
+			"description": "Lock file maintenance has no release timestamp, so the age gate would keep it pending forever.",
+			"matchUpdateTypes": ["lockFileMaintenance"],
+			"minimumReleaseAge": null
+		}
+	],
+	"nix": {
+		"enabled": true
+	},
+	"rangeStrategy": "bump",
+	"rebaseWhen": "conflicted",
+	"vulnerabilityAlerts": {
+		"labels": ["security"]
+	},
+	"customManagers": [
+		{
+			"description": "Bump the nushell version passed to setup-nu.",
+			"customType": "regex",
+			"managerFilePatterns": ["/^\\.github/(workflows|actions)/.+\\.ya?ml$/"],
+			"matchStrings": [
+				"uses: hustcer/setup-nu@[^\\n]+\\n\\s+with:\\n\\s+version: '(?<currentValue>[^']+)'"
+			],
+			"depNameTemplate": "nushell/nushell",
+			"datasourceTemplate": "github-releases"
+		}
+	]
+}

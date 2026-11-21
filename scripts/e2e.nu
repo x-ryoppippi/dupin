@@ -15,11 +15,12 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         ad $out $command $command | to json | print
     }
     # The runner image grants Runner.Listener, the app that launches every step, so
-    # agent-desktop and screencapture inherit Accessibility, PostEvent and Screen Recording.
+    # agent-desktop, osascript and screencapture inherit Accessibility, Automation, PostEvent and
+    # Screen Recording.
     let denied = ad $out permissions permissions
     | get data
     | transpose permission grant
-    | where permission in [accessibility screen_recording] and grant.state != granted
+    | where permission in [accessibility automation screen_recording] and grant.state != granted
     if ($denied | is-not-empty) {
         error make {msg: $"not granted: ($denied.permission | str join ', ')"}
     }
@@ -45,10 +46,9 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     snap $out summoned
 
     # `type` needs a settable AX value or the main window, and the field has neither: the
-    # panel never activates, so it is key but not main. Press keys as a person would.
-    for key in ('calculator' | split chars | enumerate) {
-        ad $out $'type-($key.index)' press $key.item | ignore
-    }
+    # panel never activates, so it is key but not main. Press keys as a person would, from one
+    # process: one `agent-desktop press` per key lost keys before they reached Dupin.
+    ^osascript -e 'tell application "System Events" to keystroke "calculator"'
     snap $out typed
     # Fuzzy matching would still find Calculator from a query missing keys, so check every key
     # reached the field.

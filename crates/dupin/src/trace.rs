@@ -1,6 +1,6 @@
-//! `DUPIN_TRACE=1`: print when the launch hotkey is registered, and how long each summon
-//! takes, from the hotkey handler to the first frame drawn after it, and every drawn frame's
-//! offset, to stderr. Off, it costs one branch.
+//! `DUPIN_TRACE=1`: print when the launch hotkey is registered, how long each summon takes,
+//! from the hotkey handler to the first frame drawn after it, every drawn frame's offset, and
+//! each key and edit the query field sees, to stderr. Off, it costs one branch.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -57,4 +57,18 @@ fn wall_ms() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+}
+
+/// A key the query field saw, before Dupin's handler decides on it.
+pub fn key(ev: &rune::KeyEvent) {
+    if on() {
+        eprintln!("dupin-trace: key {:?} wall={:.3}", ev.key, wall_ms());
+    }
+}
+
+/// The query field's text after an edit.
+pub fn edited(text: &str) {
+    if on() {
+        eprintln!("dupin-trace: edited {text:?} wall={:.3}", wall_ms());
+    }
 }

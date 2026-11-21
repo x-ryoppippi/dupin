@@ -202,12 +202,14 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        crate::trace::edited(&self.query.text);
         let effects = self.session.set_query(&self.query.text);
         self.apply(effects, tx);
     }
 
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        crate::trace::key(ev);
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
         let intent = match &ev.key {
