@@ -39,6 +39,8 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     snap $out launched
 
     let matched = {|r| $r.ok and $r.data?.match?.ref_id? != null }
+    # Dupin shows up in list-apps before its on_ready callback registers the hotkey.
+    wait-for-log $log 'dupin-trace: hotkey alt+space registered'
     ad $out press-hotkey press alt+space | ignore
     let field = poll $out field $matched find --app Dupin --role textfield --first
     snap $out summoned
@@ -99,6 +101,14 @@ def --wrapped poll [
         sleep 1sec
     }
     error make {msg: $"timed out waiting for ($name): ($reply | to json --raw)"}
+}
+
+def wait-for-log [log: path, line: string, --tries: int = 30] {
+    for attempt in 1..$tries {
+        if ($log | path exists) and (open --raw $log | str contains $line) { return }
+        sleep 1sec
+    }
+    error make {msg: $"timed out waiting for ($line) in ($log)"}
 }
 
 def mentions [reply: record, name: string]: nothing -> bool {
