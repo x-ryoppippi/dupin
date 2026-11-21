@@ -10,7 +10,7 @@ pub mod provider;
 pub mod searcher;
 pub mod session;
 
-pub use config::{Config, InputSource, Position};
+pub use config::{Backdrop, Config, InputSource, Position};
 pub use history::History;
 pub use item::{Action, Item, ItemKind};
 pub use provider::{Provider, Request};

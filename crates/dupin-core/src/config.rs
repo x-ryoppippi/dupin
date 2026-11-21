@@ -17,6 +17,42 @@ pub struct Config {
     /// Whether a signed release build installs its channel's updates by itself. Builds
     /// without an update feed (Nix, `cargo run`) never update.
     pub auto_update: bool,
+    /// The shader that animates behind the query field.
+    pub backdrop: Backdrop,
+}
+
+/// What animates behind the query field. In config.toml: `"flow"`, `"off"`, or the path to a
+/// WGSL file (`~/` is the home directory; a relative path is relative to config.toml).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+pub enum Backdrop {
+    /// The built-in shader: the accent color flowing.
+    #[default]
+    Flow,
+    /// Nothing; the panel draws no frames of its own while it rests.
+    Off,
+    /// A user's WGSL file.
+    File(String),
+}
+
+impl From<String> for Backdrop {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "flow" => Backdrop::Flow,
+            "off" => Backdrop::Off,
+            _ => Backdrop::File(value),
+        }
+    }
+}
+
+impl From<Backdrop> for String {
+    fn from(value: Backdrop) -> Self {
+        match value {
+            Backdrop::Flow => "flow".into(),
+            Backdrop::Off => "off".into(),
+            Backdrop::File(path) => path,
+        }
+    }
 }
 
 /// The keyboard input source the panel switches to when it shows, and switches back from when
@@ -74,6 +110,7 @@ impl Default for Config {
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
+            backdrop: Backdrop::Flow,
         }
     }
 }
@@ -135,6 +172,18 @@ mod tests {
         assert_eq!(
             read("com.apple.keylayout.ABC"),
             InputSource::Id("com.apple.keylayout.ABC".into())
+        );
+    }
+
+    #[test]
+    fn reads_the_backdrop() {
+        assert_eq!(Config::default().backdrop, Backdrop::Flow);
+        let read = |v: &str| Config::parse(&format!("backdrop = \"{v}\"")).unwrap().backdrop;
+        assert_eq!(read("off"), Backdrop::Off);
+        assert_eq!(read("flow"), Backdrop::Flow);
+        assert_eq!(
+            read("~/shaders/waves.wgsl"),
+            Backdrop::File("~/shaders/waves.wgsl".into())
         );
     }
 }
