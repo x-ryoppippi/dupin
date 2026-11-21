@@ -59,6 +59,8 @@
             # Restart after a crash, not after Quit.
             KeepAlive.SuccessfulExit = false;
             ProcessType = "Interactive";
+            # launchd doesn't load the shell's session variables.
+            EnvironmentVariables.XDG_CONFIG_HOME = config.xdg.configHome;
           };
         };
       };
