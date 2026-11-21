@@ -42,3 +42,27 @@ fn problem(message: String) -> (Config, Option<String>) {
     crate::log::warn(&message);
     (Config::default(), Some(message))
 }
+
+/// Write `config` to config.toml on a thread of its own, renaming over the file so a crash
+/// leaves the old one whole. Comments in a hand-written file are not kept.
+pub fn save(config: &dupin_core::Config) {
+    let toml = match toml::to_string(config) {
+        Ok(toml) => toml,
+        Err(e) => return crate::log::warn(&format!("couldn't serialize the settings: {e}")),
+    };
+    std::thread::spawn(move || {
+        let write = || -> std::io::Result<()> {
+            let path = path().ok_or_else(|| std::io::Error::other("HOME is unset"))?;
+            let dir = path
+                .parent()
+                .ok_or_else(|| std::io::Error::other("no parent directory"))?;
+            std::fs::create_dir_all(dir)?;
+            let tmp = path.with_extension("toml.tmp");
+            std::fs::write(&tmp, toml)?;
+            std::fs::rename(tmp, path)
+        };
+        if let Err(e) = write() {
+            crate::log::warn(&format!("couldn't save the settings: {e}"));
+        }
+    });
+}

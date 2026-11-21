@@ -12,6 +12,8 @@ dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 rune = { workspace = true }
 rune-notify = { workspace = true }
+rune-kit = { workspace = true }
+toml = { workspace = true, features = ["display"] }
 
 [lints]
 workspace = true

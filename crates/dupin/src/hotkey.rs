@@ -6,43 +6,109 @@
 //! registration (Raycast's, for one). Both registrations succeed and macOS delivers the key
 //! to one of them, so the README asks users to unassign ⌘Space elsewhere first.
 
-use rune::{AppHandle, Shortcut, ShortcutError};
+use std::sync::Mutex;
+
+use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
 
-pub fn register(handle: &AppHandle<Ui>, accelerator: &str) {
-    let shortcut = match accelerator.parse::<Shortcut>() {
-        Ok(shortcut) => shortcut,
-        Err(e) => return report(handle, accelerator, &e.to_string()),
-    };
-    // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
-    // (Spotlight's ⌘Space) take the key first without making registration fail, so ask who
-    // holds it beforehand. Register anyway: freeing the chord later then works without a restart.
-    if let Some(owner) = handle.shortcut_owner(&shortcut) {
-        report(handle, accelerator, &format!("{owner} already uses it"));
-    }
-    if let Err(e) = handle.register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx)) {
-        report(handle, accelerator, &why(handle, &shortcut, &e));
-    }
+/// The panel's hotkey registration, shared by the panel (which registers it at launch) and
+/// the settings window (which replaces it).
+pub struct Binding {
+    panel: AppHandle<Ui>,
+    id: Mutex<Option<ShortcutId>>,
+    /// Whether the launch registration failed, so recording the same chord again retries it.
+    failed: Mutex<bool>,
 }
 
-fn report(handle: &AppHandle<Ui>, accelerator: &str, reason: &str) {
-    let settings =
-        crate::settings::path().map_or_else(|| "config.toml".to_owned(), |p| p.display().to_string());
-    let message = format!(
-        "Couldn't register the {} hotkey: {reason}. Free it in the app that holds it, or set another `hotkey` in {settings}.",
-        keycaps(accelerator)
-    );
-    crate::log::warn(&message);
-    notify(&message);
-    handle.update(move |s, tx| s.show_notice(message, tx));
-}
+impl Binding {
+    pub fn new(panel: AppHandle<Ui>) -> Binding {
+        Binding {
+            panel,
+            id: Mutex::new(None),
+            failed: Mutex::new(false),
+        }
+    }
 
-fn why(handle: &AppHandle<Ui>, shortcut: &Shortcut, error: &ShortcutError) -> String {
-    match (error, handle.shortcut_owner(shortcut)) {
-        (ShortcutError::Conflict, Some(owner)) => format!("{owner} already uses it"),
-        (ShortcutError::Conflict, None) => "another app already uses it".to_owned(),
-        (e, _) => e.to_string(),
+    pub fn failed_at_launch(&self) -> bool {
+        *self.failed.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Register the configured hotkey at launch, reporting any failure.
+    pub fn register_at_launch(&self, accelerator: &str) {
+        let shortcut = match accelerator.parse::<Shortcut>() {
+            Ok(shortcut) => shortcut,
+            Err(e) => return self.report(accelerator, &e.to_string()),
+        };
+        // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
+        // (Spotlight's ⌘Space) take the key first without making registration fail, so ask who
+        // holds it beforehand. Register anyway: freeing the chord later then works without a
+        // restart.
+        if let Some(owner) = self.panel.shortcut_owner(&shortcut) {
+            self.report(accelerator, &format!("{owner} already uses it"));
+        }
+        match self
+            .panel
+            .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
+        {
+            Ok(id) => *self.id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id),
+            Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
+        }
+    }
+
+    /// Swap the hotkey for `next` (none: no hotkey), as the settings window records it. A
+    /// chord macOS or another app holds is refused and the old binding stays.
+    pub fn replace(&self, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+        if let Some(next) = next
+            && self
+                .panel
+                .shortcut_owner(next)
+                .is_some_and(|owner| owner != "Dupin")
+        {
+            return Err(ShortcutError::Conflict);
+        }
+        let new = next
+            .map(|shortcut| {
+                self.panel
+                    .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
+            })
+            .transpose()?;
+        let mut id = self.id.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = *id
+            && let Err(error) = self.panel.unregister_shortcut(old)
+        {
+            if let Some(new) = new {
+                let _ = self.panel.unregister_shortcut(new);
+            }
+            return Err(error);
+        }
+        *id = new;
+        *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        Ok(())
+    }
+
+    /// Who holds `shortcut`, for a refusal message.
+    pub fn owner(&self, shortcut: &Shortcut) -> Option<String> {
+        self.panel.shortcut_owner(shortcut)
+    }
+
+    fn report(&self, accelerator: &str, reason: &str) {
+        *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        let message = format!(
+            "Couldn't register the {} hotkey: {reason}. Free it in the app that holds it, or pick another in Settings (⌘,).",
+            keycaps(accelerator)
+        );
+        crate::log::warn(&message);
+        notify(&message);
+        self.panel.update(move |s, tx| s.show_notice(message, tx));
+    }
+
+    fn why(&self, shortcut: &Shortcut, error: &ShortcutError) -> String {
+        match (error, self.panel.shortcut_owner(shortcut)) {
+            (ShortcutError::Conflict, Some(owner)) => format!("{owner} already uses it"),
+            (ShortcutError::Conflict, None) => "another app already uses it".to_owned(),
+            (e, _) => e.to_string(),
+        }
     }
 }
 
@@ -75,6 +141,19 @@ pub fn keycaps(accelerator: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_recorded_shortcut_is_saved_in_a_form_that_reads_back() {
+        for accelerator in ["cmd+space", "ctrl+space", "ctrl+alt+k", "shift+cmd+p"] {
+            let shortcut: rune::Shortcut = accelerator.parse().unwrap();
+            let saved = shortcut.to_string();
+            assert_eq!(
+                saved.parse::<rune::Shortcut>().unwrap(),
+                shortcut,
+                "{accelerator} saved as {saved}"
+            );
+        }
+    }
+
     #[test]
     fn writes_modifiers_as_macos_glyphs() {
         assert_eq!(super::keycaps("cmd+space"), "⌘Space");

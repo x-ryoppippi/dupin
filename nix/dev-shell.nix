@@ -18,6 +18,7 @@
             actionlint
             zizmor
             gitleaks
+            nix-update
           ]
           ++ config.pre-commit.settings.enabledPackages;
         # Installs the pre-commit and pre-push hooks from nix/git-hooks.nix.

@@ -3,11 +3,14 @@
 
 mod hotkey;
 mod log;
+mod prefs;
 mod settings;
 mod store;
 mod trace;
 mod ui;
 mod view;
+
+use std::sync::Arc;
 
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
@@ -38,18 +41,34 @@ fn main() {
         .fit_content_height()
         .srgb_blend(true);
     let handle = app.handle();
+    let binding = Arc::new(hotkey::Binding::new(handle.clone()));
+
+    // The settings window: an ordinary titled window, made when ⌘, first opens it.
+    let prefs = App::new(AppSpec::new(
+        "Dupin Settings",
+        prefs::SIZE,
+        || unreachable!(),
+        prefs::view,
+    ))
+    .windowless();
+    let prefs_handle = prefs.handle();
+    let prefs = prefs.init({
+        let (config, binding, panel) = (config.clone(), binding.clone(), handle.clone());
+        move || prefs::Prefs::new(config, binding, panel)
+    });
+
     let hotkey = config.hotkey.clone();
     let mut registered = false;
     let app = app
         .init({
             let handle = handle.clone();
-            move || ui::Ui::new(handle, config, history, config_problem)
+            move || ui::Ui::new(handle, prefs_handle, config, history, config_problem)
         })
         .on_ready(move |window| {
             appear_instantly(window);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
-                hotkey::register(&handle, &hotkey);
+                binding.register_at_launch(&hotkey);
             }
         })
         .on_frame_encoded(trace::frame)
@@ -65,7 +84,13 @@ fn main() {
         let panel: rune::AnyWindowSpec = WindowSpec::from_app("panel", app)
             .configured_options(options)
             .into();
-        [panel]
+        let prefs: rune::AnyWindowSpec = WindowSpec::from_app("prefs", prefs)
+            .options(WindowOptions {
+                resizable: false,
+                ..Default::default()
+            })
+            .into();
+        [panel, prefs]
     });
 }
 

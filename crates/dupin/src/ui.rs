@@ -39,10 +39,17 @@ pub struct Ui {
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
     me: AppHandle<Ui>,
+    prefs: AppHandle<crate::prefs::Prefs>,
 }
 
 impl Ui {
-    pub fn new(me: AppHandle<Ui>, config: Config, history: History, notice: Option<String>) -> Ui {
+    pub fn new(
+        me: AppHandle<Ui>,
+        prefs: AppHandle<crate::prefs::Prefs>,
+        config: Config,
+        history: History,
+        notice: Option<String>,
+    ) -> Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
         // Scan before the first keystroke so it doesn't wait for the disk.
         let warm = apps_provider.clone();
@@ -73,7 +80,16 @@ impl Ui {
             input_source: config.input_source,
             restore_input: None,
             me,
+            prefs,
         }
+    }
+
+    /// Settings changed in the settings window. The hotkey is the settings window's to
+    /// re-register; the rest takes effect from the next summon.
+    pub fn apply_config(&mut self, config: &Config) {
+        self.file_limit = config.file_limit;
+        self.position = config.position;
+        self.input_source = config.input_source.clone();
     }
 
     pub fn setup(s: &mut Ui, waker: Waker) {
@@ -172,6 +188,11 @@ impl Ui {
             // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
             Key::Command('q') => {
                 tx.quit();
+                return true;
+            }
+            Key::Command(',') => {
+                self.dismiss(tx);
+                self.prefs.open();
                 return true;
             }
             _ => return false,

@@ -21,11 +21,14 @@ let
   # fetchCargoVendor, not importCargoLock: Rune vendors a patched tiny-skia-path as a path
   # dependency while resvg keeps the published one, so the lock holds two tiny-skia-path
   # 0.11.4 packages, and importCargoLock's name-version directories collide.
-  # Update the hash whenever Cargo.lock changes.
+  # Update the hash whenever Cargo.lock changes: `nu scripts/update-cargo-hash.nu`.
+  # The name carries Cargo.lock's hash. A fixed-output derivation whose hash didn't change is
+  # taken from the store as it is, so with a constant name a stale vendor tree from before a
+  # lock change passed every local build and failed only on a clean CI store.
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
-    name = "dupin-vendor";
-    hash = "sha256-j0YbvbowcerEbqc4AvA9KBIOCH+3IIOU+GZC1QVDAQ8=";
+    name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
+    hash = "sha256-hg4qm38ZMh49yk4+NRAXjeb8lpLl6XNPhgbweiu/PEY=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the

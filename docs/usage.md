@@ -16,6 +16,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | ⌘↩                         | Reveal the file in Finder                             |
 | Esc, or clicking elsewhere | Hide the panel                                        |
 | ⌘Q                         | Quit Dupin                                            |
+| ⌘,                         | Open Settings                                         |
 
 ## Apps
 

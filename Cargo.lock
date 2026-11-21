@@ -753,7 +753,9 @@ dependencies = [
  "dupin-core",
  "dupin-mac",
  "rune",
+ "rune-kit",
  "rune-notify",
+ "toml",
 ]
 
 [[package]]
@@ -2727,6 +2729,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rune-kit"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=86b903de7fef9c6b683e05dc23440de4ebbc4347#86b903de7fef9c6b683e05dc23440de4ebbc4347"
+dependencies = [
+ "icu_normalizer",
+ "rune",
+ "rune-motion",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "rune-media"
 version = "0.0.1"
 source = "git+https://github.com/anomalyco/rune?rev=86b903de7fef9c6b683e05dc23440de4ebbc4347#86b903de7fef9c6b683e05dc23440de4ebbc4347"
@@ -3459,6 +3472,7 @@ dependencies = [
  "serde_spanned",
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 0.7.15",
 ]
 
@@ -3500,6 +3514,12 @@ checksum = "e6769c452d71ba30696c6b37770c439a9cc9110f47f7d5cdbeda79840ef5ea31"
 dependencies = [
  "winnow 1.0.5",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"
