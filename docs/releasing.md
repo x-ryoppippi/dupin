@@ -14,11 +14,11 @@ CI runs `nix flake check` on Blacksmith's Apple silicon macOS runners. `.github/
 
 ## Signed builds
 
-The Nix package is unsigned and never updates itself. The release builds come from `scripts/package-app.nu`, which copies the Nix-built `Dupin.app` out of the store, points its libiconv at the one macOS ships, writes the channel's version, build number (the commit count) and update feed into `Info.plist`, signs it with the Developer ID under the hardened runtime, notarizes and staples it, and writes `Dupin.zip` and `update.json`.
+The Nix package is unsigned and never updates itself. The release builds come from `scripts/package-app.nu`, which copies the Nix-built `Dupin.app` out of the store, points its libiconv at the one macOS ships, writes the channel's version, build number (the commit count) and update feed into `Info.plist`, signs it with the Developer ID under the hardened runtime, notarizes and staples it, and writes `Dupin.zip` (what the updater installs), `Dupin.dmg` (signed, notarized and stapled, for downloading by hand: opening a zip leaves the app in Downloads, where App Translocation stops it updating itself) and `update.json`.
 
 `.github/workflows/package.yml` runs it for both channels:
 
-- **stable**: merging the tagpr pull request packages the tag and uploads both files to its release. `releases/latest/download/update.json` is the stable feed.
+- **stable**: merging the tagpr pull request packages the tag and uploads the three files to its release. `releases/latest/download/update.json` is the stable feed.
 - **nightly**: `.github/workflows/nightly.yml` runs daily (and on demand) when `main` has moved since the last nightly, moves the `nightly` tag to it and replaces the files on the `nightly` prerelease.
 
 Try a signed bundle locally with `nu scripts/package-app.nu --channel nightly --identity "Developer ID Application: …"` (add `--notarize` with the notary variables set), or `--identity -` for an ad-hoc signature, which runs but never updates.

@@ -87,7 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.ref }}
-        run: gh release upload "$TAG" dist/Dupin.zip dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
+        run: gh release upload "$TAG" dist/Dupin.zip dist/Dupin.dmg dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
 
       # nightly.yml skips a commit the nightly tag already points at, so the tag moves only
       # after both files are up: a failed upload leaves it behind and the next run retries.
@@ -103,7 +103,7 @@ jobs:
             # A draft creates no tag until it is published.
             gh release create nightly --repo "$GITHUB_REPOSITORY" --draft --prerelease --title Nightly --notes ""
           fi
-          gh release upload nightly dist/Dupin.zip --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload nightly dist/Dupin.zip dist/Dupin.dmg --clobber --repo "$GITHUB_REPOSITORY"
           gh release upload nightly dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
           if [ "$draft" = false ]; then
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$sha" -F force=true > /dev/null
