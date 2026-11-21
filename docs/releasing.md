@@ -32,3 +32,7 @@ Try a signed bundle locally with `nu scripts/package-app.nu --channel nightly --
 | `NOTARY_KEY`                | The contents of an App Store Connect API key (`.p8`, Developer role)                                             |
 | `NOTARY_KEY_ID`             | That key's ID                                                                                                    |
 | `NOTARY_ISSUER`             | The App Store Connect issuer ID                                                                                  |
+
+### Homebrew
+
+`packaging/homebrew/Casks` holds the casks for the `x-ryoppippi/homebrew-tap` repository. `dupin@nightly` always downloads the current nightly. `dupin` names a version and checksum, so bump both in the tap after a release; both casks declare `auto_updates`, so `brew upgrade` leaves installed copies to the app.

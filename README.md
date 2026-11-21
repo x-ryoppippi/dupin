@@ -16,7 +16,13 @@ Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac lau
 
 ## Quick start
 
-Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then:
+Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then install it with Homebrew (`dupin@nightly` for builds of `main`); it [updates itself](./docs/configuration.md#updates):
+
+```sh
+brew install --cask x-ryoppippi/tap/dupin
+```
+
+Or build it with Nix:
 
 ```sh
 nix build .#dupin
