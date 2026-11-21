@@ -1,0 +1,83 @@
+# A separate workflow because CI's token is read-only on pull requests from forks, so CI
+# itself cannot comment. This one runs in the base repository and never checks out the
+# pull request's code.
+name: E2E comment
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  comment:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      # Commit comments.
+      contents: write
+      pull-requests: write
+    steps:
+      - shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -euo pipefail
+          marker='<!-- dupin-e2e -->'
+
+          artifact_url() {
+            gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq ".artifacts[] | select(.name == \"$1\") | \"https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/\(.id)\""
+          }
+          screenshots=$(artifact_url e2e-screenshots)
+          everything=$(artifact_url e2e)
+          if [[ -z $screenshots && -z $everything ]]; then
+            echo 'E2E uploaded nothing; not commenting.'
+            exit 0
+          fi
+
+          conclusion=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.name == "e2e") | .conclusion')
+          case $conclusion in
+            success) heading='E2E passed' ;;
+            *) heading="E2E ${conclusion:-did not finish}" ;;
+          esac
+
+          body=$RUNNER_TEMP/body.md
+          {
+            printf '%s\n### %s on %s\n\n' "$marker" "$heading" "${SHA:0:7}"
+            [[ -n $screenshots ]] && printf -- '- [Screenshots](%s)\n' "$screenshots"
+            [[ -n $everything ]] && printf -- '- [Everything agent-desktop saw, with Dupin'"'"'s log](%s)\n' "$everything"
+            printf -- '- [Run](%s)\n' "$RUN_URL"
+          } >"$body"
+
+          if [[ $EVENT == pull_request ]]; then
+            number=$(gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
+              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1)
+            if [[ -z $number ]]; then
+              echo 'The pull request has moved past this commit; not commenting.'
+              exit 0
+            fi
+            list=repos/$REPO/issues/$number/comments
+            edit=repos/$REPO/issues/comments
+          else
+            list=repos/$REPO/commits/$SHA/comments
+            edit=repos/$REPO/comments
+          fi
+
+          existing=$(gh api --paginate "$list" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)
+          if [[ -n $existing ]]; then
+            gh api --method PATCH "$edit/$existing" -F "body=@$body" >/dev/null
+          else
+            gh api --method POST "$list" -F "body=@$body" >/dev/null
+          fi
