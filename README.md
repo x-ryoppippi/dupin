@@ -1,14 +1,17 @@
+<div align="center">
+    <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="128" height="128">
+    <h1>Dupin</h1>
+</div>
+
 <p align="center">
-    <img src="./assets/logo/dupin.svg" alt="Dupin" width="128" height="128">
+    <a href="https://dupin.app">dupin.app</a>
 </p>
 
-<h1 align="center">Dupin</h1>
+<div align="center">
+    <a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
+</div>
 
-A lightweight, resident launcher for Apple silicon Macs.
-
-Homepage: <https://dupin.app>
-
-<a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
+> A lightweight, resident launcher for Apple silicon Macs.
 
 - Fuzzy-search and open apps, by any name macOS knows them by
 - Space on an empty query searches files with Spotlight; `in` and Space search inside them
