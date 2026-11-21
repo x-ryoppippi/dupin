@@ -56,8 +56,8 @@
 					<span>from ⌘Space to the panel on screen. It is drawn before you ask for it.</span>
 				</li>
 				<li>
-					<strong>Native</strong>
-					<span>A Rust app on Liquid Glass, not a web page in a window.</span>
+					<strong>Written in Rust</strong>
+					<span>Native and fast, drawn on Liquid Glass. No web view, no Electron.</span>
 				</li>
 				<li>
 					<strong>Open source</strong>
