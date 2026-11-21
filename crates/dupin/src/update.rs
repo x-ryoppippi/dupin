@@ -8,7 +8,8 @@
 //! Gatekeeper accepts it. The installed bundle stays untouched until Dupin restarts into the
 //! update or quits: then one `renamex_np(RENAME_SWAP)` exchanges the two, so the install path
 //! is never empty, and the replaced bundle waits in the staging folder for the next launch to
-//! remove it.
+//! remove it. A copy that can't replace itself (a read-only folder, App Translocation) only
+//! says where to download the update. `DUPIN_DISABLE_UPDATES=1` turns the updater off.
 
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
@@ -48,6 +49,38 @@ impl Feed {
     }
 }
 
+/// How this copy takes an update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Method {
+    /// Stage it beside the bundle and swap it in.
+    Install,
+    /// Point at the download: the bundle can't be replaced in place.
+    DownloadOnly,
+}
+
+impl Method {
+    /// Replacing the bundle renames it within its folder, so both must be writable, and a
+    /// Gatekeeper App Translocation copy is a read-only mount that disappears with the process.
+    fn of(bundle: &Path, writable: impl Fn(&Path) -> bool) -> Method {
+        let translocated = bundle.components().any(|c| c.as_os_str() == "AppTranslocation");
+        if !translocated && writable(bundle) && bundle.parent().is_some_and(&writable) {
+            Method::Install
+        } else {
+            Method::DownloadOnly
+        }
+    }
+}
+
+fn writable(path: &Path) -> bool {
+    CString::new(path.as_os_str().as_bytes())
+        // SAFETY: The string is NUL-terminated and outlives the call; access has no side effects.
+        .is_ok_and(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
+}
+
+fn off_by_env() -> bool {
+    std::env::var_os("DUPIN_DISABLE_UPDATES").is_some_and(|v| v == "1")
+}
+
 /// The running build, when it can update itself.
 struct Installed {
     bundle: PathBuf,
@@ -55,6 +88,7 @@ struct Installed {
     build: u64,
     /// The bundle's designated requirement, which an update must satisfy.
     requirement: String,
+    method: Method,
 }
 
 impl Installed {
@@ -72,12 +106,19 @@ impl Installed {
             return Err(format!("{} is not signed with a Developer ID", bundle.display()));
         }
         Ok(Some(Installed {
+            method: Method::of(&bundle, writable),
             bundle,
             feed,
             build,
             requirement,
         }))
     }
+}
+
+/// What a check found newer than the running build.
+enum Found {
+    Staged(Staged),
+    Download { version: String, url: String },
 }
 
 /// A verified update unpacked beside the bundle it replaces.
@@ -117,6 +158,9 @@ impl Updater {
                 inner: Mutex::new(Inner::default()),
             }),
         };
+        if off_by_env() {
+            return updater;
+        }
         let installed = match Installed::current() {
             Ok(Some(installed)) => installed,
             Ok(None) => return updater,
@@ -125,7 +169,13 @@ impl Updater {
                 return updater;
             }
         };
-        remove_beside(&installed.bundle);
+        match installed.method {
+            Method::Install => remove_beside(&installed.bundle),
+            Method::DownloadOnly => crate::log::warn(&format!(
+                "updates are download only: {} can't be replaced in place",
+                installed.bundle.display()
+            )),
+        }
         let shared = updater.shared.clone();
         std::thread::Builder::new()
             .name("dupin-update".into())
@@ -176,6 +226,7 @@ impl Shared {
 
 fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
     std::thread::sleep(FIRST_CHECK);
+    let mut announced = None;
     loop {
         let idle = {
             let inner = shared.lock();
@@ -186,7 +237,13 @@ fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
         };
         if idle && shared.enabled.load(Ordering::Relaxed) {
             match check(installed) {
-                Ok(Some(staged)) => adopt(shared, staged, panel),
+                Ok(Some(Found::Staged(staged))) => adopt(shared, staged, panel),
+                Ok(Some(Found::Download { version, url })) => {
+                    if announced.as_ref() != Some(&version) {
+                        crate::log::warn(&format!("Dupin {version} is available: {url}"));
+                        announced = Some(version);
+                    }
+                }
                 Ok(None) => {}
                 Err(e) => crate::log::warn(&format!("couldn't update: {e}")),
             }
@@ -211,13 +268,20 @@ fn adopt(shared: &Shared, staged: Staged, panel: &AppHandle<Ui>) {
     panel.update(|s, _| s.updated());
 }
 
-/// Stage the feed's build if it is newer.
-fn check(installed: &Installed) -> Result<Option<Staged>, String> {
+/// Stage the feed's build if it is newer, or say where to get it when this copy can't
+/// install it.
+fn check(installed: &Installed) -> Result<Option<Found>, String> {
     let feed = Feed::parse(&output(curl(Duration::from_secs(60)).arg(&installed.feed))?)?;
     if feed.build <= installed.build {
         return Ok(None);
     }
-    stage(installed, &feed).map(Some)
+    Ok(Some(match installed.method {
+        Method::Install => Found::Staged(stage(installed, &feed)?),
+        Method::DownloadOnly => Found::Download {
+            version: feed.version,
+            url: feed.url,
+        },
+    }))
 }
 
 /// Download, unpack and verify the feed's build in its own folder beside the installed
@@ -419,6 +483,28 @@ mod tests {
     #[test]
     fn rejects_a_feed_without_a_checksum() {
         assert!(Feed::parse(r#"{"version":"0.2.0","build":42,"url":"u"}"#).is_err());
+    }
+
+    #[test]
+    fn installs_only_where_the_bundle_can_be_replaced() {
+        let everywhere = |_: &Path| true;
+        let app = Path::new("/Applications/Dupin.app");
+        assert_eq!(Method::of(app, everywhere), Method::Install);
+        assert_eq!(
+            Method::of(app, |p: &Path| p != Path::new("/Applications")),
+            Method::DownloadOnly
+        );
+        assert_eq!(Method::of(app, |p: &Path| p != app), Method::DownloadOnly);
+        let translocated = Path::new("/private/var/folders/x/AppTranslocation/1234/d/Dupin.app");
+        assert_eq!(Method::of(translocated, everywhere), Method::DownloadOnly);
+    }
+
+    #[test]
+    fn a_temporary_folder_is_writable_and_the_system_is_not() {
+        let root = temporary("writable");
+        assert!(writable(&root));
+        assert!(!writable(Path::new("/System/Applications")));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn temporary(name: &str) -> PathBuf {
