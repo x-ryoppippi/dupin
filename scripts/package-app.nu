@@ -73,11 +73,7 @@ def main [
     # from a read-only copy that can't update itself; a disk image asks to drag it to
     # Applications first.
     let dmg = $out | path join Dupin.dmg
-    let image = mktemp --directory
-    ^/usr/bin/ditto $bundle ($image | path join Dupin.app)
-    ^/bin/ln -s /Applications ($image | path join Applications)
-    ^/usr/bin/hdiutil create -quiet -volname Dupin -srcfolder $image -format UDZO -ov $dmg
-    rm --recursive $image
+    ^nix shell --inputs-from $root nixpkgs#python3Packages.dmgbuild --command dmgbuild -s packaging/dmg/settings.py -D $"app=($bundle)" -D $"background=(dmg-background)" Dupin $dmg
     ^/usr/bin/codesign --force --timestamp --sign $identity $dmg
     if $key != null {
         notarize $dmg $key
@@ -93,6 +89,14 @@ def main [
     }
     $feed | to json | save ($out | path join update.json)
     $feed
+}
+
+# The disk image's window background, at 1x and 2x in one TIFF so Finder picks the sharp one.
+def dmg-background []: nothing -> string {
+    let rendered = ^nix build --no-link --print-out-paths .#dmg-background | str trim
+    let tiff = mktemp --suffix .tiff
+    ^/usr/bin/tiffutil -cathidpicheck ($rendered | path join background.png) ($rendered | path join background@2x.png) -out $tiff
+    $tiff
 }
 
 def notary-key []: nothing -> record {

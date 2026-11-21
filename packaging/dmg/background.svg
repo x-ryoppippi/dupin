@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="400" viewBox="0 0 660 400">
+  <rect width="660" height="400" fill="#F4F1EA"/>
+  <path d="M0 300C140 268 250 330 380 312C500 296 580 262 660 270V400H0Z" fill="#E9E4D8"/>
+  <text x="330" y="70" text-anchor="middle" font-family="Inter" font-weight="700" font-size="26" fill="#111318">Drag Dupin into Applications.</text>
+  <path d="M258 168C298 142 346 142 392 162" fill="none" stroke="#111318" stroke-width="4" stroke-linecap="round"/>
+  <path d="M378 148L394 163L374 171" fill="none" stroke="#111318" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
