@@ -13,7 +13,7 @@ import { vitesseBlack } from '@ox-content/theme-color-vitesse';
 import { render } from 'svelte/server';
 import type { Component } from 'svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
-import { siteName, siteUrl } from '../site.ts';
+import { siteName, siteUrl, tagline } from '../site.ts';
 
 const readerChrome = { copy: true, externalLinks: false, backToTop: false } as const;
 
@@ -70,8 +70,7 @@ ${renderReaderChromeScriptTag(readerChrome)}
 	return { html, title: page.title, description: page.description };
 }
 
-const description =
-	'A lightweight, resident launcher for Apple silicon Macs. Press ⌘Space and the panel is already there.';
+const description = `Dupin is ${tagline}. It stays resident, so when you press ⌘Space the panel is already there.`;
 
 const host = {
 	routes: [
@@ -87,7 +86,7 @@ const host = {
 						context,
 						{
 							name: 'home',
-							title: `${siteName}: a launcher for Apple silicon Macs`,
+							title: `${siteName}: ${tagline}`,
 							description,
 							pathname: '/',
 						},
@@ -104,7 +103,7 @@ const host = {
 					context,
 					{
 						name: 'download',
-						title: `Download ${siteName}`,
+						title: `Download ${siteName}, ${tagline}`,
 						description:
 							'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
 						pathname: '/download',
