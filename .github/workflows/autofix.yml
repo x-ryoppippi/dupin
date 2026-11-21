@@ -3,6 +3,9 @@ name: autofix.ci
 
 on:
   pull_request:
+    # The vendor hash only depends on Cargo.lock; website/ has its own lockfile.
+    paths-ignore:
+      - 'website/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
