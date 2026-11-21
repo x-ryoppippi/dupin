@@ -3,7 +3,6 @@
 //! while the panel shows.
 
 use std::sync::Arc;
-use std::task::{Context, Poll, Waker};
 
 use dupin_core::Mode;
 use dupin_core::session::Results;
@@ -46,8 +45,8 @@ struct Gpu {
 /// than the window's.
 struct Program {
     source: Arc<str>,
-    module: Option<wgpu::ShaderModule>,
-    pipes: Vec<(wgpu::TextureFormat, Option<wgpu::RenderPipeline>)>,
+    module: wgpu::ShaderModule,
+    pipes: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
 }
 
 impl Gpu {
@@ -101,11 +100,9 @@ impl Gpu {
         {
             return;
         }
-        let module = checked(device, "backdrop shader", || {
-            device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("backdrop"),
-                source: wgpu::ShaderSource::Wgsl(source.as_ref().into()),
-            })
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("backdrop"),
+            source: wgpu::ShaderSource::Wgsl(source.as_ref().into()),
         });
         self.program = Some(Program {
             source: source.clone(),
@@ -119,42 +116,40 @@ impl Gpu {
         let at = match program.pipes.iter().position(|(f, _)| *f == format) {
             Some(at) => at,
             None => {
-                let module = program.module.as_ref()?;
-                let pipe = checked(device, "backdrop pipeline", || {
-                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                        label: Some("backdrop"),
-                        layout: Some(&self.layout),
-                        vertex: wgpu::VertexState {
-                            module,
-                            entry_point: Some("dupin_vs"),
-                            compilation_options: Default::default(),
-                            buffers: &[],
-                        },
-                        primitive: wgpu::PrimitiveState {
-                            topology: wgpu::PrimitiveTopology::TriangleStrip,
-                            ..Default::default()
-                        },
-                        depth_stencil: None,
-                        multisample: Default::default(),
-                        fragment: Some(wgpu::FragmentState {
-                            module,
-                            entry_point: Some("dupin_fs"),
-                            compilation_options: Default::default(),
-                            targets: &[Some(wgpu::ColorTargetState {
-                                format,
-                                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                                write_mask: wgpu::ColorWrites::ALL,
-                            })],
-                        }),
-                        multiview_mask: None,
-                        cache: None,
-                    })
+                let module = &program.module;
+                let pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("backdrop"),
+                    layout: Some(&self.layout),
+                    vertex: wgpu::VertexState {
+                        module,
+                        entry_point: Some("dupin_vs"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleStrip,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: Default::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module,
+                        entry_point: Some("dupin_fs"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: None,
                 });
                 program.pipes.push((format, pipe));
                 program.pipes.len() - 1
             }
         };
-        program.pipes[at].1.as_ref()
+        Some(&program.pipes[at].1)
     }
 
     fn draw(
@@ -194,22 +189,6 @@ impl Gpu {
         pass.set_bind_group(0, &self.group, &[]);
         pass.draw(0..4, 0..1);
         true
-    }
-}
-
-/// Runs `make` in a validation error scope, so a module the shader compiler rejects past
-/// `shader::compile`'s checks is logged and skipped instead of panicking in wgpu's default
-/// error handler.
-fn checked<T>(device: &wgpu::Device, what: &str, make: impl FnOnce() -> T) -> Option<T> {
-    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let made = make();
-    let mut popped = std::pin::pin!(scope.pop());
-    match popped.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
-        Poll::Ready(Some(e)) => {
-            crate::log::warn(&format!("{what}: {e}"));
-            None
-        }
-        _ => Some(made),
     }
 }
 

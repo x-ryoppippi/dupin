@@ -196,10 +196,66 @@ pub fn compile(user: &str) -> Result<Arc<str>, String> {
         .map_err(|e| format!("{}{}", at(e.location(&full)), e.message()))?;
     // Rune's clip helper unpacks half floats, which wgpu allows on Metal.
     let caps = naga::valid::Capabilities::default() | naga::valid::Capabilities::SHADER_FLOAT16_IN_FLOAT32;
-    naga::valid::Validator::new(naga::valid::ValidationFlags::all(), caps)
+    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), caps)
         .validate(&module)
         .map_err(|e| format!("{}{}", at(e.location(&full)), chain(e.as_inner())))?;
+    let span_at = |span: naga::Span| at(span.is_defined().then(|| span.location(&full)));
+    if let Some((h, o)) = module.overrides.iter().next() {
+        let name = o.name.as_deref().unwrap_or("");
+        return Err(format!(
+            "{}`override {name}` isn't supported; use a `const`",
+            span_at(module.overrides.get_span(h))
+        ));
+    }
+    for (h, g) in module.global_variables.iter() {
+        let name = g.name.as_deref().unwrap_or("");
+        if g.binding.is_some() && name != "dupin_u" {
+            return Err(format!(
+                "{}`{name}` binds a resource Dupin doesn't provide; a backdrop reads only `b`",
+                span_at(module.global_variables.get_span(h))
+            ));
+        }
+    }
+    metal(&module, &info)?;
     Ok(full.into())
+}
+
+/// Translate both entry points to MSL as Rune's Metal backend will, with `dupin_u` in buffer
+/// 0: Rune panics on a shader it can't translate, so it has to be caught here.
+fn metal(module: &naga::Module, info: &naga::valid::ModuleInfo) -> Result<(), String> {
+    use naga::back::msl;
+    use naga::proc::{BoundsCheckPolicies, BoundsCheckPolicy};
+    let mut resources = msl::EntryPointResources::default();
+    resources.resources.insert(
+        naga::ResourceBinding { group: 0, binding: 0 },
+        msl::BindTarget {
+            buffer: Some(0),
+            ..Default::default()
+        },
+    );
+    for (stage, entry) in [
+        (naga::ShaderStage::Vertex, "dupin_vs"),
+        (naga::ShaderStage::Fragment, "dupin_fs"),
+    ] {
+        let options = msl::Options {
+            lang_version: (3, 0),
+            per_entry_point_map: [(entry.to_owned(), resources.clone())].into(),
+            bounds_check_policies: BoundsCheckPolicies {
+                index: BoundsCheckPolicy::Restrict,
+                buffer: BoundsCheckPolicy::Restrict,
+                image_load: BoundsCheckPolicy::Restrict,
+                binding_array: BoundsCheckPolicy::Unchecked,
+            },
+            ..Default::default()
+        };
+        let pipeline = msl::PipelineOptions {
+            entry_point: Some((stage, entry.to_owned())),
+            ..Default::default()
+        };
+        msl::write_string(module, info, &options, &pipeline)
+            .map_err(|e| format!(" can't be compiled for Metal: {e}"))?;
+    }
+    Ok(())
 }
 
 /// An error and its causes, innermost last: naga's outer errors only name the function.
@@ -271,6 +327,22 @@ mod tests {
         source.refresh();
         assert_eq!(source.problem(), None, "the same file, moved back, works again");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_override_is_an_error() {
+        let e = compile("override k: f32 = 1.0;\nfn backdrop(p: vec2f, b: Backdrop) -> vec4f {\n    return vec4f(k);\n}\n")
+            .unwrap_err();
+        assert!(e.starts_with("1:") && e.contains("override"), "{e}");
+    }
+
+    #[test]
+    fn a_binding_dupin_doesnt_provide_is_an_error() {
+        let e = compile(
+            "@group(0) @binding(1) var<uniform> mine: vec4f;\nfn backdrop(p: vec2f, b: Backdrop) -> vec4f {\n    return mine;\n}\n",
+        )
+        .unwrap_err();
+        assert!(e.starts_with("1:") && e.contains("`mine`"), "{e}");
     }
 
     #[test]
