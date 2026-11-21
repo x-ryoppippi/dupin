@@ -22,14 +22,26 @@ use rune::{App, AppSpec, WindowOptions, WindowSpec};
 pub const PANEL_WIDTH: f32 = 680.0;
 /// The panel with nothing below the field: the window's first size, before it fits its content.
 pub const HEADER_HEIGHT: f32 = view::HEADER_H;
+/// San Francisco's family, as its file names it (`dupin_mac::font::system_ui_font`).
+const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
 
 fn main() {
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
+    // The system font instead of Rune's embedded Inter, which the build leaves out.
+    let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
+        Some(font) => Box::leak(Box::new([font])),
+        None => {
+            log::warn("couldn't map the system font; text falls back through CoreText");
+            &[]
+        }
+    };
 
     let spec = AppSpec {
         setup: Some(ui::Ui::setup),
+        fonts,
+        families: FAMILIES,
         ..AppSpec::new(
             "Dupin",
             (PANEL_WIDTH, HEADER_HEIGHT),
@@ -49,12 +61,11 @@ fn main() {
     let binding = Arc::new(hotkey::Binding::new(handle.clone()));
 
     // The settings window: an ordinary titled window, made when ⌘, first opens it.
-    let prefs = App::new(AppSpec::new(
-        "Dupin Settings",
-        prefs::SIZE,
-        || unreachable!(),
-        prefs::view,
-    ))
+    let prefs = App::new(AppSpec {
+        fonts,
+        families: FAMILIES,
+        ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
+    })
     .windowless();
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());

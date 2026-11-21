@@ -4,6 +4,7 @@
 pub mod apps;
 pub mod bundle;
 mod bundle_names;
+pub mod font;
 pub mod input_source;
 pub mod spotlight;
 pub mod window;
