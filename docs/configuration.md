@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source and how many files a search shows. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, is shown in Settings but not changed there.
+Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source and how many files a search shows. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. Dupin reads the file at launch, so restart it after editing it by hand.
 
@@ -12,6 +12,27 @@ input_source = "ascii" # "ascii", "keep", or an input source identifier such as 
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
+
+## Nix
+
+The flake's home-manager module installs Dupin and writes `config.toml` from `settings`:
+
+```nix
+{
+  imports = [ inputs.dupin.homeManagerModules.default ];
+
+  programs.dupin = {
+    enable = true;
+    settings = {
+      hotkey = "alt+space";
+      position = "top";
+    };
+    launchd.enable = true; # start at login
+  };
+}
+```
+
+With `settings` set, `config.toml` is a read-only link into the Nix store, so change it in Nix and restart Dupin. Leave `settings` empty to keep the file out of Nix and editable from Settings.
 
 ## Input source
 
