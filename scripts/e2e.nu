@@ -51,7 +51,11 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     for key in ('calculator' | split chars) {
         ad $out type press $key | ignore
     }
-    poll $out result $matched find --app Dupin --text Calculator --first
+    snap $out typed
+    # Match a node named Calculator. `--text` also matches the typed field value and every
+    # ancestor holding it, and a result row need not carry a ref, since ↩ opens the selection.
+    let found = {|r| $r.ok and $r.data?.match? != null }
+    poll $out result $found find --app Dupin --name Calculator --first
     snap $out results
 
     let before = poll $out before-return {|r| $r.ok } list-apps
