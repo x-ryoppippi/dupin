@@ -6,8 +6,6 @@ import { defineConfig } from 'vite';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
 const oxContentOptions = {
-	srcDir: 'content',
-	highlight: true,
 	search: false,
 	docs: false,
 	icons: { include: ['src/**/*.{css,ts,svelte}'] },
@@ -16,7 +14,6 @@ const oxContentOptions = {
 		siteName,
 		siteUrl,
 		minifyHtml: true,
-		readerChrome: { copy: true, externalLinks: false, backToTop: false },
 		markdownSource: { alternate: true },
 	},
 } satisfies OxContentOptions;

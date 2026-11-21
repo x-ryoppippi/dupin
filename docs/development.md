@@ -73,7 +73,7 @@ Scripts in this repository are written in Nushell.
 
 ## Website
 
-`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the panel demo, the copy buttons and the download channel switch. The install steps are Markdown in `website/content/index.md`, rendered by ox-content. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the panel demo, the copy buttons and the download channel switch. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
 
 ```sh
 just website::install # dependencies from the lockfile

@@ -25,6 +25,12 @@ export const channels = {
 export const stableReleased = false;
 export const downloadChannel: keyof typeof channels = stableReleased ? 'stable' : 'nightly';
 
+// macOS delivers a chord to only one app, so ⌘Space has to be freed before Dupin can take it.
+export const freeHotkeySteps = [
+	'System Settings → Keyboard → Keyboard Shortcuts… → Spotlight → untick "Show Spotlight search".',
+	'Remove ⌘Space from any other launcher that holds it, such as Raycast or Alfred.',
+] as const;
+
 export const nixInstall = 'nix profile install github:x-ryoppippi/dupin';
 
 export const setupPrompt = `Install Dupin, a launcher for Apple silicon Macs, on this Mac and make ⌘Space open it.

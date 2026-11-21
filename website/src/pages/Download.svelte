@@ -3,7 +3,7 @@
 	import CopyButton from '../components/CopyButton.svelte';
 	import Footer from '../components/Footer.svelte';
 	import Nav from '../components/Nav.svelte';
-	import { channels, downloadChannel, nixInstall, releasesUrl, repo, stableReleased } from '../site.ts';
+	import { channels, downloadChannel, freeHotkeySteps, nixInstall, releasesUrl, repo, stableReleased } from '../site.ts';
 
 	const stableVersion = version.trim();
 	let channel = $state<keyof typeof channels>(downloadChannel);
@@ -77,6 +77,14 @@
 			<CopyButton text={nixInstall} label="Copy the Nix command" copiedMessage="Copied the Nix command." />
 		</div>
 		<p class="download-note">Builds main. A Nix install never updates itself; upgrade it through Nix.</p>
+	</section>
+
+	<section class="download-section">
+		<h2><span class="section-icon icon-[ph--command]" aria-hidden="true"></span>Free ⌘Space first</h2>
+		<p class="download-note">macOS gives a shortcut to only one app, so take ⌘Space back before you open Dupin.</p>
+		<ol class="download-steps">
+			{#each freeHotkeySteps as step (step)}<li>{step}</li>{/each}
+		</ol>
 	</section>
 
 	<p class="download-all">All builds are on the <a href={releasesUrl}>GitHub releases page <span class="arrow">↗</span></a></p>

@@ -4,24 +4,11 @@ import type {
 	OxContentCustomHostModule,
 	OxContentCustomHostRenderContext,
 } from '@ox-content/vite-plugin/custom-host';
-import { renderThemeTokenCss } from '@ox-content/vite-plugin';
-import {
-	renderReaderChromeScriptTag,
-	renderReaderChromeStyleTag,
-} from '@ox-content/vite-plugin/reader-chrome';
-import { vitesseBlack } from '@ox-content/theme-color-vitesse';
 import { render } from 'svelte/server';
 import type { Component } from 'svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
 import { siteDescription, siteName, siteUrl, tagline } from '../site.ts';
-
-const readerChrome = { copy: true, externalLinks: false, backToTop: false } as const;
-
-// Only the code colors come from the palette; the page owns everything else.
-const syntaxCss = renderThemeTokenCss(vitesseBlack, {
-	include: (name) => name.startsWith('syntax-'),
-});
 
 function assetHead(context: OxContentCustomHostRenderContext): string {
 	return context.mode === 'serve'
@@ -64,15 +51,12 @@ function renderPage<Name extends PageName>(
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="text/markdown" href="${page.pathname === '/' ? '/index.md' : `${page.pathname}.md`}">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
-<style>${syntaxCss}</style>
-${renderReaderChromeStyleTag(readerChrome)}
 ${assetHead(context)}
 ${rendered.head}
 </head>
 <body>
 <div id="app" data-page="${page.name}">${rendered.body}</div>
 <script type="application/json" id="page-props">${JSON.stringify(props).replaceAll('<', '\\u003c')}</script>
-${renderReaderChromeScriptTag(readerChrome)}
 </body>
 </html>`;
 	return { html, title: page.title, description: page.description, source: page.markdown };
@@ -82,11 +66,7 @@ const host = {
 	routes: [
 		{
 			path: '/',
-			inputPath: 'content/index.md',
-			async render(context) {
-				const documentPath = 'content/index.md';
-				const source = await readFile(path.join(context.root, documentPath), 'utf8');
-				const install = await context.markdown.render({ source, documentPath });
+			render(context) {
 				return {
 					...renderPage(
 						context,
@@ -97,9 +77,8 @@ const host = {
 							pathname: '/',
 							markdown: homeMarkdown,
 						},
-						{ installHtml: install.html },
+						{},
 					),
-					dependencies: install.dependencies,
 					lastUpdatedPaths: ['src/pages/Home.svelte', 'src/site.ts'],
 				};
 			},

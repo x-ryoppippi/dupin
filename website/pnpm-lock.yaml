@@ -175,9 +175,6 @@ importers:
       '@iconify-json/simple-icons':
         specifier: 1.2.103
         version: 1.2.103
-      '@ox-content/theme-color-vitesse':
-        specifier: 3.8.3
-        version: 3.8.3(@ox-content/vite-plugin@3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1)))
       '@ox-content/vite-plugin':
         specifier: 3.8.3
         version: 3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1))
@@ -807,14 +804,6 @@ packages:
 
   '@ox-content/napi@3.8.3':
     resolution: {integrity: sha512-cJmk2DM3AuuIx5bZSdJXzMgNCnvUOQFy2F+Xhlp8Yc7zQ7aUXhtyIwMhzpzca8alGtrt2BpW2RGCYbUzYpxAoQ==}
-
-  '@ox-content/theme-color-vitesse@3.8.3':
-    resolution: {integrity: sha512-oHhPr3Dq1wXCMqs5h3a+moAS63EdJnXZdq/PcE9esKtOvrOh2X3nZEiOLo8hZxwcGvt//6RLZ/+dZ0ywV0wlmw==}
-    peerDependencies:
-      '@ox-content/vite-plugin': '>=3.0.0-alpha.1'
-    peerDependenciesMeta:
-      '@ox-content/vite-plugin':
-        optional: true
 
   '@ox-content/vite-plugin@3.8.3':
     resolution: {integrity: sha512-LA4AAj4AfIgFjQO2DFL7ro6D1MYUt0LpFdi/fgZ/o/4x7wiF88jPHVKLzw3o8JOK46vTHJWfaXQ/aK2D11xdQw==}
@@ -3416,10 +3405,6 @@ snapshots:
       '@ox-content/binding-linux-x64-gnu': 3.8.3
       '@ox-content/binding-linux-x64-musl': 3.8.3
       '@ox-content/binding-win32-x64-msvc': 3.8.3
-
-  '@ox-content/theme-color-vitesse@3.8.3(@ox-content/vite-plugin@3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1)))':
-    optionalDependencies:
-      '@ox-content/vite-plugin': 3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1))
 
   '@ox-content/vite-plugin@3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1))':
     dependencies:

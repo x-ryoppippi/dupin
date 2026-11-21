@@ -2,6 +2,7 @@ import {
 	channels,
 	docsUrl,
 	downloadChannel,
+	freeHotkeySteps,
 	nixInstall,
 	releasesUrl,
 	repo,
@@ -67,4 +68,10 @@ Built daily from \`main\`.
 \`${nixInstall}\` builds \`main\`. A Nix install does not update itself; upgrade it through Nix.
 
 All builds are on the [GitHub releases page](${releasesUrl}).
+
+## Free ⌘Space first
+
+macOS gives a shortcut to only one app, so take ⌘Space back before you open Dupin.
+
+${freeHotkeySteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
 `;

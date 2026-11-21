@@ -5,7 +5,6 @@
 	import PanelDemo from '../components/PanelDemo.svelte';
 	import { channels, downloadChannel, repo, setupPrompt, stableReleased } from '../site.ts';
 
-	let { installHtml }: { installHtml: string } = $props();
 </script>
 
 <Nav />
@@ -46,7 +45,7 @@
 				</a>
 				<p class="cta-more">
 					{#if !stableReleased}Nightly build until the first release ·{/if}
-					<a href="/download">All downloads</a> · <a href="#install">Install by hand</a>
+					<a href="/download">All downloads</a>
 				</p>
 			</div>
 		</div>
@@ -55,10 +54,5 @@
 		</div>
 	</section>
 
-	<section class="band install" id="install">
-		<div class="container install-inner">
-			<div class="prose">{@html installHtml}</div>
-		</div>
-	</section>
 </main>
 <Footer />

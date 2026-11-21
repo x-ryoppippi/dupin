@@ -3,7 +3,7 @@ import Download from './Download.svelte';
 import Home from './Home.svelte';
 
 export type PageProps = {
-	home: { installHtml: string };
+	home: Record<string, never>;
 	download: Record<string, never>;
 };
 export type PageName = keyof PageProps;
