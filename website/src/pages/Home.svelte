@@ -14,8 +14,7 @@
 		<div class="container hero-inner">
 			<h1 class="display hero-title rise" style="--d: 0ms">Press ⌘Space. It's there.</h1>
 			<p class="hero-sub rise" style="--d: 100ms">
-				A resident launcher for Apple silicon Macs. Dupin draws its panel before you ask for it, so the
-				hotkey only has to show it: apps, files and what's inside them, on Liquid Glass.
+				A fast, simple and beautiful app launcher for your mac.
 			</p>
 			<div class="cta rise" style="--d: 200ms">
 				<div class="cta-buttons">
@@ -51,8 +50,21 @@
 		</div>
 		<div class="container rise" style="--d: 300ms">
 			<PanelDemo />
+			<ul class="traits">
+				<li>
+					<strong>~20 ms</strong>
+					<span>from ⌘Space to the panel on screen. It is drawn before you ask for it.</span>
+				</li>
+				<li>
+					<strong>Native</strong>
+					<span>A Rust app on Liquid Glass, not a web page in a window.</span>
+				</li>
+				<li>
+					<strong>Open source</strong>
+					<span>GPL-3.0. Read it, build it with Nix, change it.</span>
+				</li>
+			</ul>
 		</div>
 	</section>
-
 </main>
 <Footer />
