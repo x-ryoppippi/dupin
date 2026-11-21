@@ -16,6 +16,8 @@ let
       (root + /Cargo.lock)
       (root + /rustfmt.toml)
       (root + /crates)
+      # The backdrop shader examples, which a test compiles.
+      (root + /examples/shaders)
       (root + /packaging)
       (root + /assets/logo/dupin.svg)
     ];
@@ -31,7 +33,7 @@ let
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-KxgUmXsiJWjtpgu5ZJVRi4SFcmMPvTskb7N8PY0Caxg=";
+    hash = "sha256-yWVAtoEB9Fl7rQUMYob2CLBFrOBqZ1c92d4h1CipMG0=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the

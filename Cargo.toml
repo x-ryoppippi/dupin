@@ -29,6 +29,10 @@ objc2-app-kit = { version = "0.3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+# Rune's own wgpu, for the compositor that draws the query field's backdrop.
+wgpu = { version = "30.0.2", default-features = false }
+# The shader compiler wgpu already links, to check a user's backdrop shader before it reaches the GPU.
+naga = { version = "30.0.2", default-features = false, features = ["wgsl-in"] }
 
 [patch.crates-io]
 winit = { git = "https://github.com/anomalyco/rune", rev = "86b903de7fef9c6b683e05dc23440de4ebbc4347" }

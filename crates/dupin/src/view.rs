@@ -6,7 +6,7 @@ use dupin_core::session::Results;
 use dupin_core::{Item, Mode};
 use rune::tok::{self, type_};
 use rune::{
-    Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, el, rich, row, text,
+    Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, effect, el, rich, row, text,
     text_input,
 };
 
@@ -41,8 +41,16 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         .continuous_corners()
         .clip_rounded(RADIUS)
         .fill(t.card.alpha(FROST))
-        .border(1.0, ink.alpha(0.08))
-        .child(header(s, &t, accent));
+        .border(1.0, ink.alpha(0.08));
+    if s.backdrop.module().is_some() {
+        panel = panel.child(
+            effect(crate::backdrop::MARK)
+                .key("backdrop")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .effect_data([accent.r, accent.g, accent.b, if dark { 1.0 } else { 0.0 }]),
+        );
+    }
+    panel = panel.child(header(s, &t, accent));
     if let Some(notice) = &s.notice {
         panel = panel.child(divider(&t)).child(
             row()

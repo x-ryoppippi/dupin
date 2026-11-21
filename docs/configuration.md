@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source and how many files a search shows. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. Dupin reads the file at launch, so restart it after editing it by hand.
 
@@ -10,6 +10,7 @@ file_limit = 200 # the most files a Spotlight search shows
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
+backdrop = "flow" # "flow", "off", or the path to a WGSL shader
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
@@ -48,6 +49,16 @@ With `settings` set, `config.toml` is a read-only link into the Nix store, so ch
 ## Input source
 
 Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition. `"ascii"` leaves a source that already types ASCII alone and otherwise picks the most recently used one that does (ABC, or an input method's Roman mode); an identifier picks that source; `"keep"` leaves the input source alone.
+
+## Backdrop
+
+A shader animates behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"` draws nothing. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
+
+Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the menu's Open Shaders Folder… opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
+
+Dupin reads the file again when it has changed since the panel last showed, so you can edit a shader and see it at the next hotkey press. A file that doesn't compile shows its error in the panel; Dupin keeps the last version that compiled, or draws `flow`. [`examples/shaders`](../examples/shaders) describes how to write one.
+
+The backdrop holds still under System Settings → Accessibility → Display → Reduce motion.
 
 ## Freeing the hotkey
 

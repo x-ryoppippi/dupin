@@ -1,10 +1,12 @@
 //! Dupin: a resident launcher panel. ⌘Space (by default) shows it; type to find an app, or
 //! press Space first to search files with Spotlight.
 
+mod backdrop;
 mod hotkey;
 mod log;
 mod prefs;
 mod settings;
+mod shader;
 mod store;
 mod trace;
 mod ui;
@@ -40,7 +42,8 @@ fn main() {
         .windowless()
         .accessory()
         .fit_content_height()
-        .srgb_blend(true);
+        .srgb_blend(true)
+        .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
     let binding = Arc::new(hotkey::Binding::new(handle.clone()));
 

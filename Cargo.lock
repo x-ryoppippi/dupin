@@ -753,12 +753,14 @@ dependencies = [
  "dupin-core",
  "dupin-mac",
  "libc",
+ "naga",
  "rune",
  "rune-kit",
  "rune-notify",
  "serde",
  "serde_json",
  "toml",
+ "wgpu",
 ]
 
 [[package]]

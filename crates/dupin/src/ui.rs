@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dupin_core::{Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session};
+use dupin_core::{
+    Backdrop, Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session,
+};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -29,6 +31,13 @@ pub struct Ui {
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
     pub icons: HashMap<String, Image>,
+    /// Between `show` and `hide`: the backdrop animates only then.
+    pub shown: bool,
+    /// The clock when the panel last showed, and when the query last changed.
+    pub shown_at: f64,
+    pub typed_at: f64,
+    pub backdrop: crate::shader::Source,
+    backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     apps: Searcher,
     files: Searcher,
@@ -62,6 +71,8 @@ impl Ui {
         let warm = apps_provider.clone();
         std::thread::spawn(move || warm.warm());
         let deliver = |me: AppHandle<Ui>| move |d: Delivery| me.update(move |s, _| s.deliver(d));
+        let (backdrop, problem) = crate::shader::Source::new(&config.backdrop);
+        let notice = notice.or_else(|| problem.inspect(|p| crate::log::warn(p)));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -70,6 +81,11 @@ impl Ui {
             query,
             notice,
             icons: HashMap::new(),
+            shown: false,
+            shown_at: 0.0,
+            typed_at: f64::NEG_INFINITY,
+            backdrop,
+            backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             apps: Searcher::spawn("apps", apps_provider, deliver(me.clone())),
             files: Searcher::spawn(
@@ -101,6 +117,12 @@ impl Ui {
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
+        if self.backdrop_pick != config.backdrop {
+            let (backdrop, problem) = crate::shader::Source::new(&config.backdrop);
+            self.backdrop = backdrop;
+            self.backdrop_pick = config.backdrop.clone();
+            self.complain(problem);
+        }
     }
 
     /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
@@ -139,6 +161,13 @@ impl Ui {
         });
     }
 
+    fn complain(&mut self, problem: Option<String>) {
+        if let Some(problem) = problem {
+            crate::log::warn(&problem);
+            self.notice = Some(problem);
+        }
+    }
+
     pub fn setup(s: &mut Ui, waker: Waker) {
         s.icon_cache = Some(ImageCache::new(waker));
     }
@@ -148,7 +177,7 @@ impl Ui {
         if self.me.is_visible() {
             self.dismiss(tx);
         } else {
-            self.show();
+            self.show(tx);
         }
     }
 
@@ -163,8 +192,10 @@ impl Ui {
         }
     }
 
-    fn show(&mut self) {
+    fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
+        let problem = self.backdrop.refresh();
+        self.complain(problem);
         self.query.focused = true;
         self.me.place(
             DisplayTarget::UnderPointer,
@@ -175,6 +206,8 @@ impl Ui {
                 inset: 0.0,
             },
         );
+        self.shown = true;
+        self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
     }
@@ -204,6 +237,7 @@ impl Ui {
             previous.restore();
         }
         self.query.clear();
+        self.shown = false;
         self.notice = None;
         tx.close_window();
         if std::mem::take(&mut self.relaunch) {
@@ -214,12 +248,13 @@ impl Ui {
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
         self.notice = Some(message);
         tx.instant();
-        self.show();
+        self.show(tx);
     }
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
         crate::trace::edited(&self.query.text);
+        self.typed_at = tx.clock();
         let effects = self.session.set_query(&self.query.text);
         self.apply(effects, tx);
     }

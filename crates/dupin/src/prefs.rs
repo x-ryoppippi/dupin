@@ -1,28 +1,77 @@
 //! The settings window (⌘, in the panel): the hotkey, where the panel opens, the input source,
-//! how many files a search shows and, for a release build, its updates. Changes apply to the
-//! panel at once and are written back to config.toml. A read-only config.toml (one Nix
-//! manages) shows its values, locked.
+//! how many files a search shows, the backdrop shader and, for a release build, its updates.
+//! Changes apply to the panel at once and are written back to config.toml. A read-only
+//! config.toml (one Nix manages) shows its values, locked.
 
 use std::sync::Arc;
 
-use dupin_core::{Config, InputSource, Position};
-use rune::{AppHandle, Cx, El, Shortcut, ShortcutError, Tx, col, el, row, text};
+use dupin_core::{Backdrop, Config, InputSource, Position};
+use rune::{AppHandle, Cx, El, PopupItem, PopupMenu, Shortcut, ShortcutError, Tx, col, el, row, text};
 use rune_kit::{
-    Button, Kit, SegmentedControl, ShortcutRecorder, ShortcutRecorderState, State, Switch,
-    shortcut_error_message,
+    Button, Kit, SegmentedControl, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, State,
+    Switch, shortcut_error_message,
 };
 
 use crate::hotkey::Binding;
+use crate::shader::EXAMPLES;
 use crate::ui::Ui;
 use crate::update::{Status, Updater};
 
 /// The window's size, taller when it shows a release build's updates.
 pub fn size(updates: bool) -> (f32, f32) {
-    (560.0, if updates { 436.0 } else { 340.0 })
+    (560.0, if updates { 484.0 } else { 388.0 })
 }
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 const LABEL_WIDTH: f32 = 150.0;
+
+const BACKDROP: &str = "backdrop";
+/// Where the menu opens: the Select's trigger, which Rune keys after the Select.
+const BACKDROP_MENU: &str = "backdrop-trigger";
+/// As wide as the segmented controls above.
+const CONTROL_WIDTH: f32 = 232.0;
+const FLOW: &str = "flow";
+const OFF: &str = "off";
+const EXAMPLE: &str = "example:";
+const FILE: &str = "file:";
+const OPEN_FOLDER: &str = "open-folder";
+
+/// Open the shaders folder in Finder, making it first if need be, for a user to drop a file in.
+fn open_shaders_folder() {
+    std::thread::spawn(|| {
+        let dir = crate::shader::shaders_dir();
+        match std::fs::create_dir_all(&dir) {
+            Ok(()) => _ = dupin_mac::workspace::open(&dir),
+            Err(e) => crate::log::warn(&format!("couldn't create {}: {e}", dir.display())),
+        }
+    });
+}
+
+/// The example a `backdrop` path is Settings' copy of.
+fn example_of(path: &str) -> Option<&'static str> {
+    EXAMPLES
+        .iter()
+        .map(|(name, _, _)| *name)
+        .find(|name| crate::shader::example_pick(name) == path)
+}
+
+fn backdrop_title(backdrop: &Backdrop) -> String {
+    match backdrop {
+        Backdrop::Flow => "Flow".to_owned(),
+        Backdrop::Off => "Off".to_owned(),
+        Backdrop::File(path) => match example_of(path) {
+            Some(name) => EXAMPLES
+                .iter()
+                .find(|(n, _, _)| *n == name)
+                .map(|(_, t, _)| (*t).to_owned())
+                .unwrap_or_default(),
+            None => {
+                let name = path.rsplit('/').next().unwrap_or(path);
+                name.strip_suffix(".wgsl").unwrap_or(name).to_owned()
+            }
+        },
+    }
+}
 
 pub struct Prefs {
     config: Config,
@@ -67,6 +116,74 @@ impl Prefs {
     fn set(&mut self, change: impl FnOnce(&mut Config)) {
         change(&mut self.config);
         self.save();
+    }
+
+    /// The backdrop menu: the built-in shader, none, or an example, copied beside config.toml
+    /// to be edited. A file config.toml names shows checked at the end.
+    fn pick_backdrop(&mut self, tx: &mut Tx) {
+        let current = &self.config.backdrop;
+        let id = |b: &Backdrop| match b {
+            Backdrop::Flow => FLOW.to_owned(),
+            Backdrop::Off => OFF.to_owned(),
+            Backdrop::File(path) => match example_of(path) {
+                Some(name) => format!("{EXAMPLE}{name}"),
+                None => format!("{FILE}{path}"),
+            },
+        };
+        let selected = id(current);
+        let item = |b: Backdrop| {
+            let id = id(&b);
+            PopupItem::new(id.clone(), backdrop_title(&b)).checked(id == selected)
+        };
+        let mut files = crate::shader::user_shaders();
+        if let Backdrop::File(path) = current
+            && example_of(path).is_none()
+            && !files.contains(path)
+        {
+            files.push(path.clone());
+        }
+        let mut menu = PopupMenu::new()
+            .item(item(Backdrop::Flow))
+            .item(item(Backdrop::Off))
+            .separator()
+            .items(
+                EXAMPLES
+                    .iter()
+                    .map(|(name, _, _)| item(Backdrop::File(crate::shader::example_pick(name)))),
+            );
+        if !files.is_empty() {
+            menu = menu
+                .separator()
+                .items(files.into_iter().map(|f| item(Backdrop::File(f))));
+        }
+        menu = menu
+            .separator()
+            .item(PopupItem::new(OPEN_FOLDER, "Open Shaders Folder…"));
+        tx.popup_menu(
+            menu.selected(selected),
+            BACKDROP_MENU,
+            |s: &mut Prefs, picked, _| {
+                let Some(picked) = picked else { return };
+                if picked == OPEN_FOLDER {
+                    return open_shaders_folder();
+                }
+                let next = if picked == FLOW {
+                    Backdrop::Flow
+                } else if picked == OFF {
+                    Backdrop::Off
+                } else if let Some(name) = picked.strip_prefix(EXAMPLE) {
+                    match crate::shader::install_example(name) {
+                        Ok(next) => next,
+                        Err(e) => return crate::log::warn(&format!("couldn't copy the {name} shader: {e}")),
+                    }
+                } else if let Some(path) = picked.strip_prefix(FILE) {
+                    Backdrop::File(path.to_owned())
+                } else {
+                    return;
+                };
+                s.set(|c| c.backdrop = next);
+            },
+        );
     }
 
     /// Persist the settings and hand them to the panel.
@@ -131,6 +248,20 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     )
     .build(&k);
 
+    // The menu lists the shaders folder as it stands when it opens, so the Select holds only
+    // the current choice.
+    let title = backdrop_title(&s.config.backdrop);
+    let mut backdrop = Select::new(BACKDROP, &[title.as_str()])
+        .appearance(SelectAppearance::Field)
+        .width(CONTROL_WIDTH)
+        .label("Backdrop")
+        .current(Some(&title))
+        .disabled(s.read_only)
+        .trigger(&k);
+    if !s.read_only {
+        backdrop = backdrop.on_press_tx(|s: &mut Prefs, tx| s.pick_backdrop(tx));
+    }
+
     let limits: Vec<String> = FILE_LIMITS.iter().map(ToString::to_string).collect();
     let file_limit = segments(
         s,
@@ -171,6 +302,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .child(setting(&k, "Position", position))
         .child(setting(&k, "Input source", input_source))
         .child(setting(&k, "Files shown", file_limit))
+        .child(setting(&k, "Backdrop", backdrop))
         .children(updates(s, &k))
         .child(el().grow(1.0))
         .child(

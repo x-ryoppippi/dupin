@@ -18,6 +18,8 @@ rune-kit = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true, features = ["display"] }
+wgpu = { workspace = true }
+naga = { workspace = true }
 
 [lints]
 workspace = true
