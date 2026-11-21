@@ -28,6 +28,7 @@
         ./nix/git-hooks.nix
         ./nix/packages.nix
         ./nix/pnpm.nix
+        ./nix/home-manager.nix
         ./nix/treefmt.nix
         ./nix/checks.nix
         ./nix/dev-shell.nix

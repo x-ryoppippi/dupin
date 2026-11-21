@@ -1,13 +1,13 @@
 //! The settings window (⌘, in the panel): the hotkey, where the panel opens, the input source
 //! and how many files a search shows. Changes apply to the panel at once and are written back
-//! to config.toml.
+//! to config.toml. A read-only config.toml (one Nix manages) shows its values, locked.
 
 use std::sync::Arc;
 
 use dupin_core::{Config, InputSource, Position};
 use rune::{AppHandle, Cx, El, Shortcut, ShortcutError, Tx, col, el, row, text};
 use rune_kit::{
-    Button, Kit, SegmentedControl, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message,
+    Button, Kit, SegmentedControl, ShortcutRecorder, ShortcutRecorderState, State, shortcut_error_message,
 };
 
 use crate::hotkey::Binding;
@@ -25,6 +25,7 @@ pub struct Prefs {
     owner: Option<String>,
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
+    read_only: bool,
 }
 
 impl Prefs {
@@ -39,6 +40,7 @@ impl Prefs {
             owner: None,
             binding,
             panel,
+            read_only: crate::settings::read_only(),
         }
     }
 
@@ -78,19 +80,24 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .label("Show Dupin")
         .on_change(Prefs::change_hotkey)
         .error_message(refusal)
+        .disabled(s.read_only)
         .build(&k);
 
-    let position = SegmentedControl::new(
-        &["Center", "Top"],
-        Some(match s.config.position {
-            Position::Center => 0,
-            Position::Top => 1,
+    let position = segments(
+        s,
+        SegmentedControl::new(
+            &["Center", "Top"],
+            Some(match s.config.position {
+                Position::Center => 0,
+                Position::Top => 1,
+            }),
+        )
+        .label("Position")
+        .on_pick(|s: &mut Prefs, i, _| {
+            s.set(|c| c.position = if i == 0 { Position::Center } else { Position::Top })
         }),
+        2,
     )
-    .label("Position")
-    .on_pick(|s: &mut Prefs, i, _| {
-        s.set(|c| c.position = if i == 0 { Position::Center } else { Position::Top })
-    })
     .build(&k);
 
     // A source picked by identifier in config.toml shows as a third segment.
@@ -103,27 +110,38 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
             2
         }
     };
-    let input_source = SegmentedControl::new(&sources, Some(picked))
-        .label("Input source")
-        .on_pick(|s: &mut Prefs, i, _| match i {
-            0 => s.set(|c| c.input_source = InputSource::Ascii),
-            1 => s.set(|c| c.input_source = InputSource::Keep),
-            _ => {}
-        })
-        .build(&k);
-
-    let limits: Vec<String> = FILE_LIMITS.iter().map(ToString::to_string).collect();
-    let file_limit = SegmentedControl::new(
-        &limits,
-        FILE_LIMITS.iter().position(|&n| n == s.config.file_limit),
+    let input_source = segments(
+        s,
+        SegmentedControl::new(&sources, Some(picked))
+            .label("Input source")
+            .on_pick(|s: &mut Prefs, i, _| match i {
+                0 => s.set(|c| c.input_source = InputSource::Ascii),
+                1 => s.set(|c| c.input_source = InputSource::Keep),
+                _ => {}
+            }),
+        sources.len(),
     )
-    .label("Files shown")
-    .on_pick(|s: &mut Prefs, i, _| s.set(|c| c.file_limit = FILE_LIMITS[i]))
     .build(&k);
 
-    let path = crate::settings::path()
+    let limits: Vec<String> = FILE_LIMITS.iter().map(ToString::to_string).collect();
+    let file_limit = segments(
+        s,
+        SegmentedControl::new(
+            &limits,
+            FILE_LIMITS.iter().position(|&n| n == s.config.file_limit),
+        )
+        .label("Files shown")
+        .on_pick(|s: &mut Prefs, i, _| s.set(|c| c.file_limit = FILE_LIMITS[i])),
+        limits.len(),
+    )
+    .build(&k);
+
+    let mut path = crate::settings::path()
         .map(|p| tilde(&p.display().to_string()))
         .unwrap_or_default();
+    if s.read_only {
+        path.push_str(" is read-only; change it where it's managed");
+    }
     let open_file = Button::new("Open config.toml")
         .build(&k)
         .on_press_tx(|_: &mut Prefs, _| {
@@ -160,6 +178,14 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 )
                 .child(open_file),
         )
+}
+
+/// The `n` segments of `control`, locked when config.toml can't be written.
+fn segments(s: &Prefs, control: SegmentedControl, n: usize) -> SegmentedControl {
+    if !s.read_only {
+        return control;
+    }
+    (0..n).fold(control, |c, i| c.segment_state(i, State::Disabled))
 }
 
 /// `$HOME/x` as `~/x`.
