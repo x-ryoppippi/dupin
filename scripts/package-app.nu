@@ -51,6 +51,9 @@ def main [
     ^/usr/bin/plutil -replace CFBundleShortVersionString -string $release.version $plist
     ^/usr/bin/plutil -replace CFBundleVersion -string $build $plist
     ^/usr/bin/plutil -insert DupinUpdateFeed -string $release.feed $plist
+    if $channel == nightly {
+        ^/usr/bin/plutil -replace CFBundleIconFile -string dupin-nightly $plist
+    }
 
     ^/usr/bin/codesign --force --options runtime --timestamp --sign $identity $bundle
     ^/usr/bin/codesign --verify --strict --verbose=2 $bundle

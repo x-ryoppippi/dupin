@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="tile">
+      <path d="M280 100H744C861 100 924 163 924 280V744C924 861 861 924 744 924H280C163 924 100 861 100 744V280C100 163 163 100 280 100Z"/>
+    </clipPath>
+  </defs>
+  <image href="../assets/logo/dupin.svg" width="1024" height="1024"/>
+  <g clip-path="url(#tile)">
+    <g transform="translate(924 100) rotate(45)">
+      <rect x="-500" y="168" width="1000" height="112" fill="#E8B04B"/>
+      <text x="0" y="248" text-anchor="middle" font-family="Inter" font-weight="800" font-size="70" letter-spacing="10" fill="#111318">NIGHTLY</text>
+    </g>
+  </g>
+</svg>

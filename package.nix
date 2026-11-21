@@ -3,6 +3,7 @@
   rustPlatform,
   resvg,
   python3Packages,
+  inter,
 }:
 let
   root = ./.;
@@ -72,15 +73,22 @@ rustPlatform.buildRustPackage (
       mv $out/bin/dupin $app/MacOS/dupin
       substitute packaging/Info.plist $app/Info.plist --subst-var-by version ${version}
 
-      # Every size an iconset has: 16 to 512 points, each also at 2x (up to 1024 pixels).
-      iconset=$(mktemp -d)
-      for size in 16 32 128 256 512; do
-        resvg -w $size -h $size assets/logo/dupin.svg $iconset/icon_''${size}x''${size}.png
-        resvg -w $((size * 2)) -h $((size * 2)) assets/logo/dupin.svg $iconset/icon_''${size}x''${size}@2x.png
-      done
+      # Every size an iconset has: 16 to 512 points, each also at 2x (up to 1024 pixels). The
+      # nightly icon's ribbon is text, and the sandbox has no system fonts.
+      icns() {
+        local iconset
+        iconset=$(mktemp -d)
+        for size in 16 32 128 256 512; do
+          resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $size -h $size "$1" $iconset/icon_''${size}x''${size}.png
+          resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $((size * 2)) -h $((size * 2)) "$1" $iconset/icon_''${size}x''${size}@2x.png
+        done
+        icnsutil compose --toc "$2" $iconset/*.png
+        icnsutil test "$2"
+      }
       mkdir -p $app/Resources
-      icnsutil compose --toc $app/Resources/dupin.icns $iconset/*.png
-      icnsutil test $app/Resources/dupin.icns
+      icns assets/logo/dupin.svg $app/Resources/dupin.icns
+      # scripts/package-app.nu points a nightly build at this one.
+      icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
       ln -s $app/MacOS/dupin $out/bin/dupin
     '';
     passthru = { inherit commonArgs; };
