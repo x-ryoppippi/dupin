@@ -102,23 +102,28 @@ impl Ui {
     }
 
     /// An update is in place at `bundle`: start it now, or once the panel hides.
+    /// The decision is made here, on the UI thread, so it sees the panel as it is now.
     pub fn updated(&mut self, bundle: PathBuf) {
         if self.me.is_visible() {
             self.relaunch = Some(bundle);
-        } else {
+        } else if self.running.load(Ordering::Acquire) > 0 {
             self.relaunch_when_idle(bundle);
+        } else {
+            crate::update::relaunch(&bundle);
         }
     }
 
-    /// Relaunch once every action already handed off has been carried out, so exiting doesn't
-    /// cut short the app or file the user just opened.
+    /// Ask again once every action already handed off has been carried out, so exiting
+    /// doesn't cut short the app or file the user just opened. The panel may have been
+    /// summoned meanwhile, so `updated` decides afresh.
     fn relaunch_when_idle(&self, bundle: PathBuf) {
         let running = self.running.clone();
+        let me = self.me.clone();
         std::thread::spawn(move || {
             while running.load(Ordering::Acquire) > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            crate::update::relaunch(&bundle);
+            me.update(move |s, _| s.updated(bundle));
         });
     }
 
