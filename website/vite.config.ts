@@ -47,6 +47,7 @@ export default defineConfig({
 				siteName: 'Dupin',
 				siteUrl: 'https://dupin.app',
 				minifyHtml: true,
+				readerChrome: { copy: true, externalLinks: false, backToTop: false },
 				render: theme,
 			},
 		}),
