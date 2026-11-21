@@ -20,6 +20,8 @@ use crate::ui::Ui;
 /// Long enough after launch not to compete with the first app scan and the panel's warm-up.
 const FIRST_CHECK: Duration = Duration::from_secs(60);
 const INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+/// The name the release zip gives the bundle, whatever the user renamed the installed copy to.
+const ARCHIVED_BUNDLE: &str = "Dupin.app";
 
 static ENABLED: AtomicBool = AtomicBool::new(true);
 
@@ -109,13 +111,7 @@ pub fn spawn(enabled: bool, panel: AppHandle<Ui>) {
 
 /// Install the feed's build if it is newer, returning its version.
 fn check(installed: &Installed) -> Result<Option<String>, String> {
-    let feed = Feed::parse(&output(Command::new("/usr/bin/curl").args([
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--location",
-        &installed.feed,
-    ]))?)?;
+    let feed = Feed::parse(&output(curl(Duration::from_secs(60)).arg(&installed.feed))?)?;
     if feed.build <= installed.build {
         return Ok(None);
     }
@@ -133,15 +129,18 @@ fn install(installed: &Installed, feed: &Feed) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir(&staging).map_err(|e| format!("couldn't create {}: {e}", staging.display()))?;
     let result = stage_and_swap(installed, feed, &staging);
-    let _ = std::fs::remove_dir_all(&staging);
+    // When neither the update nor the old app is in place, the old app is only in staging.
+    if installed.bundle.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
     result
 }
 
 fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<(), String> {
     let zip = staging.join("update.zip");
     output(
-        Command::new("/usr/bin/curl")
-            .args(["--fail", "--silent", "--show-error", "--location", "--output"])
+        curl(Duration::from_secs(15 * 60))
+            .arg("--output")
             .arg(&zip)
             .arg(&feed.url),
     )?;
@@ -158,8 +157,7 @@ fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<
             .arg(&zip)
             .arg(&unpacked),
     )?;
-    let name = installed.bundle.file_name().ok_or("the app bundle has no name")?;
-    let new = unpacked.join(name);
+    let new = unpacked.join(ARCHIVED_BUNDLE);
 
     output(
         Command::new("/usr/bin/codesign")
@@ -175,13 +173,52 @@ fn stage_and_swap(installed: &Installed, feed: &Feed, staging: &Path) -> Result<
     )
     .map_err(|e| format!("Gatekeeper rejects the update: {e}"))?;
 
+    // The feed is unsigned; the bundle's own Info.plist is covered by its signature, so it,
+    // not the feed, decides that the update is newer and on this channel.
+    let build = info_value(&new, "CFBundleVersion")?
+        .parse::<u64>()
+        .map_err(|_| "the update's CFBundleVersion is not a build number")?;
+    if build <= installed.build {
+        return Err(format!(
+            "the update is build {build}, not newer than {}",
+            installed.build
+        ));
+    }
+    if info_value(&new, "DupinUpdateFeed")? != installed.feed {
+        return Err("the update belongs to another channel".into());
+    }
+
     let old = staging.join("old.app");
     std::fs::rename(&installed.bundle, &old).map_err(|e| format!("couldn't move the old app aside: {e}"))?;
     if let Err(e) = std::fs::rename(&new, &installed.bundle) {
-        let _ = std::fs::rename(&old, &installed.bundle);
-        return Err(format!("couldn't move the update into place: {e}"));
+        return Err(match std::fs::rename(&old, &installed.bundle) {
+            Ok(()) => format!("couldn't move the update into place: {e}"),
+            Err(back) => format!(
+                "couldn't move the update into place ({e}) or the old app back ({back}); it is at {}",
+                old.display()
+            ),
+        });
     }
     Ok(())
+}
+
+/// curl that fails on HTTP errors and gives up on a stalled server.
+fn curl(max: Duration) -> Command {
+    let mut command = Command::new("/usr/bin/curl");
+    command
+        .args(["--fail", "--silent", "--show-error", "--location"])
+        .args(["--connect-timeout", "30", "--max-time"])
+        .arg(max.as_secs().to_string());
+    command
+}
+
+fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
+    let value = output(
+        Command::new("/usr/bin/plutil")
+            .args(["-extract", key, "raw", "-o", "-"])
+            .arg(bundle.join("Contents/Info.plist")),
+    )?;
+    Ok(value.trim().to_owned())
 }
 
 /// Start the installed bundle once this process has exited, and exit.
