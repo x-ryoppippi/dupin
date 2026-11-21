@@ -94,29 +94,28 @@ pub struct Source {
     /// The file's modification time when it was last read, to read it again only once it changes.
     read_at: Option<SystemTime>,
     module: Option<Arc<str>>,
+    /// Why the picked file isn't what's drawing, until a version of it is.
+    problem: Option<String>,
 }
 
 impl Source {
-    /// The source `pick` names and, when it couldn't be used, why. A file that fails falls back
-    /// to the built-in shader.
-    pub fn new(pick: &Backdrop) -> (Source, Option<String>) {
+    /// The source `pick` names. A file that fails falls back to the built-in shader.
+    pub fn new(pick: &Backdrop) -> Source {
         let mut source = Source {
             file: None,
             read_at: None,
             module: None,
+            problem: None,
         };
-        let problem = match pick {
-            Backdrop::Off => None,
-            Backdrop::Flow => {
-                source.module = Some(builtin());
-                None
-            }
+        match pick {
+            Backdrop::Off => {}
+            Backdrop::Flow => source.module = Some(builtin()),
             Backdrop::File(path) => {
                 source.file = Some(resolve(path));
-                source.reload()
+                source.reload();
             }
-        };
-        (source, problem)
+        }
+        source
     }
 
     /// The full module to draw, or `None` when the backdrop is off.
@@ -124,21 +123,34 @@ impl Source {
         self.module.as_ref()
     }
 
-    /// Read a user's file again if it changed since it was last read, so editing it shows on the
-    /// next summon. Returns why the new version couldn't be used.
-    pub fn refresh(&mut self) -> Option<String> {
-        let path = self.file.as_ref()?;
-        let changed = modified(path) != self.read_at;
-        changed.then(|| self.reload()).flatten()
+    /// Why the picked file isn't what's drawing.
+    pub fn problem(&self) -> Option<&str> {
+        self.problem.as_deref()
     }
 
-    fn reload(&mut self) -> Option<String> {
-        let path = self.file.as_ref()?;
-        self.read_at = modified(path);
-        let result = std::fs::read_to_string(path)
-            .map_err(|e| format!("couldn't read {}: {e}", path.display()))
-            .and_then(|user| compile(&user).map_err(|e| format!("{}:{e}", path.display())));
-        match result {
+    /// Read a user's file again if it changed since it was last read, so editing it shows on the
+    /// next summon.
+    pub fn refresh(&mut self) {
+        if let Some(path) = &self.file
+            && (self.read_at.is_none() || modified(path) != self.read_at)
+        {
+            self.reload();
+        }
+    }
+
+    fn reload(&mut self) {
+        let Some(path) = self.file.as_ref() else {
+            return;
+        };
+        let stamp = modified(path);
+        let result = match std::fs::read_to_string(path) {
+            Ok(user) => {
+                self.read_at = stamp;
+                compile(&user).map_err(|e| format!("{}:{e}", path.display()))
+            }
+            Err(e) => Err(format!("couldn't read {}: {e}", path.display())),
+        };
+        let problem = match result {
             Ok(module) => {
                 self.module = Some(module);
                 None
@@ -150,7 +162,13 @@ impl Source {
                 }
                 Some(format!("backdrop shader {message}"))
             }
+        };
+        if let Some(p) = &problem
+            && self.problem.as_ref() != Some(p)
+        {
+            crate::log::warn(p);
         }
+        self.problem = problem;
     }
 }
 
@@ -248,6 +266,23 @@ mod tests {
     fn errors_point_into_the_users_file() {
         let e = compile("fn backdrop(p: vec2f, b: Backdrop) -> vec4f {\n    return nope;\n}\n").unwrap_err();
         assert!(e.starts_with("2:"), "{e}");
+    }
+
+    #[test]
+    fn a_file_that_fails_keeps_its_problem_and_is_tried_again() {
+        let dir = std::env::temp_dir().join(format!("dupin-shader-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("later.wgsl");
+        let _ = std::fs::remove_file(&path);
+        let mut source = Source::new(&Backdrop::File(path.to_string_lossy().into_owned()));
+        assert!(source.problem().is_some_and(|p| p.contains("couldn't read")));
+        assert!(source.module().is_some(), "falls back to flow");
+        source.refresh();
+        assert!(source.problem().is_some(), "still reported on the next summon");
+        std::fs::write(&path, FLOW).unwrap();
+        source.refresh();
+        assert_eq!(source.problem(), None);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

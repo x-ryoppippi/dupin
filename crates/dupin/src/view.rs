@@ -51,7 +51,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     panel = panel.child(header(s, &t, accent));
-    if let Some(notice) = &s.notice {
+    for notice in s.notice.as_deref().into_iter().chain(s.backdrop.problem()) {
         panel = panel.child(divider(&t)).child(
             row()
                 .key("notice")
@@ -59,12 +59,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .px(18.0)
                 .py(12.0)
                 .fill(WARNING)
-                .child(
-                    text(notice.as_str())
-                        .font(type_::BODY.lh(18.0))
-                        .color(t.text)
-                        .wrap(),
-                ),
+                .child(text(notice).font(type_::BODY.lh(18.0)).color(t.text).wrap()),
         );
     }
     let items = s.session.items();
