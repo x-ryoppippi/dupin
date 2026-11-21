@@ -16,12 +16,13 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use rune::AppHandle;
 use serde::Deserialize;
 
+use crate::prefs::Prefs;
 use crate::ui::Ui;
 
 /// Long enough after launch not to compete with the first app scan and the panel's warm-up.
@@ -129,20 +130,72 @@ struct Staged {
     version: String,
 }
 
-/// The updater's state, shared by its worker and the UI thread.
+/// Where the updater is, as Settings shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// `DUPIN_DISABLE_UPDATES`, or a build that isn't signed with a Developer ID.
+    Off,
+    /// No check has run yet.
+    Idle,
+    Checking,
+    Downloading,
+    Current,
+    Failed(String),
+    /// Staged; installs on restart or quit.
+    Ready(String),
+    /// A newer build this copy can't install itself.
+    Download {
+        url: String,
+    },
+}
+
+impl Status {
+    pub fn text(&self, auto_update: bool, download_only: bool) -> String {
+        match self {
+            Status::Off => "Off".into(),
+            Status::Checking => "Checking…".into(),
+            Status::Downloading => "Downloading…".into(),
+            Status::Failed(e) => format!("Couldn't update: {}", e.lines().next().unwrap_or_default()),
+            Status::Ready(version) => format!("Ready: {version}"),
+            Status::Download { .. } => "Download only".into(),
+            Status::Idle | Status::Current if download_only => "Download only".into(),
+            Status::Idle if !auto_update => "Off".into(),
+            Status::Idle => "Not checked yet".into(),
+            Status::Current => "Up to date".into(),
+        }
+    }
+
+    /// Whether "Check for Updates" can start a check now.
+    pub fn can_check(&self) -> bool {
+        matches!(
+            self,
+            Status::Idle | Status::Current | Status::Failed(_) | Status::Download { .. }
+        )
+    }
+}
+
+/// The updater's state, shared by its worker, the panel and Settings.
 #[derive(Clone)]
 pub struct Updater {
     shared: Arc<Shared>,
 }
 
 struct Shared {
-    /// `auto_update` in config.toml; the next check reads it.
+    /// `auto_update` in config.toml; the next scheduled check reads it.
     enabled: AtomicBool,
+    /// This build has an update feed, so Settings shows its updates.
+    available: bool,
+    download_only: bool,
+    version: String,
     inner: Mutex<Inner>,
+    /// Set by "Check for Updates"; the worker waits on it between checks.
+    wake: Mutex<bool>,
+    signal: Condvar,
+    prefs: AppHandle<Prefs>,
 }
 
-#[derive(Default)]
 struct Inner {
+    status: Status,
     staged: Option<Staged>,
     /// The bundles were swapped. A second swap would exchange them back, so nothing stages or
     /// swaps again in this process.
@@ -151,23 +204,38 @@ struct Inner {
 
 impl Updater {
     /// Start checking the channel's feed, when this build has one.
-    pub fn start(enabled: bool, panel: AppHandle<Ui>) -> Updater {
+    pub fn start(enabled: bool, panel: AppHandle<Ui>, prefs: AppHandle<Prefs>) -> Updater {
+        let installed = if off_by_env() {
+            Ok(None)
+        } else {
+            Installed::current().inspect_err(|e| crate::log::warn(&format!("updates are off: {e}")))
+        };
+        let installed = installed.ok().flatten();
+        let download_only = installed
+            .as_ref()
+            .is_some_and(|i| i.method == Method::DownloadOnly);
         let updater = Updater {
             shared: Arc::new(Shared {
                 enabled: AtomicBool::new(enabled),
-                inner: Mutex::new(Inner::default()),
+                available: has_feed(),
+                download_only,
+                version: dupin_mac::bundle::info_string("CFBundleShortVersionString").unwrap_or_default(),
+                inner: Mutex::new(Inner {
+                    status: if installed.is_some() {
+                        Status::Idle
+                    } else {
+                        Status::Off
+                    },
+                    staged: None,
+                    applied: false,
+                }),
+                wake: Mutex::new(false),
+                signal: Condvar::new(),
+                prefs,
             }),
         };
-        if off_by_env() {
+        let Some(installed) = installed else {
             return updater;
-        }
-        let installed = match Installed::current() {
-            Ok(Some(installed)) => installed,
-            Ok(None) => return updater,
-            Err(e) => {
-                crate::log::warn(&format!("updates are off: {e}"));
-                return updater;
-            }
         };
         match installed.method {
             Method::Install => remove_beside(&installed.bundle),
@@ -184,8 +252,51 @@ impl Updater {
         updater
     }
 
+    pub fn available(&self) -> bool {
+        self.shared.available
+    }
+
+    /// `CFBundleShortVersionString` of the running build.
+    pub fn version(&self) -> &str {
+        &self.shared.version
+    }
+
+    pub fn status(&self) -> Status {
+        self.shared.lock().status.clone()
+    }
+
+    pub fn download_only(&self) -> bool {
+        self.shared.download_only
+    }
+
+    /// Turning updates on checks at once rather than at the next interval.
     pub fn set_enabled(&self, enabled: bool) {
-        self.shared.enabled.store(enabled, Ordering::Relaxed);
+        let was = self.shared.enabled.swap(enabled, Ordering::Relaxed);
+        if enabled && !was {
+            self.check_now();
+        }
+    }
+
+    pub fn check_now(&self) {
+        if !self.status().can_check() {
+            return;
+        }
+        *self.shared.wake.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.shared.signal.notify_all();
+    }
+
+    /// Open the download a copy that can't install the update itself needs.
+    pub fn open_download(&self) {
+        let Status::Download { url } = self.status() else {
+            return;
+        };
+        // The feed is unsigned: open a web page, never a file or another app's URL scheme.
+        if !url.starts_with("https://") {
+            return crate::log::warn(&format!("not opening the update download {url}"));
+        }
+        if let Err(e) = Command::new("/usr/bin/open").arg(&url).spawn() {
+            crate::log::warn(&format!("couldn't open {url}: {e}"));
+        }
     }
 
     /// Swap in the staged update and start it once this process has exited, and exit.
@@ -195,8 +306,10 @@ impl Updater {
         match swap(&staged.update, &staged.installed) {
             Ok(()) => relaunch(&staged.installed),
             Err(e) => {
-                crate::log::warn(&format!("couldn't install Dupin {}: {e}", staged.version));
+                let e = format!("couldn't install Dupin {}: {e}", staged.version);
+                crate::log::warn(&e);
                 self.shared.lock().applied = false;
+                self.shared.set_status(Status::Failed(e));
             }
         }
     }
@@ -218,14 +331,42 @@ impl Updater {
     }
 }
 
+/// Whether this build has a channel to update from at all.
+pub fn has_feed() -> bool {
+    dupin_mac::bundle::info_string("DupinUpdateFeed").is_some()
+}
+
 impl Shared {
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    fn set_status(&self, status: Status) {
+        self.lock().status = status;
+        self.prefs.update(|_, _| {});
+    }
+
+    /// Wait `delay` or until "Check for Updates"; true when asked.
+    fn wait(&self, delay: Duration) -> bool {
+        let deadline = Instant::now() + delay;
+        let mut asked = self.wake.lock().unwrap_or_else(|e| e.into_inner());
+        while !*asked {
+            let now = Instant::now();
+            if now >= deadline {
+                break;
+            }
+            asked = self
+                .signal
+                .wait_timeout(asked, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        std::mem::take(&mut *asked)
+    }
 }
 
 fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
-    std::thread::sleep(FIRST_CHECK);
+    let mut asked = shared.wait(FIRST_CHECK);
     let mut announced = None;
     loop {
         let idle = {
@@ -235,20 +376,25 @@ fn run(shared: &Shared, installed: &Installed, panel: &AppHandle<Ui>) {
             }
             inner.staged.is_none()
         };
-        if idle && shared.enabled.load(Ordering::Relaxed) {
-            match check(installed) {
+        if idle && (asked || shared.enabled.load(Ordering::Relaxed)) {
+            shared.set_status(Status::Checking);
+            match check(shared, installed) {
                 Ok(Some(Found::Staged(staged))) => adopt(shared, staged, panel),
                 Ok(Some(Found::Download { version, url })) => {
                     if announced.as_ref() != Some(&version) {
                         crate::log::warn(&format!("Dupin {version} is available: {url}"));
                         announced = Some(version);
                     }
+                    shared.set_status(Status::Download { url });
                 }
-                Ok(None) => {}
-                Err(e) => crate::log::warn(&format!("couldn't update: {e}")),
+                Ok(None) => shared.set_status(Status::Current),
+                Err(e) => {
+                    crate::log::warn(&format!("couldn't update: {e}"));
+                    shared.set_status(Status::Failed(e));
+                }
             }
         }
-        std::thread::sleep(INTERVAL);
+        asked = shared.wait(INTERVAL);
     }
 }
 
@@ -264,19 +410,25 @@ fn adopt(shared: &Shared, staged: Staged, panel: &AppHandle<Ui>) {
         return;
     }
     crate::log::warn(&format!("Dupin {} is ready to install", staged.version));
+    inner.status = Status::Ready(staged.version.clone());
     inner.staged = Some(staged);
+    drop(inner);
+    shared.prefs.update(|_, _| {});
     panel.update(|s, _| s.updated());
 }
 
 /// Stage the feed's build if it is newer, or say where to get it when this copy can't
 /// install it.
-fn check(installed: &Installed) -> Result<Option<Found>, String> {
+fn check(shared: &Shared, installed: &Installed) -> Result<Option<Found>, String> {
     let feed = Feed::parse(&output(curl(Duration::from_secs(60)).arg(&installed.feed))?)?;
     if feed.build <= installed.build {
         return Ok(None);
     }
     Ok(Some(match installed.method {
-        Method::Install => Found::Staged(stage(installed, &feed)?),
+        Method::Install => {
+            shared.set_status(Status::Downloading);
+            Found::Staged(stage(installed, &feed)?)
+        }
         Method::DownloadOnly => Found::Download {
             version: feed.version,
             url: feed.url,
@@ -497,6 +649,40 @@ mod tests {
         assert_eq!(Method::of(app, |p: &Path| p != app), Method::DownloadOnly);
         let translocated = Path::new("/private/var/folders/x/AppTranslocation/1234/d/Dupin.app");
         assert_eq!(Method::of(translocated, everywhere), Method::DownloadOnly);
+    }
+
+    #[test]
+    fn says_where_the_updater_is() {
+        let text = |status: Status| status.text(true, false);
+        assert_eq!(text(Status::Off), "Off");
+        assert_eq!(text(Status::Idle), "Not checked yet");
+        assert_eq!(text(Status::Checking), "Checking…");
+        assert_eq!(text(Status::Downloading), "Downloading…");
+        assert_eq!(text(Status::Current), "Up to date");
+        assert_eq!(text(Status::Ready("0.3.0".into())), "Ready: 0.3.0");
+        assert_eq!(
+            text(Status::Failed("/usr/bin/curl failed: timed out\nmore".into())),
+            "Couldn't update: /usr/bin/curl failed: timed out"
+        );
+        assert_eq!(Status::Idle.text(false, false), "Off");
+        assert_eq!(Status::Current.text(false, false), "Up to date");
+        assert_eq!(Status::Current.text(true, true), "Download only");
+        assert_eq!(
+            text(Status::Download {
+                url: "https://example.com/Dupin.zip".into()
+            }),
+            "Download only"
+        );
+    }
+
+    #[test]
+    fn checks_only_when_nothing_is_under_way() {
+        assert!(Status::Current.can_check());
+        assert!(Status::Failed("x".into()).can_check());
+        assert!(!Status::Off.can_check());
+        assert!(!Status::Checking.can_check());
+        assert!(!Status::Downloading.can_check());
+        assert!(!Status::Ready("0.3.0".into()).can_check());
     }
 
     #[test]

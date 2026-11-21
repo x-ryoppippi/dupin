@@ -1,19 +1,25 @@
-//! The settings window (⌘, in the panel): the hotkey, where the panel opens, the input source
-//! and how many files a search shows. Changes apply to the panel at once and are written back
-//! to config.toml. A read-only config.toml (one Nix manages) shows its values, locked.
+//! The settings window (⌘, in the panel): the hotkey, where the panel opens, the input source,
+//! how many files a search shows and, for a release build, its updates. Changes apply to the
+//! panel at once and are written back to config.toml. A read-only config.toml (one Nix
+//! manages) shows its values, locked.
 
 use std::sync::Arc;
 
 use dupin_core::{Config, InputSource, Position};
 use rune::{AppHandle, Cx, El, Shortcut, ShortcutError, Tx, col, el, row, text};
 use rune_kit::{
-    Button, Kit, SegmentedControl, ShortcutRecorder, ShortcutRecorderState, State, shortcut_error_message,
+    Button, Kit, SegmentedControl, ShortcutRecorder, ShortcutRecorderState, State, Switch,
+    shortcut_error_message,
 };
 
 use crate::hotkey::Binding;
 use crate::ui::Ui;
+use crate::update::{Status, Updater};
 
-pub const SIZE: (f32, f32) = (560.0, 340.0);
+/// The window's size, taller when it shows a release build's updates.
+pub fn size(updates: bool) -> (f32, f32) {
+    (560.0, if updates { 436.0 } else { 340.0 })
+}
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 const LABEL_WIDTH: f32 = 150.0;
@@ -25,11 +31,12 @@ pub struct Prefs {
     owner: Option<String>,
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
+    updater: Updater,
     read_only: bool,
 }
 
 impl Prefs {
-    pub fn new(config: Config, binding: Arc<Binding>, panel: AppHandle<Ui>) -> Prefs {
+    pub fn new(config: Config, binding: Arc<Binding>, panel: AppHandle<Ui>, updater: Updater) -> Prefs {
         let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
         if binding.failed_at_launch() {
             recorder.mark_unregistered();
@@ -40,6 +47,7 @@ impl Prefs {
             owner: None,
             binding,
             panel,
+            updater,
             read_only: crate::settings::read_only(),
         }
     }
@@ -163,6 +171,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .child(setting(&k, "Position", position))
         .child(setting(&k, "Input source", input_source))
         .child(setting(&k, "Files shown", file_limit))
+        .children(updates(s, &k))
         .child(el().grow(1.0))
         .child(
             row()
@@ -178,6 +187,48 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 )
                 .child(open_file),
         )
+}
+
+/// Whether to install updates, and where the updater is. A build with no update feed (Nix,
+/// `cargo run`) shows none of it.
+fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
+    if !s.updater.available() {
+        return Vec::new();
+    }
+    let auto = Switch::new(s.config.auto_update)
+        .label("Install updates automatically")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(|s: &mut Prefs| s.set(|c| c.auto_update = !c.auto_update))
+        .build(k);
+
+    let status = s.updater.status();
+    let action = match &status {
+        Status::Ready(_) => Button::new("Restart to Update").on_press(|s: &mut Prefs| {
+            s.panel.update(|ui, _| ui.restart_to_update());
+        }),
+        Status::Download { .. } => {
+            Button::new("Download").on_press(|s: &mut Prefs| s.updater.open_download())
+        }
+        _ => Button::new("Check for Updates")
+            .disabled(!status.can_check())
+            .on_press(|s: &mut Prefs| s.updater.check_now()),
+    }
+    .build(k);
+    let line = status.text(s.config.auto_update, s.updater.download_only());
+    let version = row()
+        .grow(1.0)
+        .gap(12.0)
+        .center_y()
+        .child(
+            text(format!("{} · {line}", s.updater.version()))
+                .font(k.ty.ui)
+                .color(k.c.text_muted)
+                .truncate()
+                .grow(1.0),
+        )
+        .child(action);
+    vec![setting(k, "Updates", auto), setting(k, "Version", version)]
 }
 
 /// The `n` segments of `control`, locked when config.toml can't be written.

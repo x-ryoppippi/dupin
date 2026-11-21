@@ -103,13 +103,23 @@ impl Ui {
         self.updater.set_enabled(config.auto_update);
     }
 
-    /// An update is staged: restart into it now, or once the panel hides.
-    /// The decision is made here, on the UI thread, so it sees the panel as it is now.
+    /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
     pub fn updated(&mut self) {
-        if self.me.is_visible() {
+        self.restart_into_update(false);
+    }
+
+    /// Settings' "Restart to Update".
+    pub fn restart_to_update(&mut self) {
+        self.restart_into_update(true);
+    }
+
+    /// The decision is made here, on the UI thread, so it sees the windows as they are now.
+    /// Unless asked, Settings showing defers the restart too: it would close under the user.
+    fn restart_into_update(&mut self, asked: bool) {
+        if self.me.is_visible() || (!asked && self.prefs.is_visible()) {
             self.relaunch = true;
         } else if self.running.load(Ordering::Acquire) > 0 {
-            self.relaunch_when_idle();
+            self.relaunch_when_idle(asked);
         } else {
             self.updater.restart();
         }
@@ -117,15 +127,15 @@ impl Ui {
 
     /// Ask again once every action already handed off has been carried out, so exiting
     /// doesn't cut short the app or file the user just opened. The panel may have been
-    /// summoned meanwhile, so `updated` decides afresh.
-    fn relaunch_when_idle(&self) {
+    /// summoned meanwhile, so `restart_into_update` decides afresh.
+    fn relaunch_when_idle(&self, asked: bool) {
         let running = self.running.clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
             while running.load(Ordering::Acquire) > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            me.update(|s, _| s.updated());
+            me.update(move |s, _| s.restart_into_update(asked));
         });
     }
 
@@ -197,7 +207,7 @@ impl Ui {
         self.notice = None;
         tx.close_window();
         if std::mem::take(&mut self.relaunch) {
-            self.relaunch_when_idle();
+            self.relaunch_when_idle(false);
         }
     }
 
