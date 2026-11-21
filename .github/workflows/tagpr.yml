@@ -60,15 +60,17 @@ jobs:
     needs: tagpr
     if: needs.tagpr.outputs.tag == '' && needs.tagpr.outputs.pull_request != ''
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
+      contents: read
       actions: write
     steps:
-      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: '0.116.1'
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nix-cache
       - name: Dispatch CI on the release branch
-        shell: nu {0}
+        shell: nix shell --inputs-from . nixpkgs#nushell --command nu {0}
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ fromJSON(needs.tagpr.outputs.pull_request).head.ref }}

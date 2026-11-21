@@ -27,17 +27,5 @@
 	"rebaseWhen": "conflicted",
 	"vulnerabilityAlerts": {
 		"labels": ["security"]
-	},
-	"customManagers": [
-		{
-			"description": "Bump the nushell version passed to setup-nu.",
-			"customType": "regex",
-			"managerFilePatterns": ["/^\\.github/(workflows|actions)/.+\\.ya?ml$/"],
-			"matchStrings": [
-				"uses: hustcer/setup-nu@[^\\n]+\\n\\s+with:\\n\\s+version: '(?<currentValue>[^']+)'"
-			],
-			"depNameTemplate": "nushell/nushell",
-			"datasourceTemplate": "github-releases"
-		}
-	]
+	}
 }

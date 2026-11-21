@@ -51,10 +51,6 @@ jobs:
         with:
           save: 'false'
 
-      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
-        with:
-          version: '0.116.1'
-
       - name: Import the Developer ID certificate
         env:
           P12: ${{ secrets.DEVELOPER_ID_P12 }}
@@ -79,7 +75,7 @@ jobs:
         run: |
           export NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
           printf '%s' "$NOTARY_KEY" > "$NOTARY_KEY_PATH"
-          nu scripts/package-app.nu --channel "$CHANNEL" --notarize
+          nix shell --inputs-from . nixpkgs#nushell --command nu scripts/package-app.nu --channel "$CHANNEL" --notarize
           rm "$NOTARY_KEY_PATH"
 
       - name: Publish the stable release
