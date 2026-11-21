@@ -73,11 +73,13 @@ pub fn install_example(name: &str) -> std::io::Result<Backdrop> {
         .ok_or_else(|| std::io::Error::other(format!("no example named {name}")))?;
     let pick = example_pick(name);
     let path = resolve(&pick);
-    if !path.exists() {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&path, src)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    match std::fs::File::create_new(&path) {
+        Ok(mut file) => std::io::Write::write_all(&mut file, src.as_bytes())?,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => return Err(e),
     }
     Ok(Backdrop::File(pick))
 }
