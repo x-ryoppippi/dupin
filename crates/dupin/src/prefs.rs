@@ -114,14 +114,16 @@ fn input_source_title(source: &InputSource) -> String {
     }
 }
 
-/// Open the shaders folder in Finder, making it first if need be, for a user to drop a file in.
-fn open_shaders_folder() {
-    std::thread::spawn(|| {
+/// Open the shaders folder in Finder, for a user to drop a file in. Settings makes it first
+/// only while it may write beside config.toml.
+fn open_shaders_folder(create: bool) {
+    std::thread::spawn(move || {
         let dir = crate::shader::shaders_dir();
-        match std::fs::create_dir_all(&dir) {
-            Ok(()) => _ = dupin_mac::workspace::open(&dir),
-            Err(e) => crate::log::warn(&format!("couldn't create {}: {e}", dir.display())),
+        if create && let Err(e) = std::fs::create_dir_all(&dir) {
+            crate::log::warn(&format!("couldn't create {}: {e}", dir.display()));
+            return;
         }
+        _ = dupin_mac::workspace::open(&dir);
     });
 }
 
@@ -551,14 +553,20 @@ fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
         &backdrop_title(&s.config.backdrop),
         Prefs::pick_backdrop,
     );
-    let folder = tilde(&crate::shader::shaders_dir().display().to_string());
+    let dir = crate::shader::shaders_dir();
+    let folder = tilde(&dir.display().to_string());
+    let create = !s.read_only;
     let open = value_button(
         k,
         "open-shaders",
         "Open",
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
-    )
-    .on_press(|_: &mut Prefs| open_shaders_folder());
+    );
+    let open = if create || dir.is_dir() {
+        open.on_press(move |_: &mut Prefs| open_shaders_folder(create))
+    } else {
+        open.disabled(true).layer_opacity(0.5)
+    };
     vec![
         setting(
             k,
