@@ -19,11 +19,11 @@ An unknown key or an invalid value makes Dupin fall back to the defaults and say
 
 A release build (the Homebrew cask or a zip from GitHub Releases) checks its channel every six hours and installs a newer build by itself: stable follows tagged releases, nightly follows the `nightly` prerelease. It downloads the update into a hidden `.Dupin-update-<build>` folder beside the app and keeps it only when it is signed with the same Developer ID as the running app and Gatekeeper accepts it. The installed app stays as it is until Dupin restarts into the update, which happens when the panel hides with Settings closed and nothing it opened still starting, or until you quit with ⌘Q, which installs it for the next launch. Either way the two apps swap places in one step, so the app is never missing; the next launch removes the old one. `~/Library/Logs/Dupin/dupin.log` records each update and each failed check.
 
-Settings (⌘, in the panel) shows the running version and what the updater is doing, and its Updates switch sets `auto_update`: off stops the six-hourly checks. Check for Updates checks at once, even with `auto_update = false`; Restart to Update installs a downloaded update now.
+Settings' Updates page (⌘, in the panel) shows the running version and what the updater is doing, and its switch sets `auto_update`: off stops the six-hourly checks. Check for Updates checks at once, even with `auto_update = false`; Restart to Update installs a downloaded update now.
 
 When Dupin can't replace its own app (its folder isn't writable by you, or macOS runs it from a translocated copy because it wasn't moved out of Downloads), it only checks: Settings says "Download only" and offers a Download link to the newer build instead of installing it. Move Dupin to `/Applications` or `~/Applications` to let it update itself.
 
-A build from Nix or `cargo run` never updates itself and shows no updates in Settings; update it through Nix. Set `DUPIN_DISABLE_UPDATES=1` in Dupin's environment to turn the updater off for a launch.
+A build from Nix or `cargo run` never updates itself and has no Updates page in Settings; update it through Nix. Set `DUPIN_DISABLE_UPDATES=1` in Dupin's environment to turn the updater off for a launch.
 
 ## Nix
 
@@ -54,7 +54,7 @@ Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while t
 
 A shader animates behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"` draws nothing. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
 
-Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the menu's Open Shaders Folder… opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
+Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the Shaders folder row on the Appearance page opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
 
 Dupin reads the file again when it has changed since the panel last showed, so you can edit a shader and see it at the next hotkey press. A file that doesn't compile shows its error in the panel; Dupin keeps the last version that compiled, or draws `flow`. [`examples/shaders`](../examples/shaders) describes how to write one.
 

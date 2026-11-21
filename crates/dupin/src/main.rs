@@ -3,6 +3,7 @@
 
 mod backdrop;
 mod hotkey;
+mod icons;
 mod log;
 mod prefs;
 mod settings;
@@ -50,7 +51,7 @@ fn main() {
     // The settings window: an ordinary titled window, made when ⌘, first opens it.
     let prefs = App::new(AppSpec::new(
         "Dupin Settings",
-        prefs::size(update::has_feed()),
+        prefs::SIZE,
         || unreachable!(),
         prefs::view,
     ))

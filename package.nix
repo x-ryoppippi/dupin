@@ -33,7 +33,7 @@ let
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-yWVAtoEB9Fl7rQUMYob2CLBFrOBqZ1c92d4h1CipMG0=";
+    hash = "sha256-C+cO2r+EL9LfmdaEm8df4807K8TR1G6usVarlTNjwBA=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the

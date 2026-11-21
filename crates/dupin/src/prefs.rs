@@ -1,40 +1,116 @@
-//! The settings window (⌘, in the panel): the hotkey, where the panel opens, the input source,
-//! how many files a search shows, the backdrop shader and, for a release build, its updates.
+//! The settings window (⌘, in the panel): a sidebar of pages, each a card of settings, drawn
+//! in OpenCode's theme as Hex's settings are. A release build adds a page for its updates.
 //! Changes apply to the panel at once and are written back to config.toml. A read-only
 //! config.toml (one Nix manages) shows its values, locked.
 
 use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
-use rune::{AppHandle, Cx, El, PopupItem, PopupMenu, Shortcut, ShortcutError, Tx, col, el, row, text};
+use rune::{
+    AppHandle, Cx, El, Icon, PopupItem, PopupMenu, Shortcut, ShortcutError, TextStyle, Tx, col, el, icon,
+    row, text,
+};
 use rune_kit::{
-    Button, Kit, SegmentedControl, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, State,
-    Switch, shortcut_error_message,
+    Button, Kit, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, Switch,
+    shortcut_error_message,
 };
 
 use crate::hotkey::Binding;
+use crate::icons;
 use crate::shader::EXAMPLES;
 use crate::ui::Ui;
 use crate::update::{Status, Updater};
 
-/// The window's size, taller when it shows a release build's updates.
-pub fn size(updates: bool) -> (f32, f32) {
-    (560.0, if updates { 484.0 } else { 388.0 })
-}
+pub const SIZE: (f32, f32) = (760.0, 480.0);
+
+/// Room above the sidebar's rows for the traffic lights, which sit over a full-size content view.
+const SIDEBAR_TOP: f32 = 38.0;
+const SIDEBAR_WIDTH: f32 = 220.0;
+/// The page title's band, level with the traffic lights.
+const TITLE_HEIGHT: f32 = 52.0;
+/// Text on a page lines up this far in; cards reach `ROW_PX` past it.
+const GUTTER: f32 = 32.0;
+const ROW_PX: f32 = 16.0;
+const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
-const LABEL_WIDTH: f32 = 150.0;
 
+const POSITION: &str = "position";
+const INPUT_SOURCE: &str = "input-source";
+const FILE_LIMIT: &str = "file-limit";
 const BACKDROP: &str = "backdrop";
-/// Where the menu opens: the Select's trigger, which Rune keys after the Select.
-const BACKDROP_MENU: &str = "backdrop-trigger";
-/// As wide as the segmented controls above.
-const CONTROL_WIDTH: f32 = 232.0;
 const FLOW: &str = "flow";
 const OFF: &str = "off";
 const EXAMPLE: &str = "example:";
 const FILE: &str = "file:";
-const OPEN_FOLDER: &str = "open-folder";
+
+/// Where a row's menu opens: its value's trigger, which rune-kit keys after the Select.
+fn anchor(key: &str) -> String {
+    format!("{key}-trigger")
+}
+
+/// Settings' pages, in the sidebar's order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Page {
+    General,
+    Search,
+    Appearance,
+    Updates,
+}
+
+impl Page {
+    /// The pages this build has: Updates only where there's an update feed.
+    fn all(updates: bool) -> Vec<Page> {
+        let mut pages = vec![Page::General, Page::Search, Page::Appearance];
+        if updates {
+            pages.push(Page::Updates);
+        }
+        pages
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Page::General => "General",
+            Page::Search => "Search",
+            Page::Appearance => "Appearance",
+            Page::Updates => "Updates",
+        }
+    }
+
+    /// The sidebar row's key, for scripts to press.
+    fn key(self) -> &'static str {
+        match self {
+            Page::General => "page-general",
+            Page::Search => "page-search",
+            Page::Appearance => "page-appearance",
+            Page::Updates => "page-updates",
+        }
+    }
+
+    fn icon(self) -> &'static Icon {
+        match self {
+            Page::General => &icons::SLIDERS,
+            Page::Search => &icons::SEARCH,
+            Page::Appearance => &icons::SPARKLES,
+            Page::Updates => &icons::REFRESH,
+        }
+    }
+}
+
+fn position_title(position: Position) -> &'static str {
+    match position {
+        Position::Center => "Center",
+        Position::Top => "Top",
+    }
+}
+
+fn input_source_title(source: &InputSource) -> String {
+    match source {
+        InputSource::Ascii => "ASCII".to_owned(),
+        InputSource::Keep => "Keep".to_owned(),
+        InputSource::Id(id) => id.rsplit('.').next().unwrap_or(id).to_owned(),
+    }
+}
 
 /// Open the shaders folder in Finder, making it first if need be, for a user to drop a file in.
 fn open_shaders_folder() {
@@ -75,6 +151,7 @@ fn backdrop_title(backdrop: &Backdrop) -> String {
 
 pub struct Prefs {
     config: Config,
+    page: Page,
     recorder: ShortcutRecorderState,
     /// Who holds the chord the last refusal was for, when known.
     owner: Option<String>,
@@ -92,6 +169,7 @@ impl Prefs {
         }
         Prefs {
             config,
+            page: Page::General,
             recorder,
             owner: None,
             binding,
@@ -118,8 +196,9 @@ impl Prefs {
         self.save();
     }
 
-    /// The backdrop menu: the built-in shader, none, or an example, copied beside config.toml
-    /// to be edited. A file config.toml names shows checked at the end.
+    /// The backdrop menu: the built-in shader, none, an example (copied beside config.toml to
+    /// be edited) or a file in the shaders folder. A file elsewhere that config.toml names shows
+    /// checked with them.
     fn pick_backdrop(&mut self, tx: &mut Tx) {
         let current = &self.config.backdrop;
         let id = |b: &Backdrop| match b {
@@ -156,17 +235,11 @@ impl Prefs {
                 .separator()
                 .items(files.into_iter().map(|f| item(Backdrop::File(f))));
         }
-        menu = menu
-            .separator()
-            .item(PopupItem::new(OPEN_FOLDER, "Open Shaders Folder…"));
         tx.popup_menu(
             menu.selected(selected),
-            BACKDROP_MENU,
+            anchor(BACKDROP),
             |s: &mut Prefs, picked, _| {
                 let Some(picked) = picked else { return };
-                if picked == OPEN_FOLDER {
-                    return open_shaders_folder();
-                }
                 let next = if picked == FLOW {
                     Backdrop::Flow
                 } else if picked == OFF {
@@ -186,6 +259,80 @@ impl Prefs {
         );
     }
 
+    /// Open a menu of `options` (id, title) over the row's value, the current one checked, and
+    /// apply the pick.
+    fn choose(
+        tx: &mut Tx,
+        key: &str,
+        options: Vec<(String, String)>,
+        selected: &str,
+        apply: impl FnOnce(&mut Prefs, &str) + 'static,
+    ) {
+        tx.popup_menu(
+            PopupMenu::picker(options, selected),
+            anchor(key),
+            move |s: &mut Prefs, picked, _| {
+                if let Some(id) = picked {
+                    apply(s, id);
+                }
+            },
+        );
+    }
+
+    fn pick_position(&mut self, tx: &mut Tx) {
+        let options = [(Position::Center, "center"), (Position::Top, "top")]
+            .map(|(p, id)| (id.to_owned(), position_title(p).to_owned()))
+            .to_vec();
+        let selected = match self.config.position {
+            Position::Center => "center",
+            Position::Top => "top",
+        };
+        Prefs::choose(tx, POSITION, options, selected, |s, id| {
+            s.set(|c| {
+                c.position = if id == "top" {
+                    Position::Top
+                } else {
+                    Position::Center
+                }
+            });
+        });
+    }
+
+    fn pick_input_source(&mut self, tx: &mut Tx) {
+        let current = &self.config.input_source;
+        let mut options = vec![
+            ("ascii".to_owned(), input_source_title(&InputSource::Ascii)),
+            ("keep".to_owned(), input_source_title(&InputSource::Keep)),
+        ];
+        // A source picked by identifier in config.toml stays pickable.
+        if let InputSource::Id(_) = current {
+            options.push(("id".to_owned(), input_source_title(current)));
+        }
+        let selected = match current {
+            InputSource::Ascii => "ascii",
+            InputSource::Keep => "keep",
+            InputSource::Id(_) => "id",
+        };
+        Prefs::choose(tx, INPUT_SOURCE, options, selected, |s, id| match id {
+            "ascii" => s.set(|c| c.input_source = InputSource::Ascii),
+            "keep" => s.set(|c| c.input_source = InputSource::Keep),
+            _ => {}
+        });
+    }
+
+    fn pick_file_limit(&mut self, tx: &mut Tx) {
+        let options = FILE_LIMITS
+            .iter()
+            .map(|n| (n.to_string(), n.to_string()))
+            .collect();
+        let selected = self.config.file_limit.to_string();
+        Prefs::choose(tx, FILE_LIMIT, options, &selected, |s, id| {
+            if let Ok(n) = id.parse() {
+                s.set(|c| c.file_limit = n);
+            }
+        });
+    }
+
     /// Persist the settings and hand them to the panel.
     fn save(&self) {
         crate::settings::save(&self.config);
@@ -195,7 +342,131 @@ impl Prefs {
 }
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
-    let k = Kit::neutral(cx.system_dark());
+    let k = rune_theme_opencode::kit(cx.system_dark());
+    let hair = 1.0 / cx.env().scale;
+    let rows = match s.page {
+        Page::General => general(s, k),
+        Page::Search => search(s, k),
+        Page::Appearance => appearance(s, k),
+        Page::Updates => updates(s, k),
+    };
+    let panel = col()
+        .key("panel")
+        .role("main")
+        .grow(1.0)
+        .min_w(0.0)
+        .mt(8.0)
+        .mr(8.0)
+        .mb(8.0)
+        .radius(k.radius.lg)
+        .fill(k.c.bg_base)
+        .border(hair, k.c.border_weak)
+        .padding(hair)
+        .child(
+            row()
+                .key("page-title")
+                .w_full()
+                .h(TITLE_HEIGHT)
+                .px(GUTTER)
+                .center_y()
+                .window_drag()
+                .child(
+                    text(s.page.title())
+                        .role("heading")
+                        .font(k.ty.body_medium)
+                        .color(k.c.text_base),
+                ),
+        )
+        .child(
+            col()
+                .w_full()
+                .px(GUTTER - ROW_PX)
+                .gap(12.0)
+                .child(card(k, hair, rows))
+                .children(s.read_only.then(|| {
+                    text("config.toml is read-only, so change these where it's managed.")
+                        .font(DESCRIPTION)
+                        .color(k.c.text_muted)
+                        .mx(ROW_PX)
+                        .wrap()
+                })),
+        );
+    row()
+        .key("prefs")
+        .w_full()
+        .h_full()
+        .fill(k.c.bg_deep)
+        .child(sidebar(s, k))
+        .child(panel)
+}
+
+fn sidebar(s: &Prefs, k: &Kit) -> El {
+    let c = &k.c;
+    let mut pages = col().key("pages").role("list").gap(4.0);
+    for page in Page::all(s.updater.available()) {
+        let on = s.page == page;
+        let mut item = row()
+            .key(page.key())
+            .role("listitem")
+            .label(page.title())
+            .focus_selected(on)
+            .focusable(true)
+            .h(28.0)
+            .px(6.0)
+            .gap(8.0)
+            .center_y()
+            .radius(k.radius.sm)
+            .hover(c.hover)
+            .press(c.pressed)
+            .on_press(move |s: &mut Prefs| s.page = page)
+            .child(icon(page.icon(), 16.0).color(if on { c.icon_base } else { c.icon_muted }))
+            .child(
+                text(page.title())
+                    .font(k.ty.ui)
+                    .color(if on { c.text_base } else { c.text_muted })
+                    .truncate(),
+            );
+        if on {
+            item = item.fill(c.layer_02);
+        }
+        pages = pages.child(item);
+    }
+    let config = row()
+        .key("open-config")
+        .role("button")
+        .label("Open config.toml")
+        .focusable(true)
+        .h(20.0)
+        .px(6.0)
+        .self_start()
+        .center_y()
+        .radius(k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .on_press(|_: &mut Prefs| {
+            if let Some(path) = crate::settings::path()
+                && path.exists()
+            {
+                std::thread::spawn(move || dupin_mac::workspace::open(&path));
+            }
+        })
+        .child(text("Open config.toml").font(k.ty.small).color(c.text_muted));
+    col()
+        .key("sidebar")
+        .role("navigation")
+        .w(SIDEBAR_WIDTH)
+        .h_full()
+        .pt(SIDEBAR_TOP)
+        .pb(12.0)
+        .pl(10.0)
+        .pr(6.0)
+        .window_drag()
+        .child(pages)
+        .child(el().grow(1.0))
+        .child(config)
+}
+
+fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     let owner = s.owner.clone();
     let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| match (chord, &owner) {
         (Some(chord), Some(owner)) => format!("{} is used by {owner}.", chord.keycaps().join("")),
@@ -203,137 +474,116 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     };
     let hotkey = ShortcutRecorder::new("hotkey", &s.recorder, |s: &mut Prefs| &mut s.recorder)
         .label("Show Dupin")
+        .width(180.0)
         .on_change(Prefs::change_hotkey)
         .error_message(refusal)
         .disabled(s.read_only)
-        .build(&k);
-
-    let position = segments(
+        .build(k);
+    let position = menu_value(
         s,
-        SegmentedControl::new(
-            &["Center", "Top"],
-            Some(match s.config.position {
-                Position::Center => 0,
-                Position::Top => 1,
-            }),
-        )
-        .label("Position")
-        .on_pick(|s: &mut Prefs, i, _| {
-            s.set(|c| c.position = if i == 0 { Position::Center } else { Position::Top })
-        }),
-        2,
-    )
-    .build(&k);
-
-    // A source picked by identifier in config.toml shows as a third segment.
-    let mut sources = vec!["ASCII".to_owned(), "Keep".to_owned()];
-    let picked = match &s.config.input_source {
-        InputSource::Ascii => 0,
-        InputSource::Keep => 1,
-        InputSource::Id(id) => {
-            sources.push(id.rsplit('.').next().unwrap_or(id).to_owned());
-            2
-        }
-    };
-    let input_source = segments(
+        k,
+        POSITION,
+        "Position",
+        position_title(s.config.position),
+        Prefs::pick_position,
+    );
+    let input_source = menu_value(
         s,
-        SegmentedControl::new(&sources, Some(picked))
-            .label("Input source")
-            .on_pick(|s: &mut Prefs, i, _| match i {
-                0 => s.set(|c| c.input_source = InputSource::Ascii),
-                1 => s.set(|c| c.input_source = InputSource::Keep),
-                _ => {}
-            }),
-        sources.len(),
-    )
-    .build(&k);
-
-    // The menu lists the shaders folder as it stands when it opens, so the Select holds only
-    // the current choice.
-    let title = backdrop_title(&s.config.backdrop);
-    let mut backdrop = Select::new(BACKDROP, &[title.as_str()])
-        .appearance(SelectAppearance::Field)
-        .width(CONTROL_WIDTH)
-        .label("Backdrop")
-        .current(Some(&title))
-        .disabled(s.read_only)
-        .trigger(&k);
-    if !s.read_only {
-        backdrop = backdrop.on_press_tx(|s: &mut Prefs, tx| s.pick_backdrop(tx));
-    }
-
-    let limits: Vec<String> = FILE_LIMITS.iter().map(ToString::to_string).collect();
-    let file_limit = segments(
-        s,
-        SegmentedControl::new(
-            &limits,
-            FILE_LIMITS.iter().position(|&n| n == s.config.file_limit),
-        )
-        .label("Files shown")
-        .on_pick(|s: &mut Prefs, i, _| s.set(|c| c.file_limit = FILE_LIMITS[i])),
-        limits.len(),
-    )
-    .build(&k);
-
-    let mut path = crate::settings::path()
-        .map(|p| tilde(&p.display().to_string()))
-        .unwrap_or_default();
-    if s.read_only {
-        path.push_str(" is read-only; change it where it's managed");
-    }
-    let open_file = Button::new("Open config.toml")
-        .build(&k)
-        .on_press_tx(|_: &mut Prefs, _| {
-            if let Some(path) = crate::settings::path()
-                && path.exists()
-            {
-                std::thread::spawn(move || dupin_mac::workspace::open(&path));
-            }
-        });
-
-    col()
-        .key("prefs")
-        .w_full()
-        .h_full()
-        .padding(24.0)
-        .gap(12.0)
-        .fill(k.c.page)
-        .child(setting(&k, "Hotkey", hotkey))
-        .child(setting(&k, "Position", position))
-        .child(setting(&k, "Input source", input_source))
-        .child(setting(&k, "Files shown", file_limit))
-        .child(setting(&k, "Backdrop", backdrop))
-        .children(updates(s, &k))
-        .child(el().grow(1.0))
-        .child(
-            row()
-                .w_full()
-                .gap(12.0)
-                .center_y()
-                .child(
-                    text(path)
-                        .font(k.ty.ui_compact)
-                        .color(k.c.text_muted)
-                        .truncate()
-                        .grow(1.0),
-                )
-                .child(open_file),
-        )
+        k,
+        INPUT_SOURCE,
+        "Input source",
+        &input_source_title(&s.config.input_source),
+        Prefs::pick_input_source,
+    );
+    vec![
+        setting(
+            k,
+            &icons::KEYBOARD,
+            "Hotkey",
+            Some("Shows the panel from any app"),
+            hotkey,
+        ),
+        setting(
+            k,
+            &icons::PANEL,
+            "Position",
+            Some("Where on the display the panel opens"),
+            position,
+        ),
+        setting(
+            k,
+            &icons::LANGUAGES,
+            "Input source",
+            Some("ASCII switches an input method to Roman while the panel shows"),
+            input_source,
+        ),
+    ]
 }
 
-/// Whether to install updates, and where the updater is. A build with no update feed (Nix,
-/// `cargo run`) shows none of it.
+fn search(s: &Prefs, k: &Kit) -> Vec<El> {
+    let limit = menu_value(
+        s,
+        k,
+        FILE_LIMIT,
+        "Files shown",
+        &s.config.file_limit.to_string(),
+        Prefs::pick_file_limit,
+    );
+    vec![setting(
+        k,
+        &icons::FILES,
+        "Files shown",
+        Some("The most files a Spotlight search lists"),
+        limit,
+    )]
+}
+
+fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
+    // The menu lists the shaders folder as it stands when it opens, so the trigger shows only
+    // the current choice.
+    let backdrop = menu_value(
+        s,
+        k,
+        BACKDROP,
+        "Backdrop",
+        &backdrop_title(&s.config.backdrop),
+        Prefs::pick_backdrop,
+    );
+    let folder = tilde(&crate::shader::shaders_dir().display().to_string());
+    let open = value_button(
+        k,
+        "open-shaders",
+        "Open",
+        &rune_theme_opencode::icons::CHEVRON_RIGHT,
+    )
+    .on_press(|_: &mut Prefs| open_shaders_folder());
+    vec![
+        setting(
+            k,
+            &icons::SPARKLES,
+            "Backdrop",
+            Some("The shader that animates behind the panel"),
+            backdrop,
+        ),
+        setting(
+            k,
+            &icons::FOLDER,
+            "Shaders folder",
+            Some(&format!("Put .wgsl files in {folder} to pick them above")),
+            open,
+        ),
+    ]
+}
+
+/// Whether to install updates by themselves, and where the updater is: the version, what it
+/// is doing, and the one thing to do next.
 fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
-    if !s.updater.available() {
-        return Vec::new();
-    }
     let auto = Switch::new(s.config.auto_update)
         .label("Install updates automatically")
         .hide_label()
         .disabled(s.read_only)
         .on_toggle(|s: &mut Prefs| s.set(|c| c.auto_update = !c.auto_update))
         .build(k);
-
     let status = s.updater.status();
     let action = match &status {
         Status::Ready(_) => Button::new("Restart to Update").on_press(|s: &mut Prefs| {
@@ -348,27 +598,83 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
     }
     .build(k);
     let line = status.text(s.config.auto_update, s.updater.download_only());
-    let version = row()
-        .grow(1.0)
-        .gap(12.0)
-        .center_y()
-        .child(
-            text(format!("{} · {line}", s.updater.version()))
-                .font(k.ty.ui)
-                .color(k.c.text_muted)
-                .truncate()
-                .grow(1.0),
-        )
-        .child(action);
-    vec![setting(k, "Updates", auto), setting(k, "Version", version)]
+    vec![
+        setting(
+            k,
+            &icons::REFRESH,
+            "Install updates automatically",
+            Some("New versions download in the background and install on restart"),
+            auto,
+        ),
+        setting(
+            k,
+            &icons::INFO,
+            &format!("Dupin {}", s.updater.version()),
+            Some(&line),
+            action,
+        ),
+    ]
 }
 
-/// The `n` segments of `control`, locked when config.toml can't be written.
-fn segments(s: &Prefs, control: SegmentedControl, n: usize) -> SegmentedControl {
-    if !s.read_only {
-        return control;
+/// A row's current value and a chevron, which `open` turns into a menu of the others. Locked
+/// while config.toml is read-only.
+fn menu_value(s: &Prefs, k: &Kit, key: &str, name: &str, value: &str, open: fn(&mut Prefs, &mut Tx)) -> El {
+    let trigger = Select::new(key, &[value])
+        .appearance(SelectAppearance::Inline)
+        .label(name)
+        .current(Some(value))
+        .disabled(s.read_only)
+        .trigger(k)
+        .mr(-8.0);
+    if s.read_only {
+        trigger
+    } else {
+        trigger.on_press_tx(open)
     }
-    (0..n).fold(control, |c, i| c.segment_state(i, State::Disabled))
+}
+
+/// A row's action: a label and an icon, quiet until hovered.
+fn value_button(k: &Kit, key: &str, label: &str, glyph: &'static Icon) -> El {
+    let c = &k.c;
+    row()
+        .key(key)
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .h(24.0)
+        .pl(8.0)
+        .pr(4.0)
+        .mr(-9.0)
+        .gap(4.0)
+        .center_y()
+        .radius(k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .child(text(label).font(k.ty.ui_medium.lh(16.0)).color(c.text_base))
+        .child(icon(glyph, 16.0).color(c.icon_muted))
+}
+
+/// Rows on one raised card, a hairline between each.
+fn card(k: &Kit, hair: f32, rows: Vec<El>) -> El {
+    let count = rows.len();
+    let mut card = col().key("card").w_full().radius(k.radius.lg).fill(k.c.bg_base);
+    for shadow in &k.elevation.raised {
+        card = card.box_shadow(*shadow);
+    }
+    for (i, r) in rows.into_iter().enumerate() {
+        card = card.child(r);
+        if i + 1 < count {
+            card = card.child(
+                el().key(format!("sep{i}"))
+                    .h(hair)
+                    .mx(ROW_PX)
+                    .fill(k.c.border_muted)
+                    .a11y_hidden(),
+            );
+        }
+    }
+    card
 }
 
 /// `$HOME/x` as `~/x`.
@@ -381,17 +687,30 @@ fn tilde(path: &str) -> String {
     }
 }
 
-fn setting(k: &Kit, label: &str, control: El) -> El {
+/// A row: an icon, the setting's name and what it does, and its control at the trailing edge.
+fn setting(k: &Kit, glyph: &'static Icon, label: &str, detail: Option<&str>, control: El) -> El {
+    let mut words = col()
+        .grow(1.0)
+        .min_w(100.0)
+        .gap(2.0)
+        .child(text(label.to_owned()).font(k.ty.ui).color(k.c.text_base));
+    if let Some(detail) = detail {
+        words = words.child(
+            text(detail.to_owned())
+                .font(DESCRIPTION)
+                .color(k.c.text_muted)
+                .wrap(),
+        );
+    }
     row()
         .w_full()
-        .min_h(36.0)
-        .gap(16.0)
+        .min_h(if detail.is_some() { 60.0 } else { 48.0 })
+        .px(ROW_PX)
+        .py(8.0)
+        .gap(12.0)
         .center_y()
-        .child(
-            text(label.to_owned())
-                .font(k.ty.ui)
-                .color(k.c.text_base)
-                .w(LABEL_WIDTH),
-        )
+        .label(label)
+        .child(icon(glyph, 16.0).color(k.c.icon_base))
+        .child(words)
         .child(control)
 }
