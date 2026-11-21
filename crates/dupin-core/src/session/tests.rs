@@ -181,7 +181,11 @@ fn enter_runs_the_primary_action_then_hides_and_resets() {
     let effects = s.intent(Intent::Open).unwrap();
     assert_eq!(
         effects,
-        vec![Effect::Run(Action::Open("/x/Safari".into())), Effect::Hide]
+        vec![
+            Effect::Run(Action::Open("/x/Safari".into())),
+            Effect::SaveHistory,
+            Effect::Hide
+        ]
     );
     assert_eq!(s.query(), "");
     assert_eq!(s.mode(), Mode::Apps);
@@ -295,4 +299,60 @@ fn content_results_stay_on_screen_while_the_query_grows() {
     });
     searched(&s.set_query("tax 2"));
     assert_eq!(s.items().len(), 1, "no flash of an empty list between keystrokes");
+}
+
+fn ranked(name: &str, score: i32) -> Item {
+    Item {
+        score: Some(score),
+        ..item(ItemKind::Application, name)
+    }
+}
+
+#[test]
+fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
+    let mut s = Session::with_clock(History::default(), || 1_800_000_000);
+    let g = searched(&s.set_query("s")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![ranked("Safari", 120), ranked("Shareful", 80)],
+    });
+    s.intent(Intent::Down);
+    let effects = s.intent(Intent::Open).unwrap();
+    assert_eq!(
+        effects[..2],
+        [
+            Effect::Run(Action::Open("/x/Shareful".into())),
+            Effect::SaveHistory
+        ]
+    );
+    // The next time "s" is typed, the item picked for it comes first.
+    let g = searched(&s.set_query("s")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![ranked("Safari", 120), ranked("Shareful", 80)],
+    });
+    assert_eq!(s.selected_item().unwrap().title, "Shareful");
+}
+
+#[test]
+fn reordering_on_a_later_batch_keeps_the_selected_item() {
+    let mut history = History::default();
+    history.record("/x/C", "a", 1_800_000_000);
+    let mut s = Session::with_clock(history, || 1_800_000_000);
+    let g = searched(&s.set_query("a")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![ranked("A", 100), ranked("B", 90)],
+    });
+    s.intent(Intent::Down);
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: vec![ranked("C", 10)],
+    });
+    assert_eq!(
+        s.items()[0].title,
+        "C",
+        "the item picked for this query moves to the top"
+    );
+    assert_eq!(s.selected_item().unwrap().title, "B", "the selection stays on B");
 }

@@ -2,10 +2,7 @@ name: Setup Nix with a persistent store
 description: Install Nix with persistent caches through the shared setup action
 inputs:
   cache-scope:
-    description: Unique matrix-entry identifier used to keep sticky disks separate
-    default: ''
-  disk-job:
-    description: Job id whose sticky disk this job should mount instead of its own
+    description: Unique matrix-entry identifier used to keep caches separate
     default: ''
   save:
     description: Whether this job may persist the store for later runs
@@ -18,7 +15,6 @@ runs:
         cache: auto
         cache-scope: ${{ inputs.cache-scope }}
         save: ${{ inputs.save }}
-        sticky-key: ${{ github.repository }}-nix-${{ runner.arch }}-${{ inputs.disk-job || github.job }}-${{ inputs.cache-scope }}
         extra-conf: |
           keep-derivations = true
           keep-outputs = true

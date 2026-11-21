@@ -11,19 +11,30 @@ homepage.workspace = true
 dupin-core = { workspace = true }
 objc2 = { workspace = true }
 objc2-foundation = { workspace = true, features = [
-    "std",
-    "NSArray",
-    "NSDate",
-    "NSMetadata",
-    "NSMetadataAttributes",
-    "NSObjCRuntime",
-    "NSObject",
-    "NSPredicate",
-    "NSRunLoop",
-    "NSString",
-    "NSURL",
+	"std",
+	"NSArray",
+	"NSDate",
+	"NSDictionary",
+	"NSEnumerator",
+	"NSFileManager",
+	"NSMetadata",
+	"NSMetadataAttributes",
+	"NSObjCRuntime",
+	"NSObject",
+	"NSPredicate",
+	"NSRunLoop",
+	"NSString",
+	"NSURL",
 ] }
-objc2-app-kit = { workspace = true, features = ["std", "NSResponder", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { workspace = true, features = [
+	"std",
+	"NSEvent",
+	"NSResponder",
+	"NSScreen",
+	"NSView",
+	"NSWindow",
+	"NSWorkspace",
+] }
 
 [lints]
 workspace = true

@@ -3,7 +3,7 @@
 //! (start a search, run an action, hide) for the UI and platform layers to carry out.
 
 use crate::searcher::Delivery;
-use crate::{Action, Item};
+use crate::{Action, History, Item};
 
 /// Which provider the query goes to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -53,6 +53,8 @@ pub enum Effect {
     RevealSelection,
     /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
     ClearQuery,
+    /// The history learned a pick; persist `Session::history`.
+    SaveHistory,
 }
 
 /// Where the results on screen stand relative to the current query.
@@ -75,10 +77,26 @@ pub struct Session {
     selected: usize,
     generation: u64,
     results: Results,
+    history: History,
+    /// Unix seconds; a parameter so tests can fix the time.
+    clock: fn() -> u64,
 }
 
 impl Default for Session {
     fn default() -> Self {
+        Session::new(History::default())
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
+impl Session {
+    /// A session that ranks with, and learns into, `history`.
+    pub fn new(history: History) -> Session {
         Session {
             mode: Mode::Apps,
             query: String::new(),
@@ -86,11 +104,23 @@ impl Default for Session {
             selected: 0,
             generation: 0,
             results: Results::Idle,
+            history,
+            clock: unix_now,
         }
     }
-}
 
-impl Session {
+    /// The same, with a clock in Unix seconds other than the system's.
+    pub fn with_clock(history: History, clock: fn() -> u64) -> Session {
+        Session {
+            clock,
+            ..Session::new(history)
+        }
+    }
+
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+
     pub fn mode(&self) -> Mode {
         self.mode
     }
@@ -133,7 +163,7 @@ impl Session {
         self.search()
     }
 
-    /// A key the UI recognised. None leaves the key to the text field (typing a space into a
+    /// A key the UI recognized. None leaves the key to the text field (typing a space into a
     /// query, deleting a character); Some consumes it, even when nothing else happens.
     pub fn intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
         let empty = self.query.is_empty();
@@ -178,7 +208,9 @@ impl Session {
                 let Some(action) = action else {
                     return Some(Vec::new());
                 };
-                let mut effects = vec![Effect::Run(action)];
+                let id = item.id.clone();
+                self.history.record(&id, &self.query, (self.clock)());
+                let mut effects = vec![Effect::Run(action), Effect::SaveHistory];
                 effects.extend(self.dismiss());
                 effects
             }
@@ -194,11 +226,18 @@ impl Session {
         match (delivery, self.results) {
             (Delivery::Batch { items, .. }, Results::Searching { replaced: false }) => {
                 self.items = items;
+                self.history.rerank(&mut self.items, &self.query, (self.clock)());
                 self.selected = 0;
                 self.results = Results::Searching { replaced: true };
             }
             (Delivery::Batch { items, .. }, Results::Searching { replaced: true }) => {
-                self.items.extend(items)
+                // Keep the selection on the same item while the list reorders.
+                let selected = self.selected_item().map(|item| item.id.clone());
+                self.items.extend(items);
+                self.history.rerank(&mut self.items, &self.query, (self.clock)());
+                if let Some(id) = selected {
+                    self.select_id(&id);
+                }
             }
             (Delivery::Done { .. }, Results::Searching { replaced }) => {
                 if !replaced {
@@ -261,7 +300,7 @@ impl Session {
     }
 
     fn clear_results(&mut self) {
-        // Bump the generation so answers still in flight are recognised as stale.
+        // Bump the generation so answers still in flight are recognized as stale.
         self.generation += 1;
         self.items.clear();
         self.selected = 0;

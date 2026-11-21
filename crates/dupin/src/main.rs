@@ -4,6 +4,7 @@
 mod hotkey;
 mod log;
 mod settings;
+mod store;
 mod trace;
 mod ui;
 mod view;
@@ -18,6 +19,7 @@ pub const HEADER_HEIGHT: f32 = view::HEADER_H;
 fn main() {
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
+    let history = store::load();
 
     let spec = AppSpec {
         setup: Some(ui::Ui::setup),
@@ -41,7 +43,7 @@ fn main() {
     let app = app
         .init({
             let handle = handle.clone();
-            move || ui::Ui::new(handle, config, config_problem)
+            move || ui::Ui::new(handle, config, history, config_problem)
         })
         .on_ready(move |window| {
             appear_instantly(window);

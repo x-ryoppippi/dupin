@@ -46,8 +46,12 @@ jobs:
     permissions:
       actions: write
     steps:
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: '0.116.1'
       - name: Dispatch CI on the release branch
+        shell: nu {0}
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ fromJSON(needs.tagpr.outputs.pull_request).head.ref }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
+        run: gh workflow run ci.yml --repo $env.GITHUB_REPOSITORY --ref $env.HEAD_REF

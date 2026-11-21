@@ -4,7 +4,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSView, NSWindow, NSWindowAnimationBehavior};
+use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWindowAnimationBehavior};
 
 /// Make the window holding `ns_view` appear and disappear at once. AppKit animates a panel's
 /// ordering in by default, which held Dupin's panel off screen for about 265 ms after its
@@ -25,4 +25,21 @@ pub unsafe fn appear_instantly(ns_view: NonNull<c_void>) -> bool {
     };
     window.setAnimationBehavior(NSWindowAnimationBehavior::None);
     true
+}
+
+/// The height in points of the display the pointer is on, where Rune's
+/// `DisplayTarget::UnderPointer` places the panel. Rune reports displays only at startup, and
+/// placing the panel at a display's center needs the current one. None off the main thread or
+/// when no screen holds the pointer.
+pub fn pointer_display_height() -> Option<f64> {
+    let main = MainThreadMarker::new()?;
+    let pointer = NSEvent::mouseLocation();
+    NSScreen::screens(main)
+        .iter()
+        .map(|screen| screen.frame())
+        .find_map(|frame| {
+            let inside = (frame.origin.x..frame.origin.x + frame.size.width).contains(&pointer.x)
+                && (frame.origin.y..frame.origin.y + frame.size.height).contains(&pointer.y);
+            inside.then_some(frame.size.height)
+        })
 }

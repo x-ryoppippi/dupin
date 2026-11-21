@@ -1,4 +1,6 @@
-{"events": [
-  {"t": 0.1, "type": "type", "text": "saf"},
-  {"t": 4.0, "type": "mark", "name": "end"}
-]}
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "saf" },
+		{ "t": 4.0, "type": "mark", "name": "end" }
+	]
+}

@@ -18,7 +18,7 @@ const ROW_H: f32 = 52.0;
 /// Rows shown before the list scrolls.
 const VISIBLE_ROWS: usize = 8;
 const LIST_PAD: f32 = 6.0;
-/// How much of the theme's card colour covers the glass.
+/// How much of the theme's card color covers the glass.
 const FROST: f32 = 0.45;
 const WARNING: Color = Color {
     r: 0.95,

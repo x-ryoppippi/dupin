@@ -2,6 +2,8 @@
 //! and the actions that hand results to it (NSWorkspace).
 
 pub mod apps;
+mod bundle_names;
+pub mod input_source;
 pub mod spotlight;
 pub mod window;
 pub mod workspace;

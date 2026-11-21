@@ -4,12 +4,14 @@
 
 pub mod config;
 pub mod fuzzy;
+pub mod history;
 pub mod item;
 pub mod provider;
 pub mod searcher;
 pub mod session;
 
-pub use config::Config;
+pub use config::{Config, InputSource, Position};
+pub use history::History;
 pub use item::{Action, Item, ItemKind};
 pub use provider::{Provider, Request};
 pub use searcher::{Delivery, Searcher};

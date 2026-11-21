@@ -6,82 +6,50 @@ Homepage: <https://dupin.app>
 
 Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred.
 
-## Before you start: free ⌘Space
+- Fuzzy-search and open apps, by any name macOS knows them by
+- Space on an empty query searches files with Spotlight; `in` and Space search inside them
+- A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
 
-Dupin's hotkey is **⌘Space**. macOS delivers a chord to only one app, so before running Dupin:
+## Quick start
 
-1. Turn off Spotlight's ⌘Space: System Settings → Keyboard → Keyboard Shortcuts… → Spotlight → untick "Show Spotlight search".
-2. Remove ⌘Space from any other app that uses it, such as Raycast (Settings → General → Raycast Hotkey) or Alfred.
-
-If ⌘Space is still taken when Dupin starts, Dupin says so: it writes the reason to `~/Library/Logs/Dupin/dupin.log` and stderr, posts a notification when it runs as a bundled app, and opens the panel with the message. There is one case it can't detect: another app that registered the chord non-exclusively, as Raycast does. macOS accepts both registrations and gives the key to only one of them, so step 2 matters.
-
-To use a different chord, set it in `~/.config/dupin/config.toml` (or `$XDG_CONFIG_HOME/dupin/config.toml`):
-
-```toml
-hotkey = "alt+space"   # modifiers cmd, alt, ctrl, shift, joined with + to a key
-file_limit = 200       # the most files a Spotlight search shows
-```
-
-## Use
-
-| Key | In the panel |
-| --- | --- |
-| ⌘Space | Show or hide the panel |
-| Type | Fuzzy-search the apps in `/Applications`, `/System/Applications` and `~/Applications` (Utilities and other subfolders included) |
-| Space on an empty query | Search files with Spotlight (by file and display name) |
-| `in` then Space | Search inside files with Spotlight (words in the indexed text, by prefix), as Alfred's `in` |
-| ⌫ on an empty query | Leave file or content search |
-| ↑ ↓ | Move the selection |
-| ↩ | Open the app or file |
-| ⌘↩ | Reveal the file in Finder |
-| Esc, or clicking elsewhere | Hide the panel |
-| ⌘Q | Quit Dupin (it has no Dock icon or menu bar) |
-
-## Build and run
-
-Dupin builds with Nix; the toolchain comes from nixpkgs and matches Rune's `rust-toolchain.toml`.
+Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then:
 
 ```sh
-nix build .#dupin                     # result/Applications/Dupin.app
+nix build .#dupin
 open result/Applications/Dupin.app
-nix flake check                       # clippy, tests, rustfmt and the app bundle
 ```
 
-For development, `direnv allow` (or `nix develop`) gives a shell with cargo, clippy, rustfmt and rust-analyzer:
+## Documentation
 
-```sh
-cargo run -p dupin
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p dupin-mac --example search -- in invoice      # a provider from the terminal (apps, files, in)
-scripts/snap.sh                        # headless renders of scripts/headless/*.json into target/screenshots
-```
+- [Using Dupin](./docs/usage.md): keys, app search, file and content search
+- [Configuration](./docs/configuration.md): `config.toml`, the hotkey and what happens when it's taken
+- [Development](./docs/development.md): building, the Nix layout, formatting, headless renders
+- [Architecture](./docs/architecture.md): crates, providers, the session and the panel
+- [Working around Rune](./docs/rune-workarounds.md)
+- [Releasing](./docs/releasing.md): tagpr and CI
 
-`DUPIN_TRACE=1` prints, for each summon, how long the panel took from the hotkey handler to its first drawn frame.
+## Major Sponsors
 
-Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...); see Rune's `crates/rune/README.md`, "Agent tooling".
+<p align="center">
+    <a href="https://coderabbit.link/ryoppippi">
+        <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="./docs/public/coderabbit-logo-dark.svg">
+            <img src="./docs/public/coderabbit-logo.svg" alt="CodeRabbit" width="320">
+        </picture>
+    </a>
+    &nbsp;&nbsp;&nbsp;&nbsp;
+    <a href="https://blacksmith.sh">
+        <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="./docs/public/blacksmith-logo-dark.svg">
+            <img src="./docs/public/blacksmith-logo.svg" alt="CI powered by Blacksmith" width="320">
+        </picture>
+    </a>
+</p>
 
-## Releases
+## GitHub Sponsors
 
-[tagpr](https://github.com/Songmu/tagpr) keeps a release pull request open against `main`. It bumps `VERSION`; merging it tags the merge commit and creates the GitHub release. The crates stay at version 0.0.0, so a release changes neither `Cargo.lock` nor the vendored-dependency hash in `flake.nix`.
-
-## Layout
-
-| Crate | What it holds |
-| --- | --- |
-| `crates/dupin-core` | No UI, no macOS: the `Provider` trait and `Item` model, the newest-wins `Searcher`, fuzzy matching, the launcher `Session` (modes, selection, effects) and `config.toml` |
-| `crates/dupin-mac` | The apps and Spotlight (names and contents) providers and NSWorkspace actions, through objc2 |
-| `crates/dupin` | The Rune app: the panel view, key mapping and hotkey; kept thin so the UI framework can change without touching the rest |
-
-Every source of results is a `Provider` that streams batches of `Item`s on its own worker thread. Apps and files use it today; extensions (scripts that print a JSON view to stdout) are meant to use it too.
-
-## Working around Rune
-
-Rune is pre-release and doesn't take pull requests, so Dupin works around what it hits. These are pinned to the rev in `Cargo.toml`; check them again when bumping it.
-
-- **`rune-text` embeds fonts from outside its crate.** It uses `include_bytes!("../../../rune/assets/Inter-*.ttf")`, a path that exists in a Git checkout of the whole repository but not once crates are vendored one by one. The Nix build symlinks the vendored `rune` crate into place (`postPatch` in `flake.nix`).
-- **Two `tiny-skia-path 0.11.4` packages.** Rune vendors a patched copy as a path dependency while `resvg` keeps the published one. nixpkgs' `importCargoLock` can't vendor both, so the flake uses `fetchCargoVendor`.
-- **Headless snapshots don't follow `fit_content_height`.** `--snap` renders at the window's initial size, so `scripts/snap.sh` reads the panel's height from `--tree` first.
-- **The headless clock outruns real providers.** Results come from Spotlight and the file system in real time, so headless renders pass `--realtime` (listed in `--help` but not in the README).
-- **Launcher panels fade in.** Rune leaves the panel's `animationBehavior` at AppKit's default, which kept the panel off screen for about 265 ms after its frame was ready. Dupin sets it to none once the panel exists (`dupin_mac::window::appear_instantly`), bringing hotkey-to-screen down to about 20 ms.
-- **Hotkey conflicts with macOS's own shortcuts register successfully.** Rune names Spotlight as the owner only after a `Conflict`, and Carbon reports none for it, so Dupin asks `shortcut_owner` before registering.
+<p align="center">
+    <a href="https://github.com/sponsors/ryoppippi">
+        <img src="https://sponsors.ryoppippi.com/sponsors.png" alt="Sponsors">
+    </a>
+</p>

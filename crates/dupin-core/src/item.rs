@@ -27,6 +27,9 @@ pub struct Item {
     pub icon: Option<PathBuf>,
     /// Character indices in `title` that matched the query, for highlighting.
     pub matched: Vec<usize>,
+    /// How well the item matched, for providers that rank their results; the history adds
+    /// to it. None for results that arrive in a provider's own order (Spotlight's).
+    pub score: Option<i32>,
     /// Enter.
     pub primary: Action,
     /// ⌘Enter.
@@ -47,6 +50,7 @@ impl Item {
             kind,
             icon: Some(path.clone()),
             matched,
+            score: None,
             primary: Action::Open(path.clone()),
             alternate: Some(Action::Reveal(path)),
         }

@@ -16,8 +16,10 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     }
     # The runner image grants Runner.Listener, the app that launches every step, so
     # agent-desktop and screencapture inherit Accessibility, PostEvent and Screen Recording.
-    let denied = ad $out permissions permissions | get data | transpose permission grant
-        | where permission in [accessibility screen_recording] and grant.state != granted
+    let denied = ad $out permissions permissions
+    | get data
+    | transpose permission grant
+    | where permission in [accessibility screen_recording] and grant.state != granted
     if ($denied | is-not-empty) {
         error make {msg: $"not granted: ($denied.permission | str join ', ')"}
     }
@@ -33,24 +35,27 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         }
     }
 
-    poll $out launched 30 {|r| $r.ok and (mentions $r Dupin) } list-apps
+    poll --tries 30 $out launched {|r| $r.ok and (mentions $r Dupin) } list-apps
     snap $out launched
 
+    let matched = {|r| $r.ok and $r.data?.match?.ref_id? != null }
     ad $out press-hotkey press alt+space | ignore
-    let field = poll $out query-field 10 {|r| $r.ok and $r.data?.match?.ref_id? != null } find --app Dupin --role textfield --first
+    let field = poll $out field $matched find --app Dupin --role textfield --first
     snap $out summoned
 
     # Rune's text field has no settable AX value, so type through the focused field.
     ad $out type --headed type $field.data.match.ref_id Calculator | ignore
-    poll $out result 10 {|r| $r.ok and $r.data?.match?.ref_id? != null } find --app Dupin --text Calculator --first
+    poll $out result $matched find --app Dupin --text Calculator --first
     snap $out results
 
     let before = ad $out before-return list-apps
     if (mentions $before Calculator) {
-        error make {msg: 'Calculator was running before ↩, so its launch would prove nothing'}
+        error make {
+            msg: 'Calculator was running before ↩, so its launch would prove nothing'
+        }
     }
     ad $out press-return press return | ignore
-    poll $out opened 15 {|r| $r.ok and (mentions $r Calculator) } list-apps
+    poll --tries 15 $out opened {|r| $r.ok and (mentions $r Calculator) } list-apps
     snap $out opened
 
     job kill $dupin
@@ -62,11 +67,21 @@ def --wrapped ad [out: path, name: string, ...args: string]: nothing -> record {
     let result = ^agent-desktop ...$args | complete
     $result.stdout | save --force ($out | path join $'($name).json')
     $result.stderr | save --append ($out | path join agent-desktop.stderr)
-    try { $result.stdout | from json } catch { {ok: false} }
+    try {
+        $result.stdout | from json
+    } catch {
+        {ok: false}
+    }
 }
 
 # Retry an agent-desktop command once a second until `done` accepts its reply.
-def --wrapped poll [out: path, name: string, tries: int, done: closure, ...args: string] {
+def --wrapped poll [
+    out: path
+    name: string
+    done: closure
+    --tries: int = 10
+    ...args: string
+] {
     mut reply = {ok: false}
     for attempt in 1..$tries {
         $reply = ad $out $name ...$args
