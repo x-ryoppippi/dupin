@@ -5,7 +5,7 @@ export function InstallCard() {
 	return (
 		<div class="install-card" data-rise style="--d: 200ms">
 			<div class="install-row">
-				<span class="install-label">Nix</span>
+				<span class="install-label">Homebrew</span>
 				<code class="install-value">{installCommand}</code>
 				<button
 					class="copy-button"

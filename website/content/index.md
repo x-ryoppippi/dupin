@@ -5,7 +5,7 @@ description: A lightweight, resident launcher for Apple silicon Macs. Press ⌘S
 
 ## Install
 
-Dupin runs on Apple silicon Macs and installs with [Nix](https://nixos.org/download/).
+Dupin runs on Apple silicon Macs with macOS 14 or later.
 
 ### 1. Free ⌘Space
 
@@ -15,6 +15,17 @@ macOS delivers a chord to only one app, so take ⌘Space back first.
 - Remove ⌘Space from any other launcher that holds it, such as Raycast or Alfred.
 
 ### 2. Install and open
+
+```sh
+brew install --cask x-ryoppippi/tap/dupin
+open -a Dupin
+```
+
+The build is signed and notarized, and it [updates itself](https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md#updates). Install `x-ryoppippi/tap/dupin@nightly` instead to follow `main`.
+
+### Or install with Nix
+
+A Nix build never updates itself; upgrade it through Nix.
 
 ```sh
 nix profile install github:x-ryoppippi/dupin
