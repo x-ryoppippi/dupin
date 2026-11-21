@@ -41,11 +41,11 @@
 	<section class="download-section">
 		<h2><svg class="section-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.2 8.5c0-1.6 1.3-2.4 1.4-2.4-.8-1.1-1.9-1.3-2.3-1.3-1-.1-1.9.6-2.4.6-.5 0-1.3-.6-2.1-.6-1.1 0-2.1.6-2.6 1.6-1.1 2-.3 4.9.8 6.4.5.8 1.1 1.6 1.9 1.6.8 0 1-.5 2-.5s1.2.5 2 .5c.8 0 1.4-.8 1.9-1.5.6-.9.8-1.7.8-1.8 0 0-1.4-.6-1.4-2.6zM9.6 3.7c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.8.9-.4.4-.7 1.1-.6 1.8.7.1 1.4-.3 1.8-.8z" /></svg>macOS</h2>
 		<div class="download-cards">
-			<a class="download-card" href={current.zip}>
+			<a class="download-card" href={current.dmg}>
 				<img src="/favicon.svg" alt="" width="32" height="32" />
 				<span>
 					<strong>Apple silicon</strong>
-					<small>.zip · macOS 14 or later</small>
+					<small>.dmg · macOS 14 or later</small>
 				</span>
 			</a>
 		</div>

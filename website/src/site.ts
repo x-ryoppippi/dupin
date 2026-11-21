@@ -9,12 +9,12 @@ export const channels = {
 	stable: {
 		label: 'Stable',
 		cask: 'x-ryoppippi/tap/dupin',
-		zip: `${repo}/releases/latest/download/Dupin.zip`,
+		dmg: `${repo}/releases/latest/download/Dupin.dmg`,
 	},
 	nightly: {
 		label: 'Nightly',
 		cask: 'x-ryoppippi/tap/dupin@nightly',
-		zip: `${repo}/releases/download/nightly/Dupin.zip`,
+		dmg: `${repo}/releases/download/nightly/Dupin.dmg`,
 		release: `${repo}/releases/tag/nightly`,
 	},
 } as const;
