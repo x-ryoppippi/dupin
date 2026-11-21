@@ -60,6 +60,11 @@ rustPlatform.buildRustPackage (
       resvg
       python3Packages.icnsutil
     ];
+    # cargoBuildHook overrides the profile's `strip` and leaves stripping to stdenv, whose
+    # default flags include `-p`, which llvm-strip rejects for Mach-O; the hook ignores the
+    # failure and leaves every symbol in place.
+    stripAllList = [ "Applications/Dupin.app/Contents/MacOS" ];
+    stripAllFlags = [ "--strip-all" ];
     postInstall = ''
       app=$out/Applications/Dupin.app/Contents
       mkdir -p $app/MacOS
