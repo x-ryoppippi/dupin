@@ -51,9 +51,9 @@ The renders show real results from the machine, file paths included, so they sta
 
 ## Peak memory
 
-Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, Rune's own `examples/hello` and Dupin all peak within a few MB of each other (measured on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
+Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
 
-Dupin can't avoid this without drawing outside Metal. The share that is Dupin's own (results, icons, text) is what `scripts/footprint.nu` guards: it renders each headless scenario and fails if one peaks over a budget (450 MB by default; the driver's share scales with the GPU, so pass `--budget` on other Macs):
+Dupin can't avoid this without drawing outside Metal. `scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over a budget (450 MB by default). The driver's charge scales with the GPU, so the budget only holds for one Mac and build configuration; pass `--budget` on others:
 
 ```sh
 cargo build -p dupin

@@ -5,7 +5,7 @@
 #
 # Most of the peak belongs to the GPU driver, not Dupin: see "Peak memory" in
 # docs/development.md. That share scales with the Mac's GPU, so the default budget fits the
-# Apple silicon Macs Dupin is developed on; pass `--budget` elsewhere.
+# M5 Max it was measured on; pass `--budget` elsewhere.
 def main [
     --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
     --budget: filesize = 450MB # The highest peak footprint a scenario may reach
