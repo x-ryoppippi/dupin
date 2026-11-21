@@ -46,7 +46,8 @@ fn backdrop(p: vec2f, b: Backdrop) -> vec4f {
     var alpha = smoothstep(0.32 - 0.1 * pulse, 0.72, n) * strength;
 
     let sweep = fract(t * 0.6) * (b.size.x + 240.0) - 120.0;
-    alpha += b.searching * 0.12 * exp(-pow((p.x - sweep) / 80.0, 2.0));
+    let off = (p.x - sweep) / 80.0;
+    alpha += b.searching * 0.12 * exp(-off * off);
 
     // Fade in as the panel appears.
     return vec4f(rgb, alpha * smoothstep(0.0, 0.35, t));

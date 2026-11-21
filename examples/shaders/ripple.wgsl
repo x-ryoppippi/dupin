@@ -9,7 +9,8 @@ fn backdrop(p: vec2f, b: Backdrop) -> vec4f {
     let d = distance(p, caret);
 
     let r = b.keystroke * 420.0;
-    let ring = exp(-pow((d - r) / (6.0 + b.keystroke * 30.0), 2.0)) * exp(-b.keystroke * 2.2);
+    let off = (d - r) / (6.0 + b.keystroke * 30.0);
+    let ring = exp(-off * off) * exp(-b.keystroke * 2.2);
     let wash = 0.5 + 0.5 * sin(p.x / 90.0 - b.time * 0.7 + sin(p.y / 20.0 + b.time) * 0.6);
 
     // Files and contents searches lean the hue, so the mode reads at a glance.
