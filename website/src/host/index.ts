@@ -13,7 +13,8 @@ import { vitesseBlack } from '@ox-content/theme-color-vitesse';
 import { render } from 'svelte/server';
 import type { Component } from 'svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
-import { siteName, siteUrl } from '../site.ts';
+import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
+import { siteDescription, siteName, siteUrl } from '../site.ts';
 
 const readerChrome = { copy: true, externalLinks: false, backToTop: false } as const;
 
@@ -41,7 +42,7 @@ const escapeHtml = (value: string) =>
 
 function renderPage<Name extends PageName>(
 	context: OxContentCustomHostRenderContext,
-	page: { name: Name; title: string; description: string; pathname: string },
+	page: { name: Name; title: string; description: string; pathname: string; markdown: string },
 	props: PageProps[Name],
 ) {
 	const component = pages[page.name] as Component<PageProps[Name]>;
@@ -61,6 +62,8 @@ function renderPage<Name extends PageName>(
 <meta property="og:url" content="${url}">
 <link rel="canonical" href="${url}">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="text/markdown" href="${page.pathname === '/' ? '/index.md' : `${page.pathname}.md`}">
+<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt">
 <style>${syntaxCss}</style>
 ${renderReaderChromeStyleTag(readerChrome)}
 ${assetHead(context)}
@@ -72,11 +75,8 @@ ${rendered.head}
 ${renderReaderChromeScriptTag(readerChrome)}
 </body>
 </html>`;
-	return { html, title: page.title, description: page.description };
+	return { html, title: page.title, description: page.description, source: page.markdown };
 }
-
-const description =
-	'A lightweight, resident launcher for Apple silicon Macs. Press ⌘Space and the panel is already there.';
 
 const host = {
 	routes: [
@@ -93,29 +93,41 @@ const host = {
 						{
 							name: 'home',
 							title: `${siteName}: a launcher for Apple silicon Macs`,
-							description,
+							description: siteDescription,
 							pathname: '/',
+							markdown: homeMarkdown,
 						},
 						{ installHtml: install.html },
 					),
 					dependencies: install.dependencies,
+					lastUpdatedPaths: ['src/pages/Home.svelte', 'src/site.ts'],
 				};
 			},
 		},
 		{
 			path: '/download',
 			render(context) {
-				return renderPage(
-					context,
-					{
-						name: 'download',
-						title: `Download ${siteName}`,
-						description:
-							'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
-						pathname: '/download',
-					},
-					{},
-				);
+				return {
+					...renderPage(
+						context,
+						{
+							name: 'download',
+							title: `Download ${siteName}`,
+							description:
+								'Download Dupin for Apple silicon Macs: the app, Homebrew casks, or a Nix build.',
+							pathname: '/download',
+							markdown: downloadMarkdown,
+						},
+						{},
+					),
+					lastUpdatedPaths: ['src/pages/Download.svelte', 'src/site.ts', '../VERSION'],
+				};
+			},
+		},
+		{
+			path: '/llms.txt',
+			render() {
+				return { body: homeMarkdown, contentType: 'text/plain; charset=utf-8' };
 			},
 		},
 		{

@@ -4,6 +4,8 @@ export const releasesUrl = `${repo}/releases`;
 export const sponsorUrl = 'https://github.com/sponsors/ryoppippi';
 export const siteUrl = 'https://dupin.app';
 export const siteName = 'Dupin';
+export const siteDescription =
+	'A lightweight, resident launcher for Apple silicon Macs. Press ⌘Space and the panel is already there.';
 
 export const channels = {
 	stable: {
