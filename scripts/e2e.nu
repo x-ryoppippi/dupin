@@ -1,7 +1,7 @@
 #!/usr/bin/env nix
 #! nix shell --inputs-from .. nixpkgs#nushell --command nu
 # Drive a built Dupin.app through its accessibility tree with agent-desktop:
-# hotkey → panel → type "Calculator" → ↩ → Calculator is running.
+# hotkey → panel → type "calculator" → ↩ → Calculator is running.
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
@@ -43,8 +43,14 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     let field = poll $out field $matched find --app Dupin --role textfield --first
     snap $out summoned
 
-    # Rune's text field has no settable AX value, so type through the focused field.
-    ad $out type --headed type $field.data.match.ref_id Calculator | ignore
+    if 'focused' not-in $field.data.match.states {
+        error make {msg: 'the query field is not focused after the hotkey'}
+    }
+    # `type` needs a settable AX value or the main window, and the field has neither: the
+    # panel never activates, so it is key but not main. Press keys as a person would.
+    for key in ('calculator' | split chars) {
+        ad $out type press $key | ignore
+    }
     poll $out result $matched find --app Dupin --text Calculator --first
     snap $out results
 
