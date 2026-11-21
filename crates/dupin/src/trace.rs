@@ -1,5 +1,6 @@
-//! `DUPIN_TRACE=1`: print how long each summon takes, from the hotkey handler to the first
-//! frame drawn after it, and every drawn frame's offset, to stderr. Off, it costs one branch.
+//! `DUPIN_TRACE=1`: print when the launch hotkey is registered, and how long each summon
+//! takes, from the hotkey handler to the first frame drawn after it, and every drawn frame's
+//! offset, to stderr. Off, it costs one branch.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -14,6 +15,16 @@ fn on() -> bool {
 
 thread_local! {
     static SUMMONED: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// The hotkey is live: a key press from now on summons the panel.
+pub fn registered(accelerator: &str) {
+    if on() {
+        eprintln!(
+            "dupin-trace: hotkey {accelerator} registered wall={:.3}",
+            wall_ms()
+        );
+    }
 }
 
 /// The hotkey asked for the panel.

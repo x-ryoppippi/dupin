@@ -51,7 +51,10 @@ impl Binding {
             .panel
             .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
         {
-            Ok(id) => *self.id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id),
+            Ok(id) => {
+                *self.id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+                crate::trace::registered(accelerator);
+            }
             Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
         }
     }

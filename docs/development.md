@@ -51,6 +51,6 @@ The renders show real results from the machine, file paths included, so they sta
 
 ## Timing a summon
 
-`DUPIN_TRACE=1` prints, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
+`DUPIN_TRACE=1` prints when the launch hotkey is registered and, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
 
 Scripts in this repository are written in Nushell.
