@@ -16,8 +16,28 @@ permissions:
   actions: read
 
 jobs:
-  # A pull request that only touches website/ cannot change the app, so the macOS build and the
-  # e2e run skip; skipped jobs still satisfy the required checks, which paths-ignore would not.
+  # Formatting, secrets, Nushell and the pnpm pin are quick, so every pull request runs them.
+  # The flake only targets aarch64-darwin, so even these evaluate on macOS.
+  check:
+    # Apple silicon (M4); Dupin targets nothing else. Labels: docs.blacksmith.sh, "Instance Types".
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+
+      # Every flake check except the two the build job owns, so a new check lands here.
+      - run: |
+          read -ra checks <<<"$(nix eval --raw .#checks.aarch64-darwin --apply '
+            checks: toString (map (name: ".#checks.aarch64-darwin." + name)
+              (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" ])))')"
+          nix build --no-link "${checks[@]}"
+
+  # A pull request that only touches website/ cannot change the app, so build and e2e skip;
+  # skipped jobs still satisfy required checks, which paths-ignore would not.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
@@ -47,10 +67,9 @@ jobs:
           }
           $"app=($app)\n" | save --append $env.GITHUB_OUTPUT
 
-  check:
+  build:
     needs: changes
     if: needs.changes.outputs.app == 'true'
-    # Apple silicon (M4); Dupin targets nothing else. Labels: docs.blacksmith.sh, "Instance Types".
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 60
     steps:
@@ -60,12 +79,11 @@ jobs:
 
       - uses: ./.github/actions/setup-nix-cache
 
-      # treefmt, clippy, tests (debug, as cargo runs them) and the release app bundle
-      # (`packages.dupin` is one of the checks).
-      - run: nix flake check
+      # Clippy and the tests (debug, as cargo runs them), and the release app bundle.
+      - run: nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.dupin
 
-      # The bundle is already in the store from the check. tar keeps its executable bits,
-      # which upload-artifact drops.
+      # The bundle is already in the store. tar keeps its executable bits, which
+      # upload-artifact drops.
       - run: |
           nix build .#dupin
           tar -czf "$RUNNER_TEMP/Dupin.app.tar.gz" -C result/Applications Dupin.app
@@ -76,7 +94,7 @@ jobs:
           if-no-files-found: error
 
   e2e:
-    needs: check
+    needs: build
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 20
     steps:
