@@ -82,10 +82,7 @@
 <div class="desk" bind:this={desk} aria-hidden="true">
 	<div class="panel">
 		<div class="field">
-			<svg class="field-icon" viewBox="0 0 16 16">
-				<circle cx="7" cy="7" r="4.5" />
-				<path d="M10.5 10.5L14 14" />
-			</svg>
+			<span class="field-icon icon-[ph--magnifying-glass]"></span>
 			{#if mode}<span class="chip">{mode}</span>{/if}
 			<span class="query">{query}</span>
 			<span class="caret"></span>

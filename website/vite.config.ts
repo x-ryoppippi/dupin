@@ -10,6 +10,7 @@ const oxContentOptions = {
 	highlight: true,
 	search: false,
 	docs: false,
+	icons: { include: ['src/**/*.{css,ts,svelte}'] },
 	ssg: {
 		siteName,
 		siteUrl,

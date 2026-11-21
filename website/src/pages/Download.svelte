@@ -39,7 +39,7 @@
 	</header>
 
 	<section class="download-section">
-		<h2><svg class="section-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M11.2 8.5c0-1.6 1.3-2.4 1.4-2.4-.8-1.1-1.9-1.3-2.3-1.3-1-.1-1.9.6-2.4.6-.5 0-1.3-.6-2.1-.6-1.1 0-2.1.6-2.6 1.6-1.1 2-.3 4.9.8 6.4.5.8 1.1 1.6 1.9 1.6.8 0 1-.5 2-.5s1.2.5 2 .5c.8 0 1.4-.8 1.9-1.5.6-.9.8-1.7.8-1.8 0 0-1.4-.6-1.4-2.6zM9.6 3.7c.4-.5.7-1.2.6-1.9-.6 0-1.3.4-1.8.9-.4.4-.7 1.1-.6 1.8.7.1 1.4-.3 1.8-.8z" /></svg>macOS</h2>
+		<h2><span class="section-icon icon-[simple-icons--apple]" aria-hidden="true"></span>macOS</h2>
 		<div class="download-cards">
 			<a class="download-card" href={current.zip}>
 				<img src="/favicon.svg" alt="" width="32" height="32" />
@@ -53,7 +53,7 @@
 	</section>
 
 	<section class="download-section">
-		<h2><svg class="section-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l3.5 3.5L3 11.5M8.5 12h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>Homebrew</h2>
+		<h2><span class="section-icon icon-[simple-icons--homebrew]" aria-hidden="true"></span>Homebrew</h2>
 		<div class="command">
 			<code>{brew}</code>
 			<CopyButton text={brew} label="Copy the Homebrew command" copiedMessage="Copied the Homebrew command." />
@@ -61,7 +61,7 @@
 	</section>
 
 	<section class="download-section">
-		<h2><svg class="section-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5l3.5 3.5L3 11.5M8.5 12h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg>Nix</h2>
+		<h2><span class="section-icon icon-[simple-icons--nixos]" aria-hidden="true"></span>Nix</h2>
 		<div class="command">
 			<code>{nixInstall}</code>
 			<CopyButton text={nixInstall} label="Copy the Nix command" copiedMessage="Copied the Nix command." />

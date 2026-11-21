@@ -27,8 +27,13 @@ function assetHead(context: OxContentCustomHostRenderContext): string {
 		? context.assets.document({
 				sharedStyles: ['/src/styles/site.css'],
 				clientEntries: ['/src/client/index.ts'],
+				selfHostedAssets: context.assets.selfHosted,
 			}).headHtml
-		: context.assets.document({ clientEntries: ['index.html'], crossorigin: true }).headHtml;
+		: context.assets.document({
+				clientEntries: ['index.html'],
+				crossorigin: true,
+				selfHostedAssets: context.assets.selfHosted,
+			}).headHtml;
 }
 
 const escapeHtml = (value: string) =>

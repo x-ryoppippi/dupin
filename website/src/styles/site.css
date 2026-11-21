@@ -254,11 +254,6 @@ code {
 .btn-icon {
 	width: 15px;
 	height: 15px;
-	fill: none;
-	stroke: currentColor;
-	stroke-width: 1.4;
-	stroke-linecap: round;
-	stroke-linejoin: round;
 }
 
 .copy-button.is-copied {
@@ -311,12 +306,10 @@ code {
 }
 
 .field-icon {
+	flex: none;
 	width: 20px;
 	height: 20px;
-	fill: none;
-	stroke: var(--fg-dim);
-	stroke-width: 1.6;
-	stroke-linecap: round;
+	color: var(--fg-dim);
 }
 
 .chip {
@@ -760,7 +753,6 @@ code {
 .btn-primary .btn-icon {
 	width: 16px;
 	height: 16px;
-	stroke-width: 1.6;
 }
 
 .link-arrow {

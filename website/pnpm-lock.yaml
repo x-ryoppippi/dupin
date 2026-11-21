@@ -169,6 +169,12 @@ importers:
       '@cloudflare/vite-plugin':
         specifier: 2.0.0-rc.3
         version: 2.0.0-rc.3(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1))(workerd@1.20261119.1)
+      '@iconify-json/ph':
+        specifier: 1.2.2
+        version: 1.2.2
+      '@iconify-json/simple-icons':
+        specifier: 1.2.103
+        version: 1.2.103
       '@ox-content/theme-color-vitesse':
         specifier: 3.8.3
         version: 3.8.3(@ox-content/vite-plugin@3.8.3(katex@0.16.47)(svelte@5.57.3)(vite@8.3.8(@types/node@24.19.2)(terser@5.51.4)(yaml@2.9.1)))
@@ -553,6 +559,12 @@ packages:
 
   '@emnapi/wasi-threads@2.2.0':
     resolution: {integrity: sha512-JP7OYH38Q7+pyTAe14raZHLQIK7BDKbdwji+Xi3pcd/6QkJYQH3SX4wu6EplGrGJWRepoNzedfm0G3B9Z4e9Rw==}
+
+  '@iconify-json/ph@1.2.2':
+    resolution: {integrity: sha512-PgkEZNtqa8hBGjHXQa4pMwZa93hmfu8FUSjs/nv4oUU6yLsgv+gh9nu28Kqi8Fz9CCVu4hj1MZs9/60J57IzFw==}
+
+  '@iconify-json/simple-icons@1.2.103':
+    resolution: {integrity: sha512-FMn+aVTsqQdYOwf5reCXXtfWapb+4ijI6WrU8ej1spWXWfA+d41TBXcKagHFwiHZyqt7kP7F04AiG1dYj2R06w==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -3211,6 +3223,14 @@ snapshots:
     dependencies:
       tslib: 2.9.1
     optional: true
+
+  '@iconify-json/ph@1.2.2':
+    dependencies:
+      '@iconify/types': 2.0.0
+
+  '@iconify-json/simple-icons@1.2.103':
+    dependencies:
+      '@iconify/types': 2.0.0
 
   '@iconify/types@2.0.0': {}
 

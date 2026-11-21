@@ -11,6 +11,8 @@
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "2.0.0-rc.3",
+		"@iconify-json/ph": "1.2.2",
+		"@iconify-json/simple-icons": "1.2.103",
 		"@ox-content/theme-color-vitesse": "3.8.3",
 		"@ox-content/vite-plugin": "3.8.3",
 		"@rsvelte/vite-plugin-svelte": "0.5.4",
