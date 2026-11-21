@@ -1,0 +1,71 @@
+name: E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AGENT_DESKTOP_VERSION: v1.3.1
+  AGENT_DESKTOP_SHA256: 9b7b7cfc74892eab46c2c85d6cb7dc4863bf8dab0a222cfcfb8ae4604c69c86c
+
+jobs:
+  e2e:
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: cachix/install-nix-action@bb0495a1086c46893eee56f32fd192dfe4a15bb9 # v32.0.0
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Restore only: CI owns saving and purging this cache.
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.nix', 'flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-${{ runner.arch }}-
+          save: false
+
+      - run: nix build .#dupin
+
+      - name: Install agent-desktop
+        run: |
+          dir=$RUNNER_TEMP/agent-desktop
+          mkdir -p "$dir"
+          archive=agent-desktop-$AGENT_DESKTOP_VERSION-aarch64-apple-darwin.tar.gz
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/vercel-labs/agent-desktop/releases/download/$AGENT_DESKTOP_VERSION/$archive"
+          echo "$AGENT_DESKTOP_SHA256  $RUNNER_TEMP/$archive" | shasum -a 256 -c
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$dir"
+          echo "$dir" >>"$GITHUB_PATH"
+
+      # The grant belongs to the process that launched agent-desktop. Show what the image
+      # already grants, then grant the binaries themselves, which a writable TCC.db
+      # (SIP off, as on GitHub's macOS images) allows.
+      - name: Grant Accessibility
+        run: |
+          csrutil status || true
+          db="/Library/Application Support/com.apple.TCC/TCC.db"
+          sudo sqlite3 "$db" "SELECT service, client, auth_value FROM access WHERE service IN ('kTCCServiceAccessibility', 'kTCCServicePostEvent', 'kTCCServiceScreenCapture');" || true
+          now=$(date +%s)
+          for bin in "$RUNNER_TEMP"/agent-desktop/agent-desktop "$RUNNER_TEMP"/agent-desktop/agent-desktop-macos-helper; do
+            for service in kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture; do
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access VALUES('$service','$bin',1,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$now,NULL,NULL,'UNUSED',$now);" || true
+            done
+          done
+
+      - run: scripts/e2e.sh result/Applications/Dupin.app
+
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e
+          path: target/e2e
+          if-no-files-found: warn
