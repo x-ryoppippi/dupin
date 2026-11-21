@@ -35,19 +35,15 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         }
     }
 
-    poll --tries 30 $out launched {|r| $r.ok and (mentions $r Dupin) } list-apps
+    # Dupin is running well before its on_ready callback registers the hotkey.
+    wait-for-log $log 'dupin-trace: hotkey alt+space registered'
     snap $out launched
 
-    let matched = {|r| $r.ok and $r.data?.match?.ref_id? != null }
-    # Dupin shows up in list-apps before its on_ready callback registers the hotkey.
-    wait-for-log $log 'dupin-trace: hotkey alt+space registered'
     ad $out press-hotkey press alt+space | ignore
-    let field = poll $out field $matched find --app Dupin --role textfield --first
+    let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
+    poll $out field $focused find --app Dupin --role textfield --first
     snap $out summoned
 
-    if 'focused' not-in $field.data.match.states {
-        error make {msg: 'the query field is not focused after the hotkey'}
-    }
     # `type` needs a settable AX value or the main window, and the field has neither: the
     # panel never activates, so it is key but not main. Press keys as a person would.
     for key in ('calculator' | split chars | enumerate) {
@@ -58,10 +54,11 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     # reached the field.
     let typed = {|r| $r.ok and $r.data?.match?.value? == 'calculator' }
     poll --tries 5 $out typed-value $typed find --app Dupin --role textfield --first
-    # Match a node named Calculator. `--text` also matches the typed field value and every
-    # ancestor holding it, and a result row need not carry a ref, since ↩ opens the selection.
+    # A row's name is its title and subtitle. `--text` would also match the typed field value
+    # and every ancestor holding it.
+    let row = 'Calculator /System/Applications'
     let found = {|r| $r.ok and $r.data?.match? != null }
-    poll $out result $found find --app Dupin --name Calculator --first
+    poll $out result $found find --app Dupin --name $row --exact --first
     snap $out results
 
     let before = poll $out before-return {|r| $r.ok } list-apps
