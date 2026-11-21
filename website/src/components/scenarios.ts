@@ -1,7 +1,6 @@
 export type Row = { icon: string; title: string; sub: string; hit?: string; alias?: string };
 export type Scenario = { mode?: string; query: string; rows: Row[] };
 
-// PanelDemo renders the first scenario; motion.js reads them all from data-scenarios to cycle.
 export const scenarios: [Scenario, ...Scenario[]] = [
 	{
 		query: 'cl',

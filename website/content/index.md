@@ -1,37 +1,30 @@
 ---
-title: Dupin
-description: A lightweight, resident launcher for Apple silicon Macs. Press ⌘Space and the panel is already there.
+title: Install
 ---
 
 ## Install
 
-Dupin runs on Apple silicon Macs and installs with [Nix](https://nixos.org/download/).
+Dupin runs on Apple silicon Macs with macOS 14 or later. The setup prompt at the top of the page has a coding agent do these steps for you.
 
-### Set up with an agent
-
-Paste this into Claude Code, Codex or another coding agent.
-
-```text
-Install Dupin, a launcher for Apple silicon Macs, on this Mac and make ⌘Space open it.
-
-1. Check that this is an Apple silicon Mac on macOS 14 or later and that Nix is installed. If Nix is missing, ask me before installing it.
-2. Free ⌘Space: Spotlight's shortcut is under System Settings → Keyboard → Keyboard Shortcuts… → Spotlight → "Show Spotlight search". Also check whether Raycast, Alfred or another launcher holds ⌘Space. Tell me exactly what to untick if you cannot change it yourself.
-3. Run `nix profile install github:x-ryoppippi/dupin`, then `open ~/.nix-profile/Applications/Dupin.app`.
-4. Ask me to press ⌘Space. If the panel does not show, read ~/Library/Logs/Dupin/dupin.log and tell me why.
-
-Settings are described at https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md
-```
-
-### Or set it up yourself
-
-#### 1. Free ⌘Space
+### 1. Free ⌘Space
 
 macOS delivers a chord to only one app, so take ⌘Space back first.
 
 - System Settings → Keyboard → Keyboard Shortcuts… → Spotlight → untick "Show Spotlight search".
 - Remove ⌘Space from any other launcher that holds it, such as Raycast or Alfred.
 
-#### 2. Install and open
+### 2. Install and open
+
+```sh
+brew install --cask x-ryoppippi/tap/dupin
+open -a Dupin
+```
+
+Install `x-ryoppippi/tap/dupin@nightly` instead to follow `main`, or grab the app from the [download page](/download).
+
+### Or with Nix
+
+A Nix build never updates itself; upgrade it through Nix.
 
 ```sh
 nix profile install github:x-ryoppippi/dupin

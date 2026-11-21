@@ -13,10 +13,12 @@
 		"@cloudflare/vite-plugin": "2.0.0-rc.3",
 		"@ox-content/theme-color-vitesse": "3.8.3",
 		"@ox-content/vite-plugin": "3.8.3",
+		"@rsvelte/vite-plugin-svelte": "0.5.4",
 		"@ryoppippi/vite-plugin-cloudflare-redirect": "1.1.3",
 		"@types/node": "24.19.2",
 		"cf": "1.0.0-rc.2",
 		"oxlint": "1.94.0",
+		"svelte": "5.57.3",
 		"tsrs": "7.1.0-beta.tsrs4",
 		"vite": "8.3.8"
 	},
