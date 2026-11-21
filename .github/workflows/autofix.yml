@@ -3,9 +3,6 @@ name: autofix.ci
 
 on:
   pull_request:
-    paths:
-      - Cargo.lock
-      - package.nix
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
