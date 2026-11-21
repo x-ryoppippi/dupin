@@ -31,6 +31,8 @@ const TITLE_HEIGHT: f32 = 52.0;
 /// Text on a page lines up this far in; cards reach `ROW_PX` past it.
 const GUTTER: f32 = 32.0;
 const ROW_PX: f32 = 16.0;
+/// The widest a row's value grows before it truncates, leaving its name and description room.
+const VALUE_MAX_W: f32 = 200.0;
 const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
@@ -625,6 +627,7 @@ fn menu_value(s: &Prefs, k: &Kit, key: &str, name: &str, value: &str, open: fn(&
         .current(Some(value))
         .disabled(s.read_only)
         .trigger(k)
+        .max_w(VALUE_MAX_W)
         .mr(-8.0);
     if s.read_only {
         trigger
