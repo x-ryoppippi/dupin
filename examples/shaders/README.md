@@ -28,17 +28,17 @@ fn backdrop(p: vec2f, b: Backdrop) -> vec4f
 
 `b` holds:
 
-| Field       | Type    | Meaning                                                                           |
-| ----------- | ------- | --------------------------------------------------------------------------------- |
-| `size`      | `vec2f` | The panel's size in points; its height changes with the number of results         |
-| `time`      | `f32`   | Seconds since the panel showed, for an entrance; held still under Reduce Motion   |
-| `dark`      | `f32`   | 1 in a dark theme, 0 in a light one                                               |
-| `accent`    | `vec3f` | The theme's accent color, sRGB                                                    |
-| `keystroke` | `f32`   | Seconds since the query last changed (10000 before the first change)              |
-| `query`     | `f32`   | Characters in the query                                                           |
-| `searching` | `f32`   | 1 while a file search runs                                                        |
-| `mode`      | `f32`   | 0 searching apps, 1 file names, 2 file contents                                   |
-| `field`     | `f32`   | The query field's height in points, at the panel's top; a steady unit to scale by |
+| Field       | Type    | Meaning                                                                                      |
+| ----------- | ------- | -------------------------------------------------------------------------------------------- |
+| `size`      | `vec2f` | The panel's size in points; its height changes with the number of results                    |
+| `time`      | `f32`   | Seconds since the panel showed, for an entrance; held still under Reduce Motion              |
+| `dark`      | `f32`   | 1 in a dark theme, 0 in a light one                                                          |
+| `accent`    | `vec3f` | The theme's accent color, sRGB                                                               |
+| `keystroke` | `f32`   | Seconds since the query last changed (10000 before the first change and under Reduce Motion) |
+| `query`     | `f32`   | Characters in the query                                                                      |
+| `searching` | `f32`   | 1 while a file search runs                                                                   |
+| `mode`      | `f32`   | 0 searching apps, 1 file names, 2 file contents                                              |
+| `field`     | `f32`   | The query field's height in points, at the panel's top; a steady unit to scale by            |
 
 Dupin defines these names too, so a shader can't reuse them: `Backdrop`, anything starting with `dupin_`, and Rune's clip helpers `clip_alpha`, `ramp`, `sd_rounded`, `sd_continuous`, `unpack_clip_radii` and `CONTINUOUS_K`.
 
