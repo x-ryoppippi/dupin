@@ -23,7 +23,7 @@ open result/Applications/Dupin.app
 
 - [Using Dupin](./docs/usage.md): keys, app search, file and content search
 - [Configuration](./docs/configuration.md): `config.toml`, the hotkey and what happens when it's taken
-- [Development](./docs/development.md): building, the Nix layout, formatting, headless renders
+- [Development](./docs/development.md): building, the Nix layout, formatting, headless renders, peak memory
 - [Architecture](./docs/architecture.md): crates, providers, the session and the panel
 - [Working around Rune](./docs/rune-workarounds.md)
 - [Releasing](./docs/releasing.md): tagpr and CI
