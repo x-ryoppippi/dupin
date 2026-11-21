@@ -404,7 +404,12 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
 
 fn sidebar(s: &Prefs, k: &Kit) -> El {
     let c = &k.c;
-    let mut pages = col().key("pages").role("list").gap(4.0);
+    let mut pages = col()
+        .key("pages")
+        .role("list")
+        .focus_group()
+        .focus_follows()
+        .gap(4.0);
     for page in Page::all(s.updater.available()) {
         let on = s.page == page;
         let mut item = row()
