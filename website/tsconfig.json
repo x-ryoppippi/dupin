@@ -7,15 +7,7 @@
 		"skipLibCheck": true,
 		"noEmit": true,
 		"allowImportingTsExtensions": true,
-		"jsx": "react-jsx",
-		"jsxImportSource": "@ox-content/vite-plugin",
-		"types": ["vite/client", "node"]
+		"types": ["vite/client", "node", "svelte"]
 	},
-	"include": [
-		"theme/**/*.tsx",
-		"theme/**/*.ts",
-		"vite.config.ts",
-		"cloudflare.config.ts",
-		"oxlint.config.ts"
-	]
+	"include": ["src/**/*.ts", "vite.config.ts", "cloudflare.config.ts", "oxlint.config.ts"]
 }

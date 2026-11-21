@@ -73,12 +73,12 @@ Scripts in this repository are written in Nushell.
 
 ## Website
 
-`website/` holds the landing page for <https://dupin.app>: an [ox-content](https://github.com/ubugeeei-prod/ox-content) static site with its own pnpm project. The page layout is JSX in `website/theme/`; the install steps are Markdown in `website/content/index.md`. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the panel demo, the copy buttons and the download channel switch. The install steps are Markdown in `website/content/index.md`, rendered by ox-content. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
 
 ```sh
 just website::install # dependencies from the lockfile
-just website::dev     # local server (ox-content's dev server uses its default theme, not website/theme/)
-just website::preview # build, then serve the real page with the redirects
+just website::dev     # local server, rendering the real pages
+just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
 just website::deploy  # cf build, then upload the result as Cloudflare static assets
 ```
