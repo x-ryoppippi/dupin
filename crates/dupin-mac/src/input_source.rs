@@ -11,8 +11,8 @@ use objc2_foundation::{NSDictionary, NSString};
 /// Which input source the panel types with.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    /// The most recently used source that types ASCII (ABC, or a Japanese input method's
-    /// Roman mode).
+    /// Leave a source that types ASCII alone; from one that doesn't (a Japanese input
+    /// method's kana mode), switch to the most recently used one that does.
     Ascii,
     /// A source by its identifier, such as `com.apple.keylayout.ABC`.
     Id(String),
@@ -26,7 +26,9 @@ unsafe extern "C" {
     fn TISCopyCurrentASCIICapableKeyboardInputSource() -> CFTypeRef;
     fn TISCreateInputSourceList(properties: CFTypeRef, include_all_installed: u8) -> CFTypeRef;
     fn TISSelectInputSource(source: CFTypeRef) -> i32;
+    fn TISGetInputSourceProperty(source: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
     static kTISPropertyInputSourceID: CFTypeRef;
+    static kTISPropertyInputSourceIsASCIICapable: CFTypeRef;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -36,6 +38,7 @@ unsafe extern "C" {
     fn CFEqual(a: CFTypeRef, b: CFTypeRef) -> u8;
     fn CFArrayGetCount(array: CFTypeRef) -> isize;
     fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
+    fn CFBooleanGetValue(boolean: CFTypeRef) -> u8;
 }
 
 /// An input source this module holds a reference to. Main thread only, like the TIS calls.
@@ -57,6 +60,16 @@ impl Source {
     fn same(&self, other: &Source) -> bool {
         // SAFETY: Both are live CF objects.
         unsafe { CFEqual(self.0, other.0) != 0 }
+    }
+
+    /// Whether the source types ASCII as it is (ABC, US, an input method's Roman mode).
+    fn types_ascii(&self) -> bool {
+        // SAFETY: A live input source and a property key constant; the returned CFBoolean is
+        // owned by the source (a Get, not a Copy).
+        unsafe {
+            let value = TISGetInputSourceProperty(self.0, kTISPropertyInputSourceIsASCIICapable);
+            !value.is_null() && CFBooleanGetValue(value) != 0
+        }
     }
 }
 
@@ -80,6 +93,10 @@ pub fn select(target: &Target) -> Option<Previous> {
     unsafe {
         let current = Source::owned(TISCopyCurrentKeyboardInputSource())?;
         let wanted = match target {
+            // Switch only away from a source that can't type ASCII. Switching between two that
+            // can (US to ABC) gains nothing, and keys typed while the switch lands can be lost:
+            // the end-to-end test typed "calculator" right after the hotkey and got "caclator".
+            Target::Ascii if current.types_ascii() => return None,
             Target::Ascii => Source::owned(TISCopyCurrentASCIICapableKeyboardInputSource())?,
             Target::Id(id) => find(id)?,
         };

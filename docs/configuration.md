@@ -15,7 +15,7 @@ An unknown key or an invalid value makes Dupin fall back to the defaults and say
 
 ## Input source
 
-Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition. `"ascii"` picks the most recently used source that types ASCII (ABC, or an input method's Roman mode); an identifier picks that source; `"keep"` leaves the input source alone.
+Like Alfred's "Force Keyboard", Dupin switches the keyboard input source while the panel shows and switches back when it hides, so a Japanese or other input method doesn't hold the query in composition. `"ascii"` leaves a source that already types ASCII alone and otherwise picks the most recently used one that does (ABC, or an input method's Roman mode); an identifier picks that source; `"keep"` leaves the input source alone.
 
 ## Freeing the hotkey
 
