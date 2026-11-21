@@ -4,8 +4,8 @@
 # hotkey → panel → type "Calculator" → ↩ → Calculator is running.
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
-# Run the scenario against `app`, keeping every agent-desktop reply, snapshot, screenshot and
-# Dupin's log in `out`.
+# Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
+# screenshot per stage, and Dupin's log in `out`.
 def "main run" [app: path, --out: path = 'target/e2e'] {
     mkdir $out
     let out = $out | path expand
@@ -48,7 +48,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     poll $out result $matched find --app Dupin --text Calculator --first
     snap $out results
 
-    let before = ad $out before-return list-apps
+    let before = poll $out before-return {|r| $r.ok } list-apps
     if (mentions $before Calculator) {
         error make {
             msg: 'Calculator was running before ↩, so its launch would prove nothing'
@@ -96,7 +96,7 @@ def mentions [reply: record, name: string]: nothing -> bool {
 }
 
 def snap [out: path, name: string] {
-    ad $out $name snapshot --app Dupin | ignore
+    ad $out $'($name)-snapshot' snapshot --app Dupin | ignore
     ^screencapture -x ($out | path join $'($name).png') | complete | ignore
 }
 
