@@ -6,6 +6,7 @@
 	let query = $state(first.query);
 	let mode = $state(first.mode);
 	let rows = $state<Row[]>(first.rows);
+	let open = $state(true);
 	let keys = $state<{ id: number; label: string }[]>([]);
 	let keysShown = $state(false);
 	let desk: HTMLElement;
@@ -36,25 +37,24 @@
 			await sleep(90 + Math.random() * 70);
 		};
 
-		// Replays the keys a person would press: ⌫ empties the query and, on an empty one, leaves a
-		// mode; Space on an empty query enters file search, and `in` then Space enters content search.
+		// Replays the keys a person would press: Esc closes the panel and the hotkey opens it on an empty
+		// query; Space on an empty query enters file search, and `in` then Space enters content search.
 		const play = async () => {
 			for (let i = 1; alive; i = (i + 1) % scenarios.length) {
 				await sleep(2600);
 				while (alive && (!visible || document.hidden)) await sleep(400);
 				const scenario = scenarios[i]!;
-				while (query.length > 0) {
-					press('⌫');
-					query = query.slice(0, -1);
-					await sleep(70);
-				}
+				press('esc');
+				open = false;
+				await sleep(250);
+				query = '';
+				mode = undefined;
 				rows = [];
-				if (mode && mode !== scenario.mode) {
-					press('⌫');
-					mode = undefined;
-					await sleep(250);
-				}
-				if (scenario.mode && !mode) {
+				await sleep(900);
+				press('⌘ Space');
+				open = true;
+				await sleep(400);
+				if (scenario.mode) {
 					if (scenario.mode === 'In files') {
 						await type('i');
 						await type('n');
@@ -80,7 +80,7 @@
 </script>
 
 <div class="desk" bind:this={desk} aria-hidden="true">
-	<div class="panel">
+	<div class={['panel', !open && 'is-closed']}>
 		<div class="field">
 			<span class="field-icon icon-[ph--magnifying-glass]"></span>
 			{#if mode}<span class="chip">{mode}</span>{/if}

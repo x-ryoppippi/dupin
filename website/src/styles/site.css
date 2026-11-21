@@ -296,6 +296,10 @@ code {
 	padding: 10px;
 }
 
+.panel.is-closed {
+	visibility: hidden;
+}
+
 .field {
 	display: flex;
 	align-items: center;
