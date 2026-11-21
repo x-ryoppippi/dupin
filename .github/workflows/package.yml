@@ -89,21 +89,27 @@ jobs:
           TAG: ${{ inputs.ref }}
         run: gh release upload "$TAG" dist/Dupin.zip dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
 
-      # The nightly tag moves to each build; the zip goes up before update.json so the feed
-      # never names a zip that isn't there yet.
+      # nightly.yml skips a commit the nightly tag already points at, so the tag moves only
+      # after both files are up: a failed upload leaves it behind and the next run retries.
+      # The zip goes up before update.json so the feed never names a zip that isn't there yet.
       - name: Publish the nightly prerelease
         if: inputs.channel == 'nightly'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha="$(git rev-parse HEAD)"
-          if gh release view nightly --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$sha" -F force=true > /dev/null
-          else
-            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$sha" --prerelease --title Nightly --notes ""
+          draft="$(gh release view nightly --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2> /dev/null || echo missing)"
+          if [ "$draft" = missing ]; then
+            # A draft creates no tag until it is published.
+            gh release create nightly --repo "$GITHUB_REPOSITORY" --draft --prerelease --title Nightly --notes ""
           fi
           gh release upload nightly dist/Dupin.zip --clobber --repo "$GITHUB_REPOSITORY"
           gh release upload nightly dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
+          if [ "$draft" = false ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$sha" -F force=true > /dev/null
+          else
+            gh release edit nightly --repo "$GITHUB_REPOSITORY" --draft=false --target "$sha"
+          fi
           gh release edit nightly --repo "$GITHUB_REPOSITORY" --prerelease --notes "Built from $sha."
 
       - name: Remove the signing keychain
