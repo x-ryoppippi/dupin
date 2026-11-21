@@ -8,13 +8,21 @@ A lightweight, resident launcher for Apple silicon Macs.
 
 Homepage: <https://dupin.app>
 
+<a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
+
 - Fuzzy-search and open apps, by any name macOS knows them by
 - Space on an empty query searches files with Spotlight; `in` and Space search inside them
 - A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
 
 ## Quick start
 
-Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then:
+Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then install it with Homebrew (`dupin@nightly` for builds of `main`); it [updates itself](./docs/configuration.md#updates):
+
+```sh
+brew install --cask x-ryoppippi/tap/dupin
+```
+
+Or build it with Nix:
 
 ```sh
 nix build .#dupin

@@ -3,7 +3,9 @@
 //! effects the session returns.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dupin_core::{Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
@@ -38,6 +40,10 @@ pub struct Ui {
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
+    /// An update replaced the bundle while the panel showed: relaunch when it hides.
+    relaunch: Option<PathBuf>,
+    /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
+    running: Arc<AtomicUsize>,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
 }
@@ -79,6 +85,8 @@ impl Ui {
             position: config.position,
             input_source: config.input_source,
             restore_input: None,
+            relaunch: None,
+            running: Arc::new(AtomicUsize::new(0)),
             me,
             prefs,
         }
@@ -90,6 +98,33 @@ impl Ui {
         self.file_limit = config.file_limit;
         self.position = config.position;
         self.input_source = config.input_source.clone();
+        crate::update::set_enabled(config.auto_update);
+    }
+
+    /// An update is in place at `bundle`: start it now, or once the panel hides.
+    /// The decision is made here, on the UI thread, so it sees the panel as it is now.
+    pub fn updated(&mut self, bundle: PathBuf) {
+        if self.me.is_visible() {
+            self.relaunch = Some(bundle);
+        } else if self.running.load(Ordering::Acquire) > 0 {
+            self.relaunch_when_idle(bundle);
+        } else {
+            crate::update::relaunch(&bundle);
+        }
+    }
+
+    /// Ask again once every action already handed off has been carried out, so exiting
+    /// doesn't cut short the app or file the user just opened. The panel may have been
+    /// summoned meanwhile, so `updated` decides afresh.
+    fn relaunch_when_idle(&self, bundle: PathBuf) {
+        let running = self.running.clone();
+        let me = self.me.clone();
+        std::thread::spawn(move || {
+            while running.load(Ordering::Acquire) > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            me.update(move |s, _| s.updated(bundle));
+        });
     }
 
     pub fn setup(s: &mut Ui, waker: Waker) {
@@ -159,6 +194,9 @@ impl Ui {
         self.query.clear();
         self.notice = None;
         tx.close_window();
+        if let Some(bundle) = self.relaunch.take() {
+            self.relaunch_when_idle(bundle);
+        }
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
@@ -247,10 +285,13 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
                     // Launch Services can take a moment to answer; don't hold the frame for it.
+                    let running = self.running.clone();
+                    running.fetch_add(1, Ordering::AcqRel);
                     std::thread::spawn(move || {
                         if !dupin_mac::workspace::run(&action) {
                             crate::log::warn(&format!("the system couldn't carry out {action:?}"));
                         }
+                        running.fetch_sub(1, Ordering::AcqRel);
                     });
                 }
                 Effect::Hide => self.hide(tx),

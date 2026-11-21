@@ -1,0 +1,46 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+concurrency: nightly
+
+permissions: {}
+
+jobs:
+  changed:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.head.outputs.sha }}
+      changed: ${{ steps.head.outputs.changed }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          built="$(gh api "repos/$GITHUB_REPOSITORY/commits/nightly" --jq .sha 2>/dev/null || true)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$sha" = "$built" ]; then echo changed=false; else echo changed=true; fi >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: changed
+    if: needs.changed.outputs.changed == 'true'
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/package.yml
+    with:
+      channel: nightly
+      ref: ${{ needs.changed.outputs.sha }}
+    secrets:
+      DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}

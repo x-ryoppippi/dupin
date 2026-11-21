@@ -1,35 +1,28 @@
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { readFileSync } from 'node:fs';
-import { defineConfig, runnerImport, type Plugin } from 'vite';
-import { oxContent } from '@ox-content/vite-plugin';
+import { oxContentCustomHost, type OxContentOptions } from '@ox-content/vite-plugin';
+import { svelte } from '@rsvelte/vite-plugin-svelte';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
-import type * as Theme from './theme/index.ts';
-import { repo } from './theme/site.ts';
+import { defineConfig } from 'vite';
+import { repo, siteName, siteUrl } from './src/site.ts';
 
-// ox-content writes pages to its own outDir instead of following the Vite environment's, which the
-// Cloudflare plugin moves into Build Output, so the pages must land where cf deploys assets from.
-const assetsDir = '.cloudflare/output/v1/workers/default/assets';
-
-// The config bundler ignores tsconfig, so the JSX theme goes through Vite's module runner instead.
-const {
-	module: { theme },
-} = await runnerImport<typeof Theme>('./theme/index.ts', { configFile: false });
-
-const favicon: Plugin = {
-	name: 'dupin-favicon',
-	generateBundle() {
-		this.emitFile({
-			type: 'asset',
-			fileName: 'favicon.svg',
-			source: readFileSync(new URL('../assets/logo/dupin.svg', import.meta.url)),
-		});
+const oxContentOptions = {
+	srcDir: 'content',
+	highlight: true,
+	search: false,
+	docs: false,
+	ssg: {
+		siteName,
+		siteUrl,
+		minifyHtml: true,
+		readerChrome: { copy: true, externalLinks: false, backToTop: false },
 	},
-};
+} satisfies OxContentOptions;
 
 export default defineConfig({
+	appType: 'mpa',
 	plugins: [
 		cloudflare(),
-		favicon,
+		svelte({ configFile: false }),
 		cloudflareRedirect({
 			mode: 'generate',
 			entries: [
@@ -37,18 +30,14 @@ export default defineConfig({
 				{ from: '/gh/*', to: `${repo}/:splat`, status: 302 },
 			],
 		}),
-		oxContent({
-			srcDir: 'content',
-			outDir: assetsDir,
-			highlight: true,
-			search: false,
-			docs: false,
-			ssg: {
-				siteName: 'Dupin',
-				siteUrl: 'https://dupin.app',
-				minifyHtml: true,
-				render: theme,
-			},
+		...oxContentCustomHost({
+			host: '/src/host/index.ts',
+			oxContent: oxContentOptions,
+			dev: { routeDependencies: [{ path: 'src', kind: 'directory' }] },
+			build: { transformHtml: false },
 		}),
 	],
+	build: { rollupOptions: { input: 'index.html' } },
+	// The site reads the logo and VERSION from the repository root, one level up.
+	server: { fs: { allow: ['..'] } },
 });

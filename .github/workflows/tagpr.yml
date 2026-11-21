@@ -36,6 +36,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # A tag pushed with GITHUB_TOKEN starts no workflows either, so package the release here.
+  release:
+    needs: tagpr
+    if: needs.tagpr.outputs.tag != ''
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/package.yml
+    with:
+      channel: stable
+      ref: ${{ needs.tagpr.outputs.tag }}
+    secrets:
+      DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+      DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+
   # A pull request pushed with GITHUB_TOKEN starts no workflows, so run CI on the release
   # branch explicitly.
   ci:

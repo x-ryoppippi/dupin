@@ -14,6 +14,9 @@ pub struct Config {
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
+    /// Whether a signed release build installs its channel's updates by itself. Builds
+    /// without an update feed (Nix, `cargo run`) never update.
+    pub auto_update: bool,
 }
 
 /// The keyboard input source the panel switches to when it shows, and switches back from when
@@ -70,6 +73,7 @@ impl Default for Config {
             file_limit: 200,
             position: Position::Center,
             input_source: InputSource::Ascii,
+            auto_update: true,
         }
     }
 }
@@ -111,6 +115,12 @@ mod tests {
             Position::Top
         );
         assert!(Config::parse("position = \"middle\"").is_err());
+    }
+
+    #[test]
+    fn updates_by_default() {
+        assert!(Config::default().auto_update);
+        assert!(!Config::parse("auto_update = false").unwrap().auto_update);
     }
 
     #[test]

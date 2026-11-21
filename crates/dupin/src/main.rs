@@ -8,6 +8,7 @@ mod settings;
 mod store;
 mod trace;
 mod ui;
+mod update;
 mod view;
 
 use std::sync::Arc;
@@ -57,6 +58,7 @@ fn main() {
         move || prefs::Prefs::new(config, binding, panel)
     });
 
+    update::spawn(config.auto_update, handle.clone());
     let hotkey = config.hotkey.clone();
     let mut registered = false;
     let app = app
