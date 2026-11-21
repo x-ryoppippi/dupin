@@ -1,0 +1,111 @@
+name: Package
+
+# Build, sign, notarize and publish Dupin.app for one channel. tagpr calls it for a stable
+# release; nightly.yml calls it for the nightly prerelease.
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: '"stable" or "nightly"'
+        required: true
+        type: string
+      ref:
+        description: The commit or tag to build
+        required: true
+        type: string
+    secrets:
+      DEVELOPER_ID_P12:
+        description: The Developer ID Application certificate and key, as base64 of a .p12
+        required: true
+      DEVELOPER_ID_P12_PASSWORD:
+        required: true
+      NOTARY_KEY:
+        description: An App Store Connect API key (.p8 contents) for notarytool
+        required: true
+      NOTARY_KEY_ID:
+        required: true
+      NOTARY_ISSUER:
+        required: true
+
+permissions: {}
+
+jobs:
+  package:
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
+    env:
+      CHANNEL: ${{ inputs.channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          # The build number is the commit count.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          save: 'false'
+
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: '0.116.1'
+
+      - name: Import the Developer ID certificate
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/developer-id.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain"
+
+      - name: Package
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_ISSUER }}
+        run: |
+          export NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
+          printf '%s' "$NOTARY_KEY" > "$NOTARY_KEY_PATH"
+          nu scripts/package-app.nu --channel "$CHANNEL" --notarize
+          rm "$NOTARY_KEY_PATH"
+
+      - name: Publish the stable release
+        if: inputs.channel == 'stable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.ref }}
+        run: gh release upload "$TAG" dist/Dupin.zip dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
+
+      # The nightly tag moves to each build; the zip goes up before update.json so the feed
+      # never names a zip that isn't there yet.
+      - name: Publish the nightly prerelease
+        if: inputs.channel == 'nightly'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          if gh release view nightly --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/nightly" -f sha="$sha" -F force=true > /dev/null
+          else
+            gh release create nightly --repo "$GITHUB_REPOSITORY" --target "$sha" --prerelease --title Nightly --notes ""
+          fi
+          gh release upload nightly dist/Dupin.zip --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload nightly dist/update.json --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit nightly --repo "$GITHUB_REPOSITORY" --prerelease --notes "Built from $sha."
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
