@@ -9,9 +9,16 @@ hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
+auto_update = true # whether a release build installs its channel's updates
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
+
+## Updates
+
+A release build (the Homebrew cask or a zip from GitHub Releases) checks its channel every six hours and installs a newer build by itself: stable follows tagged releases, nightly follows the `nightly` prerelease. It installs an update only when the download is signed with the same Developer ID as the running app and Gatekeeper accepts it, then restarts once the panel is hidden. `~/Library/Logs/Dupin/dupin.log` records each update and each failed check. Set `auto_update = false` to stop it.
+
+A build from Nix or `cargo run` never updates itself; update it through Nix.
 
 ## Input source
 

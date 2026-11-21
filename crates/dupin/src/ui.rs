@@ -38,6 +38,8 @@ pub struct Ui {
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
+    /// An update replaced the bundle while the panel showed: relaunch when it hides.
+    relaunch: Option<std::path::PathBuf>,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
 }
@@ -79,6 +81,7 @@ impl Ui {
             position: config.position,
             input_source: config.input_source,
             restore_input: None,
+            relaunch: None,
             me,
             prefs,
         }
@@ -90,6 +93,16 @@ impl Ui {
         self.file_limit = config.file_limit;
         self.position = config.position;
         self.input_source = config.input_source.clone();
+        crate::update::set_enabled(config.auto_update);
+    }
+
+    /// An update is in place at `bundle`: start it now, or once the panel hides.
+    pub fn updated(&mut self, bundle: std::path::PathBuf) {
+        if self.me.is_visible() {
+            self.relaunch = Some(bundle);
+        } else {
+            crate::update::relaunch(&bundle);
+        }
     }
 
     pub fn setup(s: &mut Ui, waker: Waker) {
@@ -159,6 +172,9 @@ impl Ui {
         self.query.clear();
         self.notice = None;
         tx.close_window();
+        if let Some(bundle) = self.relaunch.take() {
+            crate::update::relaunch(&bundle);
+        }
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {

@@ -755,6 +755,8 @@ dependencies = [
  "rune",
  "rune-kit",
  "rune-notify",
+ "serde",
+ "serde_json",
  "toml",
 ]
 
