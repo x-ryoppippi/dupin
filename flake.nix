@@ -1,10 +1,14 @@
 {
   description = "Dupin: a lightweight launcher for Apple silicon Macs";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # agent-desktop for the E2E job; its own nixpkgs keeps cache.numtide.com hits.
+    llm-agents.url = "github:numtide/llm-agents.nix";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, ... }:
     let
       # Apple silicon macOS is the only target.
       system = "aarch64-darwin";

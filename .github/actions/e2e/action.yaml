@@ -1,0 +1,36 @@
+name: E2E
+description: Drive a built Dupin.app with agent-desktop and upload what it saw
+inputs:
+  artifact:
+    description: Name of the artifact holding Dupin.app.tar.gz
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install agent-desktop
+      shell: bash
+      run: >-
+        nix profile install --inputs-from . llm-agents#agent-desktop
+        --option extra-substituters https://cache.numtide.com
+        --option extra-trusted-public-keys niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
+
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: ${{ inputs.artifact }}
+        path: ${{ runner.temp }}/e2e-app
+
+    - shell: bash
+      run: tar -xzf "$RUNNER_TEMP/e2e-app/Dupin.app.tar.gz" -C "$RUNNER_TEMP/e2e-app"
+
+    - shell: bash
+      run: scripts/e2e.nu grant
+
+    - shell: bash
+      run: scripts/e2e.nu run "$RUNNER_TEMP/e2e-app/Dupin.app"
+
+    - if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: e2e
+        path: target/e2e
+        if-no-files-found: warn
