@@ -13,6 +13,13 @@
 		"enabled": true
 	},
 	"minimumReleaseAge": "3 days",
+	"packageRules": [
+		{
+			"description": "Lock file maintenance has no release timestamp, so the age gate would keep it pending forever.",
+			"matchUpdateTypes": ["lockFileMaintenance"],
+			"minimumReleaseAge": null
+		}
+	],
 	"nix": {
 		"enabled": true
 	},
