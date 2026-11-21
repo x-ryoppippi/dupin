@@ -126,6 +126,13 @@ fn install(installed: &Installed, feed: &Feed) -> Result<(), String> {
         .ok_or("the app bundle has no parent folder")?;
     // Beside the bundle, so the swap is a rename on one volume.
     let staging = parent.join(".dupin-update");
+    // A previous install that could neither place the update nor move the old app back left
+    // the only copy in staging; put it back before staging is cleared.
+    let backup = staging.join("old.app");
+    if !installed.bundle.exists() && backup.exists() {
+        std::fs::rename(&backup, &installed.bundle)
+            .map_err(|e| format!("couldn't restore the old app from {}: {e}", backup.display()))?;
+    }
     let _ = std::fs::remove_dir_all(&staging);
     std::fs::create_dir(&staging).map_err(|e| format!("couldn't create {}: {e}", staging.display()))?;
     let result = stage_and_swap(installed, feed, &staging);
