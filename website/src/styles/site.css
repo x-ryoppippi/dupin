@@ -785,11 +785,6 @@ code {
 	stroke-width: 1.6;
 }
 
-.btn-icon--fill {
-	fill: currentColor;
-	stroke: none;
-}
-
 .btn-primary:hover {
 	background: var(--accent-btn-hover);
 	transform: translateY(-1px);

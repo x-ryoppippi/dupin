@@ -1,6 +1,7 @@
 import {
 	channels,
 	docsUrl,
+	downloadChannel,
 	nixInstall,
 	releasesUrl,
 	repo,
@@ -8,6 +9,7 @@ import {
 	siteDescription,
 	siteName,
 	siteUrl,
+	stableReleased,
 } from './site.ts';
 
 // Markdown twins of the pages, for agents and other readers that prefer text. The home page's
@@ -28,7 +30,7 @@ ${setupPrompt.trimEnd()}
 
 By hand:
 
-- Homebrew: \`brew install --cask ${channels.stable.cask}\` (or \`${channels.nightly.cask}\` for builds of \`main\`), then \`open -a Dupin\`. These builds update themselves.
+- Homebrew: \`brew install --cask ${channels[downloadChannel].cask}\`, then \`open -a Dupin\`. ${stableReleased ? `Use \`${channels.nightly.cask}\` for builds of \`main\`. ` : 'This is the nightly build until the first stable release. '}These builds update themselves.
 - Nix: \`${nixInstall}\`, then \`open ~/.nix-profile/Applications/Dupin.app\`. A Nix build does not update itself.
 
 ## Links
@@ -46,14 +48,18 @@ ${siteName} runs on Apple silicon Macs with macOS 14 or later.
 
 ## Stable
 
-- App: [Dupin.zip](${channels.stable.zip}), signed and notarized; it updates itself.
-- Homebrew: \`brew install --cask ${channels.stable.cask}\`
+${
+	stableReleased
+		? `- App: [Dupin.dmg](${channels.stable.dmg}), signed and notarized; it updates itself.
+- Homebrew: \`brew install --cask ${channels.stable.cask}\``
+		: 'Not released yet. Install the nightly build until the first stable release is out.'
+}
 
 ## Nightly
 
 Built daily from \`main\`.
 
-- App: [Dupin.zip](${channels.nightly.zip})
+- App: [Dupin.dmg](${channels.nightly.dmg}), signed and notarized; it updates itself.
 - Homebrew: \`brew install --cask ${channels.nightly.cask}\`
 
 ## Nix
