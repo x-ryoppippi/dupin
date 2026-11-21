@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { repo } from '../site.ts';
-	import GitHubIcon from './GitHubIcon.svelte';
 	import Logo from './Logo.svelte';
 
 	let scrolled = $state(false);
@@ -18,7 +17,7 @@
 			<a href="/download">Download</a>
 			<a href="/#install">Install</a>
 			<a href={repo} class="nav-gh">
-				<GitHubIcon />
+				<span class="gh icon-[simple-icons--github]" aria-hidden="true"></span>
 				<span>GitHub</span>
 			</a>
 		</nav>

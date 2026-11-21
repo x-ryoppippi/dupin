@@ -1,16 +1,17 @@
+<div align="center">
+    <img src="./assets/logo/dupin.svg" alt="Dupin logo" width="128" height="128">
+    <h1>Dupin</h1>
+</div>
+
 <p align="center">
-    <img src="./assets/logo/dupin.svg" alt="Dupin" width="128" height="128">
+    <a href="https://dupin.app">dupin.app</a>
 </p>
 
-<h1 align="center">Dupin</h1>
+<div align="center">
+    <a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
+</div>
 
-A lightweight, resident launcher for Apple silicon Macs, built with [Rune](https://github.com/anomalyco/rune).
-
-Homepage: <https://dupin.app>
-
-<a href="https://dupin.app"><img src="./docs/public/website.png" alt="dupin.app: Press ⌘Space. It's there." width="720"></a>
-
-Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred.
+> A lightweight, resident launcher for Apple silicon Macs.
 
 - Fuzzy-search and open apps, by any name macOS knows them by
 - Space on an empty query searches files with Spotlight; `in` and Space search inside them
@@ -33,12 +34,7 @@ open result/Applications/Dupin.app
 
 ## Documentation
 
-- [Using Dupin](./docs/usage.md): keys, app search, file and content search
-- [Configuration](./docs/configuration.md): `config.toml`, the home-manager module, the hotkey and what happens when it's taken
-- [Development](./docs/development.md): building, the Nix layout, formatting, headless renders, peak memory
-- [Architecture](./docs/architecture.md): crates, providers, the session and the panel
-- [Working around Rune](./docs/rune-workarounds.md)
-- [Releasing](./docs/releasing.md): tagpr and CI
+See [docs/](./docs/README.md) for using, configuring and developing Dupin.
 
 ## Major Sponsors
 

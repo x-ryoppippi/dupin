@@ -1,8 +1,9 @@
 #!/usr/bin/env nu
 
 # Turn the Nix-built Dupin.app into a release: give it the channel's version and update feed,
-# sign it with a Developer ID, notarize and staple it, and write <out>/Dupin.zip and
-# <out>/update.json for the GitHub release.
+# sign it with a Developer ID, notarize and staple it, and write <out>/Dupin.zip (what the
+# updater installs), <out>/Dupin.dmg (what people download by hand) and <out>/update.json for
+# the GitHub release.
 #
 # Signing needs the Developer ID Application identity in a keychain. Notarizing needs an App
 # Store Connect API key: NOTARY_KEY_PATH (the .p8 file), NOTARY_KEY_ID and NOTARY_ISSUER.
@@ -55,24 +56,31 @@ def main [
     ^/usr/bin/codesign --verify --strict --verbose=2 $bundle
 
     let zip = $out | path join Dupin.zip
-    if $notarize {
-        let key = {
-            path: ($env.NOTARY_KEY_PATH? | default "")
-            id: ($env.NOTARY_KEY_ID? | default "")
-            issuer: ($env.NOTARY_ISSUER? | default "")
-        }
-        if ($key | values | any { is-empty }) {
-            error make {
-                msg: "notarizing needs NOTARY_KEY_PATH, NOTARY_KEY_ID and NOTARY_ISSUER"
-            }
-        }
+    let key = if $notarize { notary-key } else { null }
+    if $key != null {
         ^/usr/bin/ditto -c -k --keepParent $bundle $zip
-        ^/usr/bin/xcrun notarytool submit $zip --key $key.path --key-id $key.id --issuer $key.issuer --wait
+        notarize $zip $key
         ^/usr/bin/xcrun stapler staple $bundle
         ^/usr/sbin/spctl --assess --type execute --verbose=2 $bundle
         rm $zip
     }
     ^/usr/bin/ditto -c -k --keepParent $bundle $zip
+
+    # Opening a downloaded zip leaves Dupin.app in Downloads, where App Translocation runs it
+    # from a read-only copy that can't update itself; a disk image asks to drag it to
+    # Applications first.
+    let dmg = $out | path join Dupin.dmg
+    let image = mktemp --directory
+    ^/usr/bin/ditto $bundle ($image | path join Dupin.app)
+    ^/bin/ln -s /Applications ($image | path join Applications)
+    ^/usr/bin/hdiutil create -quiet -volname Dupin -srcfolder $image -format UDZO -ov $dmg
+    rm --recursive $image
+    ^/usr/bin/codesign --force --timestamp --sign $identity $dmg
+    if $key != null {
+        notarize $dmg $key
+        ^/usr/bin/xcrun stapler staple $dmg
+        ^/usr/sbin/spctl --assess --type open --context context:primary-signature --verbose=2 $dmg
+    }
 
     let feed = {
         version: $release.version
@@ -82,6 +90,24 @@ def main [
     }
     $feed | to json | save ($out | path join update.json)
     $feed
+}
+
+def notary-key []: nothing -> record {
+    let key = {
+        path: ($env.NOTARY_KEY_PATH? | default "")
+        id: ($env.NOTARY_KEY_ID? | default "")
+        issuer: ($env.NOTARY_ISSUER? | default "")
+    }
+    if ($key | values | any { is-empty }) {
+        error make {
+            msg: "notarizing needs NOTARY_KEY_PATH, NOTARY_KEY_ID and NOTARY_ISSUER"
+        }
+    }
+    $key
+}
+
+def notarize [file: path, key: record]: nothing -> nothing {
+    ^/usr/bin/xcrun notarytool submit $file --key $key.path --key-id $key.id --issuer $key.issuer --wait
 }
 
 # Point the binary's /nix/store libraries at the copies macOS ships, so the bundle runs

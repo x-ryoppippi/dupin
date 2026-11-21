@@ -5,17 +5,18 @@ export const sponsorUrl = 'https://github.com/sponsors/ryoppippi';
 export const siteUrl = 'https://dupin.app';
 export const siteName = 'Dupin';
 export const tagline = 'a fast, open-source launcher for Apple silicon Macs';
+export const siteDescription = `Dupin is ${tagline}. It stays resident, so when you press ⌘Space the panel is already there.`;
 
 export const channels = {
 	stable: {
 		label: 'Stable',
 		cask: 'x-ryoppippi/tap/dupin',
-		zip: `${repo}/releases/latest/download/Dupin.zip`,
+		dmg: `${repo}/releases/latest/download/Dupin.dmg`,
 	},
 	nightly: {
 		label: 'Nightly',
 		cask: 'x-ryoppippi/tap/dupin@nightly',
-		zip: `${repo}/releases/download/nightly/Dupin.zip`,
+		dmg: `${repo}/releases/download/nightly/Dupin.dmg`,
 		release: `${repo}/releases/tag/nightly`,
 	},
 } as const;
