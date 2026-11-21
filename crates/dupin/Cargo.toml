@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
+libc = { workspace = true }
 rune = { workspace = true }
 rune-notify = { workspace = true }
 rune-kit = { workspace = true }

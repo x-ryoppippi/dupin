@@ -752,6 +752,7 @@ version = "0.0.0"
 dependencies = [
  "dupin-core",
  "dupin-mac",
+ "libc",
  "rune",
  "rune-kit",
  "rune-notify",
