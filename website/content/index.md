@@ -16,11 +16,11 @@ macOS delivers a chord to only one app, so take ⌘Space back first.
 ### 2. Install and open
 
 ```sh
-brew install --cask x-ryoppippi/tap/dupin
+brew install --cask x-ryoppippi/tap/dupin@nightly
 open -a Dupin
 ```
 
-The build is signed and notarized, and it [updates itself](https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md#updates). Install `x-ryoppippi/tap/dupin@nightly` instead to follow `main`, or grab the app from the [download page](/download).
+The build is signed and notarized, and it [updates itself](https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md#updates). This is the nightly build of `main`; once the first stable release is out, `x-ryoppippi/tap/dupin` installs releases only. The app is also on the [download page](/download).
 
 ### Or with Nix
 

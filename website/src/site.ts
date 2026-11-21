@@ -19,6 +19,10 @@ export const channels = {
 	},
 } as const;
 
+// Until the first stable release ships, every download link points at the nightly build.
+export const stableReleased = false;
+export const downloadChannel: keyof typeof channels = stableReleased ? 'stable' : 'nightly';
+
 export const nixInstall = 'nix profile install github:x-ryoppippi/dupin';
 
 export const setupPrompt = `Install Dupin, a launcher for Apple silicon Macs, on this Mac and make ⌘Space open it.
