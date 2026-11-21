@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source and how many files a search shows. Changes apply at once and are written to `config.toml`, replacing any comments in it.
+Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source and how many files a search shows. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, is shown in Settings but not changed there.
 
 Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. Dupin reads the file at launch, so restart it after editing it by hand.
 
