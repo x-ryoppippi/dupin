@@ -58,13 +58,13 @@ fn main() {
         move || prefs::Prefs::new(config, binding, panel)
     });
 
-    update::spawn(config.auto_update, handle.clone());
+    let updater = update::Updater::start(config.auto_update, handle.clone());
     let hotkey = config.hotkey.clone();
     let mut registered = false;
     let app = app
         .init({
             let handle = handle.clone();
-            move || ui::Ui::new(handle, prefs_handle, config, history, config_problem)
+            move || ui::Ui::new(handle, prefs_handle, updater, config, history, config_problem)
         })
         .on_ready(move |window| {
             appear_instantly(window);
