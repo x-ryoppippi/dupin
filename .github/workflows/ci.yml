@@ -61,7 +61,9 @@ jobs:
           let app = if $env.EVENT != 'pull_request' {
             true
           } else {
-            gh pr diff $env.PR --repo $env.GITHUB_REPOSITORY --name-only
+            # A rename counts by both paths, so moving a file into website/ still builds.
+            (gh api --paginate $"repos/($env.GITHUB_REPOSITORY)/pulls/($env.PR)/files"
+              --jq '.[] | .filename, (.previous_filename // empty)')
             | lines
             | any {|path| not ($path | str starts-with 'website/') }
           }
