@@ -4,25 +4,6 @@
 # hotkey → panel → type "Calculator" → ↩ → Calculator is running.
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
-const services = [kTCCServiceAccessibility kTCCServicePostEvent kTCCServiceScreenCapture]
-
-# Grant agent-desktop what it needs. macOS gives the grant to the app that launched it, and a
-# CI runner has no one to click Allow; writing TCC.db directly needs SIP off, as on GitHub's
-# macOS images. Prints SIP and the image's existing grants first, to show which assumption broke.
-def "main grant" [] {
-    ^csrutil status
-    let db = '/Library/Application Support/com.apple.TCC/TCC.db'
-    let wanted = $services | each { $"'($in)'" } | str join ', '
-    ^sudo sqlite3 $db $"SELECT service, client, auth_value FROM access WHERE service IN \(($wanted)\);"
-    let bin = which agent-desktop | first | get path | path expand
-    let now = date now | format date '%s'
-    for client in [$bin ($bin | path dirname | path join agent-desktop-macos-helper)] {
-        for service in $services {
-            ^sudo sqlite3 $db $"INSERT OR REPLACE INTO access VALUES \('($service)', '($client)', 1, 2, 4, 1, NULL, NULL, 0, 'UNUSED', NULL, 0, ($now), NULL, NULL, 'UNUSED', ($now)\);"
-        }
-    }
-}
-
 # Run the scenario against `app`, keeping every agent-desktop reply, snapshot, screenshot and
 # Dupin's log in `out`.
 def "main run" [app: path, --out: path = 'target/e2e'] {
@@ -30,8 +11,15 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     let out = $out | path expand
     let app = $app | path expand
 
-    for command in [version status permissions] {
+    for command in [version status] {
         ad $out $command $command | to json | print
+    }
+    # The runner image grants Runner.Listener, the app that launches every step, so
+    # agent-desktop and screencapture inherit Accessibility, PostEvent and Screen Recording.
+    let denied = ad $out permissions permissions | get data | transpose permission grant
+        | where permission in [accessibility screen_recording] and grant.state != granted
+    if ($denied | is-not-empty) {
+        error make {msg: $"not granted: ($denied.permission | str join ', ')"}
     }
 
     # Spotlight holds ⌘Space on a fresh macOS.
@@ -52,10 +40,15 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     let field = poll $out query-field 10 {|r| $r.ok and $r.data?.match?.ref_id? != null } find --app Dupin --role textfield --first
     snap $out summoned
 
-    ad $out type type $field.data.match.ref_id Calculator | ignore
+    # Rune's text field has no settable AX value, so type through the focused field.
+    ad $out type --headed type $field.data.match.ref_id Calculator | ignore
     poll $out result 10 {|r| $r.ok and $r.data?.match?.ref_id? != null } find --app Dupin --text Calculator --first
     snap $out results
 
+    let before = ad $out before-return list-apps
+    if (mentions $before Calculator) {
+        error make {msg: 'Calculator was running before ↩, so its launch would prove nothing'}
+    }
     ad $out press-return press return | ignore
     poll $out opened 15 {|r| $r.ok and (mentions $r Calculator) } list-apps
     snap $out opened
@@ -93,5 +86,5 @@ def snap [out: path, name: string] {
 }
 
 def main [] {
-    print 'usage: scripts/e2e.nu grant | scripts/e2e.nu run <Dupin.app> [--out <dir>]'
+    print 'usage: scripts/e2e.nu run <Dupin.app> [--out <dir>]'
 }
