@@ -50,10 +50,14 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     }
     # `type` needs a settable AX value or the main window, and the field has neither: the
     # panel never activates, so it is key but not main. Press keys as a person would.
-    for key in ('calculator' | split chars) {
-        ad $out type press $key | ignore
+    for key in ('calculator' | split chars | enumerate) {
+        ad $out $'type-($key.index)' press $key.item | ignore
     }
     snap $out typed
+    # Fuzzy matching would still find Calculator from a query missing keys, so check every key
+    # reached the field.
+    let typed = {|r| $r.ok and $r.data?.match?.value? == 'calculator' }
+    poll --tries 5 $out typed-value $typed find --app Dupin --role textfield --first
     # Match a node named Calculator. `--text` also matches the typed field value and every
     # ancestor holding it, and a result row need not carry a ref, since ↩ opens the selection.
     let found = {|r| $r.ok and $r.data?.match? != null }
