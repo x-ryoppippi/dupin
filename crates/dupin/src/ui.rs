@@ -292,7 +292,9 @@ impl Ui {
         self.shown = false;
         self.notice = None;
         tx.close_window();
-        if let Some(request) = self.relaunch.take() {
+        if !self.settings_after_close
+            && let Some(request) = self.relaunch.take()
+        {
             self.relaunch_when_idle(request);
         }
     }
