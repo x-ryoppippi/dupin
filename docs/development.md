@@ -124,8 +124,6 @@ Hawk archive and its analysis compiler together in `nix/cargo-hawk.nix`.
 from closed-workspace visibility decisions. Those libraries define plugin and
 host contracts, including consumers in separate experiment workspaces, so this
 workspace's callers cannot establish their complete public API requirements.
-The host's provider registration entry point also remains public; its precise
-`expect` entry in `hawk.toml` fails if the exception becomes stale.
 
 ## Logo
 

@@ -200,6 +200,7 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
             Item {
                 icon: Some(app.icon.clone()),
                 score: Some(score),
+                completion: None,
                 ..item
             }
         })

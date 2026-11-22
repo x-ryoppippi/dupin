@@ -5,8 +5,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
@@ -56,6 +56,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    web: Arc<RwLock<crate::web::WebCatalog>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
@@ -140,6 +141,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            web: registration.web,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
@@ -159,11 +161,19 @@ impl Ui {
         let previous_limit = self.session.command().result_limit;
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
+        let web_changed = {
+            let mut web = self.web.write().unwrap();
+            let changed = *web != registration.web;
+            *web = registration.web;
+            changed
+        };
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
-        if self.session.command().result_limit != previous_limit {
+        if self.session.command().result_limit != previous_limit
+            || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
+        {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
@@ -409,6 +419,14 @@ impl Ui {
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
         let intent = match &ev.key {
+            Key::Tab
+                if plain
+                    && !m.shift
+                    && self.query.anchor == self.query.focus
+                    && self.query.focus == self.query.text.len() =>
+            {
+                Intent::Complete
+            }
             Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,

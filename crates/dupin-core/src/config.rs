@@ -1,5 +1,7 @@
 //! `config.toml`: user settings. Every key is optional; a missing file is the defaults.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -12,6 +14,10 @@ pub struct Config {
     pub file_limit: usize,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
+    /// Web search keywords and their URL templates. `{query}` is replaced when selected.
+    pub web_searches: BTreeMap<String, WebSearch>,
+    /// Web search keywords offered when no regular results match.
+    pub web_fallbacks: Vec<String>,
     /// Where the panel opens on the display under the pointer.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
@@ -21,6 +27,13 @@ pub struct Config {
     pub auto_update: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebSearch {
+    pub name: String,
+    pub url: String,
 }
 
 /// What animates behind the query field. In config.toml: `"flow"`, `"off"`, or the path to a
@@ -110,6 +123,30 @@ impl Default for Config {
             hotkey: "cmd+space".into(),
             file_limit: 200,
             dictionary_keywords: vec!["define".into(), "d".into()],
+            web_searches: BTreeMap::from([
+                (
+                    "g".into(),
+                    WebSearch {
+                        name: "Google".into(),
+                        url: "https://www.google.com/search?q={query}".into(),
+                    },
+                ),
+                (
+                    "gh".into(),
+                    WebSearch {
+                        name: "GitHub".into(),
+                        url: "https://github.com/search?q={query}".into(),
+                    },
+                ),
+                (
+                    "yt".into(),
+                    WebSearch {
+                        name: "YouTube".into(),
+                        url: "https://www.youtube.com/results?search_query={query}".into(),
+                    },
+                ),
+            ]),
+            web_fallbacks: Vec::new(),
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
@@ -162,6 +199,45 @@ mod tests {
         assert_eq!(Config::parse("").unwrap().dictionary_keywords, ["define", "d"]);
         let config = Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
         assert_eq!(config.dictionary_keywords, ["word", "lookup"]);
+    }
+
+    #[test]
+    fn web_search_defaults_and_custom_entries_round_trip() {
+        let defaults = Config::default();
+        assert_eq!(defaults.web_searches["g"].name, "Google");
+        assert_eq!(
+            defaults.web_searches["g"].url,
+            "https://www.google.com/search?q={query}"
+        );
+        assert_eq!(defaults.web_searches["gh"].name, "GitHub");
+        assert_eq!(defaults.web_searches["yt"].name, "YouTube");
+        assert!(defaults.web_fallbacks.is_empty());
+
+        let config = Config::parse(
+            r#"
+web_searches."docs".name = "Docs"
+web_searches."docs".url = "https://docs.example/search?q={query}"
+web_fallbacks = ["docs", "g"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.web_searches["docs"].name, "Docs");
+        assert_eq!(config.web_fallbacks, ["docs", "g"]);
+
+        assert!(
+            Config::parse(
+                r#"
+[web_searches.docs]
+name = "Docs"
+url = "https://docs.example/search?q={query}"
+unexpected = true
+"#
+            )
+            .is_err()
+        );
+
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
     }
 
     #[test]

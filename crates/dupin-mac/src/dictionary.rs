@@ -75,6 +75,7 @@ fn item(term: &str, definition: String) -> Item {
         record_usage: false,
         icon: None,
         matched: Vec::new(),
+        completion: None,
         score: None,
         primary: None,
         alternate: None,

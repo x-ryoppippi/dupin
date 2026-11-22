@@ -63,6 +63,7 @@ impl QueryPresentation {
 pub struct CommandSpec {
     id: CommandId,
     pub result_limit: usize,
+    fallback: bool,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
 }
@@ -72,9 +73,20 @@ impl CommandSpec {
         Self {
             id,
             result_limit,
+            fallback: false,
             presentation,
             deadline: std::time::Duration::from_secs(30),
         }
+    }
+
+    /// Mark this provider's results as fallback results for the default search.
+    pub fn with_fallback(mut self) -> Self {
+        self.fallback = true;
+        self
+    }
+
+    pub(crate) fn is_fallback(&self) -> bool {
+        self.fallback
     }
 }
 

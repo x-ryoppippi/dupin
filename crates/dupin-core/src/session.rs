@@ -17,6 +17,8 @@ pub enum Intent {
     Backspace,
     Up,
     Down,
+    /// Complete the selected result into the query field.
+    Complete,
     /// Enter.
     Open,
     /// ⌘Enter.
@@ -94,6 +96,7 @@ struct ProviderState {
     items: Vec<Item>,
     phase: ProviderPhase,
     limit: usize,
+    fallback: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -293,6 +296,19 @@ impl Session {
         let empty = self.query.is_empty();
         Some(match intent {
             Intent::Actions => self.actions(),
+            Intent::Complete => {
+                let completion = self.actionable_items().get(self.selected)?.completion.clone()?;
+                let mut effects = self.set_query(&completion);
+                if let Some(Effect::ReplaceQuery(text)) = effects
+                    .iter_mut()
+                    .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
+                {
+                    *text = self.query.clone();
+                } else {
+                    effects.insert(0, Effect::ReplaceQuery(self.query.clone()));
+                }
+                effects
+            }
             Intent::Space if empty => self
                 .commands
                 .space_on_empty(&self.command)
@@ -447,6 +463,11 @@ impl Session {
             }
         }
         let pending = self.providers.values().any(|s| s.phase == ProviderPhase::Pending);
+        let show_fallback = self
+            .providers
+            .values()
+            .filter(|state| !state.fallback)
+            .all(|state| state.phase != ProviderPhase::Pending && state.items.is_empty());
         self.items.clear();
         self.origins.clear();
         let mut order = self.active_order.clone();
@@ -455,6 +476,9 @@ impl Session {
         }
         for id in order {
             let state = &self.providers[&id];
+            if state.fallback && !show_fallback {
+                continue;
+            }
             let count = if self.active_pin.as_ref() == Some(&id) {
                 1
             } else {
@@ -597,6 +621,7 @@ impl Session {
                         items: Vec::new(),
                         phase: ProviderPhase::Pending,
                         limit: self.commands.command(&id).unwrap().result_limit,
+                        fallback: !self.explicit && self.commands.command(&id).unwrap().is_fallback(),
                     },
                 )
             })
