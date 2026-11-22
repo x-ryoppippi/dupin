@@ -42,8 +42,13 @@ statistical comparison or a reason by itself to enable sccache by default.
 The child processes inherit the caller's normal build environment except that
 inherited `SCCACHE_*` variables and `CARGO_INCREMENTAL` are removed. The script
 sets `RUSTC_WRAPPER` explicitly for each case and sets
-`RUSTC_WORKSPACE_WRAPPER` to empty. This keeps the cache and server isolated and
-lets Cargo use its default incremental setting.
+`RUSTC_WORKSPACE_WRAPPER` to empty. This isolates the cache and server without
+imposing an incremental profile override.
+
+Explicit profile overrides such as `CARGO_PROFILE_DEV_INCREMENTAL` and the
+caller's Cargo configuration still apply. Normal completion and caught command
+failures stop the private server; interrupting a build may leave it running
+until its idle timeout.
 
 ## Recorded run
 
@@ -70,7 +75,9 @@ the non-cacheable requests separately.
 
 This sequential run shows that many cache hits can coexist with little change
 in build time when the target path changes. Rebuilding at the same path had a
-large benefit here. Local machine load and operating-system caches were not
+large benefit here: 7.686 seconds was also below both fresh native builds
+(27.935 and 28.403 seconds). The slower 36.206-second native rebuild has no
+established explanation. Local machine load and operating-system caches were not
 controlled, so these are observations, not stable speedup estimates. They do
 not establish the exact cause of each miss or show that path settings would
 resolve it. The development shell and CI keep their existing

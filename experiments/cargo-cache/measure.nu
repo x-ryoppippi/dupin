@@ -244,7 +244,7 @@ def main [sccache: path, --package(-p): string = "dupin", --output(-o): path = "
             ))
             | str trim
         )
-        cargo_incremental: "unset for child Cargo processes; Cargo default applies"
+        cargo_incremental: "CARGO_INCREMENTAL unset; profile settings and Cargo configuration remain in effect"
         workspace_wrapper: "RUSTC_WORKSPACE_WRAPPER is empty for child Cargo processes"
         cache_limit_bytes: 2147483648
         temporary_root: ($temp_root | into string)
