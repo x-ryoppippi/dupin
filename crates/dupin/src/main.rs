@@ -69,7 +69,8 @@ fn main() {
         families: FAMILIES,
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
-    .windowless();
+    .windowless()
+    .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let prefs = prefs.init({

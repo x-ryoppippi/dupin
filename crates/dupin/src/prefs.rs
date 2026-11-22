@@ -188,6 +188,11 @@ impl Prefs {
         }
     }
 
+    pub fn closed(&mut self, _: &mut Tx) {
+        // Queue the decision so Rune publishes Settings' hidden state before it runs.
+        self.panel.update(Ui::resume_restart);
+    }
+
     fn change_hotkey(&mut self, next: Option<&Shortcut>, _: &mut Tx) -> Result<(), ShortcutError> {
         let result = self.binding.replace(next);
         self.owner = match (&result, next) {

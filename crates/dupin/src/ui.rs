@@ -166,6 +166,12 @@ impl Ui {
         self.restart(Restart::Requested, tx);
     }
 
+    pub fn resume_restart(&mut self, tx: &mut Tx) {
+        if let Some(request) = self.relaunch.take() {
+            self.restart(request, tx);
+        }
+    }
+
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
     /// Automatic updates wait for both windows to hide; an explicit request closes them.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
