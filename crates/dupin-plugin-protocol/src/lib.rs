@@ -218,13 +218,14 @@ fn identifier(value: &str, field: &'static str) -> Result<(), ProtocolError> {
     Ok(())
 }
 fn state(value: &Option<State>) -> Result<(), ProtocolError> {
-    fn depth(value: &serde_json::Value, level: usize) -> bool {
-        if level > 64 {
-            return false;
-        }
+    fn depth(value: &serde_json::Value, remaining: usize) -> bool {
         match value {
-            serde_json::Value::Array(values) => values.iter().all(|v| depth(v, level + 1)),
-            serde_json::Value::Object(values) => values.values().all(|v| depth(v, level + 1)),
+            serde_json::Value::Array(values) => {
+                remaining > 0 && values.iter().all(|v| depth(v, remaining - 1))
+            }
+            serde_json::Value::Object(values) => {
+                remaining > 0 && values.values().all(|v| depth(v, remaining - 1))
+            }
             _ => true,
         }
     }
@@ -232,7 +233,7 @@ fn state(value: &Option<State>) -> Result<(), ProtocolError> {
         if value.version == 0 {
             return Err(ProtocolError::InvalidField("state.version"));
         }
-        if !depth(&value.data, 0) {
+        if !depth(&value.data, 64) {
             return Err(ProtocolError::InvalidField("state.data"));
         }
         encode_json(&value.data, MAX_STATE_BYTES).map_err(|_| ProtocolError::InvalidField("state.data"))?;
@@ -377,6 +378,25 @@ mod tests {
         };
         subtitle.clear();
         assert_eq!(Response::decode(&res.encode(&req).unwrap(), &req).unwrap(), res);
+    }
+
+    #[test]
+    fn state_depth_counts_containers_without_rejecting_boundary_leaves() {
+        let nested = |count, leaf| (0..count).fold(leaf, |value, _| json!([value]));
+        let mut req = request();
+        req.state.as_mut().unwrap().data = nested(64, serde_json::Value::Null);
+        assert_eq!(Request::decode(&req.encode().unwrap()).unwrap(), req);
+        for empty in [json!([]), json!({})] {
+            req.state.as_mut().unwrap().data = nested(63, empty.clone());
+            assert!(req.encode().is_ok());
+            req.state.as_mut().unwrap().data = nested(64, empty);
+            assert_eq!(req.encode(), Err(ProtocolError::InvalidField("state.data")));
+            let bytes = serde_json::to_vec(&req).unwrap();
+            assert_eq!(
+                Request::decode(&bytes),
+                Err(ProtocolError::InvalidField("state.data"))
+            );
+        }
     }
     #[test]
     fn rejects_malformed_oversize_and_unknown_versions() {

@@ -38,7 +38,7 @@ fn fixture(version: &str, alloc: &str, query: &str, data: &[u8]) -> GuestModule 
     let data: String = data.iter().map(|byte| format!("\\{byte:02x}")).collect();
     let module = format!(
         r#"(module
-        (memory (export "memory") 8 256)
+        (memory (export "memory") 8)
         (global $next (mut i32) (i32.const 1024))
         (global $calls (mut i32) (i32.const 0))
         (func (export "dupin_abi_version") (result i32) {version})
@@ -143,10 +143,23 @@ fn memory_and_table_limits_cover_startup_and_growth() {
         let module = GuestModule::load(&wat::parse_str(source).unwrap()).unwrap();
         assert_eq!(module.query(&request()), Err(HostError::Instantiate));
     }
+    let bytes = response().encode(&request()).unwrap();
+    let copy = format!(
+        "local.get 2 i32.const 400000 i32.const {} memory.copy i32.const {}",
+        bytes.len(),
+        bytes.len()
+    );
+    let exact = fixture(
+        "i32.const 1",
+        ALLOC,
+        &format!("i32.const 248 memory.grow drop {copy}"),
+        &bytes,
+    );
+    assert_eq!(exact.query(&request()).unwrap(), response());
     let module = fixture(
         "i32.const 1",
         ALLOC,
-        "i32.const 257 memory.grow drop i32.const 0",
+        "i32.const 249 memory.grow drop i32.const 0",
         b"",
     );
     assert_eq!(module.query(&request()), Err(HostError::Trap));

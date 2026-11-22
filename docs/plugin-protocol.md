@@ -51,8 +51,11 @@ current-generation checks.
 | Actions per item             |                    8 |
 | Encoded opaque state data    |      8 KiB, depth 64 |
 
-State schema versions must be positive; the feature owns their meaning. Strings
-are measured in UTF-8 bytes, and IDs cannot contain control characters. A zero
+State schema versions must be positive; the feature owns their meaning. Depth
+counts nested arrays and objects, with at most 64 containers on a path. State
+holds parsed JSON values: duplicate object keys inside `state.data` keep their
+last value. Typed protocol fields reject duplicates. Strings are measured in
+UTF-8 bytes, and IDs cannot contain control characters. A zero
 result limit is valid. The calculator returns an empty result before evaluation
 in that case. Data is rejected rather than silently truncated.
 

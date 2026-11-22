@@ -23,6 +23,8 @@ arithmetic and a zero-limit pathological expression. The latter must return
 an empty result without evaluating it. There are no clipboard, URL, network,
 file-search or calendar operations in this fixture.
 The calculator is stateless and rejects supplied saved state explicitly.
+It uses fend's search preview; when that preview is empty, the response contains
+no items rather than an error. Final calculator evaluation policy belongs to #17.
 
 ```sh
 cargo test -p dupin-plugin-protocol

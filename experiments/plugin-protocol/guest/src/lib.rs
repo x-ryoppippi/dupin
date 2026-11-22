@@ -46,9 +46,9 @@ fn handle_with(bytes: &[u8], evaluate: impl FnOnce(&str) -> String) -> Result<Ve
     } else {
         let result = evaluate(&request.query);
         if result.is_empty() {
-            Outcome::Error {
-                code: ErrorCode::InvalidQuery,
-                message: "No result for this expression.".into(),
+            Outcome::Results {
+                items: Vec::new(),
+                state: None,
             }
         } else {
             Outcome::Results {
@@ -191,5 +191,15 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn uninteresting_previews_do_not_become_errors() {
+        for query in ["42", "not-maths", "2^200"] {
+            let request = request(query);
+            let bytes = handle(&request.encode().unwrap()).unwrap();
+            let response = Response::decode(&bytes, &request).unwrap();
+            assert!(matches!(response.outcome, Outcome::Results { items, .. } if items.is_empty()));
+        }
     }
 }
