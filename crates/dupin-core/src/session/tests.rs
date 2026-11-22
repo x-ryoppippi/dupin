@@ -89,6 +89,28 @@ fn unknown_actions_and_missing_results_do_nothing() {
 }
 
 #[test]
+fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
+    for intent in [Intent::Actions, Intent::Open, Intent::OpenAlternate] {
+        let mut s = Session::default();
+        let old_generation = searched(&s.set_query("old")).1;
+        s.deliver(Delivery::Batch {
+            generation: old_generation,
+            items: vec![item(ItemKind::File, "old.md")],
+        });
+        let generation = searched(&s.set_query("new")).1;
+        assert_eq!(s.items()[0].id, "/x/old.md");
+        assert!(s.intent(intent).unwrap().is_empty());
+        assert!(s.run_action(generation, "/x/old.md", "open").is_empty());
+        assert_eq!(s.history(), &History::default());
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item(ItemKind::File, "new.md")],
+        });
+        assert!(!s.intent(intent).unwrap().is_empty());
+    }
+}
+
+#[test]
 fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let mut history = History::default();
     history.record("/Applications/Safari.app", "saf", 1_800_000_000);

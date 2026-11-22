@@ -176,7 +176,8 @@ impl Session {
     }
 
     fn actions(&self) -> Vec<Effect> {
-        self.selected_item()
+        self.actionable_items()
+            .get(self.selected)
             .filter(|item| !item.actions.is_empty())
             .map(|item| {
                 vec![Effect::ShowActions {
@@ -187,11 +188,24 @@ impl Session {
             .unwrap_or_default()
     }
 
+    fn actionable_items(&self) -> &[Item] {
+        if matches!(self.results, Results::Searching { replaced: false }) {
+            &[]
+        } else {
+            &self.items
+        }
+    }
+
     pub fn run_action(&mut self, generation: u64, item_id: &str, action_id: &str) -> Vec<Effect> {
         if generation != self.generation {
             return Vec::new();
         }
-        let Some(item) = self.items.iter().find(|item| item.id == item_id).cloned() else {
+        let Some(item) = self
+            .actionable_items()
+            .iter()
+            .find(|item| item.id == item_id)
+            .cloned()
+        else {
             return Vec::new();
         };
         let Some(action) = item.action(action_id).cloned() else {
@@ -330,7 +344,7 @@ impl Session {
                 vec![Effect::RevealSelection]
             }
             Intent::Open | Intent::OpenAlternate => {
-                let Some(item) = self.selected_item() else {
+                let Some(item) = self.actionable_items().get(self.selected) else {
                     return Some(Vec::new());
                 };
                 let id = if intent == Intent::Open {
