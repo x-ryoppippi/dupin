@@ -16,16 +16,21 @@ use crate::ui::Ui;
 /// the settings window (which replaces it).
 pub struct Binding {
     panel: AppHandle<Ui>,
-    id: Mutex<Option<ShortcutId>>,
+    registration: Mutex<Option<Registration>>,
     /// Whether the launch registration failed, so recording the same chord again retries it.
     failed: Mutex<bool>,
+}
+
+struct Registration {
+    id: ShortcutId,
+    shortcut: Shortcut,
 }
 
 impl Binding {
     pub fn new(panel: AppHandle<Ui>) -> Binding {
         Binding {
             panel,
-            id: Mutex::new(None),
+            registration: Mutex::new(None),
             failed: Mutex::new(false),
         }
     }
@@ -36,8 +41,9 @@ impl Binding {
 
     /// Register the configured hotkey at launch, reporting any failure.
     pub fn register_at_launch(&self, accelerator: &str) {
-        let shortcut = match accelerator.parse::<Shortcut>() {
-            Ok(shortcut) => shortcut,
+        let shortcut = match parse(accelerator) {
+            Ok(Some(shortcut)) => shortcut,
+            Ok(None) => return,
             Err(e) => return self.report(accelerator, &e.to_string()),
         };
         // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
@@ -52,7 +58,8 @@ impl Binding {
             .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
         {
             Ok(id) => {
-                *self.id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+                *self.registration.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Registration { id, shortcut });
                 crate::trace::registered(accelerator);
             }
             Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
@@ -76,18 +83,30 @@ impl Binding {
                     .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
             })
             .transpose()?;
-        let mut id = self.id.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = *id
-            && let Err(error) = self.panel.unregister_shortcut(old)
+        let mut registration = self.registration.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = registration.as_ref()
+            && let Err(error) = self.panel.unregister_shortcut(old.id)
         {
             if let Some(new) = new {
                 let _ = self.panel.unregister_shortcut(new);
             }
             return Err(error);
         }
-        *id = new;
+        *registration = new.zip(next).map(|(id, shortcut)| Registration {
+            id,
+            shortcut: shortcut.clone(),
+        });
         *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = false;
         Ok(())
+    }
+
+    pub fn is_installed(&self, shortcut: Option<&Shortcut>) -> bool {
+        self.registration
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|registration| &registration.shortcut)
+            == shortcut
     }
 
     /// Who holds `shortcut`, for a refusal message.
@@ -112,6 +131,14 @@ impl Binding {
             (ShortcutError::Conflict, None) => "another app already uses it".to_owned(),
             (e, _) => e.to_string(),
         }
+    }
+}
+
+pub fn parse(accelerator: &str) -> Result<Option<Shortcut>, ShortcutError> {
+    if accelerator.trim().is_empty() {
+        Ok(None)
+    } else {
+        accelerator.parse().map(Some)
     }
 }
 
@@ -144,6 +171,19 @@ pub fn keycaps(accelerator: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_hotkey_disables_registration() {
+        assert_eq!(super::parse(""), Ok(None));
+        assert_eq!(super::parse("  "), Ok(None));
+        assert!(super::parse("cmd+not-a-key").is_err());
+        assert!(super::parse("cmd+space").unwrap().is_some());
+    }
+
+    #[test]
+    fn equivalent_spellings_describe_the_same_hotkey() {
+        assert_eq!(super::parse("cmd+space"), super::parse("Command+Space"));
+    }
+
     #[test]
     fn a_recorded_shortcut_is_saved_in_a_form_that_reads_back() {
         for accelerator in ["cmd+space", "ctrl+space", "ctrl+alt+k", "shift+cmd+p"] {

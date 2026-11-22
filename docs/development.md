@@ -20,6 +20,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+For isolated local Cargo cache measurements, see the
+[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
+sccache across fresh and reused target directories without changing the
+development shell or Nix package cache.
+
 ## Nix layout
 
 | File                   | Holds                                                                                                                       |
