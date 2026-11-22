@@ -98,6 +98,35 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
     poll $out settings-window $settings list-windows --app Dupin
     snap $out settings-general
+    # Each page in the sidebar in turn: a ref from before a click goes stale once the page
+    # changes, so find the next one afresh.
+    let search = poll $out search $page find --app Dupin --name Search --exact --first
+    ad $out open-search click $search.data.match.ref_id | ignore
+    (poll
+        $out
+        search-page
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Files shown'
+        --exact
+        --first
+    )
+    snap $out settings-search
+    let appearance = (poll
+        $out
+        appearance
+        $page
+        find
+        --app
+        Dupin
+        --name
+        Appearance
+        --exact
+        --first
+    )
     ad $out open-appearance click $appearance.data.match.ref_id | ignore
     (poll
         $out
