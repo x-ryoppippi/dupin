@@ -596,6 +596,7 @@ mod tests {
         fs::write(&path, source).unwrap();
         let desired = Config {
             dictionary_keywords: vec!["lookup".into()],
+            position: dupin_core::Position::Top,
             ..base.clone()
         };
 
@@ -609,7 +610,13 @@ mod tests {
         .run();
 
         let update = update_receiver.try_recv().unwrap();
-        assert_eq!(update.result.unwrap().dictionary_keywords, ["meaning"]);
+        assert_eq!(
+            update.result.unwrap(),
+            Config {
+                dictionary_keywords: vec!["meaning".into()],
+                ..Config::default()
+            }
+        );
         let error = update.save_problem.unwrap();
         assert!(error.contains("conflicting setting"));
         assert!(!error.contains("meaning"));
