@@ -176,16 +176,15 @@ impl Ui {
         if update.revision != self.configuration.files.revision() {
             return;
         }
+        let previous = self.configuration.values.borrow().clone();
         let accepted = update.result.and_then(|config| {
-            let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
-                "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
-            })?;
-            if !self.configuration.hotkey.is_installed(shortcut.as_ref()) {
-                self.configuration.hotkey.replace(shortcut.as_ref()).map_err(|error| {
-                    format!("Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration.")
-                })?;
-            }
-            Ok(config)
+            accept_config(config, &previous, |shortcut| {
+                if self.configuration.hotkey.is_installed(shortcut) {
+                    Ok(())
+                } else {
+                    self.configuration.hotkey.replace(shortcut)
+                }
+            })
         });
         let problem = match accepted {
             Ok(config) => {
@@ -193,13 +192,15 @@ impl Ui {
                     *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config, tx);
                 }
-                update.watch_problem
+                None
             }
-            Err(error) => Some(match update.watch_problem {
-                Some(watch) => format!("{error} {watch}"),
-                None => error,
-            }),
+            Err(error) => Some(error),
         };
+        let problems: Vec<_> = [problem, update.save_problem, update.watch_problem]
+            .into_iter()
+            .flatten()
+            .collect();
+        let problem = (!problems.is_empty()).then(|| problems.join("; "));
         if self.config_problem != problem
             && let Some(problem) = &problem
         {
@@ -596,6 +597,24 @@ fn backdrop_source(pick: &Backdrop) -> crate::shader::Source {
     source
 }
 
+fn accept_config(
+    config: Config,
+    previous: &Config,
+    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
+) -> Result<Config, String> {
+    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
+        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
+    })?;
+    if let Err(error) = install(shortcut.as_ref())
+        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
+    {
+        return Err(format!(
+            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
+        ));
+    }
+    Ok(config)
+}
+
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
     let due: Vec<_> = deadlines
         .iter()
@@ -623,5 +642,32 @@ mod deadline_tests {
         deadlines.insert(id.clone(), (3, 30.0));
         deadlines.remove(&id);
         assert!(take_due(&mut deadlines, 30.0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
+        let previous = Config::default();
+        let changed = Config {
+            file_limit: 50,
+            ..previous.clone()
+        };
+        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
+        assert_eq!(accepted, Ok(changed));
+    }
+
+    #[test]
+    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
+        let previous = Config::default();
+        let changed = Config {
+            hotkey: "ctrl+alt+k".into(),
+            file_limit: 50,
+            ..previous.clone()
+        };
+        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
     }
 }

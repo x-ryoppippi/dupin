@@ -14,6 +14,7 @@ pub struct Update {
     pub read_only: bool,
     pub result: Result<Config, String>,
     pub watch_problem: Option<String>,
+    pub save_problem: Option<String>,
 }
 
 pub struct Service {
@@ -174,7 +175,7 @@ where
             if !batch.saves.is_empty() {
                 self.process_saves(batch.saves);
             } else if !batch.stop && (batch.activate || batch.changed) {
-                self.emit_snapshot(self.last_processed_revision);
+                self.emit_snapshot(self.last_processed_revision, None);
             }
 
             if batch.stop {
@@ -197,7 +198,7 @@ where
         let Some(path) = &self.path else {
             return;
         };
-        let (original_source, current, read_only) = read(path);
+        let (original_source, current, _) = read(path);
         let saved = current
             .map_err(|error| format!("could not save config.toml: {error}"))
             .and_then(|mut current| {
@@ -211,17 +212,17 @@ where
             });
 
         match saved {
-            Ok(()) => self.emit_snapshot(latest_revision),
-            Err(error) => self.emit(original_source, Err(error), read_only, latest_revision),
+            Ok(()) => self.emit_snapshot(latest_revision, None),
+            Err(error) => self.emit_snapshot(latest_revision, Some(error)),
         }
     }
 
-    fn emit_snapshot(&mut self, revision: u64) {
+    fn emit_snapshot(&mut self, revision: u64, save_problem: Option<String>) {
         let (source, result, read_only) = match &self.path {
             Some(path) => read(path),
             None => (None, Ok(Config::default()), false),
         };
-        self.emit(source, result, read_only, revision);
+        self.emit(source, result, read_only, revision, save_problem);
     }
 
     fn emit(
@@ -230,12 +231,14 @@ where
         result: Result<Config, String>,
         read_only: bool,
         revision: u64,
+        save_problem: Option<String>,
     ) {
         let update = Update {
             revision,
             read_only,
             result,
             watch_problem: self.watch_problem.clone(),
+            save_problem,
         };
         let emitted = Emitted {
             source,
@@ -606,7 +609,8 @@ mod tests {
         .run();
 
         let update = update_receiver.try_recv().unwrap();
-        let error = update.result.unwrap_err();
+        assert_eq!(update.result.unwrap().dictionary_keywords, ["meaning"]);
+        let error = update.save_problem.unwrap();
         assert!(error.contains("conflicting setting"));
         assert!(!error.contains("meaning"));
         assert_eq!(fs::read_to_string(path).unwrap(), source);
