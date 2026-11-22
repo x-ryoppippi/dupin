@@ -6,6 +6,7 @@
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
 use e2e-recording.nu record
+use e2e-state.nu is-focused-query
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
@@ -95,10 +96,7 @@ def scenario [out: path] {
     let left_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: key Left ' } | length
     let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: quick-look picker input visible=false key=false' } | length
     ad $out close-preview press escape | ignore
-    let restored = {|r|
-        $r.ok and $r.data?.match?.value? == 'calculator'
-        and 'focused' in ($r.data?.match?.states? | default [])
-    }
+    let restored = {|r| is-focused-query $r calculator }
     (poll
         $out
         quick-look-restored
