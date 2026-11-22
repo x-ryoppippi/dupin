@@ -147,7 +147,8 @@ fn unknown_actions_and_missing_results_do_nothing() {
     });
     let key = s.result_key(0);
     assert!(s.run_key_action(&key, "unknown").is_empty());
-    assert!(s.run_key_action("missing-result", "open").is_empty());
+    let missing_key = key.replace("/x/notes.md", "/x/missing.md");
+    assert!(s.run_key_action(&missing_key, "open").is_empty());
     assert_eq!(s.query(), "note");
 }
 
@@ -610,7 +611,8 @@ fn a_click_selects_by_id_even_after_rows_move() {
     let key = s.result_key(2);
     assert!(s.select_key(&key));
     assert_eq!(s.selected_item().unwrap().display_title(), "C");
-    assert!(!s.select_key("missing-result"));
+    let missing_key = key.replace("/x/C", "/x/gone");
+    assert!(!s.select_key(&missing_key));
     assert_eq!(s.selected(), 2);
 }
 
