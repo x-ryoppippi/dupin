@@ -280,6 +280,22 @@ impl Ui {
         self.apply(effects, tx);
     }
 
+    /// Keep panel shortcuts available while the definition owns the text selection.
+    pub fn unfocused_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if tx.focused().is_some() {
+            return false;
+        }
+        if let Key::Text(text) = &ev.key
+            && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt)
+        {
+            tx.focus("query", false);
+            self.query.insert(text);
+            self.edited(tx);
+            return true;
+        }
+        self.key(ev, tx)
+    }
+
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         crate::trace::key(ev);

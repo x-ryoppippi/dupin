@@ -184,6 +184,7 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                     .child(
                         row()
                             .w_full()
+                            .center_y()
                             .gap(12.0)
                             .child(
                                 text(item.title.as_str())
@@ -191,8 +192,14 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                                     .color(t.text)
                                     .wrap(),
                             )
-                            .child(text("↩ Open in Dictionary").font(type_::BODY).color(accent))
-                            .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                            .child(
+                                text("↩ Open in Dictionary")
+                                    .font(type_::BODY)
+                                    .color(accent)
+                                    .cursor(rune::Cursor::Pointer)
+                                    .hover(t.hover)
+                                    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                            ),
                     )
                     .child(
                         col()
@@ -246,7 +253,7 @@ fn dictionary_definition(definition: &str, t: &tok::Theme) -> El {
         .gap(12.0)
         .selection_group(true)
         .children(boundaries.windows(2).enumerate().map(|(index, range)| {
-            text(&definition[range[0]..range[1]])
+            text(definition[range[0]..range[1]].trim_end())
                 .key(format!("definition-paragraph-{index}"))
                 .w_full()
                 .font(TextStyle::new(16.0, 400.0).lh(25.0))

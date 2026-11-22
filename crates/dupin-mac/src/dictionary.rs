@@ -32,7 +32,7 @@ impl Default for DictionaryProvider {
 impl Provider for DictionaryProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
         let term = request.query.trim();
-        if term.is_empty() || request.is_cancelled() {
+        if request.limit == 0 || term.is_empty() || request.is_cancelled() {
             return;
         }
         let Some(definition) = (self.lookup)(term) else {
@@ -111,6 +111,16 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0][0].title, "serendipity");
         assert_eq!(batches[0][0].subtitle, "The occurrence of events by chance.");
+    }
+
+    #[test]
+    fn zero_limit_does_not_lookup_or_emit() {
+        let provider = DictionaryProvider {
+            lookup: |_| panic!("zero limit must skip lookup"),
+        };
+        provider.search(&Request::detached("serendipity", 0), &mut |_| {
+            panic!("zero limit must not emit")
+        });
     }
 
     #[test]

@@ -40,6 +40,7 @@ fn main() {
 
     let spec = AppSpec {
         setup: Some(ui::Ui::setup),
+        on_key: Some(ui::Ui::unfocused_key),
         fonts,
         families: FAMILIES,
         ..AppSpec::new(
