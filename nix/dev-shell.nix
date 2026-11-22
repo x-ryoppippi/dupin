@@ -3,10 +3,7 @@
     { config, pkgs, ... }:
     {
       devShells.default = pkgs.mkShell {
-        inputsFrom = [
-          config.packages.dupin
-          config.packages.dupin.cargoBinary
-        ];
+        inputsFrom = [ config.packages.dupin.baseline ];
         packages =
           with pkgs;
           [

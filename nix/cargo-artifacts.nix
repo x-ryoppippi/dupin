@@ -21,6 +21,7 @@ let
       inherit (pkgs) rustfmt;
     }
   );
+  # Match cargoSetupHook's target defaults so cached and baseline code generation agree.
   cargoVendorDir = pkgs.runCommand "dupin-cargo-vendor-config" { } ''
     mkdir -p "$out"
     # Per-crate links let Crane remove references to the original source store path.

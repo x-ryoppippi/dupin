@@ -74,6 +74,7 @@ def main [
     --output: path = "/tmp/dupin-nix-cache-results.json"
 ] {
     const script = path self
+    let script_sha256 = open --raw $script | hash sha256
     if ($baseline_revision | is-empty) {
         error make {msg: "Provide --baseline-revision with the original Nix build."}
     }
@@ -174,7 +175,11 @@ def main [
             {
                 name: $snapshot.name
                 values: ($attributes | each {|attribute|
-                    {label: $attribute.label, drv: (evaluate $snapshot.flake $"($attribute.attribute).drvPath")}
+                    {
+                        label: $attribute.label
+                        drv: (evaluate $snapshot.flake $"($attribute.attribute).drvPath")
+                        output: (evaluate $snapshot.flake $"($attribute.attribute).outPath")
+                    }
                 })
             }
         }
@@ -206,31 +211,38 @@ def main [
         let nonce = random uuid
         let edit = $"\nconst _: &str = \"($nonce)\";\n"
         $snapshots | each {|snapshot|
-            $edit | save --append ($snapshot.directory | path join crates dupin src ui.rs)
+            let module = $snapshot.directory | path join crates dupin src ui.rs
+            let source = open --raw $module
+            if not ($source | str contains "\nuse ") {
+                error make {msg: "The UI module must contain an import after its documentation."}
+            }
+            $source | str replace "\nuse " $"($edit)\nuse " | save --force $module
         } | ignore
         let after_artifacts = {
             release: (evaluate $candidate.flake "dupin.releaseArtifacts.outPath")
             debug: (evaluate $candidate.flake "dupin.debugArtifacts.outPath")
         }
         if $before_artifacts != $after_artifacts {
-            error make {
-                msg: "A Rust source edit changed the dependency artifact derivations."
-            }
+            error make {msg: "A Rust source edit changed the dependency output paths."}
         }
         let after_derivations = $snapshots | each {|snapshot|
             {
                 name: $snapshot.name
                 values: ($attributes | each {|attribute|
-                    {label: $attribute.label, drv: (evaluate $snapshot.flake $"($attribute.attribute).drvPath")}
+                    {
+                        label: $attribute.label
+                        drv: (evaluate $snapshot.flake $"($attribute.attribute).drvPath")
+                        output: (evaluate $snapshot.flake $"($attribute.attribute).outPath")
+                    }
                 })
             }
         }
         let stale = $before_derivations | zip $after_derivations | any {|pair|
-            $pair.0.values | zip $pair.1.values | any {|entry| $entry.0.drv == $entry.1.drv}
+            $pair.0.values | zip $pair.1.values | any {|entry| $entry.0.output == $entry.1.output}
         }
         if $stale {
             error make {
-                msg: "The Rust source edit must change every application/check derivation."
+                msg: "The Rust source edit must change every application/check output path."
             }
         }
         let measurements = $attributes | each {|attribute|
@@ -269,7 +281,7 @@ def main [
         started_at: $started_at
         baseline_revision: $baseline_revision
         revision: $revision
-        script_sha256: (open --raw $script | hash sha256)
+        script_sha256: $script_sha256
         nix_version: $nix_version
         nixpkgs: $nixpkgs
         compiler_inputs: $candidate_tools
