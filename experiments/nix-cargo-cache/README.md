@@ -26,12 +26,15 @@ The runner builds the original app/checks and the candidate app/checks before
 timing edits. It roots both candidate dependency outputs, then appends the same
 unused Rust constant to each archived UI module. A fresh UUID makes each run's
 edited application outputs new, while the unused constant has no runtime effect.
-Dependency derivations must stay identical and application/check
+Dependency output paths must stay identical and application/check
 derivations must change. The four edited builds run sequentially and offline.
 
 An additional evaluation-only probe changes the bundle's Info.plist template.
-It requires the bundle derivation to change while the binary and dependency
-derivations stay identical, then restores the template before timing builds.
+It requires the bundle output path to change while the binary and dependency
+output paths stay identical, then restores the template before timing builds.
+Output paths reflect Nix's fixed-output dependency normalization; derivation
+paths can change when the vendor input's source changes without requiring a
+new dependency output.
 
 The JSON records preparation separately from edited-build measurements, elapsed
 nanoseconds, exact commands, derivations, outputs and compiler identities. It

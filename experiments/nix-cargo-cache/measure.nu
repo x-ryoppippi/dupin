@@ -140,27 +140,27 @@ def main [
 
     let run = try {
         let before_artifacts = {
-            release: (evaluate $candidate.flake "dupin.releaseArtifacts.drvPath")
-            debug: (evaluate $candidate.flake "dupin.debugArtifacts.drvPath")
+            release: (evaluate $candidate.flake "dupin.releaseArtifacts.outPath")
+            debug: (evaluate $candidate.flake "dupin.debugArtifacts.outPath")
         }
         let resource_before = {
-            binary: (evaluate $candidate.flake "dupin.cargoBinary.drvPath")
-            package: (evaluate $candidate.flake "dupin.drvPath")
+            binary: (evaluate $candidate.flake "dupin.cargoBinary.outPath")
+            package: (evaluate $candidate.flake "dupin.outPath")
             artifacts: $before_artifacts
         }
         let template = $candidate.directory | path join packaging Info.plist
         let original_template = open --raw $template
         $"\n<!-- cache probe (random uuid) -->\n" | save --append $template
         let resource_after = {
-            binary: (evaluate $candidate.flake "dupin.cargoBinary.drvPath")
-            package: (evaluate $candidate.flake "dupin.drvPath")
+            binary: (evaluate $candidate.flake "dupin.cargoBinary.outPath")
+            package: (evaluate $candidate.flake "dupin.outPath")
             artifacts: {
-                release: (evaluate $candidate.flake "dupin.releaseArtifacts.drvPath")
-                debug: (evaluate $candidate.flake "dupin.debugArtifacts.drvPath")
+                release: (evaluate $candidate.flake "dupin.releaseArtifacts.outPath")
+                debug: (evaluate $candidate.flake "dupin.debugArtifacts.outPath")
             }
         }
         $original_template | save --force $template
-        let restored_package = evaluate $candidate.flake "dupin.drvPath"
+        let restored_package = evaluate $candidate.flake "dupin.outPath"
         if $resource_before.binary != $resource_after.binary or $resource_before.artifacts != $resource_after.artifacts or $resource_before.package == $resource_after.package or $restored_package != $resource_before.package {
             error make {
                 msg: "A packaging-only edit must change the bundle without invalidating Rust builds."
@@ -209,8 +209,8 @@ def main [
             $edit | save --append ($snapshot.directory | path join crates dupin src ui.rs)
         } | ignore
         let after_artifacts = {
-            release: (evaluate $candidate.flake "dupin.releaseArtifacts.drvPath")
-            debug: (evaluate $candidate.flake "dupin.debugArtifacts.drvPath")
+            release: (evaluate $candidate.flake "dupin.releaseArtifacts.outPath")
+            debug: (evaluate $candidate.flake "dupin.debugArtifacts.outPath")
         }
         if $before_artifacts != $after_artifacts {
             error make {
