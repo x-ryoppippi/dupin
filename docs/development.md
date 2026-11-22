@@ -20,6 +20,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+For isolated local Cargo cache measurements, see the
+[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
+sccache across fresh and reused target directories without changing the
+development shell or Nix package cache.
+
 ## Remote development with Testbox
 
 The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
