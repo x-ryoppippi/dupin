@@ -93,7 +93,10 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
-    wait-frontmost Dupin
+    # Settings comes to the front over Calculator, though Dupin, an accessory app, doesn't become
+    # the active app, so wait for the window rather than for Dupin to be frontmost.
+    let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
+    poll $out settings-window $settings list-windows --app Dupin
     snap $out settings-general
     ad $out open-appearance click $appearance.data.match.ref_id | ignore
     (poll
@@ -108,7 +111,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
-    wait-frontmost Dupin
+    poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
 
     job kill $dupin
