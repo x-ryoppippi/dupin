@@ -318,7 +318,36 @@ fn fallback_rows_retained_from_an_old_query_cannot_be_opened_or_completed() {
     assert_eq!(session.intent(Intent::Complete), None);
     assert_eq!(session.intent(Intent::Open), Some(Vec::new()));
     session.deliver_from(id("web.fallbacks"), batch(next, &["stale fallback"]));
+    assert_eq!(visible_ids(&session), ["fallback"]);
+    assert_eq!(session.intent(Intent::Complete), None);
+    assert_eq!(session.intent(Intent::Open), Some(Vec::new()));
+}
+
+#[test]
+fn empty_auxiliary_answers_preserve_only_pending_providers_old_rows() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "first");
+    let mut app = item("old app");
+    app.completion = Some("old completion".into());
+    session.deliver_from(
+        id("apps.search"),
+        Delivery::Batch {
+            generation,
+            items: vec![app],
+        },
+    );
+    session.deliver_from(id("web.keywords"), batch(generation, &["old keyword"]));
+    let generation = start(&mut session, "second");
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    session.deliver_from(id("web.fallbacks"), Delivery::Done { generation });
+    assert_eq!(visible_ids(&session), ["old app"]);
+    assert_eq!(session.results(), Results::Searching { replaced: false });
+    let key = session.result_key(0);
+    assert!(session.run_key_action(&key, "open").is_empty());
+    assert_eq!(session.intent(Intent::Complete), None);
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
     assert!(session.items().is_empty());
+    assert_eq!(session.results(), Results::Done);
 }
 
 #[test]

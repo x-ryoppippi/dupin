@@ -24,17 +24,13 @@ struct ValidatedSearch {
 }
 
 impl WebCatalog {
-    pub fn compile(config: &Config) -> (Self, Option<String>) {
+    pub fn compile(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Self, Option<String>) {
         let mut catalog = Self::default();
         let mut problems = Vec::new();
 
         for (keyword, search) in &config.web_searches {
             if !valid_keyword(keyword)
-                || keyword == "in"
-                || config
-                    .dictionary_keywords
-                    .iter()
-                    .any(|reserved| reserved == keyword)
+                || is_reserved(keyword)
                 || !valid_name(&search.name)
                 || !valid_template(&search.url)
             {
@@ -278,9 +274,27 @@ mod tests {
         }
     }
 
+    fn compile(config: &Config) -> (WebCatalog, Option<String>) {
+        WebCatalog::compile(config, |keyword| {
+            keyword == "in"
+                || config
+                    .dictionary_keywords
+                    .iter()
+                    .any(|reserved| reserved == keyword)
+        })
+    }
+
     fn compiled(config: &Config) -> (Arc<RwLock<WebCatalog>>, Option<String>) {
-        let (catalog, notice) = WebCatalog::compile(config);
+        let (catalog, notice) = compile(config);
         (Arc::new(RwLock::new(catalog)), notice)
+    }
+
+    #[test]
+    fn reserved_keywords_come_from_the_hosts_registered_commands() {
+        let (catalog, notice) = WebCatalog::compile(&Config::default(), |keyword| keyword == "gh");
+        assert!(notice.is_some());
+        assert!(!catalog.searches.contains_key("gh"));
+        assert!(catalog.searches.contains_key("g"));
     }
 
     fn collect(provider: &WebProvider, query: &str, limit: usize) -> Vec<Item> {
@@ -393,7 +407,7 @@ mod tests {
                 )]),
                 ..Config::default()
             };
-            let (catalog, notice) = WebCatalog::compile(&config);
+            let (catalog, notice) = compile(&config);
             assert!(catalog.searches.is_empty());
             assert!(notice.is_some());
         }
@@ -415,7 +429,7 @@ mod tests {
 
     #[test]
     fn fallback_stops_iterating_as_soon_as_the_request_is_cancelled() {
-        let (catalog, _) = WebCatalog::compile(&config());
+        let (catalog, _) = compile(&config());
         let mut checks = 0;
         let items = fallback_items(&catalog, "rust", 3, || {
             checks += 1;
@@ -447,7 +461,7 @@ mod tests {
             web_fallbacks: vec!["g".into()],
             ..Config::default()
         };
-        let (replacement, _) = WebCatalog::compile(&config);
+        let (replacement, _) = compile(&config);
         *catalog.write().unwrap() = replacement;
 
         assert_eq!(
@@ -468,7 +482,7 @@ mod tests {
         config
             .web_fallbacks
             .extend(std::iter::repeat_n("gh".into(), MAX_FALLBACKS + 2));
-        let (catalog, notice) = WebCatalog::compile(&config);
+        let (catalog, notice) = compile(&config);
         assert!(notice.is_some());
         assert_eq!(catalog.fallbacks.len(), 2);
         assert_eq!(catalog.fallbacks[0], "g");

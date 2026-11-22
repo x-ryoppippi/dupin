@@ -485,8 +485,8 @@ impl Session {
             .values()
             .filter(|state| !state.fallback)
             .all(|state| state.phase != ProviderPhase::Pending && state.items.is_empty());
-        self.items.clear();
-        self.origins.clear();
+        let mut items = Vec::new();
+        let mut origins = Vec::new();
         let mut order = self.active_order.clone();
         if let Some(pin) = &self.active_pin {
             order.sort_by_key(|id| id != pin);
@@ -502,13 +502,35 @@ impl Session {
                 state.result_limit
             };
             for item in state.items.iter().take(count) {
-                if self.items.len() >= self.active_limit {
+                if items.len() >= self.active_limit {
                     break;
                 }
-                self.items.push(item.clone());
-                self.origins.push(id.clone());
+                items.push(item.clone());
+                origins.push(id.clone());
             }
         }
+        if items.is_empty() && pending && matches!(self.results, Results::Searching { replaced: false }) {
+            let previous_items = std::mem::take(&mut self.items);
+            let previous_origins = std::mem::take(&mut self.origins);
+            let previous_selection = self.selected;
+            self.selected = 0;
+            for (index, (item, origin)) in previous_items.into_iter().zip(previous_origins).enumerate() {
+                if self
+                    .providers
+                    .get(&origin)
+                    .is_some_and(|state| state.phase == ProviderPhase::Pending)
+                {
+                    if index == previous_selection {
+                        self.selected = self.items.len();
+                    }
+                    self.items.push(item);
+                    self.origins.push(origin);
+                }
+            }
+            return true;
+        }
+        self.items = items;
+        self.origins = origins;
         let selection = self.refresh_selection.clone().or(selected);
         // A chosen result must remain actionable when newer candidates fill the visible slots.
         if self.selection_held

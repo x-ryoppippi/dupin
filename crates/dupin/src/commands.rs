@@ -134,7 +134,8 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
     });
 
-    let (web, web_notice) = crate::web::WebCatalog::compile(config);
+    let (web, web_notice) =
+        crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
     let notices: Vec<_> = [dictionary_notice, web_notice].into_iter().flatten().collect();
     let notice = (!notices.is_empty()).then(|| notices.join("\n"));
     Ok(ConfiguredCommands {
