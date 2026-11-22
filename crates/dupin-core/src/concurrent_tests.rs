@@ -290,3 +290,238 @@ fn provider_error_is_terminal_and_worker_closes_when_dropped() {
         Err(mpsc::RecvTimeoutError::Disconnected)
     );
 }
+
+fn ranked_session(history: History, shown: usize, candidates: usize) -> Session {
+    let command = id("rank.search");
+    let mut commands = CommandRegistry::new(command.clone(), None);
+    commands
+        .register(
+            CommandSpec::new(command, shown, QueryPresentation::new("Search"))
+                .with_candidate_limit(candidates),
+        )
+        .unwrap();
+    Session::new(history, commands).unwrap()
+}
+
+fn scored_batch(generation: u64, entries: &[(&str, i32)]) -> Delivery {
+    Delivery::Batch {
+        generation,
+        items: entries
+            .iter()
+            .map(|(name, score)| {
+                let mut row = item(name);
+                row.score = Some(*score);
+                row
+            })
+            .collect(),
+    }
+}
+
+fn visible_ids(session: &Session) -> Vec<&str> {
+    session.items().iter().map(|item| item.id.as_str()).collect()
+}
+
+#[test]
+fn late_better_candidates_are_ranked_before_the_visible_cut() {
+    let mut session = ranked_session(History::default(), 2, 4);
+    let generation = start(&mut session, "term");
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("low", 30), ("medium", 50)]),
+    );
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("best", 100), ("good", 90)]),
+    );
+    assert_eq!(visible_ids(&session), ["best", "good"]);
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("over-budget", 1000)]),
+    );
+    assert_eq!(visible_ids(&session), ["best", "good"]);
+}
+
+#[test]
+fn an_explicit_selection_survives_falling_below_the_visible_cut() {
+    let mut session = ranked_session(History::default(), 2, 4);
+    let generation = start(&mut session, "term");
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("low", 30), ("medium", 50)]),
+    );
+    let chosen = session.result_key(1);
+    assert!(session.select_key(&chosen));
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("best", 100), ("good", 90)]),
+    );
+    assert_eq!(visible_ids(&session), ["best", "low"]);
+    assert_eq!(session.selected_item().unwrap().id, "low");
+    assert_eq!(session.result_key(session.selected()), chosen);
+    assert!(!session.run_key_action(&chosen, "open").is_empty());
+}
+
+#[test]
+fn an_open_menu_keeps_its_result_visible_during_ranking() {
+    let mut session = ranked_session(History::default(), 1, 2);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("first", 30)]));
+    assert!(matches!(
+        &session.intent(Intent::Actions).unwrap()[..],
+        [Effect::ShowActions { .. }]
+    ));
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("better", 100)]));
+    assert_eq!(visible_ids(&session), ["first"]);
+}
+
+#[test]
+fn an_automatic_first_row_does_not_pin_a_one_result_search() {
+    let mut session = ranked_session(History::default(), 1, 2);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("first", 30)]));
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("better", 100)]));
+    assert_eq!(visible_ids(&session), ["better"]);
+}
+
+#[test]
+fn query_history_is_applied_before_truncating_candidates() {
+    let mut history = History::default();
+    history.record("familiar", "term", 0);
+    let mut session = ranked_session(history, 1, 2);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("new", 100)]));
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("familiar", 90)]));
+    assert_eq!(visible_ids(&session), ["familiar"]);
+    assert_eq!(session.items()[0].score, Some(90));
+}
+
+#[test]
+fn duplicate_candidates_do_not_fill_the_bounded_pool() {
+    let mut session = ranked_session(History::default(), 2, 3);
+    let generation = start(&mut session, "term");
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("same", 30), ("same", 30)]),
+    );
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("best", 100), ("next", 90)]),
+    );
+    assert_eq!(visible_ids(&session), ["best", "next"]);
+}
+
+#[test]
+fn the_worker_candidate_budget_is_cumulative_across_batches() {
+    struct Verbose;
+    impl Provider for Verbose {
+        fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+            assert_eq!(request.limit, 3);
+            for names in [["a", "b"], ["c", "d"], ["e", "f"]] {
+                emit(names.into_iter().map(item).collect());
+            }
+            Ok(())
+        }
+    }
+    let (sender, receiver) = mpsc::channel();
+    let worker = Searcher::spawn("candidate-budget", Arc::new(Verbose), move |delivery| {
+        sender.send(delivery).unwrap()
+    });
+    worker.search(1, "term".into(), 3);
+    let mut total = 0;
+    loop {
+        match receiver.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            Delivery::Batch { items, .. } => total += items.len(),
+            Delivery::Done { .. } => break,
+            other => panic!("unexpected delivery: {other:?}"),
+        }
+    }
+    assert_eq!(total, 3);
+}
+
+#[test]
+fn a_refresh_keeps_the_chosen_identity_in_its_first_ranked_batch() {
+    let mut session = ranked_session(History::default(), 1, 3);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("chosen", 30)]));
+    let chosen = session.result_key(0);
+    assert!(session.select_key(&chosen));
+    let next = session
+        .refresh()
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(*generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(next, &[("best", 100), ("chosen", 30)]),
+    );
+    assert_eq!(visible_ids(&session), ["chosen"]);
+    assert_eq!(session.selected_item().unwrap().id, "chosen");
+    assert_ne!(session.result_key(0), chosen);
+}
+
+#[test]
+fn holding_a_selection_does_not_carry_into_a_different_query() {
+    let mut session = ranked_session(History::default(), 1, 3);
+    let generation = start(&mut session, "old");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("chosen", 30)]));
+    let chosen = session.result_key(0);
+    assert!(session.select_key(&chosen));
+    let next = start(&mut session, "new");
+    session.deliver_from(id("rank.search"), scored_batch(next, &[("first", 30)]));
+    session.deliver_from(id("rank.search"), scored_batch(next, &[("better", 100)]));
+    assert_eq!(visible_ids(&session), ["better"]);
+}
+
+#[test]
+fn a_sole_pinned_slot_is_not_replaced_to_keep_another_providers_selection() {
+    let command = id("rank.search");
+    let pin = id("pin.search");
+    let mut commands = CommandRegistry::new(command.clone(), None);
+    commands
+        .register(
+            CommandSpec::new(command.clone(), 1, QueryPresentation::new("Search")).with_candidate_limit(2),
+        )
+        .unwrap();
+    commands
+        .register(CommandSpec::new(pin.clone(), 1, QueryPresentation::new("Pin")))
+        .unwrap();
+    commands
+        .set_default_providers(vec![command.clone(), pin.clone()], Some(pin.clone()))
+        .unwrap();
+    let mut session = Session::new(History::default(), commands).unwrap();
+    let generation = start(&mut session, "term");
+    session.deliver_from(command, scored_batch(generation, &[("chosen", 30)]));
+    assert!(session.select_key(&session.result_key(0)));
+    session.deliver_from(pin, scored_batch(generation, &[("pinned", 100)]));
+    assert_eq!(visible_ids(&session), ["pinned"]);
+}
+
+#[test]
+fn retaining_a_pinned_selection_never_uses_a_second_slot() {
+    let main = id("rank.search");
+    let pin = id("pin.search");
+    let mut commands = CommandRegistry::new(main.clone(), None);
+    commands
+        .register(CommandSpec::new(
+            main.clone(),
+            2,
+            QueryPresentation::new("Search"),
+        ))
+        .unwrap();
+    commands
+        .register(CommandSpec::new(pin.clone(), 3, QueryPresentation::new("Pin")).with_candidate_limit(4))
+        .unwrap();
+    commands
+        .set_default_providers(vec![main.clone(), pin.clone()], Some(pin.clone()))
+        .unwrap();
+    let mut session = Session::new(History::default(), commands).unwrap();
+    let generation = start(&mut session, "term");
+    session.deliver_from(pin.clone(), scored_batch(generation, &[("chosen-pin", 30)]));
+    assert!(session.select_key(&session.result_key(0)));
+    session.deliver_from(main, scored_batch(generation, &[("main-row", 100)]));
+    session.deliver_from(pin, scored_batch(generation, &[("better-pin", 100)]));
+    assert_eq!(visible_ids(&session), ["chosen-pin", "main-row"]);
+}

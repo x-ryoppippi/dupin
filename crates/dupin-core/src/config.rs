@@ -10,6 +10,9 @@ pub struct Config {
     pub hotkey: String,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
+    /// Directories to rank lower in file search. Relative names match directory components;
+    /// paths beginning with `~/` are expanded by the platform layer.
+    pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
     /// Where the panel opens on the display under the pointer.
@@ -109,6 +112,18 @@ impl Default for Config {
         Config {
             hotkey: "cmd+space".into(),
             file_limit: 200,
+            file_demotions: [
+                "~/Library",
+                "Caches",
+                "node_modules",
+                ".git",
+                "target",
+                "build",
+                "dist",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
             position: Position::Center,
             input_source: InputSource::Ascii,
@@ -162,6 +177,28 @@ mod tests {
         assert_eq!(Config::parse("").unwrap().dictionary_keywords, ["define", "d"]);
         let config = Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
         assert_eq!(config.dictionary_keywords, ["word", "lookup"]);
+    }
+
+    #[test]
+    fn file_demotions_default_and_round_trip() {
+        let defaults = Config::default();
+        assert_eq!(
+            defaults.file_demotions,
+            [
+                "~/Library",
+                "Caches",
+                "node_modules",
+                ".git",
+                "target",
+                "build",
+                "dist",
+            ]
+        );
+
+        let config = Config::parse("file_demotions = [\"~/Library\", \"Vendor/Cache\", \"\"]").unwrap();
+        assert_eq!(config.file_demotions, ["~/Library", "Vendor/Cache", ""]);
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
     }
 
     #[test]

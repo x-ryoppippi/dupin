@@ -39,7 +39,9 @@ When an app matches through one of those other names, the name shows before its 
 
 ## Files
 
-Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results stream in as Spotlight finds them, up to `file_limit` (200 by default).
+Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).
+
+The list shows up to `file_limit` results (200 by default) from a bounded candidate pool. A selected file or an open action menu keeps its target while results reorder.
 
 `in` followed by Space switches to content search ("In files"). Every word must start a word in the text Spotlight indexed from inside the file.
 

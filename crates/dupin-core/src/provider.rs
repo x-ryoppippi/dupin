@@ -14,7 +14,7 @@ pub trait Provider: Send + Sync + 'static {
 
 pub struct Request {
     pub query: String,
-    /// The most results the provider should emit in total.
+    /// The most candidates the provider should emit in total, before the display limit.
     pub limit: usize,
     generation: u64,
     current: Arc<AtomicU64>,

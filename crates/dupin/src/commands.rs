@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use dupin_core::{CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation};
 use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
@@ -8,11 +8,13 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub struct Registration {
     pub registry: CommandRegistry,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
+    pub file_demotions: Arc<RwLock<Vec<String>>>,
 }
 
 pub struct ConfiguredCommands {
@@ -43,6 +45,7 @@ fn presentation(
 }
 
 pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::CommandError> {
+    let file_limit = config.file_limit.min(MAX_FILE_CANDIDATES);
     let apps_id = id(APPS);
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
@@ -56,7 +59,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         ),
         CommandSpec::new(
             files_id.clone(),
-            config.file_limit,
+            file_limit,
             presentation(
                 "Search files",
                 Some("Files"),
@@ -65,10 +68,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 true,
                 1.0,
             ),
-        ),
+        )
+        .with_candidate_limit(file_limit.saturating_mul(4).min(MAX_FILE_CANDIDATES)),
         CommandSpec::new(
             contents_id.clone(),
-            config.file_limit,
+            file_limit,
             presentation(
                 "Search inside files",
                 Some("In files"),
@@ -117,11 +121,15 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
+    let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
         (
             files_id,
-            Arc::new(SpotlightProvider::new(Target::Names)) as Arc<dyn Provider>,
+            Arc::new(SpotlightProvider::with_demotions(
+                Target::Names,
+                file_demotions.clone(),
+            )) as Arc<dyn Provider>,
         ),
         (
             contents_id,
@@ -138,12 +146,38 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         registry,
         providers,
         notice,
+        file_demotions,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_name_search_oversamples_with_a_bounded_candidate_budget() {
+        for requested in [0, 2, 4000, usize::MAX] {
+            let config = Config {
+                file_limit: requested,
+                ..Config::default()
+            };
+            let configured = configured(&config).unwrap();
+            let session =
+                dupin_core::Session::new(dupin_core::History::default(), configured.registry).unwrap();
+            let names = session.provider_spec(&id(FILES)).unwrap();
+            let contents = session.provider_spec(&id(CONTENTS)).unwrap();
+            let shown = requested.min(MAX_FILE_CANDIDATES);
+            assert_eq!(names.result_limit, shown);
+            assert_eq!(
+                names.candidate_limit(),
+                shown.saturating_mul(4).min(MAX_FILE_CANDIDATES)
+            );
+            assert_eq!(contents.result_limit, shown);
+            assert_eq!(contents.candidate_limit(), shown);
+            let apps = session.provider_spec(&id(APPS)).unwrap();
+            assert_eq!(apps.candidate_limit(), apps.result_limit);
+        }
+    }
 
     #[test]
     fn invalid_dictionary_keywords_are_skipped_with_a_notice() {

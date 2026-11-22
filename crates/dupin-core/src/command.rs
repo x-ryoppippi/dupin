@@ -63,6 +63,7 @@ impl QueryPresentation {
 pub struct CommandSpec {
     id: CommandId,
     pub result_limit: usize,
+    candidate_limit: Option<usize>,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
 }
@@ -72,9 +73,22 @@ impl CommandSpec {
         Self {
             id,
             result_limit,
+            candidate_limit: None,
             presentation,
             deadline: std::time::Duration::from_secs(30),
         }
+    }
+
+    pub fn with_candidate_limit(mut self, limit: usize) -> Self {
+        self.candidate_limit = Some(limit);
+        self
+    }
+
+    /// The total candidate budget, before ranking and the visible result limit.
+    pub fn candidate_limit(&self) -> usize {
+        self.candidate_limit
+            .unwrap_or(self.result_limit)
+            .max(self.result_limit)
     }
 }
 
@@ -342,5 +356,17 @@ mod tests {
         for invalid in ["search", "Test.search", "test.search.extra", "test."] {
             assert!(CommandId::new(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn candidate_budgets_default_to_and_never_undercut_display_limits() {
+        let mut command = CommandSpec::new(id("rank.search"), 3, QueryPresentation::new("Search"));
+        assert_eq!(command.candidate_limit(), 3);
+        command = command.with_candidate_limit(8);
+        assert_eq!(command.candidate_limit(), 8);
+        command.result_limit = 9;
+        assert_eq!(command.candidate_limit(), 9);
+        let empty = CommandSpec::new(id("empty.search"), 0, QueryPresentation::new("Search"));
+        assert_eq!(empty.candidate_limit(), 0);
     }
 }

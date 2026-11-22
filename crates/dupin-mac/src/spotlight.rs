@@ -1,16 +1,21 @@
 //! File search through the Spotlight index (`NSMetadataQuery`), matching file and display
-//! names and streaming results in the order Spotlight finds them.
+//! names and streaming results as Spotlight gathers them.
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use dupin_core::Config;
+use dupin_core::file_rank::{self, FileDates};
 use dupin_core::fuzzy;
 use dupin_core::{Item, Provider, ProviderError, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
-    NSArray, NSDate, NSDefaultRunLoopMode, NSMetadataItem, NSMetadataItemPathKey, NSMetadataQuery,
-    NSMetadataQueryLocalComputerScope, NSPredicate, NSRunLoop, NSString,
+    NSArray, NSDate, NSDefaultRunLoopMode, NSMetadataItem, NSMetadataItemFSContentChangeDateKey,
+    NSMetadataItemLastUsedDateKey, NSMetadataItemPathKey, NSMetadataQuery, NSMetadataQueryLocalComputerScope,
+    NSPredicate, NSRunLoop, NSString,
 };
 
 /// How long the worker's run loop turns between looks at the query: short enough that a
@@ -30,17 +35,36 @@ pub enum Target {
 /// which a [`Searcher`](dupin_core::Searcher)'s dedicated worker is.
 pub struct SpotlightProvider {
     target: Target,
+    demotions: Arc<RwLock<Vec<String>>>,
 }
 
 impl SpotlightProvider {
     pub fn new(target: Target) -> Self {
-        SpotlightProvider { target }
+        Self::with_demotions(target, Arc::new(RwLock::new(Config::default().file_demotions)))
+    }
+
+    pub fn with_demotions(target: Target, rules: Arc<RwLock<Vec<String>>>) -> Self {
+        SpotlightProvider {
+            target,
+            demotions: rules,
+        }
     }
 }
 
 impl Provider for SpotlightProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        autoreleasepool(|_| run_query(self.target, request, emit))
+        let demotions = if self.target == Target::Names {
+            let home = std::env::var_os("HOME").map(PathBuf::from);
+            snapshot_demotions(&self.demotions, home.as_deref())
+        } else {
+            Vec::new()
+        };
+        let now = if self.target == Target::Names {
+            unix_now()
+        } else {
+            0
+        };
+        autoreleasepool(|_| run_query(self.target, request, emit, &demotions, now))
     }
 }
 
@@ -48,6 +72,8 @@ fn run_query(
     target: Target,
     request: &Request,
     emit: &mut dyn FnMut(Vec<Item>),
+    demotions: &[PathBuf],
+    now: u64,
 ) -> Result<(), ProviderError> {
     let Some(predicate) = predicate(target, &request.query) else {
         return Ok(());
@@ -67,7 +93,8 @@ fn run_query(
     }
 
     let run_loop = NSRunLoop::currentRunLoop();
-    let mut seen = 0;
+    let mut seen_index = 0;
+    let mut seen_paths = HashSet::new();
     loop {
         let until = NSDate::dateWithTimeIntervalSinceNow(SLICE.as_secs_f64());
         // SAFETY: The default mode constant is a valid run loop mode.
@@ -82,15 +109,50 @@ fn run_query(
         query.disableUpdates();
         let gathering = query.isGathering();
         let count = query.resultCount().min(request.limit);
-        let batch: Vec<Item> = (seen..count)
-            .filter_map(|i| item(&query.resultAtIndex(i), &request.query))
-            .collect();
+        let batch: Vec<Item> = match target {
+            Target::Names => {
+                // Spotlight may reorder results while gathering. Rescan the bounded prefix so
+                // a newly surfaced path at an earlier index is not skipped.
+                let mut batch = Vec::new();
+                for i in 0..count {
+                    if seen_paths.len() >= request.limit || request.is_cancelled() {
+                        break;
+                    }
+                    let result = query.resultAtIndex(i);
+                    let Some(path) = result_path(&result) else {
+                        continue;
+                    };
+                    if !seen_paths.insert(path.clone()) {
+                        continue;
+                    }
+                    if let Some(item) = item(target, &result, path, &request.query, now, demotions) {
+                        batch.push(item);
+                    }
+                }
+                batch
+            }
+            Target::Contents => (seen_index..count)
+                .filter_map(|i| {
+                    let result = query.resultAtIndex(i);
+                    let path = result_path(&result)?;
+                    item(target, &result, path, &request.query, now, demotions)
+                })
+                .collect(),
+        };
         query.enableUpdates();
-        seen = count;
+        if request.is_cancelled() {
+            break;
+        }
+        seen_index = count;
         if !batch.is_empty() {
             emit(batch);
         }
-        if !gathering || seen >= request.limit {
+        if !gathering
+            || match target {
+                Target::Names => seen_paths.len() >= request.limit,
+                Target::Contents => seen_index >= request.limit,
+            }
+        {
             break;
         }
     }
@@ -98,19 +160,103 @@ fn run_query(
     Ok(())
 }
 
-fn item(result: &AnyObject, query: &str) -> Option<Item> {
+fn item(
+    target: Target,
+    result: &AnyObject,
+    path: PathBuf,
+    query: &str,
+    now: u64,
+    demotions: &[PathBuf],
+) -> Option<Item> {
+    let dates = if target == Target::Names {
+        file_dates(result.downcast_ref()?)
+    } else {
+        FileDates {
+            last_used: None,
+            modified: None,
+        }
+    };
+    item_for_path(target, path, query, dates, now, demotions)
+}
+
+fn item_for_path(
+    target: Target,
+    path: PathBuf,
+    query: &str,
+    dates: FileDates,
+    now: u64,
+    demotions: &[PathBuf],
+) -> Option<Item> {
+    let title = path.file_name()?.to_string_lossy().into_owned();
+    let (score, matched) = match target {
+        Target::Names => {
+            let ranked = file_rank::score(query, &title, &path, dates, now, demotions);
+            (Some(ranked.score), ranked.positions)
+        }
+        Target::Contents => {
+            // Contents results keep Spotlight's order and the historic title-only highlight.
+            let matched = fuzzy::score(query, &title)
+                .map(|m| m.positions)
+                .unwrap_or_default();
+            (None, matched)
+        }
+    };
+    let mut item = Item::path(path, title, matched);
+    item.score = score;
+    Some(item)
+}
+
+fn result_path(result: &AnyObject) -> Option<PathBuf> {
     let result: &NSMetadataItem = result.downcast_ref()?;
-    // SAFETY: The path key is a valid attribute name constant.
+    // SAFETY: The path key is a valid immutable Foundation metadata key.
     let path = result.valueForAttribute(unsafe { NSMetadataItemPathKey })?;
     let path: Retained<NSString> = path.downcast().ok()?;
-    let path = PathBuf::from(path.to_string());
-    let title = path.file_name()?.to_string_lossy().into_owned();
-    // Spotlight matched each word somewhere in the name; highlight where the fuzzy matcher
-    // finds the query, when it does.
-    let matched = fuzzy::score(query, &title)
-        .map(|m| m.positions)
-        .unwrap_or_default();
-    Some(Item::path(path, title, matched))
+    Some(PathBuf::from(path.to_string()))
+}
+
+fn file_dates(result: &NSMetadataItem) -> FileDates {
+    // SAFETY: These are valid immutable Foundation metadata key constants.
+    let last_used = date_attribute(result, unsafe { NSMetadataItemLastUsedDateKey });
+    // SAFETY: These are valid immutable Foundation metadata key constants.
+    let modified = date_attribute(result, unsafe { NSMetadataItemFSContentChangeDateKey });
+    FileDates { last_used, modified }
+}
+
+fn date_attribute(result: &NSMetadataItem, key: &NSString) -> Option<u64> {
+    date_timestamp(result.valueForAttribute(key))
+}
+
+fn date_timestamp(value: Option<Retained<AnyObject>>) -> Option<u64> {
+    let date: Retained<NSDate> = value?.downcast().ok()?;
+    let seconds = date.timeIntervalSince1970();
+    (seconds.is_finite() && seconds >= 0.0 && seconds < u64::MAX as f64).then_some(seconds as u64)
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or_default()
+}
+
+fn expand_demotions(rules: &[String], home: Option<&Path>) -> Vec<PathBuf> {
+    rules
+        .iter()
+        .filter(|rule| !rule.is_empty())
+        .map(|rule| match (rule.as_str(), home) {
+            ("~", Some(home)) => home.to_path_buf(),
+            (rule, Some(home)) if rule.starts_with("~/") => home.join(&rule[2..]),
+            _ => PathBuf::from(rule),
+        })
+        .collect()
+}
+
+fn snapshot_demotions(rules: &RwLock<Vec<String>>, home: Option<&Path>) -> Vec<PathBuf> {
+    let rules = rules
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    expand_demotions(&rules, home)
 }
 
 fn predicate(target: Target, query: &str) -> Option<Retained<NSPredicate>> {
@@ -182,5 +328,84 @@ mod tests {
         for target in [Target::Names, Target::Contents] {
             assert!(predicate(target, r#"weird "name" *.txt"#).is_some(), "{target:?}");
         }
+    }
+
+    #[test]
+    fn names_items_carry_the_file_rank_and_match_positions() {
+        let path = PathBuf::from("/Users/test/Documents/Safari Guide.pdf");
+        let dates = FileDates {
+            last_used: Some(1_700_000_000),
+            modified: Some(1_699_000_000),
+        };
+        let item = item_for_path(Target::Names, path, "saf", dates, 1_700_000_100, &[]).unwrap();
+
+        assert!(item.score.is_some());
+        assert_eq!(
+            item.matched,
+            fuzzy::score("saf", "Safari Guide.pdf").unwrap().positions
+        );
+    }
+
+    #[test]
+    fn contents_items_keep_spotlight_order_without_a_score() {
+        let item = item_for_path(
+            Target::Contents,
+            PathBuf::from("/Users/test/Documents/Guide.pdf"),
+            "gde",
+            FileDates {
+                last_used: Some(1_700_000_000),
+                modified: Some(1_699_000_000),
+            },
+            1_700_000_100,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(item.score, None);
+        assert_eq!(item.matched, fuzzy::score("gde", "Guide.pdf").unwrap().positions);
+    }
+
+    #[test]
+    fn date_attributes_accept_dates_and_ignore_missing_or_wrong_values() {
+        let date = NSDate::dateWithTimeIntervalSince1970(1_700_000_000.75);
+        let date: Retained<AnyObject> = date.into_super().into();
+        assert_eq!(date_timestamp(Some(date)), Some(1_700_000_000));
+        assert_eq!(date_timestamp(None), None);
+
+        let not_a_date: Retained<AnyObject> = NSString::from_str("not a date").into_super().into();
+        assert_eq!(date_timestamp(Some(not_a_date)), None);
+
+        let before_epoch = NSDate::dateWithTimeIntervalSince1970(-1.0);
+        let before_epoch: Retained<AnyObject> = before_epoch.into_super().into();
+        assert_eq!(date_timestamp(Some(before_epoch)), None);
+    }
+
+    #[test]
+    fn demotion_rules_expand_home_paths_in_the_native_layer() {
+        let rules = vec![
+            "~".into(),
+            "~/Library/Caches".into(),
+            "Vendor/Cache".into(),
+            "".into(),
+        ];
+        assert_eq!(
+            expand_demotions(&rules, Some(Path::new("/Users/test"))),
+            vec![
+                PathBuf::from("/Users/test"),
+                PathBuf::from("/Users/test/Library/Caches"),
+                PathBuf::from("Vendor/Cache")
+            ]
+        );
+    }
+
+    #[test]
+    fn each_job_snapshots_the_current_demotion_rules() {
+        let rules = RwLock::new(vec!["~/Library/Caches".into()]);
+        let first = snapshot_demotions(&rules, Some(Path::new("/Users/test")));
+        *rules.write().unwrap() = vec!["Vendor/Cache".into()];
+        let second = snapshot_demotions(&rules, Some(Path::new("/Users/test")));
+
+        assert_eq!(first, [PathBuf::from("/Users/test/Library/Caches")]);
+        assert_eq!(second, [PathBuf::from("Vendor/Cache")]);
     }
 }

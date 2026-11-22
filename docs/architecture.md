@@ -1,16 +1,10 @@
 # Architecture
 
-Dupin is a Cargo workspace with separate core, macOS, UI and protocol crates. The UI layer stays thin so the UI framework can change without touching the rest.
-
-| Crate               | Holds                                                                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `crates/dupin-core` | No UI and no macOS: the `Provider` trait and `Item` model, the newest-wins `Searcher`, fuzzy matching, the launcher `Session` and `config.toml` |
-| `crates/dupin-mac`  | The apps and Spotlight providers, NSWorkspace actions and the panel's AppKit settings, through objc2                                            |
-| `crates/dupin`      | The Rune app: the panel view, key mapping, the hotkey and logging                                                                               |
+The search and ranking model must remain independent of UI frameworks and operating-system APIs. Native providers own the macOS boundary; the thin UI layer adapts input and renders results so that the UI framework can change without replacing the model.
 
 ## Providers
 
-Every source of results is a `Provider`: given a `Request` (query and limit), it streams batches of `Item`s and stops when the request is superseded. Apps, file names and file contents each have one; extensions (scripts that print a JSON view to stdout) are meant to take the same shape.
+Every source of results is a `Provider`: given a `Request` (query and candidate budget), it streams batches of `Item`s and stops when the request is superseded. Apps, file names and file contents each have one; extensions (scripts that print a JSON view to stdout) are meant to take the same shape.
 
 An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (title/subtitle), Detail (title/body), or Pair (source/result). It also carries its stable ID, icon path, matched title characters, optional score, action list and primary/alternate action IDs. `display_title()` returns the Text/Detail title or Pair source. Explicit `record_usage` metadata controls history recording; apps/files opt in and dictionary results opt out, independently of view.
 
@@ -21,6 +15,8 @@ Registered routes and shared internal views advance the plugin migration. Native
 ## Searching off the main thread
 
 Each provider runs on its own long-lived thread behind a `Searcher`. The newest request wins: queued requests never start, a running one sees `Request::is_cancelled`, and its late batches are dropped before they reach the UI. A dedicated thread, rather than a pool, lets the Spotlight provider turn that thread's run loop, which `NSMetadataQuery` delivers through.
+
+Candidate budgets and display limits are separate. The worker enforces each request's cumulative output budget; the session stores at most that many unique candidates, applies usage ranking, then cuts each provider and the merged list to their display limits. A chosen row or open action menu keeps its target in a visible slot while ranking changes, except when the only available slot belongs to the pinned provider. Automatic first-row selection does not pin a weak result indefinitely.
 
 ## The session
 

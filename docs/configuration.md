@@ -9,6 +9,7 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
+file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
@@ -23,6 +24,12 @@ Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaul
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+## File ranking
+
+File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
+
+`file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
 
 ## Updates
 

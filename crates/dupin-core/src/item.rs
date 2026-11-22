@@ -44,7 +44,7 @@ pub struct Item {
     /// Character indices in `display_title()` that matched the query, for highlighting.
     pub matched: Vec<usize>,
     /// How well the item matched, for providers that rank their results; the history adds
-    /// to it. None for results that arrive in a provider's own order (Spotlight's).
+    /// to it. None for results that keep a provider's own order.
     pub score: Option<i32>,
     /// The action ID for Enter; without one, Enter offers the action menu.
     pub primary: Option<String>,
