@@ -1,0 +1,10 @@
+[package]
+name = "dupin-wasm-calculator-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+dupin-calculator-guest = { path = "../guest" }
+wasmi = { version = "=2.0.2", default-features = false, features = ["std", "validate"] }
+serde_json = "1"

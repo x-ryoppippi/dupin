@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["guest", "host"]
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
