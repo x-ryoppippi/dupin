@@ -69,8 +69,9 @@ application/check outputs while retaining both dependency-cache output paths.
 
 The same release and debug dependency outputs were first built in the
 [initial run](https://github.com/x-ryoppippi/dupin/blob/5262352/experiments/nix-cargo-cache/results/2026-11-22-aarch64-darwin.json),
-taking 93.3 s and 73.8 s. This repeat reused them, and each preparation command
-completed in about 0.6 s. The table measures subsequent source edits with those
+taking 93.3 s and 73.8 s. This repeat reused them, and each dependency-cache preparation
+command completed in about 0.6 s. The separate warm-build preparation commands
+are also recorded in the JSON and are excluded from these cache timings. The table measures subsequent source edits with those
 outputs available. This is one sequential run on a shared machine, with
 uncontrolled load; it does not establish repeatable timing improvements or CI
 cache performance.
