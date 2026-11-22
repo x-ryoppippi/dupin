@@ -95,7 +95,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     )
     let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
     poll $out settings-window $settings list-windows --app Dupin
-    wait-frontmost Dupin
+    wait-frontmost Dupin --window "Dupin Settings"
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
@@ -200,21 +200,34 @@ def snap [out: path, name: string] {
     }
 }
 
-# Wait until `app` is the frontmost application, so a screenshot shows its window.
-def wait-frontmost [app: string, --tries: int = 20] {
-    let script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+# Wait for the active app and, when requested, its focused window.
+def wait-frontmost [app: string, --window: string, --tries: int = 20] {
+    let script = if $window == null {
+        'tell application "System Events" to get name of first application process whose frontmost is true'
+    } else {
+        'tell application "System Events"
+            set frontProcess to first application process whose frontmost is true
+            set focusedWindow to value of attribute "AXFocusedWindow" of frontProcess
+            return (name of frontProcess) & linefeed & (name of focusedWindow)
+        end tell'
+    }
     mut front = ''
+    mut focused = ''
     for attempt in 1..$tries {
-        $front = (
-            ^osascript -e $script
-            | complete
-            | get stdout
-            | str trim
-        )
-        if ($front | str lowercase) == ($app | str lowercase) { return }
+        let reply = (^osascript -e $script | complete)
+        let names = $reply.stdout | str trim | lines
+        $front = ($names | get -o 0 | default '')
+        $focused = ($names | get -o 1 | default '')
+        if (
+            $reply.exit_code == 0
+            and ($front | str lowercase) == ($app | str lowercase)
+            and ($window == null or $focused == $window)
+        ) { return }
         sleep 500ms
     }
-    error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}
+    error make {
+        msg: $"timed out waiting for ($app) / ($window | default 'any window'); active: ($front), focused: ($focused)"
+    }
 }
 
 def main [] {
