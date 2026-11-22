@@ -26,6 +26,30 @@ pub struct ConfiguredCommands {
     pub web: crate::web::WebCatalog,
 }
 
+fn parsed_file_query(
+    command: &CommandId,
+    raw: &str,
+) -> Option<Result<dupin_core::file_query::FileQuery, dupin_core::file_query::FileQueryError>> {
+    matches!(command.as_str(), FILES | CONTENTS).then(|| dupin_core::file_query::FileQuery::parse(raw))
+}
+
+pub fn query_qualifier_ranges(command: &CommandId, raw: &str) -> Vec<std::ops::Range<usize>> {
+    parsed_file_query(command, raw)
+        .and_then(Result::ok)
+        .map(|query| query.qualifier_ranges)
+        .unwrap_or_default()
+}
+
+pub fn query_problem(command: &CommandId, raw: &str) -> Option<&'static str> {
+    match parsed_file_query(command, raw)? {
+        Err(error) => Some(error.message()),
+        Ok(query) if command.as_str() == CONTENTS && query.terms.is_empty() && !raw.trim().is_empty() => {
+            Some("Type a word to search file contents.")
+        }
+        _ => None,
+    }
+}
+
 fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
 }
@@ -270,6 +294,27 @@ mod tests {
         assert!(notice.contains("in"));
         assert!(notice.contains("must not be empty"));
     }
+
+    #[test]
+    fn qualifier_feedback_matches_only_the_file_commands() {
+        let raw = "kind:pdf report";
+        for command in [FILES, CONTENTS] {
+            let ranges = query_qualifier_ranges(&id(command), raw);
+            assert_eq!(ranges.len(), 1);
+            assert_eq!(ranges[0], 0..8);
+        }
+        assert!(query_qualifier_ranges(&id(APPS), raw).is_empty());
+        assert!(query_problem(&id(APPS), "kind:").is_none());
+        assert!(query_problem(&id(FILES), "kind:").is_some());
+        assert!(query_problem(&id(FILES), "kind:pdf").is_none());
+        assert_eq!(
+            query_problem(&id(CONTENTS), "kind:pdf"),
+            Some("Type a word to search file contents.")
+        );
+        assert!(query_problem(&id(CONTENTS), raw).is_none());
+        assert!(query_problem(&id(CONTENTS), "").is_none());
+    }
+
     #[test]
     fn only_name_search_oversamples_with_a_bounded_candidate_budget() {
         for requested in [0, 2, 4000, usize::MAX] {

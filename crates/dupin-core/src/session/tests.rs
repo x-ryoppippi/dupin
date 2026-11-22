@@ -87,6 +87,33 @@ fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
 }
 
 #[test]
+fn providers_and_recall_keep_escaped_trailing_whitespace() {
+    let raw = "in:~/Work\\ ";
+    for delete_before_dismiss in [false, true] {
+        let mut s = session();
+        s.intent(Intent::Space);
+        let effects = s.set_query(raw);
+        let (_, generation, query) = searched(&effects);
+        assert_eq!(query, raw);
+        assert_eq!(
+            crate::file_query::FileQuery::parse(query).unwrap().folder,
+            crate::file_query::FileQuery::parse("in:\"~/Work \"")
+                .unwrap()
+                .folder
+        );
+        s.deliver(Delivery::Done { generation });
+        if delete_before_dismiss {
+            s.set_query("in:~/Work\\");
+        }
+        s.intent(Intent::Dismiss);
+        s.intent(Intent::Space);
+        let effects = s.intent(Intent::Up).unwrap();
+        assert!(effects.contains(&Effect::ReplaceQuery(raw.into())));
+        assert_eq!(s.query(), raw);
+    }
+}
+
+#[test]
 fn starts_in_apps_mode_with_nothing_shown() {
     let s = session();
     assert_eq!(s.command_id(), &app_command());

@@ -13,6 +13,7 @@ pub trait Provider: Send + Sync + 'static {
 }
 
 pub struct Request {
+    /// Raw field text after keyword routing: whitespace may be part of the provider's syntax.
     pub query: String,
     /// The most candidates the provider should emit in total, before the display limit.
     pub limit: usize,

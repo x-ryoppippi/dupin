@@ -95,7 +95,9 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     let items = s.session.items();
-    if !items.is_empty() {
+    if !items.is_empty()
+        && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
+    {
         panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
     } else if let Some(hint) = hint(s) {
         panel = panel.child(divider(&t)).child(
@@ -125,14 +127,15 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
 fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
     let placeholder = presentation.placeholder.as_str();
-    let field = text_input(&s.query, TextStyle::new(22.0, 400.0).lh(30.0))
+    let field = text_input(&s.query_display(), TextStyle::new(22.0, 400.0).lh(30.0))
         .key("query")
         .label(placeholder)
         .single_line()
         .grow(1.0)
         .color(t.text)
+        .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
-        .on_edit(|s: &mut Ui| &mut s.query)
+        .on_edit(Ui::query_edit)
         .on_input_key(|s: &mut Ui, ev, tx| s.key(ev, tx))
         .on_input_change(|s: &mut Ui, tx| s.edited(tx));
     let mut bar = row()
@@ -168,6 +171,9 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
 }
 
 fn hint(s: &Ui) -> Option<&str> {
+    if let Some(problem) = crate::commands::query_problem(s.session.command_id(), s.session.query()) {
+        return Some(problem);
+    }
     let presentation = &s.session.command().presentation;
     if s.session.query().trim().is_empty() {
         presentation.empty_hint.as_deref()
