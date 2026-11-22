@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick as tickDOM } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
 	import { repo } from '../site.ts';
-	import { marked, marking, scenarios, type Scenario } from './scenarios.ts';
+	import { features, marked, marking, type Scenario } from './scenarios.ts';
 
-	const [first] = scenarios;
-	// The panel starts hidden; the demo opens it with the hotkey, as a person would.
+	const first = features[0]!.scenario;
+	let feature = $state('Apps');
 	let query = $state('');
 	let mode = $state<Scenario['mode']>();
 	let shown = $state<Scenario>(first);
@@ -36,9 +36,10 @@
 	let picks = 0;
 	let shownAt = 0;
 	let typedAt = -Infinity;
-	const modes: Record<string, number> = { Files: 1, 'In files': 2 };
-	const placeholders: Record<string, string> = { '': 'Search apps', Files: 'Search files', 'In files': 'Search inside files' };
+	const modes: Record<string, number> = { Files: 1, 'In files': 2, Define: 3 };
+	const placeholders: Record<string, string> = { '': 'Search apps', Files: 'Search files', 'In files': 'Search inside files', Define: 'Look up a word' };
 	const hints: Record<string, string> = {
+		Define: 'Type a word  ·  ⌫ back to apps',
 		Files: 'Type to search files with Spotlight  ·  ⌫ back to apps',
 		'In files': 'Type to search inside files with Spotlight  ·  ⌫ back to apps',
 	};
@@ -124,12 +125,27 @@
 		};
 	});
 
-	onMount(() => {
+	$effect(() => {
+		const scenario: Scenario = features.find((choice) => choice.label === feature)!.scenario;
+		shown = scenario;
+		query = '';
+		found = '';
+		mode = undefined;
+		open = false;
+		launching = false;
+		searching = false;
+		selected = 0;
+		actionsOpen = false;
+		keys = [];
+		keysShown = false;
+		shownAt = performance.now();
+		typedAt = -Infinity;
 		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-			// One still search in place of the loop.
+			query = scenario.query;
+			found = scenario.query;
+			mode = scenario.mode;
 			open = true;
-			query = first.query;
-			found = first.query;
+			void tickDOM().then(draw);
 			return;
 		}
 
@@ -139,8 +155,13 @@
 		let hideTimer: ReturnType<typeof setTimeout> | undefined;
 		// A wait that outlives the component ends the replay instead of resuming it.
 		const stopped = new Error('stopped');
+		let waitTimer: ReturnType<typeof setTimeout> | undefined;
+		let cancelWait: (() => void) | undefined;
 		const sleep = (ms: number) =>
-			new Promise<void>((resolve, reject) => setTimeout(() => (alive ? resolve() : reject(stopped)), ms));
+			new Promise<void>((resolve, reject) => {
+				cancelWait = () => reject(stopped);
+				waitTimer = setTimeout(() => (alive ? resolve() : reject(stopped)), ms);
+			});
 		const observer = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
 		observer.observe(desk);
 
@@ -177,73 +198,75 @@
 			await sleep(420);
 		};
 
-		// Each round is one use of Dupin: ⌘Space shows the bar, the query narrows the list key by
+		// Each scene is one use of Dupin: ⌘Space shows the bar, the query narrows the list key by
 		// key, and ↩ opens the top result and hides the panel. File searches enter their mode
 		// first: Space on an empty query for file names, `in` then Space for contents.
 		const play = async () => {
 			await sleep(900);
-			for (let i = 0; alive; i = (i + 1) % scenarios.length) {
-				while (alive && (!visible || document.hidden)) await sleep(400);
-				const scenario = scenarios[i]!;
-				shown = scenario;
-				press('⌘ Space', true);
-				open = true;
-				shownAt = performance.now();
-				await sleep(1800);
+			while (alive && (!visible || document.hidden)) await sleep(400);
+			shown = scenario;
+			press('⌘ Space', true);
+			open = true;
+			shownAt = performance.now();
+			await sleep(700);
+			keys = [];
+			if (scenario.mode === 'In files' || scenario.keyword) {
+				for (const char of scenario.keyword ?? 'in') await type(char);
+				await sleep(300);
+			}
+			if (scenario.mode) {
+				press('␣');
+				setQuery('');
+				found = '';
+				mode = scenario.mode;
+				// Long enough to read the hint the mode shows before the search starts.
+				await sleep(500);
 				keys = [];
-				if (scenario.mode === 'In files') {
-					await type('i');
-					await type('n');
-					await sleep(300);
-				}
-				if (scenario.mode) {
-					press('␣');
-					setQuery('');
-					found = '';
-					mode = scenario.mode;
-					// Long enough to read the hint the mode shows before the search starts.
-					await sleep(1600);
-					keys = [];
-				}
-				for (const char of scenario.query) await type(char);
+			}
+			for (const char of scenario.query) await type(char);
+			await sleep(1200);
+			if (!scenario.mode) {
+				press('⌘A', true);
+				await sleep(250);
+				press('⌫');
+				setQuery('');
+				found = '';
+				await sleep(800);
+				press('↑', true);
+				setQuery(scenario.query);
+				found = scenario.query;
 				await sleep(1200);
-				if (i === 0) {
-					press('⌘A', true);
-					await sleep(250);
-					press('⌫');
-					setQuery('');
-					found = '';
-					await sleep(800);
-					press('↑', true);
-					setQuery(scenario.query);
-					found = scenario.query;
-					await sleep(1200);
-				}
-				if (i !== 0 && rows.length > 2) {
-					await down(true);
-					await down();
-					await sleep(500);
-				}
-				if (scenario.actions) {
-					press('→', true);
-					actionsOpen = true;
-					await sleep(1800);
+			}
+			if (scenario.mode && rows.length > 2) {
+				await down(true);
+				await down();
+				await sleep(500);
+			}
+			if (scenario.actions || scenario.detail) {
+				press('→', true);
+				actionsOpen = true;
+				await sleep(700);
+				if (!scenario.detail) {
 					press('Esc', true);
 					actionsOpen = false;
 					await sleep(600);
 				}
-				press('↩', true);
-				launching = true;
-				await sleep(220);
-				open = false;
-				launching = false;
-				query = '';
-				found = '';
-				selected = 0;
-				mode = undefined;
-				actionsOpen = false;
-				await sleep(1300);
 			}
+			press('↩', true);
+			launching = true;
+			await sleep(220);
+			open = false;
+			launching = false;
+			query = '';
+			found = '';
+			selected = 0;
+			mode = undefined;
+			actionsOpen = false;
+			await sleep(600);
+			query = scenario.query;
+			found = scenario.query;
+			mode = scenario.mode;
+			open = true;
 		};
 		play().catch((e: unknown) => {
 			if (e !== stopped) throw e;
@@ -252,11 +275,18 @@
 		return () => {
 			alive = false;
 			observer.disconnect();
+			clearTimeout(waitTimer);
+			cancelWait?.();
 			clearTimeout(hideTimer);
 		};
 	});
 </script>
 
+<div class="feature-picker" role="group" aria-label="Demo feature">
+	{#each features as choice (choice.label)}
+		<button type="button" aria-pressed={feature === choice.label} onclick={() => (feature = choice.label)}>{choice.label}</button>
+	{/each}
+</div>
 <div class="desk" bind:this={desk} aria-hidden="true">
 	<div class={['panel', !open && 'is-closed']} bind:this={panel}>
 		<canvas class={['backdrop', drawing && 'is-drawing']} bind:this={canvas}></canvas>
@@ -269,10 +299,12 @@
 			</span>
 			{#if searching}<span class="searching">Searching…</span>{/if}
 		</div>
-		{#if rows.length === 0 && mode && !query}
+		{#if shown.detail && found === shown.query}
+			<div class="definition"><strong>{found}</strong><p>{shown.detail}</p></div>
+		{:else if rows.length === 0 && mode && !query}
 			<div class="hint">{hints[mode]}</div>
-		{:else if rows.length === 0 && found && !searching}
-			<div class="hint">No matches</div>
+		{:else if rows.length === 0 && found && !searching && !(shown.detail && found !== shown.query)}
+			<div class="hint">{mode === 'Define' ? 'No definition found' : 'No matches'}</div>
 		{:else if rows.length > 0}
 			<ul class="rows">
 				{#each rows as row, i (row.title)}
@@ -297,9 +329,13 @@
 	</div>
 	{#if actionsOpen}
 		<div class="action-menu">
-			<div>Open</div>
-			<div>Reveal in Finder</div>
-			<div>Copy path</div>
+			{#if shown.detail}
+				<div>Open in Dictionary</div>
+			{:else}
+				<div>Open</div>
+				<div>Reveal in Finder</div>
+				<div>Copy path</div>
+			{/if}
 		</div>
 	{/if}
 	<div class={['keycast', keysShown && 'is-shown']}>
@@ -520,7 +556,7 @@
 	.desk {
 		position: relative;
 		max-width: 1080px;
-		margin: 64px auto 0;
+		margin: 16px auto 0;
 		/* Fixed so the page never shifts while the panel grows and shrinks with its results. */
 		height: calc(494px + var(--desk-pad) + 84px);
 		padding: var(--desk-pad) 20px 0;
@@ -556,9 +592,6 @@
 			radial-gradient(circle, #fff 0 62%, #1c1c1e 64%);
 	}
 
-	.app-icon--t3code {
-		background: url('/apps/t3code.png') center / 125% no-repeat;
-	}
 
 	.app-icon--pdf,
 	.app-icon--doc,
@@ -660,6 +693,15 @@
 		opacity: 1;
 	}
 
+	.definition {
+		padding: 20px;
+		font-size: 15px;
+		line-height: 1.6;
+	}
+	.definition p {
+		margin: 8px 0 0;
+	}
+	.feature-picker,
 	.backdrop-picker {
 		display: flex;
 		flex-wrap: wrap;
@@ -668,6 +710,11 @@
 		margin: 16px auto 0;
 	}
 
+	.feature-picker {
+		margin-top: 64px;
+	}
+
+	.feature-picker button,
 	.backdrop-picker button {
 		padding: 5px 12px;
 		border: 1px solid var(--border-strong);
@@ -682,11 +729,13 @@
 			color 150ms var(--ease-out);
 	}
 
+	.feature-picker button:hover:not(:disabled),
 	.backdrop-picker button:hover:not(:disabled) {
 		color: var(--fg);
 		background: var(--bg-elev);
 	}
 
+	.feature-picker button[aria-pressed='true'],
 	.backdrop-picker button[aria-pressed='true'] {
 		color: var(--fg);
 		background: var(--bg-card);

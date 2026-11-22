@@ -51,7 +51,47 @@ enum Restart {
     Requested,
 }
 
+pub struct ActionScreen {
+    pub key: String,
+    pub item: dupin_core::Item,
+    pub layout_key: String,
+    pub selected: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ActionKey {
+    Stay,
+    Back,
+    Run(String, String),
+}
+
+impl ActionScreen {
+    fn key(&mut self, key: &Key) -> ActionKey {
+        match key {
+            Key::Up => self.selected = self.selected.saturating_sub(1),
+            Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
+            Key::Left | Key::Escape => return ActionKey::Back,
+            Key::Enter => {
+                if let Some(action) = self.item.actions.get(self.selected) {
+                    return ActionKey::Run(self.key.clone(), action.id.clone());
+                }
+            }
+            _ => {}
+        }
+        ActionKey::Stay
+    }
+
+    fn is_current(&self, session: &Session) -> bool {
+        session
+            .items()
+            .iter()
+            .enumerate()
+            .any(|(index, _)| session.result_key(index) == self.key)
+    }
+}
+
 pub struct Ui {
+    pub action_screen: Option<ActionScreen>,
     pub session: Session,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
@@ -155,6 +195,7 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            action_screen: None,
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
@@ -401,6 +442,7 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        self.action_screen = None;
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.close();
         }
@@ -426,6 +468,7 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        self.action_screen = None;
         crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
         let effects = self.session.set_query(&self.query.text);
@@ -434,6 +477,9 @@ impl Ui {
 
     /// Keep panel shortcuts available while the definition owns the text selection.
     pub fn unfocused_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.action_screen.is_some() {
+            return self.key(ev, tx);
+        }
         if tx.focused().is_some() {
             return false;
         }
@@ -457,6 +503,34 @@ impl Ui {
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         crate::trace::key(ev);
+        match &ev.key {
+            // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
+            Key::Command('q') => {
+                self.updater.install_on_quit();
+                tx.quit();
+                return true;
+            }
+            Key::Command(',') => {
+                crate::trace::settings("requested");
+                self.settings_after_close = true;
+                self.dismiss(tx);
+                return true;
+            }
+            _ => {}
+        }
+        if let Some(screen) = &mut self.action_screen {
+            match screen.key(&ev.key) {
+                ActionKey::Back => {
+                    self.action_screen = None;
+                    tx.focus("query", false);
+                }
+                ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
+                ActionKey::Stay => {
+                    tx.scroll_into_view(format!("action-{}", screen.selected));
+                }
+            }
+            return true;
+        }
         if self.query.is_composing() {
             return false;
         }
@@ -499,21 +573,10 @@ impl Ui {
                 Intent::Actions
             }
             Key::Command('k') => Intent::Actions,
+            Key::Text(t) if m.ctrl && t.eq_ignore_ascii_case("k") => Intent::Actions,
             Key::Enter if m.cmd => Intent::OpenAlternate,
             Key::Enter => Intent::Open,
             Key::Escape => Intent::Dismiss,
-            // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
-            Key::Command('q') => {
-                self.updater.install_on_quit();
-                tx.quit();
-                return true;
-            }
-            Key::Command(',') => {
-                crate::trace::settings("requested");
-                self.settings_after_close = true;
-                self.dismiss(tx);
-                return true;
-            }
             _ => return false,
         };
         let Some(effects) = self.session.intent(intent) else {
@@ -539,6 +602,19 @@ impl Ui {
         }
     }
 
+    pub fn pick_action(&mut self, key: &str, action: &str, tx: &mut Tx) {
+        if !self
+            .action_screen
+            .as_ref()
+            .is_some_and(|screen| screen.key == key)
+        {
+            return;
+        }
+        self.action_screen = None;
+        let effects = self.session.run_key_action(key, action);
+        self.apply(effects, tx);
+    }
+
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
             if self
@@ -547,6 +623,13 @@ impl Ui {
                 .is_some_and(|(g, _)| !self.session.pending(&origin, *g))
             {
                 self.deadlines.remove(&origin);
+            }
+            if self
+                .action_screen
+                .as_ref()
+                .is_some_and(|screen| !screen.is_current(&self.session))
+            {
+                self.action_screen = None;
             }
             self.fetch_icons();
         }
@@ -572,16 +655,11 @@ impl Ui {
                     else {
                         continue;
                     };
-                    let menu = rune::PopupMenu::new().items(
-                        item.actions
-                            .iter()
-                            .map(|action| rune::PopupItem::new(action.id.clone(), action.title.clone())),
-                    );
-                    tx.popup_menu(menu, "query", move |s: &mut Ui, picked, tx| {
-                        if let Some(action_id) = picked {
-                            let effects = s.session.run_key_action(&id, action_id);
-                            s.apply(effects, tx);
-                        }
+                    self.action_screen = Some(ActionScreen {
+                        key: id,
+                        item: item.clone(),
+                        layout_key: self.session.layout_key(self.session.selected()),
+                        selected: 0,
                     });
                 }
                 Effect::Search {
@@ -589,6 +667,7 @@ impl Ui {
                     generation,
                     query,
                 } => {
+                    self.action_screen = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
                     let limit = spec.candidate_limit();
                     let due = tx.clock() + spec.deadline.as_secs_f64();
@@ -611,6 +690,7 @@ impl Ui {
                     }
                 }
                 Effect::CancelSearch => {
+                    self.action_screen = None;
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
@@ -937,5 +1017,127 @@ mod qualifier_tests {
         mark_query_qualifiers(&mut edit, &CommandId::new(crate::commands::APPS).unwrap());
         assert_eq!(edit.text, "report ext:rs");
         assert_eq!(edit.pills().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod action_screen_tests {
+    use super::*;
+    use dupin_core::{Action, CommandRegistry, CommandSpec, Item, QueryPresentation};
+    use std::path::PathBuf;
+
+    fn fixture() -> (Session, ActionScreen) {
+        let origin = CommandId::new("sample.search").unwrap();
+        let mut registry = CommandRegistry::new(origin.clone(), None);
+        registry
+            .register(CommandSpec::new(
+                origin.clone(),
+                10,
+                QueryPresentation {
+                    placeholder: "Search".into(),
+                    chip: None,
+                    empty_hint: None,
+                    no_results_hint: None,
+                    show_searching: false,
+                    backdrop: 0.0,
+                },
+            ))
+            .unwrap();
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("example");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search { generation, .. } => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        session.deliver_from(
+            origin,
+            Delivery::Batch {
+                generation,
+                items: vec![Item::path(
+                    PathBuf::from("/fixture/example"),
+                    "Example".into(),
+                    vec![],
+                )],
+            },
+        );
+        session.intent(Intent::Actions);
+        let screen = ActionScreen {
+            key: session.result_key(0),
+            layout_key: session.layout_key(0),
+            item: session.items()[0].clone(),
+            selected: 0,
+        };
+        (session, screen)
+    }
+
+    #[test]
+    fn keyboard_navigation_is_bounded_and_runs_the_captured_key() {
+        let (_, mut screen) = fixture();
+        screen.key(&Key::Up);
+        assert_eq!(screen.selected, 0);
+        for _ in 0..10 {
+            screen.key(&Key::Down);
+        }
+        assert_eq!(screen.selected, 2);
+        screen.key(&Key::Up);
+        assert_eq!(
+            screen.key(&Key::Enter),
+            ActionKey::Run(screen.key.clone(), "reveal".into())
+        );
+        assert_eq!(screen.key(&Key::Text("x".into())), ActionKey::Stay);
+    }
+
+    #[test]
+    fn cancel_returns_without_changing_search_or_selection() {
+        let (session, mut screen) = fixture();
+        let before = (
+            session.query().to_owned(),
+            session.selected(),
+            session.result_key(0),
+        );
+        for key in [Key::Left, Key::Escape] {
+            assert_eq!(screen.key(&key), ActionKey::Back);
+            assert_eq!(
+                (
+                    session.query().to_owned(),
+                    session.selected(),
+                    session.result_key(0)
+                ),
+                before
+            );
+        }
+    }
+
+    #[test]
+    fn generation_changes_and_reset_make_captured_actions_inert() {
+        for reset in [false, true] {
+            let (mut session, screen) = fixture();
+            assert!(screen.is_current(&session));
+            if reset {
+                session.reset();
+            } else {
+                session.set_query("another");
+            }
+            assert!(!screen.is_current(&session));
+            assert!(session.run_key_action(&screen.key, "open").is_empty());
+        }
+    }
+
+    #[test]
+    fn enter_uses_the_selected_action_without_running_external_effects() {
+        let (mut session, mut screen) = fixture();
+        screen.selected = 2;
+        let ActionKey::Run(key, action) = screen.key(&Key::Enter) else {
+            panic!("expected action")
+        };
+        let effects = session.run_key_action(&key, &action);
+        assert!(
+            effects.iter().any(
+                |effect| matches!(effect, Effect::Run(Action::Copy(value)) if value == "/fixture/example")
+            )
+        );
     }
 }

@@ -4,24 +4,24 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 
 ## Keys
 
-| Key                                   | In the panel                                          |
-| ------------------------------------- | ----------------------------------------------------- |
-| Hotkey                                | Show or hide the panel                                |
-| Type                                  | Fuzzy-search installed apps                           |
-| Space on an empty query               | Search files with Spotlight, by file and display name |
-| `in` then Space                       | Search inside files with Spotlight, as Alfred's `in`  |
-| `define` or `d`, then Space           | Look up a word in macOS dictionaries                  |
-| ⌫ on an empty query                   | Leave file, content or dictionary search              |
-| ↑ ↓                                   | Move the selection                                    |
-| Tab at the end of an unselected input | Complete the selected search keyword                  |
-| ↑ on an empty query, then ↑ ↓         | Recall searches in the current mode                   |
-| ↩                                     | Open the app or file                                  |
-| ⌘↩                                    | Reveal the file in Finder                             |
-| ⌘Y                                    | Preview the selected app or file with Quick Look      |
-| → at the end of the input, or ⌘K      | Show actions for the selected result                  |
-| Esc, or clicking elsewhere            | Hide the panel                                        |
-| ⌘Q                                    | Quit Dupin                                            |
-| ⌘,                                    | Open Settings                                         |
+| Key                                     | In the panel                                          |
+| --------------------------------------- | ----------------------------------------------------- |
+| Hotkey                                  | Show or hide the panel                                |
+| Type                                    | Fuzzy-search installed apps                           |
+| Space on an empty query                 | Search files with Spotlight, by file and display name |
+| `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`  |
+| `define` or `d`, then Space             | Look up a word in macOS dictionaries                  |
+| ⌫ on an empty query                     | Leave file, content or dictionary search              |
+| ↑ ↓                                     | Move the selection                                    |
+| Tab at the end of an unselected input   | Complete the selected search keyword                  |
+| ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
+| ↩                                       | Open the app or file                                  |
+| ⌘↩                                      | Reveal the file in Finder                             |
+| ⌘Y                                      | Preview the selected app or file with Quick Look      |
+| → at the end of the input, ⌘K or Ctrl+K | Show actions for the selected result                  |
+| Esc, or clicking elsewhere              | Hide the panel                                        |
+| ⌘Q                                      | Quit Dupin                                            |
+| ⌘,                                      | Open Settings                                         |
 
 Completed searches are remembered for the current Dupin process when you clear
 the input, hide the panel or activate a result. With an empty input, ↑ recalls the
@@ -51,7 +51,7 @@ Set `web_searches` and optional `web_fallbacks` in [configuration](./configurati
 
 Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).
 
-The list shows up to `file_limit` results (200 by default) from a bounded candidate pool. A selected file or an open action menu keeps its target while results reorder.
+The list shows up to `file_limit` results (200 by default) from a bounded candidate pool. A selected file or an open action screen keeps its target while results reorder.
 
 `in` followed by Space switches to content search ("In files"). Every word must start a word in the text Spotlight indexed from inside the file.
 
@@ -72,11 +72,11 @@ Valid qualifiers appear as inline chips without changing the query text. Backspa
 
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
-result's action menu: Open, Reveal in Finder, Quick Look and Copy path. Quick
-Look opens the native preview and Escape returns to the picker with its search
-and selection intact. Escape cancels the action menu and returns to the search.
-The same menu is available for app results.
+result's action screen: Open, Reveal in Finder, Quick Look and Copy path. Escape cancels the
+screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. The same screen is available for app results.
 
-`define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its menu; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
+Quick Look opens the native preview; Escape returns to the picker with its search and selection intact.
+
+`define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
 You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.

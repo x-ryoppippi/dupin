@@ -50,7 +50,11 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .effect_data([accent.r, accent.g, accent.b, if dark { 1.0 } else { 0.0 }]),
         );
     }
-    panel = panel.child(header(s, &t, accent));
+    panel = panel.child(if s.action_screen.is_some() {
+        action_header(s, &t)
+    } else {
+        header(s, &t, accent)
+    });
     let notices = [
         ("config-problem", s.config_problem.as_deref()),
         ("notice", s.notice.as_deref()),
@@ -95,7 +99,9 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     let items = s.session.items();
-    if !items.is_empty()
+    if s.action_screen.is_some() {
+        panel = panel.child(divider(&t)).child(action_list(s, &t, accent));
+    } else if !items.is_empty()
         && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
     {
         panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
@@ -121,6 +127,96 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             .fill(t.card)
             .system_material(SystemMaterial::Glass)
             .child(panel),
+    )
+}
+
+fn action_header(s: &Ui, t: &tok::Theme) -> El {
+    let screen = s.action_screen.as_ref().unwrap();
+    let icon = match s.icons.get(&screen.layout_key) {
+        Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
+        None => el().size(ICON_SIZE, ICON_SIZE),
+    };
+    let subtitle = match &screen.item.view {
+        View::Text { subtitle, .. } => subtitle.as_str(),
+        _ => "Actions",
+    };
+    row()
+        .key("action-context")
+        .w_full()
+        .h(HEADER_H)
+        .px(18.0)
+        .gap(12.0)
+        .center_y()
+        .child(icon)
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    text(screen.item.display_title())
+                        .font(type_::TITLE)
+                        .color(t.text)
+                        .truncate(),
+                )
+                .child(
+                    text(subtitle)
+                        .font(type_::LABEL)
+                        .color(t.text_secondary)
+                        .truncate(),
+                ),
+        )
+        .child(
+            text("← Search")
+                .font(type_::LABEL)
+                .color(t.text_secondary)
+                .on_press_tx(|s: &mut Ui, tx| {
+                    s.action_screen = None;
+                    tx.focus("query", false);
+                }),
+        )
+}
+
+fn action_list(s: &Ui, t: &tok::Theme, accent: Color) -> El {
+    let screen = s.action_screen.as_ref().unwrap();
+    col().key("actions").w_full().py(LIST_PAD).child(
+        col()
+            .w_full()
+            .max_h(44.0 * VISIBLE_ROWS as f32)
+            .scroll(ScrollSpec { stick_bottom: false })
+            .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
+                let on = index == screen.selected;
+                let key = screen.key.clone();
+                let id = action.id.clone();
+                row()
+                    .key(format!("action-{index}"))
+                    .w_full()
+                    .h(44.0)
+                    .px(LIST_PAD)
+                    .child(
+                        row()
+                            .w_full()
+                            .h_full()
+                            .px(12.0)
+                            .gap(12.0)
+                            .center_y()
+                            .radius(8.0)
+                            .fill(if on { accent } else { Color::TRANSPARENT })
+                            .hover(if on { accent } else { t.hover })
+                            .child(
+                                text(&action.title)
+                                    .font(type_::BODY)
+                                    .color(if on { Color::WHITE } else { t.text })
+                                    .grow(1.0),
+                            )
+                            .child(
+                                text(if on { "↩" } else { "" })
+                                    .font(type_::LABEL)
+                                    .color(Color::WHITE.alpha(0.78)),
+                            )
+                            .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx)),
+                    )
+            })),
     )
 }
 
