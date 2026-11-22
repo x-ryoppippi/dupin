@@ -1,0 +1,10 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": " " },
+		{ "t": 0.3, "type": "type", "text": "dupin-core" },
+		{ "t": 1.0, "type": "key", "name": "Home" },
+		{ "t": 1.3, "type": "type", "text": "in:/" },
+		{ "t": 1.7, "type": "key", "name": "End" },
+		{ "t": 3.0, "type": "mark", "name": "end" }
+	]
+}

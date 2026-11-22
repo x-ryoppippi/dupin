@@ -250,7 +250,7 @@ impl Session {
                 .all(|ch| previous.by_ref().any(|before| before == ch));
         if deletion {
             if !self.deleting {
-                self.before_deletion = (self.results == Results::Done).then(|| self.query.trim().to_owned());
+                self.before_deletion = (self.results == Results::Done).then(|| self.query.clone());
                 self.deleting = true;
             }
         } else {
@@ -566,8 +566,8 @@ impl Session {
             self.record_query(query);
             return;
         }
-        let query = self.query.trim();
-        if (!activated && self.results != Results::Done) || query.is_empty() {
+        let query = &self.query;
+        if (!activated && self.results != Results::Done) || query.trim().is_empty() {
             return;
         }
         self.record_query(query.to_owned());
@@ -629,7 +629,7 @@ impl Session {
                 Vec::new()
             };
         }
-        let query = query.to_owned();
+        let query = self.query.clone();
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };

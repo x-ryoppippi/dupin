@@ -22,6 +22,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
+	"NSCompoundPredicate",
 	"NSObjCRuntime",
 	"NSObject",
 	"NSPredicate",

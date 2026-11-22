@@ -46,6 +46,21 @@ The list shows up to `file_limit` results (200 by default) from a bounded candid
 
 `in` followed by Space switches to content search ("In files"). Every word must start a word in the text Spotlight indexed from inside the file.
 
+Narrow either file mode with qualifiers:
+
+| Qualifier        | Meaning                                                                     |
+| ---------------- | --------------------------------------------------------------------------- |
+| `kind:pdf`       | A category: pdf, image, text, audio, video, folder, archive or app          |
+| `ext:rs`         | An extension, including compound extensions such as `ext:tar.gz`            |
+| `in:~/Documents` | Search within an absolute or home-relative folder                           |
+| `modified:7d`    | Modified within a positive number of hours (`h`), days (`d`) or weeks (`w`) |
+
+Combine different qualifiers, using each at most once: `report kind:pdf modified:7d`. Quote folder paths containing spaces, such as `in:"~/My Documents"`. Backslashes can escape spaces, quotes and backslashes in qualifier values. Unknown colon prefixes remain ordinary search text.
+
+Folder scopes resolve symlinks and require an existing directory. A missing path or a path to a file returns no results.
+
+Valid qualifiers appear as inline chips without changing the query text. Backspace deletes a whole chip, and Undo restores it. Copy and query recall retain the raw query. Incomplete or invalid qualifiers show a syntax hint and return no results. File-name search accepts qualifiers without ordinary terms; content search still requires a word to search for.
+
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
 result's action menu: Open, Reveal in Finder, Quick Look and Copy path. Quick

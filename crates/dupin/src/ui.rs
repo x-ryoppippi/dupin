@@ -24,6 +24,21 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
+    let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
+        .into_iter()
+        .filter(|range| {
+            ![edit.anchor, edit.focus]
+                .into_iter()
+                .any(|position| range.start < position && position < range.end)
+        })
+        .map(|range| rune::MarkRange::new(range, rune::Mark::Pill("file-qualifier".into())))
+        .collect();
+    if edit.marks() != marks.as_slice() {
+        edit.set_marks(marks);
+    }
+}
+
 pub struct Configuration {
     pub values: Rc<RefCell<Config>>,
     pub hotkey: Arc<crate::hotkey::Binding>,
@@ -76,6 +91,18 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// Cursor-only redraws do not emit Rune input-change callbacks.
+    pub fn query_display(&self) -> TextEdit {
+        let mut query = self.query.clone();
+        mark_query_qualifiers(&mut query, self.session.command_id());
+        query
+    }
+
+    pub fn query_edit(&mut self) -> &mut TextEdit {
+        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        &mut self.query
+    }
+
     pub fn new(
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
@@ -403,7 +430,7 @@ impl Ui {
         }
         if ev.key == Key::Backspace && !self.query.text.is_empty() {
             tx.focus("query", false);
-            self.query.key(ev, None);
+            self.query_edit().key(ev, None);
             self.edited(tx);
             return true;
         }
@@ -411,7 +438,7 @@ impl Ui {
             && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt)
         {
             tx.focus("query", false);
-            self.query.insert(text);
+            self.query_edit().insert(text);
             self.edited(tx);
             return true;
         }
@@ -605,6 +632,7 @@ impl Ui {
                 }
             }
         }
+        mark_query_qualifiers(&mut self.query, self.session.command_id());
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
@@ -803,5 +831,86 @@ mod config_tests {
             ..previous.clone()
         };
         assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod qualifier_tests {
+    use super::*;
+
+    fn files() -> CommandId {
+        CommandId::new(crate::commands::FILES).unwrap()
+    }
+
+    #[test]
+    fn inserting_a_qualifier_before_text_keeps_the_caret_inside_the_unfinished_token() {
+        let mut edit = TextEdit::new("report");
+        edit.set_caret(0);
+        edit.insert("in:/");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "in:/report");
+        assert_eq!(edit.focus, 4);
+        assert_eq!(edit.pills().count(), 0);
+        edit.insert("tmp ");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "in:/tmp report");
+        assert_eq!(edit.focus, 8);
+        assert_eq!(edit.pills().count(), 1);
+    }
+
+    #[test]
+    fn moving_the_caret_outside_a_token_allows_idempotent_marking() {
+        let mut edit = TextEdit::new("in:/tmp report");
+        edit.set_caret(4);
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.focus, 4);
+        assert_eq!(edit.pills().count(), 0);
+        edit.set_caret(edit.text.len());
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        let before = edit.focus;
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.focus, before);
+        assert_eq!(edit.text, "in:/tmp report");
+    }
+
+    #[test]
+    fn qualifier_pills_keep_raw_unicode_text_and_delete_as_whole_tokens() {
+        let raw = "日本語 kind:pdf";
+        let mut edit = TextEdit::new(raw);
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, raw);
+        let (range, _) = edit.pills().next().unwrap();
+        assert_eq!(&edit.text[range], "kind:pdf");
+        edit.set_caret(edit.text.len());
+        edit.key(
+            &KeyEvent {
+                key: Key::Backspace,
+                mods: Default::default(),
+            },
+            None,
+        );
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "日本語 ");
+        assert_eq!(edit.pills().count(), 0);
+        edit.undo();
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, raw);
+        assert_eq!(edit.pills().count(), 1);
+    }
+
+    #[test]
+    fn query_replacement_and_mode_changes_recompute_marks_without_changing_text() {
+        let mut edit = TextEdit::new("kind:pdf");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        edit.replace_text("report ext:rs");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        let (range, _) = edit.pills().next().unwrap();
+        assert_eq!(&edit.text[range], "ext:rs");
+        mark_query_qualifiers(&mut edit, &CommandId::new(crate::commands::APPS).unwrap());
+        assert_eq!(edit.text, "report ext:rs");
+        assert_eq!(edit.pills().count(), 0);
     }
 }
