@@ -70,7 +70,7 @@ fn main() {
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()
-    // macOS ignores a focus request until the new Settings window is visible.
+    // Work around Rune's first-open activation issue until its open() lifecycle is fixed.
     .on_ready(|window| window.focus());
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
