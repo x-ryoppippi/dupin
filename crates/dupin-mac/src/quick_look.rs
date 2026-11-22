@@ -8,9 +8,12 @@ use std::ptr::NonNull;
 use dupin_core::{Action, Item, ItemAction};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
-use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate};
-use objc2_foundation::{NSNotification, NSObjectProtocol, NSString, NSURL};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+use objc2_app_kit::{
+    NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate,
+    NSWindowDidResignKeyNotification,
+};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString, NSURL};
 use objc2_quick_look_ui::{QLPreviewItem, QLPreviewPanel, QLPreviewPanelDataSource, QLPreviewPanelDelegate};
 
 pub const ACTION_ID: &str = "quick-look";
@@ -43,6 +46,8 @@ define_class!(
 
     unsafe impl NSObjectProtocol for PreviewController {}
 
+    unsafe impl NSWindowDelegate for PreviewController {}
+
     unsafe impl QLPreviewPanelDataSource for PreviewController {
         #[unsafe(method(numberOfPreviewItemsInPreviewPanel:))]
         unsafe fn number_of_preview_items(&self, _panel: Option<&QLPreviewPanel>) -> isize {
@@ -62,9 +67,10 @@ define_class!(
         }
     }
 
-    unsafe impl NSWindowDelegate for PreviewController {
-        #[unsafe(method(windowDidResignKey:))]
+    impl PreviewController {
+        #[unsafe(method(previewWindowResigned:))]
         fn window_did_resign_key(&self, _notification: &NSNotification) {
+            trace_preview("resigned notification");
             self.clear_item();
             let callback = &self.ivars().panel_resigned;
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
@@ -216,6 +222,21 @@ impl Previewer {
             self.controller.clear_item();
             return false;
         };
+        // Window notifications survive the preview delegate being cleared at control teardown.
+        unsafe {
+            let center = NSNotificationCenter::defaultCenter();
+            center.removeObserver_name_object(
+                &self.controller,
+                Some(NSWindowDidResignKeyNotification),
+                Some(&panel),
+            );
+            center.addObserver_selector_name_object(
+                &self.controller,
+                sel!(previewWindowResigned:),
+                Some(NSWindowDidResignKeyNotification),
+                Some(&panel),
+            );
+        }
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
         let owner = self.view.window();
@@ -341,6 +362,14 @@ impl Previewer {
 impl Drop for Previewer {
     fn drop(&mut self) {
         self.controller.clear_item();
+        // SAFETY: The observer is removed before its retained controller is released.
+        unsafe {
+            NSNotificationCenter::defaultCenter().removeObserver_name_object(
+                &self.controller,
+                Some(NSWindowDidResignKeyNotification),
+                None,
+            );
+        }
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
