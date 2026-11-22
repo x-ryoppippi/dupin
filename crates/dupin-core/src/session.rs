@@ -477,49 +477,45 @@ impl Session {
             }
             Delivery::Expired { .. } => {
                 state.phase = ProviderPhase::Expired;
-                state.items.clear();
             }
         }
-        let any_items = self.providers.values().any(|s| !s.items.is_empty());
         let pending = self.providers.values().any(|s| s.phase == ProviderPhase::Pending);
-        if any_items || !pending || matches!(self.results, Results::Searching { replaced: true }) {
-            self.items.clear();
-            self.origins.clear();
-            let mut order = self.active_order.clone();
-            if let Some(pin) = &self.active_pin {
-                order.sort_by_key(|id| id != pin);
-            }
-            for id in order {
-                let state = &self.providers[&id];
-                let count = if self.active_pin.as_ref() == Some(&id) {
-                    1
-                } else {
-                    state.items.len()
-                };
-                for item in state.items.iter().take(count) {
-                    if self.items.len() >= self.active_limit {
-                        break;
-                    }
-                    self.items.push(item.clone());
-                    self.origins.push(id.clone());
-                }
-            }
-            self.selected = 0;
-            if let Some((origin, id)) = self.refresh_selection.clone().or(selected)
-                && let Some(i) = self
-                    .items
-                    .iter()
-                    .enumerate()
-                    .position(|(i, item)| item.id == id && self.origins[i] == origin)
-            {
-                self.selected = i;
-            }
-            self.results = if pending {
-                Results::Searching { replaced: true }
-            } else {
-                Results::Done
-            };
+        self.items.clear();
+        self.origins.clear();
+        let mut order = self.active_order.clone();
+        if let Some(pin) = &self.active_pin {
+            order.sort_by_key(|id| id != pin);
         }
+        for id in order {
+            let state = &self.providers[&id];
+            let count = if self.active_pin.as_ref() == Some(&id) {
+                1
+            } else {
+                state.items.len()
+            };
+            for item in state.items.iter().take(count) {
+                if self.items.len() >= self.active_limit {
+                    break;
+                }
+                self.items.push(item.clone());
+                self.origins.push(id.clone());
+            }
+        }
+        self.selected = 0;
+        if let Some((origin, id)) = self.refresh_selection.clone().or(selected)
+            && let Some(i) = self
+                .items
+                .iter()
+                .enumerate()
+                .position(|(i, item)| item.id == id && self.origins[i] == origin)
+        {
+            self.selected = i;
+        }
+        self.results = if pending {
+            Results::Searching { replaced: true }
+        } else {
+            Results::Done
+        };
         true
     }
 

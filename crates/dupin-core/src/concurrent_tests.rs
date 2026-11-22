@@ -29,10 +29,46 @@ fn batch(generation: u64, names: &[&str]) -> Delivery {
     }
 }
 fn start(s: &mut Session, query: &str) -> u64 {
-    match &s.set_query(query)[0] {
-        Effect::Search { generation, .. } => *generation,
-        _ => panic!(),
-    }
+    s.set_query(query)
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(*generation),
+            _ => None,
+        })
+        .expect("query starts a search")
+}
+
+#[test]
+fn expiry_preserves_delivered_rows_and_rejects_late_updates() {
+    let mut s = Session::new(History::default(), registry(false)).unwrap();
+    let g = start(&mut s, "slow term");
+    s.deliver_from(id("slow.search"), batch(g, &["valid"]));
+    let key = s.result_key(0);
+    s.deliver_from(id("slow.search"), Delivery::Expired { generation: g });
+    assert_eq!(s.results(), Results::Done);
+    assert_eq!(s.items()[0].id, "valid");
+    assert_eq!(s.failures().count(), 1);
+    assert!(!s.deliver_from(id("slow.search"), batch(g, &["late"])));
+    assert_eq!(
+        s.run_key_action(&key, "copy-path")[0],
+        Effect::Run(Action::Copy("valid".into()))
+    );
+}
+
+#[test]
+fn empty_completion_clears_previous_query_without_waiting_for_other_provider() {
+    let mut s = Session::new(History::default(), registry(false)).unwrap();
+    let g = start(&mut s, "old");
+    s.deliver_from(id("apps.search"), batch(g, &["previous"]));
+    let key = s.result_key(0);
+    let g = start(&mut s, "new");
+    assert_eq!(s.items()[0].id, "previous");
+    s.deliver_from(id("apps.search"), Delivery::Done { generation: g });
+    assert!(s.items().is_empty());
+    assert!(s.pending(&id("slow.search"), g));
+    assert!(s.run_key_action(&key, "open").is_empty());
+    s.deliver_from(id("slow.search"), batch(g, &["current"]));
+    assert_eq!(s.items()[0].id, "current");
 }
 
 #[test]
