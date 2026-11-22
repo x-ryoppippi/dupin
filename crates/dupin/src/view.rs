@@ -58,13 +58,13 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
         panel = panel.child(divider(&t)).child(
-            row()
-                .key(key)
-                .w_full()
-                .px(18.0)
-                .py(12.0)
-                .fill(WARNING)
-                .child(text(notice).font(type_::BODY.lh(18.0)).color(t.text).wrap()),
+            row().key(key).w_full().px(18.0).py(12.0).fill(WARNING).child(
+                text(notice)
+                    .font(type_::BODY.lh(18.0))
+                    .color(t.text)
+                    .wrap()
+                    .w_full(),
+            ),
         );
     }
     let items = s.session.items();
