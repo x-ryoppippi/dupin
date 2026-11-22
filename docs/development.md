@@ -50,6 +50,39 @@ nu scripts/snap.nu
 
 The renders show real results from the machine, file paths included, so they stay out of the repository. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
+## Native E2E evidence
+
+CI collects screenshots and any MP4, MOV or WebM recordings in `e2e-media`, with
+logs and detailed replies in `e2e`. The reporting workflow uses the same body
+for PR comments and commit comments: images render inline and recordings use
+GitHub's video player. Existing `e2e-screenshots` runs remain readable.
+
+Automatic attachment uploads need the optional repository secret
+`E2E_ASSET_TOKEN`, containing an accepted GitHub OAuth or personal access token
+with write access to the repository. The ordinary `GITHUB_TOKEN` can post the
+comment but currently cannot upload user attachments. No upload credential is
+created automatically. Without it, or if the upload fails, the comment retains
+the media download and logs.
+
+The privileged reporting job checks out only the default branch and never runs
+PR code. Its uploader accepts top-level regular media files with safe names and
+matching signatures, up to 50 files, 10 MB per image or 100 MB per video; GitHub
+may impose a lower account limit. Uploaded URLs must belong to GitHub's
+attachment service. The raw upload protocol follows GitHub CLI 2.104.0 and is
+not a documented REST contract, so compatibility failures use the same fallback.
+
+For local inspection, the uploader defaults to a JSON manifest without network
+access. Explicit upload reads `GH_TOKEN` from the caller's environment:
+
+```sh
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e --upload
+nu scripts/tests/e2e-assets.nu
+```
+
+The current native suite captures PNG stages; it does not record videos yet.
+Recordings will be included when a test writes them into `target/e2e`.
+
 ## Peak memory
 
 Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.

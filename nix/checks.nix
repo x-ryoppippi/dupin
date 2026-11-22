@@ -19,6 +19,10 @@ in
     {
       checks = {
         inherit dupin;
+        e2e-assets = repoCheck "dupin-e2e-assets" [ pkgs.coreutils pkgs.jq pkgs.bash ] ''
+          nu scripts/tests/e2e-assets.nu
+          nu scripts/tests/e2e-comment.nu
+        '';
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = pkgs.rustPlatform.buildRustPackage (

@@ -32,18 +32,21 @@ runs:
         path: target/e2e
         if-no-files-found: warn
 
-    # The screenshots on their own, linked from the run summary, so seeing what the panel
-    # showed doesn't mean digging through every reply.
+    # The reporting workflow uploads these as inline GitHub attachments.
     - if: always()
-      id: screenshots
+      id: media
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: e2e-screenshots
-        path: target/e2e/*.png
+        name: e2e-media
+        path: |
+          target/e2e/*.png
+          target/e2e/*.mp4
+          target/e2e/*.mov
+          target/e2e/*.webm
         if-no-files-found: warn
 
-    - if: always() && steps.screenshots.outputs.artifact-url != ''
+    - if: always() && steps.media.outputs.artifact-url != ''
       shell: bash
       env:
-        URL: ${{ steps.screenshots.outputs.artifact-url }}
-      run: printf '### E2E screenshots\n\n[Download e2e-screenshots](%s)\n' "$URL" >>"$GITHUB_STEP_SUMMARY"
+        URL: ${{ steps.media.outputs.artifact-url }}
+      run: printf '### E2E media\n\n[Download e2e-media](%s)\n' "$URL" >>"$GITHUB_STEP_SUMMARY"
