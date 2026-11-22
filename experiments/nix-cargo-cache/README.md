@@ -7,6 +7,12 @@ Cargo, compiler, target linker and frame-pointer setting. The non-flake
 `default.nix` build remains available as the native baseline. `package.nix`
 owns the shared vendor hash; the flake exposes that builder as `dupin.baseline`.
 
+Both builders map their vendor source locations to `/vendor`. The baseline
+uses cargoSetupHook's writable copy, while the cached builder maps its vendor
+adapter. The release and debug dependency caches and their consumers share the
+cached mapping. This keeps temporary build paths out of diagnostics and makes
+the executable-size comparison independent of Nix's build-directory names.
+
 Run the comparison from the repository with committed changes:
 
 ```sh

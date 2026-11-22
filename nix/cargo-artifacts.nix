@@ -47,6 +47,10 @@ let
   baseArgs = builtins.removeAttrs commonArgs [ "cargoDeps" ] // {
     src = cargoSrc;
     inherit cargoVendorDir;
+    # Crane compiles through the adapter rather than cargoSetupHook's copied tree.
+    prePatch = ''
+      export NIX_RUSTFLAGS="''${NIX_RUSTFLAGS-} --remap-path-prefix=${cargoVendorDir}=/vendor"
+    '';
     env.CARGO_PROFILE_RELEASE_STRIP = "false";
   };
   releaseArgs = baseArgs // {
