@@ -25,11 +25,18 @@ const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
 fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
-    let marks = crate::commands::query_qualifier_ranges(command, &edit.text)
+    let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
         .into_iter()
+        .filter(|range| {
+            ![edit.anchor, edit.focus]
+                .into_iter()
+                .any(|position| range.start < position && position < range.end)
+        })
         .map(|range| rune::MarkRange::new(range, rune::Mark::Pill("file-qualifier".into())))
         .collect();
-    edit.set_marks(marks);
+    if edit.marks() != marks.as_slice() {
+        edit.set_marks(marks);
+    }
 }
 
 pub struct Configuration {
@@ -757,6 +764,38 @@ mod qualifier_tests {
 
     fn files() -> CommandId {
         CommandId::new(crate::commands::FILES).unwrap()
+    }
+
+    #[test]
+    fn inserting_a_qualifier_before_text_keeps_the_caret_inside_the_unfinished_token() {
+        let mut edit = TextEdit::new("report");
+        edit.set_caret(0);
+        edit.insert("in:/");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "in:/report");
+        assert_eq!(edit.focus, 4);
+        assert_eq!(edit.pills().count(), 0);
+        edit.insert("tmp ");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "in:/tmp report");
+        assert_eq!(edit.focus, 8);
+        assert_eq!(edit.pills().count(), 1);
+    }
+
+    #[test]
+    fn moving_the_caret_outside_a_token_allows_idempotent_marking() {
+        let mut edit = TextEdit::new("in:/tmp report");
+        edit.set_caret(4);
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.focus, 4);
+        assert_eq!(edit.pills().count(), 0);
+        edit.set_caret(edit.text.len());
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        let before = edit.focus;
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.focus, before);
+        assert_eq!(edit.text, "in:/tmp report");
     }
 
     #[test]
