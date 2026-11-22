@@ -121,11 +121,21 @@ fn malformed_and_foreign_responses_do_not_escape_the_boundary() {
 
 #[test]
 fn fuel_stops_query_and_startup_loops() {
+    let control = QueryControl {
+        deadline: Instant::now() + Duration::from_secs(60),
+        is_cancelled: &|| false,
+    };
     let module = fixture("i32.const 1", ALLOC, "(loop $spin br $spin) i32.const 0", b"");
-    assert_eq!(module.query(&request()), Err(HostError::Fuel));
+    assert_eq!(
+        module.query_controlled(&request(), &control),
+        Err(HostError::Fuel)
+    );
     let bytes = wat::parse_str("(module (func $start (loop $spin br $spin)) (start $start))").unwrap();
     let module = GuestModule::load(&bytes).unwrap();
-    assert_eq!(module.query(&request()), Err(HostError::Fuel));
+    assert_eq!(
+        module.query_controlled(&request(), &control),
+        Err(HostError::Fuel)
+    );
 }
 
 #[test]

@@ -96,10 +96,12 @@ The experimental host can poll a host cancellation predicate and absolute
 deadline between resumable fuel slices. The CLI uses a five-second fixture
 deadline. These checks do not pre-empt module loading, instantiation/start,
 host parsing/translation, allocations or individual charged operations; the
-start function remains bounded by initialization fuel. See the fixture README
+start function remains bounded by startup fuel. See the fixture README
 for the execution policy and its limits.
 
-Fuel bounds guest execution, not rendering or total host memory. This prototype
-has no permission-bearing imports, host operation completions or external-plugin
+Fuel bounds guest execution, not eager host parsing/translation, rendering or
+total host memory. `MAX_MODULE_BYTES` caps the input size for parsing/translation;
+neither fuel nor query deadlines bound their work. This prototype has no
+permission-bearing imports, host operation completions or external-plugin
 installation. Production cancellation/deadline integration is still required;
 this is not a claim that the production isolation and permission design is complete.
