@@ -121,6 +121,25 @@ nu scripts/footprint.nu
 
 Scripts in this repository are written in Nushell.
 
+## Rust visibility
+
+`just hawk` checks workspace API visibility and fails on warnings. The same
+command runs in `nix build .#checks.aarch64-darwin.hawk`, which CI includes
+alongside its existing checks. `hawk.toml` identifies the distributed launcher
+as the production binary.
+
+Hawk 0.1.18 uses a private Rust 1.100.0 analysis toolchain. Its compiler-internal
+API requires that exact toolchain; `cargo-hawk` selects it without changing the
+compiler used by ordinary Cargo commands or the packaged launcher. Update the
+Hawk archive and its analysis compiler together in `nix/cargo-hawk.nix`.
+
+`scripts/hawk.nu` excludes the plugin protocol, runtime and policy libraries
+from closed-workspace visibility decisions. Those libraries define plugin and
+host contracts, including consumers in separate experiment workspaces, so this
+workspace's callers cannot establish their complete public API requirements.
+The host's provider registration entry point also remains public; its precise
+`expect` entry in `hawk.toml` fails if the exception becomes stale.
+
 ## Logo
 
 `assets/logo/dupin.svg` is the app icon and `assets/logo/dupin-mark.svg` a monochrome `currentColor` mark, for template images such as a menu-bar item. They are the only tracked logo sources: the Nix build draws every icon size from `dupin.svg` with resvg and packs them with icnsutil, so no generated PNG or icns is committed.

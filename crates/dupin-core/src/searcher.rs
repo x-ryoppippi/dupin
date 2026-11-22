@@ -15,7 +15,7 @@ pub enum Delivery {
 }
 
 impl Delivery {
-    pub fn generation(&self) -> u64 {
+    pub(crate) fn generation(&self) -> u64 {
         match self {
             Delivery::Batch { generation, .. }
             | Delivery::Done { generation }

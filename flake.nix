@@ -15,6 +15,10 @@
     };
     # agent-desktop for the E2E job; its own nixpkgs keeps cache.numtide.com hits.
     llm-agents.url = "github:numtide/llm-agents.nix";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -33,6 +37,7 @@
         ./nix/treefmt.nix
         ./nix/checks.nix
         ./nix/dev-shell.nix
+        ./nix/hawk.nix
       ];
     };
 }

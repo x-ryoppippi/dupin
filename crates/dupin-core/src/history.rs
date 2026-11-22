@@ -77,7 +77,7 @@ impl History {
     }
 
     /// The item with this id was opened, after typing `query`, at `now` (Unix seconds).
-    pub fn record(&mut self, id: &str, query: &str, now: u64) {
+    pub(crate) fn record(&mut self, id: &str, query: &str, now: u64) {
         let entry = self.items.entry(id.to_owned()).or_default();
         entry.count = entry.count.saturating_add(1);
         entry.visits.push(now);
@@ -112,7 +112,7 @@ impl History {
     }
 
     /// What the history adds to an item's match score for `query` at `now`.
-    pub fn boost(&self, id: &str, query: &str, now: u64) -> i32 {
+    pub(crate) fn boost(&self, id: &str, query: &str, now: u64) -> i32 {
         let Some(entry) = self.items.get(id) else { return 0 };
         let query = normalize(query);
         let knowledge = if entry.queries.contains_key(&query) {
@@ -128,7 +128,7 @@ impl History {
     /// Sort ranked items (all with a `score`) by score plus boost, keeping the providers'
     /// order among equals. Items without scores, which arrive in a provider's own order
     /// (Spotlight's), are left as they are.
-    pub fn rerank(&self, items: &mut [Item], query: &str, now: u64) {
+    pub(crate) fn rerank(&self, items: &mut [Item], query: &str, now: u64) {
         if items.is_empty() || items.iter().any(|item| item.score.is_none()) {
             return;
         }

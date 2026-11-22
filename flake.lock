@@ -201,7 +201,28 @@
         "git-hooks": "git-hooks",
         "llm-agents": "llm-agents",
         "nixpkgs": "nixpkgs_2",
+        "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix_2"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794561628,
+        "narHash": "sha256-oWtItM1eQqkp9OJXq2/Zo10Y9Vu9PDE6O8JRjj4+EkE=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "84edd48f141b0c8910dffdd0296ddd577e829132",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
       }
     },
     "systems": {

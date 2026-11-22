@@ -15,6 +15,7 @@
             config.packages.pnpm
             config.packages.blacksmith
             just
+            config.packages.cargo-hawk
             nufmt
             config.treefmt.build.wrapper
             typos
