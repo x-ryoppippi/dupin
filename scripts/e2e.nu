@@ -199,6 +199,55 @@ def scenario [out: path] {
     )
     poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
+
+    ad $out close-settings press cmd+w | ignore
+    ad $out settings-search-hotkey press alt+space | ignore
+    (poll
+        $out
+        settings-search-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "dupin settings"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out
+        settings-search-query
+        {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    (poll
+        $out
+        settings-search-result
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Dupin Settings Preferences'
+        --exact
+        --first
+    )
+    let log = $out | path join dupin.log
+    let requests_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings requested ' } | length
+    ad $out open-settings-result press return | ignore
+    wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
+    poll $out settings-from-result $settings list-windows --app Dupin
+    snap $out settings-from-result
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -230,9 +279,14 @@ def --wrapped poll [
     error make {msg: $"timed out waiting for ($name): ($reply | to json --raw)"}
 }
 
-def wait-for-log [log: path, line: string, --tries: int = 30] {
+def wait-for-log [
+    log: path
+    line: string
+    --tries: int = 30
+    --after: int = 0
+] {
     for attempt in 1..$tries {
-        if ($log | path exists) and (open --raw $log | str contains $line) { return }
+        if ($log | path exists) and ((open --raw $log | lines | where {|entry| $entry | str contains $line } | length) > $after) { return }
         sleep 1sec
     }
     error make {msg: $"timed out waiting for ($line) in ($log)"}

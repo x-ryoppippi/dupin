@@ -40,7 +40,6 @@ fn discover(root: &Path) -> Vec<Pane> {
     paths.sort();
     paths
         .into_iter()
-        .take(512)
         .filter(|path| path.extension().is_some_and(|extension| extension == "appex"))
         .filter_map(|path| {
             let bundle = NSBundle::bundleWithPath(&NSString::from_str(path.to_str()?))?;
