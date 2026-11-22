@@ -10,7 +10,7 @@ install:
 dev:
     pnpm run dev
 
-# Build the static site into dist/
+# Build the Worker and its static assets
 build:
     pnpm run build
 
@@ -22,6 +22,6 @@ preview:
 lint:
     pnpm run lint
 
-# Build, then upload dist/ to Cloudflare as static assets
+# Build and deploy the Worker and its static assets
 deploy:
     pnpm run deploy

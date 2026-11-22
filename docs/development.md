@@ -140,7 +140,7 @@ just website::install # dependencies from the lockfile
 just website::dev     # local server, rendering the real pages
 just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # cf build, then upload the result as Cloudflare static assets
+just website::deploy  # build and deploy the Worker and its static assets
 ```
 
 Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
