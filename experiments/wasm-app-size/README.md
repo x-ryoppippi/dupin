@@ -47,6 +47,23 @@ installed under the runtime-only label.
 
 ## Interpretation
 
+The recorded Apple silicon run is in
+[`results/2026-11-22-aarch64-darwin.json`](results/2026-11-22-aarch64-darwin.json).
+All three signed-app probes passed, without additional entitlements.
+
+| Variant                              | Signed app bytes |  ZIP bytes | App increase | ZIP increase |
+| ------------------------------------ | ---------------: | ---------: | -----------: | -----------: |
+| Baseline                             |       18,423,525 |  9,557,772 |            — |            — |
+| Runtime                              |       19,559,797 |  9,954,186 |    1,136,272 |      396,414 |
+| Runtime + minimal guest              |       19,576,474 |  9,957,490 |    1,152,949 |      399,718 |
+| Runtime + calculator + minimal guest |       20,326,614 | 10,211,718 |    1,903,089 |      653,946 |
+
+The calculator variant adds about 1.81 MiB to the app and 0.62 MiB to the ZIP.
+Its executable is 144 bytes smaller than the runtime-only variant; whole-program
+linking can change layout, so this is not a negative guest-code cost. Guest
+resources are counted separately in the app total. Recorded artifact paths are
+relative to the run directory.
+
 These are deltas against the pinned app. They include the host probe code and
 external resources, rather than treating a standalone interpreter as the app's
 incremental cost. The minimal guest bundled alongside the calculator has no

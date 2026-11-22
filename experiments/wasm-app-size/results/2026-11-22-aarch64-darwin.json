@@ -1,0 +1,77 @@
+{
+	"metadata": {
+		"baseline_commit": "ac3991952f90435ea207e7c0bd9f876dec371028",
+		"system": "aarch64-darwin",
+		"runtime": "wasmi 2.0.2; std, validate; fuel enabled; 16 MiB linear-memory limit",
+		"release_profile": "fat LTO; one codegen unit; package.nix stripping",
+		"signing": "ad-hoc; hardened runtime; no additional entitlements; no notary submission",
+		"archive": "ditto ZIP, as used by the updater; no DMG measurement",
+		"nixpkgs": {
+			"lastModified": 1795217999,
+			"narHash": "sha256-Z5mAFcY8XTAaWe+RwTchz4Fx1gwaeQ2WD8A8bKX7njY=",
+			"owner": "NixOS",
+			"repo": "nixpkgs",
+			"rev": "680275f0bb6afce84fbac3e75fc47c5f2272400b",
+			"type": "github"
+		},
+		"guest_bytes": 766406,
+		"guest_sha256": "bff14694b6005d445de67887798d5e711753927fdccb226b6329fd7d590b06e6",
+		"patch_sha256": "93cc87ee01c9ac985e651aa31c0b81814b28d41c7a19a4ad6d48eaed1c571bbb",
+		"script_sha256": "49b75c4ef5ada22332c05343bdd965bdca0a4473d51ba7a6286975b8a494b484",
+		"unlink_store_sha256": "7be4242a9d568a2881f99917cd91a8c7dc29be7f25572b2a2890756e76d0f23d",
+		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"nix_outputs": {
+			"baseline": "/nix/store/fsbb29x5pl7d70bks7g6zqrk9brm5hh5-dupin-0.1.0",
+			"variant": "/nix/store/vrlblazwp5np9l8q99f7q3x2vl4pzvv0-dupin-0.1.0"
+		},
+		"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131"
+	},
+	"measurements": [
+		{
+			"label": "baseline",
+			"raw_executable_bytes": 18388256,
+			"signed_executable_bytes": 18281488,
+			"signed_app_file_bytes": 18423525,
+			"zip_bytes": 9557772,
+			"app": "artifacts/baseline.app"
+		},
+		{
+			"label": "wasmi-runtime",
+			"raw_executable_bytes": 19531184,
+			"signed_executable_bytes": 19417760,
+			"signed_app_file_bytes": 19559797,
+			"zip_bytes": 9954186,
+			"app": "artifacts/wasmi-runtime.app"
+		},
+		{
+			"label": "wasmi-minimal",
+			"raw_executable_bytes": 19547664,
+			"signed_executable_bytes": 19434144,
+			"signed_app_file_bytes": 19576474,
+			"zip_bytes": 9957490,
+			"app": "artifacts/wasmi-minimal.app"
+		},
+		{
+			"label": "wasmi-fend",
+			"raw_executable_bytes": 19531040,
+			"signed_executable_bytes": 19417616,
+			"signed_app_file_bytes": 20326614,
+			"zip_bytes": 10211718,
+			"app": "artifacts/wasmi-fend.app"
+		}
+	],
+	"probes": [
+		{
+			"label": "wasmi-runtime",
+			"output": "wasmi_runtime=ok memory_limit_bytes=16777216"
+		},
+		{
+			"label": "wasmi-minimal",
+			"output": "minimal_guest_result=42 wasm_bytes=37"
+		},
+		{
+			"label": "wasmi-fend",
+			"output": "query=\"560 km to mi\" result=\"approx. 347.9678676529 mi\" wasm_bytes=766406"
+		}
+	]
+}
