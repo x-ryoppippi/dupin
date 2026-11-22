@@ -169,7 +169,8 @@
 					}
 					press('␣');
 					mode = scenario.mode;
-					await sleep(350);
+					// Long enough to read the hint the mode shows before the search starts.
+					await sleep(1600);
 				}
 				shown = scenario;
 				for (const char of scenario.query) {
@@ -302,8 +303,7 @@
 		height: 26px;
 		margin: 0 -1px;
 		vertical-align: -6px;
-		background: var(--dupin-accent);
-		animation: blink 1s steps(2) infinite;
+		background: var(--dupin-text);
 	}
 
 	.chip {
