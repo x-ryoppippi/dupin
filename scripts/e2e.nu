@@ -74,6 +74,9 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     poll --tries 15 $out opened {|r| $r.ok and (mentions $r Calculator) } list-apps
     snap $out opened
 
+    # Calculator can still be coming forward; summoned before then, the panel would lose focus
+    # to it and hide before ⌘, arrives.
+    wait-frontmost Calculator
     ad $out press-hotkey-again press alt+space | ignore
     poll $out field-again $focused find --app Dupin --role textfield --first
     ^osascript -e 'tell application "System Events" to keystroke "," using command down'
@@ -90,6 +93,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
+    wait-frontmost Dupin
     snap $out settings-general
     ad $out open-appearance click $appearance.data.match.ref_id | ignore
     (poll
@@ -104,12 +108,13 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
+    wait-frontmost Dupin
     snap $out settings-appearance
 
     job kill $dupin
     # A shader that fails falls back to the built-in one with a warning, which the
     # screenshots alone wouldn't show.
-    if (open --raw $log | str contains 'backdrop shader') {
+    if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
     print 'e2e: the panel opened Calculator, and Settings showed its pages'
@@ -158,7 +163,27 @@ def mentions [reply: record, name: string]: nothing -> bool {
 
 def snap [out: path, name: string] {
     ad $out $'($name)-snapshot' snapshot --app Dupin | ignore
-    ^screencapture -x ($out | path join $'($name).png') | complete | ignore
+    let shot = ^screencapture -x ($out | path join $'($name).png') | complete
+    if $shot.exit_code != 0 {
+        error make {msg: $"screencapture failed for ($name): ($shot.stderr)"}
+    }
+}
+
+# Wait until `app` is the frontmost application, so a screenshot shows its window.
+def wait-frontmost [app: string, --tries: int = 20] {
+    let script = 'tell application "System Events" to get name of first application process whose frontmost is true'
+    mut front = ''
+    for attempt in 1..$tries {
+        $front = (
+            ^osascript -e $script
+            | complete
+            | get stdout
+            | str trim
+        )
+        if ($front | str downcase) == ($app | str downcase) { return }
+        sleep 500ms
+    }
+    error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}
 }
 
 def main [] {
