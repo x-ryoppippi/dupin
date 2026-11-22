@@ -16,7 +16,7 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
 
-Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. These keywords are read at launch.
+Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Edits to the file take effect after relaunch.
 
 ## Updates
 

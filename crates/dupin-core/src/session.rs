@@ -3,7 +3,7 @@
 //! (start a search, run an action, hide) for the UI and platform layers to carry out.
 
 use crate::searcher::Delivery;
-use crate::{Action, History, Item};
+use crate::{Action, History, Item, ItemKind};
 
 /// Which provider the query goes to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -22,6 +22,7 @@ pub enum Mode {
 
 /// Typed before Space in the apps search, enters [`Mode::Contents`].
 pub const CONTENTS_KEYWORD: &str = "in";
+
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Intent {
@@ -242,9 +243,12 @@ impl Session {
                 let Some(action) = action else {
                     return Some(Vec::new());
                 };
-                let id = item.id.clone();
-                self.history.record(&id, &self.query, (self.clock)());
-                let mut effects = vec![Effect::Run(action), Effect::SaveHistory];
+                let mut effects = vec![Effect::Run(action)];
+                if item.kind != ItemKind::Dictionary {
+                    let id = item.id.clone();
+                    self.history.record(&id, &self.query, (self.clock)());
+                    effects.push(Effect::SaveHistory);
+                }
                 effects.extend(self.dismiss());
                 effects
             }

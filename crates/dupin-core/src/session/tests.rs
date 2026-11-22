@@ -29,6 +29,27 @@ fn starts_in_apps_mode_with_nothing_shown() {
 }
 
 #[test]
+fn opening_a_dictionary_result_does_not_change_ranking_history() {
+    let mut history = History::default();
+    history.record("/Applications/Safari.app", "saf", 1_800_000_000);
+    let mut s = Session::new(history.clone());
+    s.set_query("d");
+    s.intent(Intent::Space);
+    let generation = searched(&s.set_query("serendipity")).1;
+    let mut result = item(ItemKind::Dictionary, "serendipity");
+    let action = Action::OpenUrl("dict://serendipity".into());
+    result.primary = action.clone();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![result],
+    });
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(effects.contains(&Effect::Run(action)));
+    assert!(!effects.contains(&Effect::SaveHistory));
+    assert_eq!(s.history(), &history);
+}
+
+#[test]
 fn typing_searches_apps() {
     let mut s = Session::default();
     let effects = s.set_query("saf");
