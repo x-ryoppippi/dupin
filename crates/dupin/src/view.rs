@@ -51,20 +51,19 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     panel = panel.child(header(s, &t, accent));
-    if let Some(notice) = &s.notice {
+    let notices = [
+        ("notice", s.notice.as_deref()),
+        ("backdrop-notice", s.backdrop.problem()),
+    ];
+    for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
         panel = panel.child(divider(&t)).child(
             row()
-                .key("notice")
+                .key(key)
                 .w_full()
                 .px(18.0)
                 .py(12.0)
                 .fill(WARNING)
-                .child(
-                    text(notice.as_str())
-                        .font(type_::BODY.lh(18.0))
-                        .color(t.text)
-                        .wrap(),
-                ),
+                .child(text(notice).font(type_::BODY.lh(18.0)).color(t.text).wrap()),
         );
     }
     let items = s.session.items();

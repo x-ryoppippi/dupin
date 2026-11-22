@@ -229,11 +229,16 @@ impl Compositor<Ui> for Backdrop {
         let clock = f.rt.clock;
         let inputs = Inputs {
             // Seconds since the panel showed, so a shader can play an entrance and the value
-            // stays small enough for f32. Under Reduce Motion, a frame well past any entrance.
+            // stays small enough for f32. Under Reduce Motion, a frame well past any entrance
+            // with no keystroke or search to react to.
             time: if still { 10.0 } else { (clock - s.shown_at) as f32 },
-            keystroke: ((clock - s.typed_at) as f32).min(NO_KEYSTROKE),
+            keystroke: if still {
+                NO_KEYSTROKE
+            } else {
+                ((clock - s.typed_at) as f32).min(NO_KEYSTROKE)
+            },
             query: s.query.text.chars().count() as f32,
-            searching: matches!(s.session.results(), Results::Searching { .. }) as u8 as f32,
+            searching: (!still && matches!(s.session.results(), Results::Searching { .. })) as u8 as f32,
             mode: match s.session.mode() {
                 Mode::Apps => 0.0,
                 Mode::Files => 1.0,

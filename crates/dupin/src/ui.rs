@@ -84,8 +84,7 @@ impl Ui {
         let warm = apps_provider.clone();
         std::thread::spawn(move || warm.warm());
         let deliver = |me: AppHandle<Ui>| move |d: Delivery| me.update(move |s, _| s.deliver(d));
-        let (backdrop, problem) = crate::shader::Source::new(&config.backdrop);
-        let notice = notice.or_else(|| problem.inspect(|p| crate::log::warn(p)));
+        let backdrop = backdrop_source(&config.backdrop);
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -139,10 +138,8 @@ impl Ui {
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
-            let (backdrop, problem) = crate::shader::Source::new(&config.backdrop);
-            self.backdrop = backdrop;
+            self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();
-            self.complain(problem);
         }
     }
 
@@ -182,13 +179,6 @@ impl Ui {
         });
     }
 
-    fn complain(&mut self, problem: Option<String>) {
-        if let Some(problem) = problem {
-            crate::log::warn(&problem);
-            self.notice = Some(problem);
-        }
-    }
-
     pub fn setup(s: &mut Ui, waker: Waker) {
         s.icon_cache = Some(ImageCache::new(waker));
     }
@@ -215,8 +205,9 @@ impl Ui {
 
     fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
-        let problem = self.backdrop.refresh();
-        self.complain(problem);
+        if let Some(problem) = self.backdrop.refresh() {
+            crate::log::warn(problem);
+        }
         self.query.focused = true;
         self.me.place(
             DisplayTarget::UnderPointer,
@@ -423,4 +414,13 @@ impl Ui {
             }
         }
     }
+}
+
+/// The backdrop `pick` names, logging why it can't be used.
+fn backdrop_source(pick: &Backdrop) -> crate::shader::Source {
+    let source = crate::shader::Source::new(pick);
+    if let Some(problem) = source.problem() {
+        crate::log::warn(problem);
+    }
+    source
 }
