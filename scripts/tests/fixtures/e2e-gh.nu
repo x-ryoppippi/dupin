@@ -48,6 +48,7 @@ def --wrapped main [...args: string] {
         return
     }
     if ($request | str contains 'pulls?state=open') {
+        if $env.GH_LATE_STALE == '1' and (open --raw $env.GH_CALLS | str contains 'uploads.github.com') { return }
         if $env.GH_STALE != '1' { print '7' }
         return
     }

@@ -65,6 +65,10 @@ jobs:
             gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
               --jq ".artifacts[] | select(.name == \"$1\") | \"https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/\(.id)\""
           }
+          current_pr() {
+            gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
+              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1
+          }
           media_name=e2e-media
           media=$(artifact_url "$media_name")
           if [[ -z $media ]]; then
@@ -85,8 +89,7 @@ jobs:
           esac
 
           if [[ $EVENT == pull_request ]]; then
-            number=$(gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
-              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1)
+            number=$(current_pr)
             if [[ -z $number ]]; then
               echo 'The pull request has moved past this commit; not commenting.'
               exit 0
@@ -122,6 +125,11 @@ jobs:
             [[ -n $everything ]] && printf -- '- [Log and detailed evidence](%s)\n' "$everything"
             printf -- '- [Run](%s)\n' "$RUN_URL"
           } >"$body"
+
+          if [[ $EVENT == pull_request && $(current_pr) != "$number" ]]; then
+            echo 'The pull request changed during media processing; not commenting.'
+            exit 0
+          fi
 
           existing=$(gh api --paginate "$list" \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)

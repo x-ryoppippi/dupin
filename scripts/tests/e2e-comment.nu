@@ -74,6 +74,16 @@ let failure = try {
             stale: false
             fork: true
         }
+        {
+            name: moved-during-upload
+            event: pull_request
+            token: true
+            failed: false
+            existing: true
+            legacy: false
+            stale: false
+            late: true
+        }
     ]
     for case in $cases {
         let work = $root | path join $case.name
@@ -88,6 +98,7 @@ let failure = try {
             GH_EXISTING: (if $case.existing { '1' } else { '0' })
             GH_LEGACY: (if $case.legacy { '1' } else { '0' })
             GH_STALE: (if $case.stale { '1' } else { '0' })
+            GH_LATE_STALE: (if ($case.late? | default false) { '1' } else { '0' })
             GH_FIXTURES: $fixtures
             GH_POSTED: $posted
             GH_CALLS: $calls
@@ -104,9 +115,13 @@ let failure = try {
         if $run.exit_code != 0 { print --stderr $run.stderr }
         assert ($run.exit_code == 0) $'reporting failed: ($case.name)'
         let commands = open --raw $calls
-        if $case.stale {
+        if $case.stale or ($case.late? | default false) {
             assert (not ($posted | path exists)) 'a stale PR run must not post'
-            assert (not ($commands | str contains 'uploads.github.com')) 'a stale PR run must not upload'
+            if $case.stale {
+                assert (not ($commands | str contains 'uploads.github.com')) 'a stale PR run must not upload'
+            } else {
+                assert ($commands | str contains 'uploads.github.com') 'the head must move after optional media work'
+            }
         } else {
             let body = open --raw $posted
             assert ($body | str starts-with '<!-- dupin-e2e -->') 'report marker must survive'
