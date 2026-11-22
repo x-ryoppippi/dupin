@@ -163,10 +163,10 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                 }
             })
             .collect::<Vec<_>>();
-        let content = col().key("rows").w_full().children(rows);
+        let content = col().key("content-rows").w_full().children(rows);
         return col().key("results").w_full().py(LIST_PAD).child(
             col()
-                .key("scroll")
+                .key("content-scroll")
                 .w_full()
                 .shrink()
                 .max_h(440.0)
