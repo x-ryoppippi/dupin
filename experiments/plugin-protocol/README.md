@@ -2,8 +2,10 @@
 
 This separate workspace exercises the [experimental query protocol](../../docs/plugin-protocol.md)
 with a real calculator Wasm guest. It is not loaded by Dupin and changes no app
-permissions, entitlements or runtime dependency. The shared protocol crate is
-part of the root workspace so its validation tests run with the normal checks.
+permissions, entitlements or runtime dependency. The protocol and bounded Wasm
+host live in the root workspace as `dupin-plugin-protocol` and
+`dupin-plugin-runtime`; the fixture CLI uses that same host implementation.
+Neither crate adds a runtime dependency to the launcher executable.
 
 Build the guest using the repository's Rust toolchain and bare Wasm standard
 library. Nix's temporary linker shell supplies `lld` without a global install:
@@ -28,9 +30,9 @@ no items rather than an error. Final calculator evaluation policy belongs to #17
 
 ```sh
 cargo test -p dupin-plugin-protocol
+cargo test -p dupin-plugin-runtime
 cargo test --manifest-path experiments/plugin-protocol/Cargo.toml --locked --workspace
-cargo test --manifest-path experiments/plugin-protocol/Cargo.toml --locked \
-  --release -p dupin-protocol-host
+cargo test --release -p dupin-plugin-runtime
 ```
 
 Host tests use adversarial WAT modules to check pointer bounds, overlap, output

@@ -92,7 +92,7 @@ Initialisation/version/allocation share 1M fuel; the query receives a separate
 portable dispatch available when native tail calls cannot be guaranteed, notably
 in debug builds; increasing the native stack is not a substitute for it.
 
-The experimental host can poll a host cancellation predicate and absolute
+The shared `dupin-plugin-runtime` host can poll a host cancellation predicate and absolute
 deadline between resumable fuel slices. The CLI uses a five-second fixture
 deadline. These checks do not pre-empt module loading, instantiation/start,
 host parsing/translation, allocations or individual charged operations; the

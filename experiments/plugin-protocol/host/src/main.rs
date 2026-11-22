@@ -5,7 +5,7 @@ use std::{
 };
 
 use dupin_plugin_protocol::{MAX_REQUEST_BYTES, Request};
-use dupin_protocol_host::{GuestModule, MAX_MODULE_BYTES};
+use dupin_plugin_runtime::{GuestModule, MAX_MODULE_BYTES};
 
 fn read(path: &Path, cap: usize) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
