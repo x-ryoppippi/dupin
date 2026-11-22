@@ -497,6 +497,21 @@ impl Ui {
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         crate::trace::key(ev);
+        match &ev.key {
+            // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
+            Key::Command('q') => {
+                self.updater.install_on_quit();
+                tx.quit();
+                return true;
+            }
+            Key::Command(',') => {
+                crate::trace::settings("requested");
+                self.settings_after_close = true;
+                self.dismiss(tx);
+                return true;
+            }
+            _ => {}
+        }
         if let Some(screen) = &mut self.action_screen {
             match screen.key(&ev.key) {
                 ActionKey::Back => {
@@ -541,18 +556,6 @@ impl Ui {
             Key::Enter if m.cmd => Intent::OpenAlternate,
             Key::Enter => Intent::Open,
             Key::Escape => Intent::Dismiss,
-            // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
-            Key::Command('q') => {
-                self.updater.install_on_quit();
-                tx.quit();
-                return true;
-            }
-            Key::Command(',') => {
-                crate::trace::settings("requested");
-                self.settings_after_close = true;
-                self.dismiss(tx);
-                return true;
-            }
             _ => return false,
         };
         let Some(effects) = self.session.intent(intent) else {
