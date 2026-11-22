@@ -126,7 +126,9 @@ fn open_shaders_folder() {
             crate::log::warn(&format!("couldn't create {}: {e}", dir.display()));
             return;
         }
-        _ = dupin_mac::workspace::open(&dir);
+        if dir.is_dir() {
+            _ = dupin_mac::workspace::open(&dir);
+        }
     });
 }
 
