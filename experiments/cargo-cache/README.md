@@ -8,8 +8,9 @@ place so the recorded run can be inspected; the output JSON records its path.
 Run it from the repository root after dependencies are available locally:
 
 ```sh
-nu experiments/cargo-cache/measure.nu /path/to/sccache \
-  --package dupin-core --output /tmp/dupin-core-cache-results.json
+nix build --inputs-from . nixpkgs#sccache --out-link /tmp/dupin-cache-sccache
+nu experiments/cargo-cache/measure.nu /tmp/dupin-cache-sccache/bin/sccache \
+  --package dupin --output /tmp/dupin-cache-results.json
 ```
 
 The default package is `dupin`. Cargo uses `--offline`, so the experiment will
@@ -31,6 +32,8 @@ worktree was dirty. Cargo artifact freshness describes Cargo's
 target-directory decision; use sccache's hit and miss counters to identify
 compiler cache replay.
 
+`elapsed` is in nanoseconds; cache sizes are bytes.
+
 This is a local debug-profile `cargo build` experiment. It does not measure the
 Nix derivation, CI cache restore, release binary size, application launch, or
 the effect of editing a source file. One run is exploratory evidence, not a
@@ -41,3 +44,35 @@ inherited `SCCACHE_*` variables and `CARGO_INCREMENTAL` are removed. The script
 sets `RUSTC_WRAPPER` explicitly for each case and sets
 `RUSTC_WORKSPACE_WRAPPER` to empty. This keeps the cache and server isolated and
 lets Cargo use its default incremental setting.
+
+## Recorded run
+
+[The recorded output](results/2026-11-22-aarch64-darwin.json) was generated from
+clean commit `4d208c00a2cd76e5a0e741adc6ff5700680e2487` on macOS 27.2.1,
+hardware model `Mac17,7`, with Rust 1.99.1 and sccache 0.19.0. The launcher,
+dependencies and Nix configuration are unchanged from `45bc4a8`.
+
+| Case                                                | Seconds | Rust hits | Rust misses |
+| --------------------------------------------------- | ------: | --------: | ----------: |
+| Native, fresh target                                |  28.403 |         — |           — |
+| sccache, cold cache, fresh target                   |  39.405 |         0 |         210 |
+| sccache, warm cache, different fresh target path    |  28.081 |       173 |          37 |
+| Native, fresh-target control                        |  27.935 |         — |           — |
+| sccache, existing target                            |   0.170 |         — |           — |
+| Native, existing target                             |   0.238 |         — |           — |
+| sccache, warm cache, same target path after removal |   7.686 |       210 |           0 |
+| Native, same target path after removal              |  36.206 |         — |           — |
+
+The existing-target cases issued no compiler requests. The final cache size was
+483,011,452 bytes under the 2 GiB cap. Workspace incremental builds, procedural
+macros and executables remain outside the Rust cache; the raw output records
+the non-cacheable requests separately.
+
+This sequential run shows that many cache hits can coexist with little change
+in build time when the target path changes. Rebuilding at the same path had a
+large benefit here. Local machine load and operating-system caches were not
+controlled, so these are observations, not stable speedup estimates. They do
+not establish the exact cause of each miss or show that path settings would
+resolve it. The development shell and CI keep their existing
+configuration. Sharing compiled Nix dependency outputs remains a separate
+experiment tracked by [#95](https://github.com/x-ryoppippi/dupin/issues/95).

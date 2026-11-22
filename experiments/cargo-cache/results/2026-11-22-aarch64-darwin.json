@@ -1,0 +1,8759 @@
+{
+	"format_version": 1,
+	"source_commit": "4d208c00a2cd76e5a0e741adc6ff5700680e2487",
+	"working_tree_dirty": false,
+	"working_directory": "/Users/ryoppippi/.t3/worktrees/dupin/t3-9cdb881b-3863c8fa8ee0ae96",
+	"package": "dupin",
+	"sccache_executable": "/nix/store/p4fwsv1frlvwdvmhh5gfl7zwrv8y533b-sccache-0.19.0/bin/sccache",
+	"sccache_version": "sccache 0.19.0",
+	"cargo_version": "cargo 1.99.0 (5f94df478 2026-08-27)",
+	"rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+	"script_sha256": "9ce9713b589df3d8beb2591cb8c5a636c859c6bfd4b9340033f1fa1a046968c9",
+	"cargo_lock_sha256": "b852afa6579cb18612e247d02bf711fefe7990db79ddc5392dc008a7c2634092",
+	"flake_lock_sha256": "998c650bea2ae1c93d94e7c2c03826bd74b8b926240f9181a4a00b25434e2611",
+	"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
+	"hardware": "Mac17,7",
+	"cargo_incremental": "unset for child Cargo processes; Cargo default applies",
+	"workspace_wrapper": "RUSTC_WORKSPACE_WRAPPER is empty for child Cargo processes",
+	"cache_limit_bytes": 2147483648,
+	"temporary_root": "/private/tmp/dupin-cargo-cache.Q8uG5Dii",
+	"result": {
+		"status": "ok",
+		"results": [
+			{
+				"name": "native_first_fresh_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-a",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-a",
+				"rustc_wrapper": "",
+				"elapsed": 28403318709,
+				"cargo_artifacts": [
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 0,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 0,
+						"requests_not_cacheable": 0,
+						"requests_executed": 0,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 0,
+						"not_cached": {},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": null,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "sccache_cold_fresh_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-a",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-a",
+				"rustc_wrapper": "/nix/store/p4fwsv1frlvwdvmhh5gfl7zwrv8y533b-sccache-0.19.0/bin/sccache",
+				"elapsed": 39404888541,
+				"cargo_artifacts": [
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 268,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 2,
+						"requests_not_cacheable": 52,
+						"requests_executed": 214,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {
+								"Rust": 210,
+								"Assembler": 1,
+								"C/C++": 1
+							},
+							"adv_counts": {
+								"c [clang]": 1,
+								"assemblerToPreprocess [clang]": 1,
+								"rust": 210
+							}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 212,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 337007294
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 212,
+						"compiler_write_duration": {
+							"secs": 145,
+							"nanos": 356118460
+						},
+						"compile_fails": 2,
+						"not_cached": {
+							"crate-type (bin)": 33,
+							"crate-type (proc-macro)": 10,
+							"incremental": 3,
+							"-": 3,
+							"missing input": 3
+						},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 341281762,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "sccache_warm_fresh_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+				"rustc_wrapper": "/nix/store/p4fwsv1frlvwdvmhh5gfl7zwrv8y533b-sccache-0.19.0/bin/sccache",
+				"elapsed": 28081156750,
+				"cargo_artifacts": [
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 268,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 2,
+						"requests_not_cacheable": 52,
+						"requests_executed": 214,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {
+								"Rust": 173,
+								"C/C++": 1,
+								"Assembler": 1
+							},
+							"adv_counts": {
+								"rust": 173,
+								"assemblerToPreprocess [clang]": 1,
+								"c [clang]": 1
+							}
+						},
+						"cache_misses": {
+							"counts": {
+								"Rust": 37
+							},
+							"adv_counts": {
+								"rust": 37
+							}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 37,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 98321124
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 63219752
+						},
+						"compilations": 37,
+						"compiler_write_duration": {
+							"secs": 36,
+							"nanos": 518172669
+						},
+						"compile_fails": 2,
+						"not_cached": {
+							"incremental": 3,
+							"crate-type (bin)": 33,
+							"crate-type (proc-macro)": 10,
+							"-": 3,
+							"missing input": 3
+						},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "native_control_fresh_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+				"rustc_wrapper": "",
+				"elapsed": 27934563208,
+				"cargo_artifacts": [
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 0,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 0,
+						"requests_not_cacheable": 0,
+						"requests_executed": 0,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 0,
+						"not_cached": {},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "sccache_warm_reused_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+				"rustc_wrapper": "/nix/store/p4fwsv1frlvwdvmhh5gfl7zwrv8y533b-sccache-0.19.0/bin/sccache",
+				"elapsed": 170074875,
+				"cargo_artifacts": [
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cfg_if",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": true
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": true
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": true
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": true
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "log",
+						"cargo_fresh": true
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": true
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": true
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": true
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": true
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": true
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": true
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": true
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": true
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": true
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": true
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": true
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": true
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": true
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": true
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "half",
+						"cargo_fresh": true
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": true
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": true
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": true
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": true
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": true
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": true
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": true
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "object",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "png",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": true
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": true
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": true
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": true
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": true
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": true
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": true
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": true
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": true
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": true
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": true
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": true
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": true
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": true
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": true
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": true
+					},
+					{
+						"target": "png",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": true
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": true
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": true
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "image",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": true
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": true
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": true
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": true
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": true
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": true
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 0,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 0,
+						"requests_not_cacheable": 0,
+						"requests_executed": 0,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 0,
+						"not_cached": {},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "native_reused_target",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+				"rustc_wrapper": "",
+				"elapsed": 237899875,
+				"cargo_artifacts": [
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cfg_if",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": true
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": true
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": true
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": true
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "log",
+						"cargo_fresh": true
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": true
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": true
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": true
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": true
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": true
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": true
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": true
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": true
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": true
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": true
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": true
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": true
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": true
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": true
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "half",
+						"cargo_fresh": true
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": true
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": true
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": true
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": true
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": true
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": true
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": true
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": true
+					},
+					{
+						"target": "object",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "png",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": true
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": true
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": true
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": true
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": true
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": true
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": true
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": true
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": true
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": true
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": true
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": true
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": true
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": true
+					},
+					{
+						"target": "png",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": true
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": true
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": true
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": true
+					},
+					{
+						"target": "image",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": true
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": true
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": true
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": true
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": true
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": true
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": true
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": true
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": true
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": true
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": true
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": true
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": true
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": true
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": true
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": true
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": true
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": true
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": true
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 0,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 0,
+						"requests_not_cacheable": 0,
+						"requests_executed": 0,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 0,
+						"not_cached": {},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "sccache_warm_same_absolute_target_after_removal",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/cached-b",
+				"rustc_wrapper": "/nix/store/p4fwsv1frlvwdvmhh5gfl7zwrv8y533b-sccache-0.19.0/bin/sccache",
+				"elapsed": 7686168958,
+				"cargo_artifacts": [
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 268,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 2,
+						"requests_not_cacheable": 52,
+						"requests_executed": 214,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {
+								"Rust": 210,
+								"C/C++": 1,
+								"Assembler": 1
+							},
+							"adv_counts": {
+								"assemblerToPreprocess [clang]": 1,
+								"rust": 210,
+								"c [clang]": 1
+							}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 67570418
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 2,
+						"not_cached": {
+							"crate-type (bin)": 33,
+							"-": 3,
+							"crate-type (proc-macro)": 10,
+							"missing input": 3,
+							"incremental": 3
+						},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			},
+			{
+				"name": "native_same_absolute_target_after_removal",
+				"command": [
+					"cargo",
+					"build",
+					"--offline",
+					"--package",
+					"dupin",
+					"--target-dir",
+					"/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+					"--message-format=json"
+				],
+				"target_dir": "/private/tmp/dupin-cargo-cache.Q8uG5Dii/native-b",
+				"rustc_wrapper": "",
+				"elapsed": 36206386792,
+				"cargo_artifacts": [
+					{
+						"target": "cfg_if",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_ident",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cfg_aliases",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foldhash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "shlex",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "once_cell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stable_deref_trait",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smallvec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "find_msvc_tools",
+						"cargo_fresh": false
+					},
+					{
+						"target": "log",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "autocfg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simd_adler32",
+						"cargo_fresh": false
+					},
+					{
+						"target": "adler2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_encode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "equivalent",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memchr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "writeable",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "itoa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "hashbrown",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litemap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bitflags",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_width",
+						"cargo_fresh": false
+					},
+					{
+						"target": "float_cmp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_vec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zmij",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "strict_num",
+						"cargo_fresh": false
+					},
+					{
+						"target": "scopeguard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bit_set",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "utf8_iter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "static_assertions",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arrayref",
+						"cargo_fresh": false
+					},
+					{
+						"target": "proc_macro2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "codespan_reporting",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quote",
+						"cargo_fresh": false
+					},
+					{
+						"target": "indexmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "lock_api",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fdeflate",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "constant_time_eq",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "miniz_oxide",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "crc32fast",
+						"cargo_fresh": false
+					},
+					{
+						"target": "profiling",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "libloading",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_hash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "siphasher",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "num_traits",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parking_lot",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "flate2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "memmap2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "portable_atomic",
+						"cargo_fresh": false
+					},
+					{
+						"target": "quick_error",
+						"cargo_fresh": false
+					},
+					{
+						"target": "color_quant",
+						"cargo_fresh": false
+					},
+					{
+						"target": "xmlwriter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "simplecss",
+						"cargo_fresh": false
+					},
+					{
+						"target": "weezl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "byteorder_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "imagesize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "data_url",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pico_args",
+						"cargo_fresh": false
+					},
+					{
+						"target": "base64",
+						"cargo_fresh": false
+					},
+					{
+						"target": "roxmltree",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "kurbo",
+						"cargo_fresh": false
+					},
+					{
+						"target": "litrs",
+						"cargo_fresh": false
+					},
+					{
+						"target": "svgtypes",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "linebender_resource_handle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "version_check",
+						"cargo_fresh": false
+					},
+					{
+						"target": "gif",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zune_jpeg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "document_features",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation_sys",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dispatch",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_emoji",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parlance",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_io_surface",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_motion",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_json",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_shared",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image_webp",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "uuid",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeroize",
+						"cargo_fresh": false
+					},
+					{
+						"target": "block2",
+						"cargo_fresh": false
+					},
+					{
+						"target": "blake3",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pin_project_lite",
+						"cargo_fresh": false
+					},
+					{
+						"target": "png",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zeno",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yazi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pollster",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "cursor_icon",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dpi",
+						"cargo_fresh": false
+					},
+					{
+						"target": "smol_str",
+						"cargo_fresh": false
+					},
+					{
+						"target": "slotmap",
+						"cargo_fresh": false
+					},
+					{
+						"target": "unicode_segmentation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_spanned",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_datetime",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tracing",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "pxfm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "synstructure",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rustc_demangle",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "object",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_notify",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml_parser",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_consumer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "syn",
+						"cargo_fresh": false
+					},
+					{
+						"target": "ar_archive_writer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types_macros",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "displaydoc",
+						"cargo_fresh": false
+					},
+					{
+						"target": "foreign_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "build-script-build",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winnow",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "core_graphics",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerofrom",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror_impl",
+						"cargo_fresh": false
+					},
+					{
+						"target": "thiserror",
+						"cargo_fresh": false
+					},
+					{
+						"target": "yoke",
+						"cargo_fresh": false
+					},
+					{
+						"target": "bytemuck",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rgb",
+						"cargo_fresh": false
+					},
+					{
+						"target": "font_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "psm",
+						"cargo_fresh": false
+					},
+					{
+						"target": "stacker",
+						"cargo_fresh": false
+					},
+					{
+						"target": "toml",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia_path",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerotrie",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerovec",
+						"cargo_fresh": false
+					},
+					{
+						"target": "potential_utf",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tinystr",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde_derive",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_taffy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_collections",
+						"cargo_fresh": false
+					},
+					{
+						"target": "serde",
+						"cargo_fresh": false
+					},
+					{
+						"target": "tiny_skia",
+						"cargo_fresh": false
+					},
+					{
+						"target": "resvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "moxcms",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_types",
+						"cargo_fresh": false
+					},
+					{
+						"target": "usvg",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_plugin_protocol",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_provider",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_locale_fallback",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_normalizer",
+						"cargo_fresh": false
+					},
+					{
+						"target": "zerocopy",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_segmenter",
+						"cargo_fresh": false
+					},
+					{
+						"target": "half",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_core_video",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_data",
+						"cargo_fresh": false
+					},
+					{
+						"target": "raw_window_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_quartz_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "icu_properties",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_metal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_av_foundation",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "arboard",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_spell",
+						"cargo_fresh": false
+					},
+					{
+						"target": "accesskit_macos",
+						"cargo_fresh": false
+					},
+					{
+						"target": "image",
+						"cargo_fresh": false
+					},
+					{
+						"target": "objc2_app_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin_mac",
+						"cargo_fresh": false
+					},
+					{
+						"target": "winit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "fontique",
+						"cargo_fresh": false
+					},
+					{
+						"target": "read_fonts",
+						"cargo_fresh": false
+					},
+					{
+						"target": "skrifa",
+						"cargo_fresh": false
+					},
+					{
+						"target": "harfrust",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley_engine",
+						"cargo_fresh": false
+					},
+					{
+						"target": "parley",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_naga_bridge",
+						"cargo_fresh": false
+					},
+					{
+						"target": "swash",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core_deps_apple",
+						"cargo_fresh": false
+					},
+					{
+						"target": "naga",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_hal",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_edit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_text",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_staging",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu_core",
+						"cargo_fresh": false
+					},
+					{
+						"target": "wgpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_gpu",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_media",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_theme_opencode",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune_kit",
+						"cargo_fresh": false
+					},
+					{
+						"target": "rune",
+						"cargo_fresh": false
+					},
+					{
+						"target": "dupin",
+						"cargo_fresh": false
+					}
+				],
+				"sccache": {
+					"stats": {
+						"compile_requests": 0,
+						"requests_unsupported_compiler": 0,
+						"requests_not_compile": 0,
+						"requests_not_cacheable": 0,
+						"requests_executed": 0,
+						"cache_errors": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_hits": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_misses": {
+							"counts": {},
+							"adv_counts": {}
+						},
+						"cache_timeouts": 0,
+						"cache_read_errors": 0,
+						"non_cacheable_compilations": 0,
+						"forced_recaches": 0,
+						"cache_write_errors": 0,
+						"cache_writes": 0,
+						"cache_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"cache_read_hit_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compilations": 0,
+						"compiler_write_duration": {
+							"secs": 0,
+							"nanos": 0
+						},
+						"compile_fails": 0,
+						"not_cached": {},
+						"dist_compiles": {},
+						"dist_errors": 0,
+						"multi_level": null
+					},
+					"cache_location": "Local disk: \"/private/tmp/dupin-cargo-cache.Q8uG5Dii/cache\"",
+					"cache_size": 483011452,
+					"max_cache_size": 2147483648,
+					"use_preprocessor_cache_mode": true,
+					"version": "0.19.0",
+					"basedirs": [],
+					"effective_cache_mode": "ReadWrite"
+				}
+			}
+		]
+	}
+}
