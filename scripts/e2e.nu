@@ -77,7 +77,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     ad $out press-hotkey-again press alt+space | ignore
     poll $out field-again $focused find --app Dupin --role textfield --first
     ^osascript -e 'tell application "System Events" to keystroke "," using command down'
-    let page = {|r| $r.ok and $r.data?.match?.ref? != null }
+    let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
     let appearance = (poll
         $out
         settings
@@ -91,7 +91,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --first
     )
     snap $out settings-general
-    ad $out open-appearance click $appearance.data.match.ref | ignore
+    ad $out open-appearance click $appearance.data.match.ref_id | ignore
     (poll
         $out
         appearance-page
