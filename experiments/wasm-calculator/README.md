@@ -49,9 +49,72 @@ An initial run is recorded in
 [results/2026-11-22-aarch64-darwin.json](results/2026-11-22-aarch64-darwin.json),
 including toolchain and source/artifact hashes. The baseline commit identifies
 the app revision the experiment was added to; source hashes identify the fixture.
-That historical run predates `auto-dispatch` and the regression tests. Its source
-hashes and measurements are retained unchanged; it does not measure the current
-host configuration.
+All checked-in runs, including the runtime comparison below, predate
+`auto-dispatch` and the regression tests. Their source hashes and measurements
+are retained unchanged; they do not measure the current host configuration.
+
+## Interpreter versus compiled execution
+
+`compiled-host` runs the same guest and query cases with Wasmtime 51.0.0,
+defaults disabled and only `cranelift`, `runtime` and `std` enabled. It explicitly
+selects Cranelift rather than Pulley, which is another interpreter. The existing
+Wasmi runner remains unchanged so the two paths can be examined independently.
+
+On macOS, after building the bare guest above:
+
+```sh
+nu experiments/wasm-calculator/compare.nu \
+  experiments/wasm-calculator/target/wasm32-unknown-unknown/release/dupin_calculator_guest.wasm
+```
+
+The script copies the manifests, lockfile, Rust sources and guest into a temporary
+snapshot before building either host. It records their hashes, compiler and OS,
+executable bytes, each runner's JSON, and macOS `time -l` process statistics.
+Each host is built separately to avoid merging dependency features across the
+two runners. Build output lives inside that run's directory, preventing another
+invocation from replacing an executable before it is copied or measured.
+Git state and the root nixpkgs pin are recorded with the toolchain.
+`--prepare-only` checks snapshot preparation without building or executing.
+The final `results.json` stays in the reported run directory. Both runners must
+produce the same query/result pairs and pass fuel and memory-limit assertions.
+
+Module loading includes native compilation in Wasmtime; Wasmi's lazy translation
+instead contributes to first-use latency. Fuel counts have different meanings in
+the two runtimes and must not be compared as equivalent work units. Cranelift
+compilation is single-threaded here; parallel compilation and precompiled module
+loading are not enabled or measured. Process peak
+memory covers compilation, queries and the limit checks; it is not idle memory
+or a bound on host allocations. Standalone executable sizes include the native
+evaluator and are not application bundle deltas.
+
+Cranelift produces executable memory. These unsigned command-line runs do not
+prove compatibility with Dupin's hardened-runtime signing or justify entitlement
+changes. A compiled runtime still needs an app-level size/signing measurement
+before adoption. No app dependency, permission or entitlement changes are made.
+
+The [recorded M5 Max run](results/2026-11-22-runtime-comparison-aarch64-darwin.json)
+uses the same 766,406-byte guest. Both engines passed result equality, fuel cutoff
+and exact memory-boundary checks.
+
+| Measurement                |      Wasmi 2.0.2 | Wasmtime 51.0.0 / Cranelift |
+| -------------------------- | ---------------: | --------------------------: |
+| Module load / compilation  |         2.534 ms |                  373.450 ms |
+| Warm `560 km to mi` mean   |         0.976 ms |                    0.117 ms |
+| Warm `30*(60+1)` mean      |         0.131 ms |                    0.017 ms |
+| Warm `60 mph in m/s` mean  |         1.118 ms |                    0.130 ms |
+| Warm `1 acre in m^2` mean  |         0.986 ms |                    0.115 ms |
+| Process peak footprint     | 23,167,360 bytes |            42,598,856 bytes |
+| Standalone host executable |  2,091,392 bytes |             7,618,528 bytes |
+
+Cranelift improves warm query time here while paying more at module load and in
+process memory. These exploratory numbers do not decide production adoption;
+the signed app, cold/idle costs and protocol costs still need consideration.
+
+References: [Wasmtime compilation configuration](https://docs.rs/wasmtime/51.0.0/wasmtime/struct.Config.html),
+[resource limits](https://docs.rs/wasmtime/51.0.0/wasmtime/struct.StoreLimitsBuilder.html),
+[fuel traps](https://docs.rs/wasmtime/51.0.0/wasmtime/enum.Trap.html),
+[Pulley](https://docs.wasmtime.dev/examples-pulley.html), and
+[Apple's executable-memory entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.allow-jit).
 
 ## Boundaries
 

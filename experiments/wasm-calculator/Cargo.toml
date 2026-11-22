@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["guest", "host"]
+members = ["guest", "host", "compiled-host"]
 
 [profile.release]
 lto = "fat"
