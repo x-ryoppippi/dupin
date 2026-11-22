@@ -15,6 +15,8 @@ mod ui;
 mod update;
 mod view;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
@@ -81,11 +83,21 @@ fn main() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
+    let settings = Arc::new(settings::Service::new(settings::path(), {
+        let panel = handle.clone();
+        move |update| panel.update(move |s, tx| s.reload_config(update, tx))
+    }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
+    let current_config = Rc::new(RefCell::new(config.clone()));
     let prefs = prefs.init({
-        let (config, binding, panel, updater) =
-            (config.clone(), binding.clone(), handle.clone(), updater.clone());
-        move || prefs::Prefs::new(config, binding, panel, updater)
+        let (config, binding, panel, updater, settings) = (
+            current_config.clone(),
+            binding.clone(),
+            handle.clone(),
+            updater.clone(),
+            settings.clone(),
+        );
+        move || prefs::Prefs::new(config, binding, panel, updater, settings)
     });
 
     let hotkey = config.hotkey.clone();
@@ -93,13 +105,28 @@ fn main() {
     let app = app
         .init({
             let handle = handle.clone();
-            move || ui::Ui::new(handle, prefs_handle, updater, config, history, config_problem)
+            let configuration = ui::Configuration {
+                values: current_config,
+                hotkey: binding.clone(),
+                files: settings.clone(),
+            };
+            move || {
+                ui::Ui::new(
+                    handle,
+                    prefs_handle,
+                    updater,
+                    configuration,
+                    history,
+                    config_problem,
+                )
+            }
         })
         .on_ready(move |window| {
             appear_instantly(window);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
                 binding.register_at_launch(&hotkey);
+                settings.activate();
             }
         })
         .on_frame_encoded(trace::frame)

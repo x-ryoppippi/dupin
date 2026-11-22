@@ -2,7 +2,9 @@
 //! field, icons, a notice). Handlers translate keys into session intents and carry out the
 //! effects the session returns.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -22,6 +24,12 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Configuration {
+    pub values: Rc<RefCell<Config>>,
+    pub hotkey: Arc<crate::hotkey::Binding>,
+    pub files: Arc<crate::settings::Service>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Restart {
     Update,
@@ -34,7 +42,10 @@ pub struct Ui {
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
+    configuration: Configuration,
+    acknowledged_config: Config,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -67,10 +78,11 @@ impl Ui {
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
         updater: crate::update::Updater,
-        config: Config,
+        configuration: Configuration,
         history: History,
         notice: Option<String>,
     ) -> Ui {
+        let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
@@ -112,11 +124,13 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
-            notice,
+            notice: None,
+            config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
@@ -129,7 +143,8 @@ impl Ui {
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
-            input_source: config.input_source,
+            input_source: config.input_source.clone(),
+            configuration,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
@@ -140,15 +155,18 @@ impl Ui {
         }
     }
 
-    /// Settings changed in the settings window. The hotkey is the settings window's to
-    /// re-register; the rest takes effect from the next summon.
-    pub fn apply_config(&mut self, config: &Config) {
+    pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        let previous_limit = self.session.command().result_limit;
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        if self.session.command().result_limit != previous_limit {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -156,6 +174,53 @@ impl Ui {
             self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();
         }
+    }
+
+    pub fn reload_config(&mut self, update: crate::settings::Update, tx: &mut Tx) {
+        if update.revision != self.configuration.files.revision() {
+            return;
+        }
+        let previous = self.configuration.values.borrow().clone();
+        let (snapshot, read_problem) = reconcile_snapshot(
+            update.result,
+            &self.acknowledged_config,
+            update.save_problem.is_some(),
+        );
+        let accepted = snapshot.and_then(|config| {
+            accept_config(config, &previous, |shortcut| {
+                if self.configuration.hotkey.is_installed(shortcut) {
+                    Ok(())
+                } else {
+                    self.configuration.hotkey.replace(shortcut)
+                }
+            })
+        });
+        let problem = match accepted {
+            Ok(config) => {
+                self.acknowledged_config = config.clone();
+                if *self.configuration.values.borrow() != config {
+                    *self.configuration.values.borrow_mut() = config.clone();
+                    self.apply_config(&config, tx);
+                }
+                None
+            }
+            Err(error) => Some(error),
+        };
+        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
+            .into_iter()
+            .flatten()
+            .collect();
+        let problem = (!problems.is_empty()).then(|| problems.join("; "));
+        if self.config_problem != problem
+            && let Some(problem) = &problem
+        {
+            crate::log::warn(problem);
+        }
+        self.config_problem = problem.clone();
+        let config = self.configuration.values.borrow().clone();
+        self.prefs.update(move |prefs, _| {
+            prefs.reflect_config(update.revision, config, update.read_only, problem);
+        });
     }
 
     /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
@@ -558,6 +623,35 @@ fn backdrop_source(pick: &Backdrop) -> crate::shader::Source {
     source
 }
 
+fn reconcile_snapshot(
+    snapshot: Result<Config, String>,
+    acknowledged: &Config,
+    save_failed: bool,
+) -> (Result<Config, String>, Option<String>) {
+    match snapshot {
+        Err(error) if save_failed => (Ok(acknowledged.clone()), Some(error)),
+        snapshot => (snapshot, None),
+    }
+}
+
+fn accept_config(
+    config: Config,
+    previous: &Config,
+    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
+) -> Result<Config, String> {
+    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
+        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
+    })?;
+    if let Err(error) = install(shortcut.as_ref())
+        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
+    {
+        return Err(format!(
+            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
+        ));
+    }
+    Ok(config)
+}
+
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
     let due: Vec<_> = deadlines
         .iter()
@@ -585,5 +679,53 @@ mod deadline_tests {
         deadlines.insert(id.clone(), (3, 30.0));
         deadlines.remove(&id);
         assert!(take_due(&mut deadlines, 30.0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_save_and_invalid_snapshot_restore_acknowledged_values() {
+        let acknowledged = Config::default();
+        let (restored, problem) = reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, true);
+        assert_eq!(restored, Ok(acknowledged.clone()));
+        assert_eq!(problem.as_deref(), Some("invalid TOML"));
+        let disk = Config {
+            file_limit: 30,
+            ..acknowledged.clone()
+        };
+        assert_eq!(
+            reconcile_snapshot(Ok(disk.clone()), &acknowledged, true),
+            (Ok(disk), None)
+        );
+        assert!(
+            reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, false)
+                .0
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
+        let previous = Config::default();
+        let changed = Config {
+            file_limit: 50,
+            ..previous.clone()
+        };
+        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
+        assert_eq!(accepted, Ok(changed));
+    }
+
+    #[test]
+    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
+        let previous = Config::default();
+        let changed = Config {
+            hotkey: "ctrl+alt+k".into(),
+            file_limit: 50,
+            ..previous.clone()
+        };
+        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
     }
 }
