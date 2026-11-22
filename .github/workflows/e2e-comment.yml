@@ -61,21 +61,29 @@ jobs:
           set -euo pipefail
           marker='<!-- dupin-e2e -->'
 
+          artifacts=$(gh api --paginate --slurp "repos/$REPO/actions/runs/$RUN_ID/artifacts")
+          artifact_id() {
+            jq -r --arg name "$1" '
+              [.[].artifacts[] | select(.name == $name and .expired == false)]
+              | sort_by(.created_at, .id) | last | .id // empty
+            ' <<<"$artifacts"
+          }
           artifact_url() {
-            gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-              --jq ".artifacts[] | select(.name == \"$1\") | \"https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/\(.id)\""
+            [[ -z $1 ]] || printf 'https://github.com/%s/actions/runs/%s/artifacts/%s' "$REPO" "$RUN_ID" "$1"
           }
           current_pr() {
             gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
               --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1
           }
           media_name=e2e-media
-          media=$(artifact_url "$media_name")
+          media_id=$(artifact_id "$media_name")
+          media=$(artifact_url "$media_id")
           if [[ -z $media ]]; then
             media_name=e2e-screenshots
-            media=$(artifact_url "$media_name")
+            media_id=$(artifact_id "$media_name")
+            media=$(artifact_url "$media_id")
           fi
-          everything=$(artifact_url e2e)
+          everything=$(artifact_url "$(artifact_id e2e)")
           if [[ -z $media && -z $everything ]]; then
             echo 'E2E uploaded nothing; not commenting.'
             exit 0
@@ -106,7 +114,9 @@ jobs:
           if [[ $SOURCE_REPO == "$REPO" && -n $media && -n $ASSET_TOKEN ]] && command -v nu >/dev/null && [[ -f scripts/e2e-assets.nu ]]; then
             directory=$RUNNER_TEMP/e2e-media
             mkdir -p "$directory"
-            if timeout --kill-after=5s 60s gh run download "$RUN_ID" --repo "$REPO" --name "$media_name" --dir "$directory" &&
+            archive=$RUNNER_TEMP/e2e-media.zip
+            if timeout --kill-after=5s 60s gh api "repos/$REPO/actions/artifacts/$media_id/zip" >"$archive" &&
+              timeout --kill-after=5s 60s unzip -q "$archive" -d "$directory" &&
               GH_TOKEN="$ASSET_TOKEN" timeout --kill-after=5s 180s nu --no-config-file scripts/e2e-assets.nu "$REPO" "$directory" --upload >"$manifest"; then
               if jq -e '.uploaded and (.assets | length > 0)' "$manifest" >/dev/null; then
                 inline=true
