@@ -10,5 +10,5 @@ pub mod spotlight;
 pub mod window;
 pub mod workspace;
 
-pub use apps::AppsProvider;
+pub use apps::{AppsProvider, AppsWatcher};
 pub use spotlight::{SpotlightProvider, Target};

@@ -37,6 +37,18 @@ fn typing_searches_apps() {
 }
 
 #[test]
+fn refreshing_repeats_the_current_apps_query_with_a_new_generation() {
+    let mut s = Session::default();
+    let first_effects = s.set_query("saf");
+    let first = searched(&first_effects);
+    let refresh_effects = s.refresh();
+    let refreshed = searched(&refresh_effects);
+    assert_eq!(refreshed.0, Mode::Apps);
+    assert_eq!(refreshed.2, "saf");
+    assert!(refreshed.1 > first.1);
+}
+
+#[test]
 fn space_on_an_empty_query_enters_file_mode_and_is_consumed() {
     let mut s = Session::default();
     assert_eq!(s.intent(Intent::Space), Some(vec![]));
@@ -355,4 +367,27 @@ fn reordering_on_a_later_batch_keeps_the_selected_item() {
         "the item picked for this query moves to the top"
     );
     assert_eq!(s.selected_item().unwrap().title, "B", "the selection stays on B");
+}
+
+#[test]
+fn refreshing_keeps_the_selected_item_when_results_reorder() {
+    let mut s = Session::default();
+    let generation = searched(&s.set_query("a")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("A", 100), ranked("B", 90)],
+    });
+    s.intent(Intent::Down);
+    let generation = searched(&s.refresh()).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("C", 110), ranked("A", 100), ranked("B", 90)],
+    });
+    assert_eq!(s.selected_item().unwrap().title, "B");
+    let generation = searched(&s.refresh()).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("A", 100)],
+    });
+    assert_eq!(s.selected_item().unwrap().title, "A");
 }

@@ -77,6 +77,7 @@ pub struct Session {
     selected: usize,
     generation: u64,
     results: Results,
+    refresh_selection: Option<String>,
     history: History,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
@@ -104,6 +105,7 @@ impl Session {
             selected: 0,
             generation: 0,
             results: Results::Idle,
+            refresh_selection: None,
             history,
             clock: unix_now,
         }
@@ -161,6 +163,14 @@ impl Session {
         }
         self.query = text.to_owned();
         self.search()
+    }
+
+    /// Search the current query again after a provider's underlying data changes.
+    pub fn refresh(&mut self) -> Vec<Effect> {
+        let selected = self.selected_item().map(|item| item.id.clone());
+        let effects = self.search();
+        self.refresh_selection = selected;
+        effects
     }
 
     /// A key the UI recognized. None leaves the key to the text field (typing a space into a
@@ -228,6 +238,9 @@ impl Session {
                 self.items = items;
                 self.history.rerank(&mut self.items, &self.query, (self.clock)());
                 self.selected = 0;
+                if let Some(id) = self.refresh_selection.take() {
+                    self.select_id(&id);
+                }
                 self.results = Results::Searching { replaced: true };
             }
             (Delivery::Batch { items, .. }, Results::Searching { replaced: true }) => {
@@ -277,6 +290,7 @@ impl Session {
     }
 
     fn search(&mut self) -> Vec<Effect> {
+        self.refresh_selection = None;
         let query = self.query.trim();
         if query.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
