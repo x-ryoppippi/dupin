@@ -58,7 +58,9 @@ The script copies the manifests, lockfile, Rust sources and guest into a tempora
 snapshot before building either host. It records their hashes, compiler and OS,
 executable bytes, each runner's JSON, and macOS `time -l` process statistics.
 Each host is built separately to avoid merging dependency features across the
-two runners. Git state and the root nixpkgs pin are recorded with the toolchain.
+two runners. Build output lives inside that run's directory, preventing another
+invocation from replacing an executable before it is copied or measured.
+Git state and the root nixpkgs pin are recorded with the toolchain.
 `--prepare-only` checks snapshot preparation without building or executing.
 The final `results.json` stays in the reported run directory. Both runners must
 produce the same query/result pairs and pass fuel and memory-limit assertions.

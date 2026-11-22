@@ -72,7 +72,8 @@ def main [guest: path, --prepare-only]: nothing -> record {
     if $prepare_only {
         return {work: $work, metadata: $metadata, prepared: true}
     }
-    let target = $env.FILE_PWD | path join target
+    let target = $work | path join target
+    print --stderr $"Building isolated hosts in ($target)…"
     let runtimes = [
         {label: wasmi, binary: dupin-wasm-calculator-bench}
         {label: wasmtime, binary: dupin-compiled-calculator-bench}
