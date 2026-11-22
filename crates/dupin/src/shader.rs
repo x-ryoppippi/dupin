@@ -76,12 +76,15 @@ pub fn install_example(name: &str) -> std::io::Result<Backdrop> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    match std::fs::File::create_new(&path) {
-        Ok(mut file) => std::io::Write::write_all(&mut file, src.as_bytes())?,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => return Err(e),
+    // Written whole beside it first, then linked into place: linking never replaces a file, so
+    // a copy made meanwhile stays, and a write that fails part way leaves no copy at all.
+    let staged = path.with_extension(format!("wgsl.{}.tmp", std::process::id()));
+    let linked = std::fs::write(&staged, src).and_then(|()| std::fs::hard_link(&staged, &path));
+    _ = std::fs::remove_file(&staged);
+    match linked {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => Err(e),
+        _ => Ok(Backdrop::File(pick)),
     }
-    Ok(Backdrop::File(pick))
 }
 
 /// What the panel draws behind its content, as config.toml picked it.
