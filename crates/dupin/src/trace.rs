@@ -19,6 +19,15 @@ pub fn settings(event: &str) {
     }
 }
 
+pub fn panel(event: &str, visible: bool, shown: bool) {
+    if on() {
+        eprintln!(
+            "dupin-trace: panel {event} visible={visible} shown={shown} wall={:.3}",
+            wall_ms()
+        );
+    }
+}
+
 thread_local! {
     static SUMMONED: Cell<Option<Instant>> = const { Cell::new(None) };
 }
