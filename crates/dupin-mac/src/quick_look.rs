@@ -253,6 +253,11 @@ impl Previewer {
             }
             return false;
         }
+        trace_preview(&format!(
+            "shown visible={} key={}",
+            panel.isVisible(),
+            panel.isKeyWindow()
+        ));
         true
     }
 
@@ -289,6 +294,10 @@ impl Previewer {
             return self.owner_is_key();
         }
         let visible = panel.as_ref().is_some_and(|panel| panel.isVisible());
+        trace_preview(&format!(
+            "focus transfer visible={visible} key={}",
+            panel.as_ref().is_some_and(|panel| panel.isKeyWindow())
+        ));
         if !visible {
             self.controller.clear_item();
         }

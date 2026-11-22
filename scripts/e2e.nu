@@ -89,15 +89,13 @@ def scenario [out: path] {
     snap $out results
 
     ad $out preview-shortcut press cmd+y | ignore
-    let preview = {|r| $r.ok and (
-        $r.data | any {|window|
-            $window.is_focused and ($window.title | str starts-with 'Calculator')
-        }
-    ) }
-    poll --tries 15 $out quick-look-window $preview list-windows --app Dupin
+    # Quick Look is visible in recordings but absent from Dupin's AX window list.
+    wait-for-log $log 'dupin-trace: quick-look shown visible=true key=true'
     snap $out quick-look
     let left_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: key Left ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: quick-look focus transfer visible=false key=false' } | length
     ad $out close-preview press escape | ignore
+    wait-for-log --after $closed_before $log 'dupin-trace: quick-look focus transfer visible=false key=false'
     let restored = {|r|
         $r.ok and $r.data?.match?.value? == 'calculator'
         and 'focused' in ($r.data?.match?.states? | default [])
