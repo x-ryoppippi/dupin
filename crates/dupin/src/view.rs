@@ -6,8 +6,8 @@ use dupin_core::session::Results;
 use dupin_core::{Item, View};
 use rune::tok::{self, type_};
 use rune::{
-    Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, effect, el, rich, row, text,
-    text_input,
+    Align, Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, effect, el, rich,
+    row, text, text_input,
 };
 
 use crate::ui::{ICON_SIZE, Ui};
@@ -158,16 +158,9 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
             .enumerate()
             .map(|(index, item)| match &item.view {
                 View::Text { .. } => result_row(s, item, index == s.session.selected(), t, accent),
-                View::Detail { body, .. } => {
-                    content_card(item, body, index == s.session.selected(), t, accent)
+                View::Detail { .. } | View::Pair { .. } => {
+                    content_card(item, index == s.session.selected(), t, accent)
                 }
-                View::Pair { source, result } => content_card(
-                    item,
-                    &format!("Source\n{source}\n\nResult\n{result}"),
-                    index == s.session.selected(),
-                    t,
-                    accent,
-                ),
             })
             .collect::<Vec<_>>();
         let content = col().key("rows").w_full().children(rows);
@@ -206,56 +199,101 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
     )
 }
 
-fn content_card(item: &Item, body: &str, on: bool, t: &tok::Theme, accent: Color) -> El {
+fn content_card(item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
     let id = item.id.clone();
+    let mut card = col()
+        .w_full()
+        .px(22.0)
+        .py(18.0)
+        .gap(16.0)
+        .radius(8.0)
+        .fill(t.card)
+        .border(1.0, if on { accent } else { Color::TRANSPARENT });
+    let mut header = row().w_full().center_y().gap(12.0);
+    let has_title = if let View::Detail { title, .. } = &item.view {
+        header = header.child(
+            text(title)
+                .font(TextStyle::new(24.0, 600.0))
+                .color(t.text)
+                .grow(1.0)
+                .min_w(0.0)
+                .wrap(),
+        );
+        true
+    } else {
+        header = header.child(el().grow(1.0));
+        false
+    };
+    if !item.actions.is_empty() {
+        header = header.child(
+            text("→ Actions")
+                .font(type_::BODY)
+                .color(accent)
+                .cursor(rune::Cursor::Pointer)
+                .hover(t.hover)
+                .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
+        );
+    }
+    if has_title || !item.actions.is_empty() {
+        card = card.child(header);
+    }
+    let body = match &item.view {
+        View::Detail { body, .. } => col()
+            .key(format!("{}-body", row_key(&item.id)))
+            .w_full()
+            .shrink()
+            .min_h(20.0)
+            .max_h(340.0)
+            .scroll(ScrollSpec { stick_bottom: false })
+            .child(detail_body(&item.id, body, t)),
+        View::Pair { source, result } => row()
+            .key(format!("{}-pair", row_key(&item.id)))
+            .w_full()
+            .gap(16.0)
+            .center_y()
+            .selection_group(true)
+            .child(pair_value(&item.id, "source", source, "Source", t))
+            .child(
+                text("→")
+                    .font(TextStyle::new(28.0, 400.0))
+                    .color(t.text_secondary),
+            )
+            .child(pair_value(&item.id, "result", result, "Result", t)),
+        View::Text { .. } => unreachable!("text row"),
+    };
     col()
         .key(row_key(&item.id))
         .w_full()
         .px(LIST_PAD)
         .py(LIST_PAD)
+        .child(card.child(body))
+}
+
+fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &tok::Theme) -> El {
+    col()
+        .grow(1.0)
+        .min_w(0.0)
+        .gap(6.0)
         .child(
-            col()
+            text(value)
+                .key(format!("{}-{part}", row_key(id)))
                 .w_full()
-                .px(22.0)
-                .py(18.0)
-                .gap(16.0)
-                .radius(8.0)
-                .fill(t.card)
-                .border(1.0, if on { accent } else { Color::TRANSPARENT })
-                .child(
-                    row()
-                        .w_full()
-                        .center_y()
-                        .gap(12.0)
-                        .child(
-                            text(item.display_title())
-                                .font(TextStyle::new(24.0, 600.0))
-                                .color(t.text)
-                                .wrap(),
-                        )
-                        .child(
-                            text("→ Actions")
-                                .font(type_::BODY)
-                                .color(accent)
-                                .cursor(rune::Cursor::Pointer)
-                                .hover(t.hover)
-                                .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
-                        ),
-                )
-                .child(
-                    col()
-                        .key("detail-body")
-                        .w_full()
-                        .shrink()
-                        .min_h(20.0)
-                        .max_h(340.0)
-                        .scroll(ScrollSpec { stick_bottom: false })
-                        .child(detail_body(body, t)),
-                ),
+                .font(TextStyle::new(28.0, 600.0).lh(36.0))
+                .color(t.text)
+                .align(Align::Center)
+                .wrap()
+                .selectable(true),
+        )
+        .child(
+            text(label)
+                .w_full()
+                .font(type_::LABEL)
+                .color(t.text_secondary)
+                .align(Align::Center),
         )
 }
 
-fn detail_body(body: &str, t: &tok::Theme) -> El {
+fn detail_body(id: &str, body: &str, t: &tok::Theme) -> El {
     let boundaries: Vec<usize> = std::iter::once(0)
         .chain(
             body.match_indices('•')
@@ -265,12 +303,13 @@ fn detail_body(body: &str, t: &tok::Theme) -> El {
         .chain(std::iter::once(body.len()))
         .collect();
     col()
+        .key(format!("{}-selection", row_key(id)))
         .w_full()
         .gap(12.0)
         .selection_group(true)
         .children(boundaries.windows(2).enumerate().map(|(index, range)| {
             text(body[range[0]..range[1]].trim_end())
-                .key(format!("detail-paragraph-{index}"))
+                .key(format!("{}-paragraph-{index}", row_key(id)))
                 .w_full()
                 .font(TextStyle::new(16.0, 400.0).lh(25.0))
                 .color(t.text)
