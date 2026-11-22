@@ -7,6 +7,7 @@ def --wrapped main [...args: string] {
             run-external ...($args | skip 3)
         }
         ffmpeg => {
+            if $env.VIDEO_DELAY == '1' { sleep 500ms }
             if '-nostdin' not-in $args or 'Capture screen 0:none' not-in $args or '45' not-in $args { exit 21 }
             'capture-started' | save --append $env.VIDEO_TRACE
             print 'frame=1'

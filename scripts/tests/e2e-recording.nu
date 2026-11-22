@@ -24,15 +24,22 @@ let failure = try {
         short
         codec
         frames
+        reused
     ] {
         let out = $root | path join $kind
         mkdir $out
+        if $kind == reused {
+            mkdir ($out | path join recording)
+            'old movie' | save ($out | path join launcher-flow.mp4)
+            'frame=675' | save ($out | path join recording capture.progress)
+        }
         let trace = $out | path join trace
         '' | save $trace
         let problem = with-env {
             PATH: ($env.PATH | prepend $bin)
             VIDEO_TRACE: $trace
-            VIDEO_FAILURE: $kind
+            VIDEO_FAILURE: (if $kind == reused { 'capture' } else { $kind })
+            VIDEO_DELAY: (if $kind == reused { '1' } else { '0' })
         } {
             try { ^sh -c 'exit 3' } catch { }
             try {

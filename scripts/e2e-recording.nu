@@ -4,6 +4,8 @@ export def record [out: path, scenario: closure] {
     let movie = $logs | path join launcher-flow.mp4
     let progress = $logs | path join capture.progress
     let errors = $logs | path join capture.stderr
+    let published = $out | path join launcher-flow.mp4
+    rm --force $published $movie $progress $errors ($logs | path join metadata.json) ($logs | path join ffprobe.stderr)
     job spawn {
         let status = try {
             (^timeout --signal=INT --kill-after=5s 60s
@@ -40,7 +42,7 @@ export def record [out: path, scenario: closure] {
                 msg: 'Recording is too short or not H.264; see recording/metadata.json'
             }
         }
-        mv $movie ($out | path join launcher-flow.mp4)
+        mv $movie $published
         null
     } catch {|error| $error }
     if $scenario_error != null {
