@@ -55,7 +55,7 @@ pub enum Effect {
     RevealSelection,
     /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
     ClearQuery,
-    /// Replace the input after consuming a keyword or recalling a query.
+    /// Replace the input with the term left after a pasted mode keyword.
     ReplaceQuery(String),
     /// The history learned a pick; persist `Session::history`.
     SaveHistory,
@@ -180,11 +180,11 @@ impl Session {
             && let Some((keyword, term)) = text.split_once(char::is_whitespace)
             && let Some(mode) = self.keyword_mode(keyword)
         {
-            self.clear_results();
-            self.mode = mode;
+            self.items.clear();
+            self.selected = 0;
             self.query = term.trim_start().to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
-            effects.extend(self.search());
+            effects.extend(self.switch(mode));
             return effects;
         }
         self.query = text.to_owned();
@@ -343,8 +343,7 @@ impl Session {
         }
         let query = query.to_owned();
         self.generation += 1;
-        // The rows on screen are this mode's: every mode change goes through an empty query,
-        // which cleared them.
+        // A mode change clears the previous mode's rows before starting a search.
         self.results = Results::Searching { replaced: false };
         vec![Effect::Search {
             mode: self.mode,

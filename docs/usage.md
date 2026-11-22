@@ -39,4 +39,4 @@ Both modes search the Spotlight index, so they find only what Spotlight has inde
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Enter opens Dictionary.app to that term. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 
-You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin recognizes the same keywords and configured aliases, switches mode, and leaves the search term in the input.
+You can also paste a complete query such as `in release notes` or `d serendipity` into app search. Dupin accepts the same keywords and configured aliases, switches mode, and leaves the search term in the input.

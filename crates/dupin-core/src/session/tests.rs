@@ -528,3 +528,21 @@ fn refreshing_keeps_the_selected_item_when_results_reorder() {
     });
     assert_eq!(s.selected_item().unwrap().title, "A");
 }
+
+#[test]
+fn pasting_an_empty_keyword_cancels_the_previous_search() {
+    let mut s = Session::default();
+    let generation = searched(&s.set_query("Safari")).1;
+    let effects = s.set_query("d ");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.query(), "");
+    assert_eq!(
+        effects,
+        vec![Effect::ReplaceQuery(String::new()), Effect::CancelSearch]
+    );
+    assert!(!s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("Safari", 100)],
+    }));
+    assert!(s.items().is_empty());
+}
