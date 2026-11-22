@@ -177,12 +177,11 @@ impl Session {
             return Vec::new();
         }
         if self.mode == Mode::Apps
-            && let Some((keyword, term)) = text.split_once(char::is_whitespace)
-            && let Some(mode) = self.keyword_mode(keyword)
+            && let Some((mode, term)) = self.keyword_query(text)
         {
             self.items.clear();
             self.selected = 0;
-            self.query = term.trim_start().to_owned();
+            self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
             effects.extend(self.switch(mode));
             return effects;
@@ -199,6 +198,16 @@ impl Session {
         } else {
             None
         }
+    }
+
+    fn keyword_query<'a>(&self, text: &'a str) -> Option<(Mode, &'a str)> {
+        text.char_indices()
+            .rev()
+            .filter(|(_, ch)| ch.is_whitespace())
+            .find_map(|(end, _)| {
+                self.keyword_mode(&text[..end])
+                    .map(|mode| (mode, text[end..].trim_start()))
+            })
     }
 
     /// Search the current query again after a provider's underlying data changes.

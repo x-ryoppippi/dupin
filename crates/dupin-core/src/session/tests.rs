@@ -64,10 +64,11 @@ fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
         ("define", Mode::Dictionary),
         ("d", Mode::Dictionary),
         ("word", Mode::Dictionary),
+        ("look up", Mode::Dictionary),
     ] {
         let mut s = Session::with_dictionary_keywords(
             History::default(),
-            vec!["define".into(), "d".into(), "word".into()],
+            vec!["define".into(), "d".into(), "word".into(), "look up".into()],
         );
         let effects = s.set_query(&format!("{keyword}  日本語 phrase"));
         assert_eq!(s.mode(), mode);
@@ -79,6 +80,24 @@ fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
         s.intent(Intent::Backspace);
         assert_eq!(s.mode(), Mode::Apps);
     }
+}
+
+#[test]
+fn compound_aliases_match_the_complete_keyword_and_separator() {
+    let mut s = Session::with_dictionary_keywords(History::default(), vec!["look up".into()]);
+    s.set_query("look up");
+    s.intent(Intent::Space);
+    assert_eq!(s.mode(), Mode::Dictionary);
+    s.reset();
+    let effects = s.set_query("look up\t  日本語 phrase");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.query(), "日本語 phrase");
+    assert_eq!(searched(&effects[1..]).2, "日本語 phrase");
+    s.reset();
+    assert_eq!(searched(&s.set_query("look upper")).0, Mode::Apps);
+    s.set_query("look up ");
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert!(s.query().is_empty());
 }
 
 #[test]
