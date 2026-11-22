@@ -45,7 +45,7 @@
 				</a>
 				<p class="cta-more">
 					{#if !stableReleased}Nightly build until the first release ·{/if}
-					<a href="/download">All downloads</a>
+					<a href="/download/">All downloads</a>
 				</p>
 			</div>
 		</div>

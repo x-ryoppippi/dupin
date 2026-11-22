@@ -14,7 +14,7 @@
 			<span>Dupin</span>
 		</a>
 		<nav class="nav-links">
-			<a href="/download">Download</a>
+			<a href="/download/">Download</a>
 			<a href={repo} class="nav-gh">
 				<span class="gh icon-[simple-icons--github]" aria-hidden="true"></span>
 				<span>GitHub</span>

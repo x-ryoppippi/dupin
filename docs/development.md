@@ -86,3 +86,13 @@ just website::deploy  # cf build, then upload the result as Cloudflare static as
 Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
 
 Icons are `icon-[set--name]` classes that ox-content turns into one self-hosted stylesheet from the `@iconify-json/*` collections installed in `website/`; add the collection before using a new set. For agents and crawlers the site also serves `/llms.txt`, a Markdown twin of each page (`/index.md`, `/download.md`), `sitemap.xml` and `robots.txt`; the Markdown is built in `website/src/markdown.ts` from the same data as the pages, and `website/public/_headers` sets their content types.
+
+The shared page head supplies canonical URLs, social cards and application JSON-LD.
+The 1200 × 630 social image is generated from `assets/social/og.svg`, which reuses
+the app logo. After editing the source, regenerate `website/public/og.png`:
+
+```sh
+nix shell --inputs-from . nixpkgs#resvg --command resvg --skip-system-fonts \
+  --use-fonts-dir "$(nix build --inputs-from . --no-link --print-out-paths nixpkgs#inter)/share/fonts" \
+  assets/social/og.svg website/public/og.png
+```
