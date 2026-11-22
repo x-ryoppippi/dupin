@@ -92,11 +92,14 @@ nu scripts/tests/e2e-assets.nu
 The native CI suite also records the first 45 seconds of its real interaction:
 summoning the panel, typing the search term character by character, showing the
 results and opening Calculator. `--record` uses the runner's existing Screen
-Recording grant; it does not request or change permissions. It waits for macOS's
-timed capture to finish, including after a scenario failure, then converts the
-movie to a 1080p H.264 MP4. Raw footage and conversion logs remain in the full
-artifact. Local runs record only when explicitly given `--record`; use a
-disposable machine. Native capture and encoding must be verified by CI.
+Recording grant; it does not request or change permissions. It waits for the
+FFmpeg AVFoundation capture to encode its first frame before sending keys. It
+captures the screen without audio, writes a bounded 45-second H.264 MP4, and
+checks its duration and frame count before attaching it. A process deadline
+bounds capture failures; logs and rejected footage remain in the full artifact,
+including after a scenario failure. Local runs record only when explicitly
+given `--record`; use a disposable machine. Native capture and encoding must be
+verified by CI.
 
 ## Peak memory
 

@@ -7,10 +7,10 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install agent-desktop
+    - name: Install native E2E tools
       shell: bash
       run: >-
-        nix profile install --inputs-from . llm-agents#agent-desktop
+        nix profile install --inputs-from . llm-agents#agent-desktop nixpkgs#ffmpeg nixpkgs#coreutils
         --option extra-substituters https://cache.numtide.com
         --option extra-trusted-public-keys niks3.numtide.com-1:DTx8wZduET09hRmMtKdQDxNNthLQETkc/yaX7M4qK0g=
 
