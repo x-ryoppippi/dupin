@@ -218,6 +218,8 @@ impl Previewer {
         };
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
+        let owner = self.view.window();
+        let owner_was_key = owner.as_ref().is_some_and(|window| window.isKeyWindow());
         panel.makeKeyAndOrderFront(None);
         if !current_controller_is(&panel, &self.controller) {
             if std::env::var_os("DUPIN_TRACE").is_some() {
@@ -242,6 +244,12 @@ impl Previewer {
             // SAFETY: An unclaimed panel has no other controller whose presentation we could close.
             if unsafe { panel.currentController().is_none() } {
                 panel.orderOut(None);
+            }
+            if owner_was_key
+                && let Some(owner) = owner
+                && !owner.isKeyWindow()
+            {
+                owner.makeKeyWindow();
             }
             return false;
         }
