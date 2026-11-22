@@ -144,7 +144,7 @@ unavailable until approved; the plugin can continue its existing granted
 operations. A required unavailable capability
 produces an explicit unavailable state rather than an implicit grant.
 Disabling a plugin cancels its work and prevents further broker access. macOS may
-grant access to Dupin globally; that does not authorize every plugin to use it.
+grant access to Dupin globally; each plugin still needs its own grant.
 
 ## First implementation cases
 
@@ -157,7 +157,7 @@ grant access to Dupin globally; that does not authorize every plugin to use it.
    query through the broker, plugin-owned search/display and an external-open
    action. Tests use synthetic events and never request real permissions.
 4. Migrate app, file and dictionary providers through the same registration,
-   lifecycle, view and action contracts, retaining their existing input behavior.
+   lifecycle, view and action contracts, retaining their existing input interactions.
 
 Runtime selection, guest ABI, package format and measurable performance budgets
 remain open. More feature-specific built-ins should not ship before this boundary
