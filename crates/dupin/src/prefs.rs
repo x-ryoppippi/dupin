@@ -418,6 +418,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             .label(page.title())
             .focus_selected(on)
             .focusable(true)
+            .focus_ring(2.0, 0.0, c.border_focus)
             .h(28.0)
             .px(6.0)
             .gap(8.0)
