@@ -90,6 +90,18 @@ pub struct Ui {
 }
 
 impl Ui {
+    /// Cursor-only redraws do not emit Rune input-change callbacks.
+    pub fn query_display(&self) -> TextEdit {
+        let mut query = self.query.clone();
+        mark_query_qualifiers(&mut query, self.session.command_id());
+        query
+    }
+
+    pub fn query_edit(&mut self) -> &mut TextEdit {
+        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        &mut self.query
+    }
+
     pub fn new(
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
@@ -412,7 +424,7 @@ impl Ui {
         }
         if ev.key == Key::Backspace && !self.query.text.is_empty() {
             tx.focus("query", false);
-            self.query.key(ev, None);
+            self.query_edit().key(ev, None);
             self.edited(tx);
             return true;
         }
@@ -420,7 +432,7 @@ impl Ui {
             && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt)
         {
             tx.focus("query", false);
-            self.query.insert(text);
+            self.query_edit().insert(text);
             self.edited(tx);
             return true;
         }
