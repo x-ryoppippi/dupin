@@ -14,10 +14,10 @@ export def record [out: path, scenario: closure] {
                 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p
                 -movflags +faststart -map_metadata -1 -progress pipe:1 $movie
                 o> $progress e> $errors)
-            $env.LAST_EXIT_CODE
+            0
         } catch {|error|
-            $error.msg | save --append $errors
-            1
+            $"exit ($error.exit_code? | default 'n/a'): ($error.msg)" | save --append $errors
+            $error.exit_code? | default 1
         }
         $status | job send 0 --tag 1
     } | ignore
@@ -30,7 +30,8 @@ export def record [out: path, scenario: closure] {
         let status = job recv --tag 1 --timeout 75sec
         if $status != 0 { error make {msg: 'Screen recording failed; see recording/capture.stderr'} }
         let result = ^ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,nb_frames:format=duration -of json $movie | complete
-        if $result.exit_code != 0 { error make {msg: 'Could not inspect the recording'} }
+        $result.stderr | save --force ($logs | path join ffprobe.stderr)
+        if $result.exit_code != 0 { error make {msg: 'Could not inspect the recording; see recording/ffprobe.stderr'} }
         let metadata = $result.stdout | from json
         $metadata | to json | save --force ($logs | path join metadata.json)
         let video = $metadata.streams | first

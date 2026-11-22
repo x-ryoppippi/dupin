@@ -18,7 +18,7 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         ad $out $command $command | to json | print
     }
     # The runner image grants Runner.Listener, the app that launches every step, so
-    # agent-desktop, osascript and screencapture inherit Accessibility, Automation, PostEvent and
+    # agent-desktop, osascript, screencapture and ffmpeg inherit Accessibility, Automation, PostEvent and
     # Screen Recording.
     let denied = ad $out permissions permissions
     | get data

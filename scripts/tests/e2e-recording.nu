@@ -34,6 +34,7 @@ let failure = try {
             VIDEO_TRACE: $trace
             VIDEO_FAILURE: $kind
         } {
+            try { ^sh -c 'exit 3' } catch { }
             try {
                 record $out {
                     assert ((open --raw $trace | str contains capture-started)) 'Capture must start before the scenario'
