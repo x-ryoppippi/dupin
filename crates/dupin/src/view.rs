@@ -52,6 +52,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     panel = panel.child(header(s, &t, accent));
     let notices = [
+        ("config-problem", s.config_problem.as_deref()),
         ("notice", s.notice.as_deref()),
         ("registration-notice", s.registration_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),

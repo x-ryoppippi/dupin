@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use dupin_core::Config;
 
+mod live;
+pub use live::{Service, Update};
+
 /// `$XDG_CONFIG_HOME/dupin/config.toml`, else `~/.config/dupin/config.toml`.
 pub fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -45,25 +48,40 @@ fn can_write(path: &Path) -> bool {
 
 /// Follow `path` through any symlinks to the file they name, which need not exist yet.
 fn resolve(path: &Path) -> std::io::Result<PathBuf> {
+    resolve_with(path, |_| {})
+}
+
+fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
     let mut path = path.to_owned();
-    for _ in 0..40 {
-        match std::fs::read_link(&path) {
-            Ok(target) => {
-                path = match path.parent() {
-                    Some(dir) => dir.join(target),
-                    None => target,
-                };
+    'links: for _ in 0..40 {
+        visit(&path);
+        let mut prefix = PathBuf::new();
+        let mut components = path.components();
+        while let Some(component) = components.next() {
+            prefix.push(component.as_os_str());
+            match std::fs::read_link(&prefix) {
+                Ok(target) => {
+                    visit(&prefix);
+                    let target = match prefix.parent() {
+                        Some(dir) => dir.join(target),
+                        None => target,
+                    };
+                    path = if components.as_path().as_os_str().is_empty() {
+                        target
+                    } else {
+                        target.join(components.as_path())
+                    };
+                    continue 'links;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput
+                    ) => {}
+                Err(error) => return Err(error),
             }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput
-                ) =>
-            {
-                return Ok(path);
-            }
-            Err(e) => return Err(e),
         }
+        return Ok(path);
     }
     Err(std::io::Error::other(format!(
         "{} has too many links",
@@ -76,7 +94,7 @@ pub fn load() -> (Config, Option<String>) {
     let Some(path) = path() else {
         return (Config::default(), None);
     };
-    let src = match std::fs::read_to_string(&path) {
+    let src = match read_source(&path) {
         Ok(src) => src,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
         Err(e) => {
@@ -96,26 +114,28 @@ pub fn load() -> (Config, Option<String>) {
     }
 }
 
+fn read_source(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config.toml must be a regular file",
+        ));
+    }
+    let mut source = String::new();
+    file.read_to_string(&mut source)?;
+    Ok(source)
+}
+
 fn problem(message: String) -> (Config, Option<String>) {
     crate::log::warn(&message);
     (Config::default(), Some(message))
-}
-
-/// Write `config` to config.toml on a thread of its own. Comments in a hand-written file are
-/// not kept.
-pub fn save(config: &dupin_core::Config) {
-    let toml = match toml::to_string(config) {
-        Ok(toml) => toml,
-        Err(e) => return crate::log::warn(&format!("couldn't serialize the settings: {e}")),
-    };
-    std::thread::spawn(move || {
-        let written = path()
-            .ok_or_else(|| std::io::Error::other("HOME is unset"))
-            .and_then(|path| write(&path, &toml));
-        if let Err(e) = written {
-            crate::log::warn(&format!("couldn't save the settings: {e}"));
-        }
-    });
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
@@ -145,6 +165,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn reads_only_regular_files_including_through_links() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = scratch("regular-source");
+        let real = dir.join("regular.toml");
+        std::fs::write(&real, "file_limit = 30\n").unwrap();
+        let link = dir.join("config.toml");
+        symlink(&real, &link).unwrap();
+        assert_eq!(read_source(&link).unwrap(), "file_limit = 30\n");
+        assert!(read_source(&dir).is_err());
+        let fifo = dir.join("pipe");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            read_source(&fifo).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

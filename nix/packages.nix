@@ -9,6 +9,7 @@
         inherit (inputs) crane;
         inherit native;
       };
+      blacksmith = pkgs.callPackage ./blacksmith.nix { };
       # scripts/package-app.nu lays out Dupin.dmg over this.
       dmg-background =
         pkgs.runCommand "dupin-dmg-background"
@@ -26,7 +27,7 @@
     in
     {
       packages = {
-        inherit dupin dmg-background;
+        inherit dupin dmg-background blacksmith;
         default = dupin;
       };
     };

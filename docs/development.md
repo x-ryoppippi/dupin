@@ -20,6 +20,52 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+For isolated local Cargo cache measurements, see the
+[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
+sccache across fresh and reused target directories without changing the
+development shell or Nix package cache.
+
+## Remote development with Testbox
+
+The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
+`testbox-dev.yml` workflow compiles native test dependencies on a disposable Apple
+silicon runner, then keeps it available for commands. It follows ccusage's
+Testbox setup and uses the same macOS runner and Nix setup as CI.
+
+After this workflow is available on the repository's default branch, start a box
+from the root of the worktree you want to test:
+
+```sh
+blacksmith auth status
+blacksmith --org <account> testbox warmup .github/workflows/testbox-dev.yml \
+  --ref <pushed-branch> --job dev --idle-timeout 15
+blacksmith --org <account> testbox run --id <id> \
+  'nix develop --command cargo clippy --workspace --all-targets -- -D warnings'
+blacksmith --org <account> testbox run --id <id> \
+  'nix develop --command cargo test --workspace'
+blacksmith --org <account> testbox stop --id <id>
+```
+
+Use the Blacksmith account connected to this repository. Each agent or worktree
+gets its own box and ID. Run commands from the worktree root: the CLI mirrors
+that directory with `rsync --delete`, including tracked and untracked files
+that Git does not ignore. Ignored build directories stay on the runner. Check
+which files will be exported before the first run; a Git-ignored file is not
+evidence that every other local file is safe to send.
+
+Use Cargo directly for iteration. Synced new files are present on disk but are
+not added to the remote Git index, so a Git flake build can omit them. Cargo
+reads them directly and reuses the box's ignored `target/` between runs. Push
+new Nix inputs before warming a ref that needs them.
+
+The box holds its own configuration and build outputs. Native E2E additionally
+needs agent-desktop and the disposable runner's accessibility, automation and
+screen recording grants; this workflow does not configure or verify those.
+
+Stop a box when finished; the idle timeout is a fallback and the workflow has a
+four-hour limit. CLI builds and workflow checks do not prove that remote
+authentication, warmup or native E2E succeeded.
+
 ## Nix layout
 
 | File                      | Holds                                                                                                                       |
@@ -27,8 +73,9 @@ cargo run -p dupin-mac --example search -- in invoice # a provider from the term
 | `flake.nix`               | Inputs and the flake-parts modules below                                                                                    |
 | `package.nix`             | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg` |
 | `default.nix`             | `package.nix` for non-flake use                                                                                             |
-| `nix/packages.nix`        | `packages.dupin` and `packages.default`                                                                                     |
+| `nix/packages.nix`        | `packages.dupin`, `packages.default` and `packages.blacksmith`                                                              |
 | `nix/cargo-artifacts.nix` | Compiled release/debug dependency caches and the flake's app and Clippy/test builds                                         |
+| `nix/blacksmith.nix`      | The pinned Testbox CLI and its SSH/rsync tools                                                                              |
 | `nix/home-manager.nix`    | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                 |
 | `nix/checks.nix`          | Clippy and the tests in one debug build                                                                                     |
 | `nix/treefmt.nix`         | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
