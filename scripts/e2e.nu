@@ -180,7 +180,7 @@ def wait-frontmost [app: string, --tries: int = 20] {
             | get stdout
             | str trim
         )
-        if ($front | str downcase) == ($app | str downcase) { return }
+        if ($front | str lowercase) == ($app | str lowercase) { return }
         sleep 500ms
     }
     error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}
