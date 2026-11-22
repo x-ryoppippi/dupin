@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dupin_core::fuzzy;
-use dupin_core::{Item, ItemKind, Provider, Request};
+use dupin_core::{Item, Provider, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
@@ -105,7 +105,7 @@ fn item(result: &AnyObject, query: &str) -> Option<Item> {
     let matched = fuzzy::score(query, &title)
         .map(|m| m.positions)
         .unwrap_or_default();
-    Some(Item::path(ItemKind::File, path, title, matched))
+    Some(Item::path(path, title, matched))
 }
 
 fn predicate(target: Target, query: &str) -> Option<Retained<NSPredicate>> {

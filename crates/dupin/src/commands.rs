@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use dupin_core::{
-    CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation, ResultLayout,
-};
+use dupin_core::{CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation};
 use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
 
 pub const APPS: &str = "apps.search";
@@ -32,7 +30,6 @@ fn presentation(
     empty_hint: Option<&str>,
     no_results_hint: Option<&str>,
     show_searching: bool,
-    result_layout: ResultLayout,
     backdrop: f32,
 ) -> QueryPresentation {
     QueryPresentation {
@@ -41,7 +38,6 @@ fn presentation(
         empty_hint: empty_hint.map(str::to_owned),
         no_results_hint: no_results_hint.map(str::to_owned),
         show_searching,
-        result_layout,
         backdrop,
     }
 }
@@ -56,15 +52,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         CommandSpec::new(
             apps_id.clone(),
             50,
-            presentation(
-                "Search apps",
-                None,
-                None,
-                Some("No matches"),
-                false,
-                ResultLayout::List,
-                0.0,
-            ),
+            presentation("Search apps", None, None, Some("No matches"), false, 0.0),
         ),
         CommandSpec::new(
             files_id.clone(),
@@ -75,7 +63,6 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
                 Some("No matches"),
                 true,
-                ResultLayout::List,
                 1.0,
             ),
         ),
@@ -88,7 +75,6 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
                 Some("No matches"),
                 true,
-                ResultLayout::List,
                 2.0,
             ),
         ),
@@ -101,7 +87,6 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 Some("Type a word  ·  ⌫ back to apps"),
                 Some("No definition found"),
                 true,
-                ResultLayout::Detail,
                 3.0,
             ),
         ),

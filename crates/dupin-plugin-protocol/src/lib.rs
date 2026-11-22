@@ -67,7 +67,7 @@ pub struct PluginItem {
     pub actions: Vec<PluginAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum View {
     Text { title: String, subtitle: String },

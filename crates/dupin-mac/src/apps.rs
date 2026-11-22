@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use dupin_core::fuzzy;
-use dupin_core::{Item, ItemKind, Provider, Request};
+use dupin_core::{Item, Provider, Request, View};
 
 /// How deep to look for bundles below a root: `/Applications/Utilities/X.app` is depth 2.
 const MAX_DEPTH: usize = 2;
@@ -433,19 +433,13 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
-            let item = Item::path(
-                ItemKind::Application,
-                app.path.clone(),
-                app.name.clone(),
-                positions,
-            );
+            let mut item = Item::path(app.path.clone(), app.name.clone(), positions);
+            if let (Some(alias), View::Text { subtitle, .. }) = (alias, &mut item.view) {
+                *subtitle = format!("{alias} · {subtitle}");
+            }
             Item {
                 icon: Some(app.icon.clone()),
                 score: Some(score),
-                subtitle: match alias {
-                    Some(alias) => format!("{alias} · {}", item.subtitle),
-                    None => item.subtitle.clone(),
-                },
                 ..item
             }
         })
@@ -498,6 +492,12 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
 
 #[cfg(test)]
 mod tests {
+    fn text_subtitle(item: &dupin_core::Item) -> &str {
+        let dupin_core::View::Text { subtitle, .. } = &item.view else {
+            panic!("expected text")
+        };
+        subtitle
+    }
     use super::*;
 
     static NEXT_TREE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -562,7 +562,10 @@ mod tests {
                 }
             })
             .collect();
-        let titles: Vec<_> = rank(&apps, "saf", 10).into_iter().map(|i| i.title).collect();
+        let titles: Vec<_> = rank(&apps, "saf", 10)
+            .into_iter()
+            .map(|i| i.display_title().to_owned())
+            .collect();
         assert_eq!(titles, ["Safari", "Safari Technology Preview", "Hush Safe"]);
         assert_eq!(rank(&apps, "saf", 1).len(), 1);
     }
@@ -598,15 +601,18 @@ mod tests {
         let apps = [app("ChatGPT", &["Codex"]), app("Calculator", &[])];
         let items = rank(&apps, "codex", 10);
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "ChatGPT");
+        assert_eq!(items[0].display_title(), "ChatGPT");
         assert!(items[0].matched.is_empty(), "nothing in the title matched");
-        assert_eq!(items[0].subtitle, "Codex · /Applications");
+        assert_eq!(text_subtitle(&items[0]), "Codex · /Applications");
     }
 
     #[test]
     fn the_displayed_name_beats_an_equal_alias_match() {
         let apps = [app("Preview Tool", &[]), app("Something", &["Preview Tool"])];
-        let titles: Vec<_> = rank(&apps, "prev", 10).into_iter().map(|i| i.title).collect();
+        let titles: Vec<_> = rank(&apps, "prev", 10)
+            .into_iter()
+            .map(|i| i.display_title().to_owned())
+            .collect();
         assert_eq!(titles, ["Preview Tool", "Something"]);
     }
 

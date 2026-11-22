@@ -13,6 +13,7 @@ homepage = "https://dupin.app"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
+dupin-plugin-protocol = { path = "crates/dupin-plugin-protocol" }
 dupin-core = { path = "crates/dupin-core" }
 dupin-mac = { path = "crates/dupin-mac" }
 

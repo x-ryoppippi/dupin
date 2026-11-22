@@ -1,6 +1,6 @@
 # Architecture
 
-Dupin is a Cargo workspace of three crates. The UI layer stays thin so the UI framework can change without touching the rest.
+Dupin is a Cargo workspace with separate core, macOS, UI and protocol crates. The UI layer stays thin so the UI framework can change without touching the rest.
 
 | Crate               | Holds                                                                                                                                           |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -12,7 +12,11 @@ Dupin is a Cargo workspace of three crates. The UI layer stays thin so the UI fr
 
 Every source of results is a `Provider`: given a `Request` (query and limit), it streams batches of `Item`s and stops when the request is superseded. Apps, file names and file contents each have one; extensions (scripts that print a JSON view to stdout) are meant to take the same shape.
 
-An `Item` carries its title, subtitle, icon path, the matched characters for highlighting, and two actions: Enter's (`primary`) and ⌘Enter's (`alternate`).
+An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (title/subtitle), Detail (title/body), or Pair (source/result). It also carries its stable ID, icon path, matched title characters, optional score, action list and primary/alternate action IDs. `display_title()` returns the Text/Detail title or Pair source. Explicit `record_usage` metadata controls history recording; apps/files opt in and dictionary results opt out, independently of view.
+
+The host renders each item in declared order. All-text lists retain fixed-height virtualisation; mixed results use a bounded scrolling column with selectable detail/pair cards and stable row/action anchors. Content is plain text.
+
+Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly: the native OS broker, external manifests/packages/runtime integration and plugin grants remain incomplete. The protocol dependency adds no plugin execution runtime to the app.
 
 ## Searching off the main thread
 

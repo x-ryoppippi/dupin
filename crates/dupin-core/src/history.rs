@@ -133,7 +133,12 @@ impl History {
             return;
         }
         items.sort_by_cached_key(|item| {
-            std::cmp::Reverse(item.score.unwrap_or(0) + self.boost(&item.id, query, now))
+            let boost = if item.record_usage {
+                self.boost(&item.id, query, now)
+            } else {
+                0
+            };
+            std::cmp::Reverse(item.score.unwrap_or(0) + boost)
         });
     }
 }
@@ -143,24 +148,18 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::ItemKind;
 
     const NOW: u64 = 1_800_000_000;
 
     fn app(name: &str, score: i32) -> Item {
         Item {
             score: Some(score),
-            ..Item::path(
-                ItemKind::Application,
-                PathBuf::from(format!("/A/{name}.app")),
-                name.into(),
-                vec![],
-            )
+            ..Item::path(PathBuf::from(format!("/A/{name}.app")), name.into(), vec![])
         }
     }
 
     fn titles(items: &[Item]) -> Vec<&str> {
-        items.iter().map(|i| i.title.as_str()).collect()
+        items.iter().map(|i| i.display_title()).collect()
     }
 
     #[test]
@@ -211,14 +210,7 @@ mod tests {
         history.record("/x/b.txt", "b", NOW);
         let mut items: Vec<Item> = ["a.txt", "b.txt"]
             .iter()
-            .map(|n| {
-                Item::path(
-                    ItemKind::File,
-                    PathBuf::from(format!("/x/{n}")),
-                    (*n).into(),
-                    vec![],
-                )
-            })
+            .map(|n| Item::path(PathBuf::from(format!("/x/{n}")), (*n).into(), vec![]))
             .collect();
         history.rerank(&mut items, "b", NOW);
         assert_eq!(titles(&items), ["a.txt", "b.txt"]);
@@ -242,5 +234,24 @@ mod tests {
         let mut history = History::default();
         history.record("/A/Safari.app", "saf", NOW);
         assert_eq!(History::from_json(&history.to_json()).unwrap(), history);
+    }
+    #[test]
+    fn opted_out_items_do_not_receive_old_history_boosts() {
+        let mut history = History::default();
+        history.record("/A/Old.app", "q", NOW);
+        let mut old = app("Old", 80);
+        old.record_usage = false;
+        let mut detail = app("Detail", 100);
+        detail.view = crate::View::Detail {
+            title: "Detail".into(),
+            body: "Body".into(),
+        };
+        let mut items = vec![old, detail];
+        history.rerank(&mut items, "q", NOW);
+        assert_eq!(titles(&items), ["Detail", "Old"]);
+        history.record("/A/Detail.app", "q", NOW);
+        items[0].score = Some(1);
+        history.rerank(&mut items, "q", NOW);
+        assert_eq!(titles(&items), ["Detail", "Old"]);
     }
 }

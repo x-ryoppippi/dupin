@@ -98,7 +98,7 @@ fn run(rx: Receiver<Job>, provider: &dyn Provider, current: &Arc<AtomicU64>, del
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ItemKind;
+
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::sync::mpsc::RecvTimeoutError;
@@ -116,12 +116,7 @@ mod tests {
                 let _ = gate.recv();
             }
             let path = PathBuf::from(format!("/{}", request.query));
-            emit(vec![Item::path(
-                ItemKind::File,
-                path,
-                request.query.clone(),
-                vec![],
-            )]);
+            emit(vec![Item::path(path, request.query.clone(), vec![])]);
         }
     }
 
@@ -151,7 +146,7 @@ mod tests {
             }
         }
         assert!(got.iter().all(|d| d.generation() == 2), "{got:?}");
-        assert!(matches!(&got[0], Delivery::Batch { items, .. } if items[0].title == "fast"));
+        assert!(matches!(&got[0], Delivery::Batch { items, .. } if items[0].display_title() == "fast"));
     }
 
     #[test]

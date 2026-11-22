@@ -35,13 +35,6 @@ impl fmt::Display for CommandId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ResultLayout {
-    #[default]
-    List,
-    Detail,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryPresentation {
     pub placeholder: String,
@@ -49,7 +42,6 @@ pub struct QueryPresentation {
     pub empty_hint: Option<String>,
     pub no_results_hint: Option<String>,
     pub show_searching: bool,
-    pub result_layout: ResultLayout,
     pub backdrop: f32,
 }
 
@@ -61,7 +53,6 @@ impl QueryPresentation {
             empty_hint: None,
             no_results_hint: None,
             show_searching: false,
-            result_layout: ResultLayout::List,
             backdrop: 0.0,
         }
     }

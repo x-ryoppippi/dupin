@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+pub use dupin_plugin_protocol::View;
+
 /// What running a result does. Providers decide; the platform layer carries it out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -29,24 +31,17 @@ impl ItemAction {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ItemKind {
-    Application,
-    File,
-    Dictionary,
-}
-
 /// One candidate row, as every provider returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
     /// Unique among the results of one search; the UI keys rows by it.
     pub id: String,
-    pub title: String,
-    pub subtitle: String,
-    pub kind: ItemKind,
+    pub view: View,
+    /// Participate in usage recording and history ranking.
+    pub record_usage: bool,
     /// The file whose icon represents the row, if any.
     pub icon: Option<PathBuf>,
-    /// Character indices in `title` that matched the query, for highlighting.
+    /// Character indices in `display_title()` that matched the query, for highlighting.
     pub matched: Vec<usize>,
     /// How well the item matched, for providers that rank their results; the history adds
     /// to it. None for results that arrive in a provider's own order (Spotlight's).
@@ -60,16 +55,15 @@ pub struct Item {
 
 impl Item {
     /// A file system entry: Enter opens it, ⌘Enter reveals it.
-    pub fn path(kind: ItemKind, path: PathBuf, title: String, matched: Vec<usize>) -> Self {
+    pub fn path(path: PathBuf, title: String, matched: Vec<usize>) -> Self {
         let subtitle = path
             .parent()
             .map(|p| tilde(&p.to_string_lossy()))
             .unwrap_or_default();
         Item {
             id: path.to_string_lossy().into_owned(),
-            title,
-            subtitle,
-            kind,
+            view: View::Text { title, subtitle },
+            record_usage: true,
             icon: Some(path.clone()),
             matched,
             score: None,
@@ -84,6 +78,13 @@ impl Item {
                     Action::Copy(path.to_string_lossy().into_owned()),
                 ),
             ],
+        }
+    }
+
+    pub fn display_title(&self) -> &str {
+        match &self.view {
+            View::Text { title, .. } | View::Detail { title, .. } => title,
+            View::Pair { source, .. } => source,
         }
     }
 

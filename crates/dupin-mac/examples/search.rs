@@ -27,7 +27,7 @@ fn main() {
             Delivery::Batch { items, .. } => {
                 println!("-- batch of {} at {:?}", items.len(), start.elapsed());
                 for item in items {
-                    println!("{}\t{}", item.title, item.subtitle);
+                    println!("{}\t{:?}", item.display_title(), item.view);
                 }
             }
             Delivery::Done { .. } => {

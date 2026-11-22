@@ -101,20 +101,18 @@ limits, with an explicit host import if an evaluator also needs cooperative chec
 
 The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
 messages, versions, correlation and per-request guest-memory ownership with a
-real calculator guest. It is not yet used by the launcher. Registration,
+real calculator guest. Its runtime-independent Text/Detail/Pair view type is now shared by launcher items; its guest transport is not yet used by the launcher. Internal command registration and routes are implemented. External manifest/package registration, runtime integration, plugin grants,
 capability brokerage, cancellation/deadlines, action invocation and streaming
 still need implementation and review before external plugins run.
 
 ## Views, actions and saved state
 
-The host renders a versioned data model for lists, details, forms and source/result
-cards. Plugins supply content and stable action IDs, not native UI objects or
+The launcher currently renders the shared Text, Detail and Pair data model per item. Forms remain planned. Plugins supply content and stable action IDs, not native UI objects or
 arbitrary code inside the view. Text selection and keyboard focus belong to the
 host renderer.
 
 Enter invokes a declared primary action. Right Arrow and Cmd+K open the shared
-action menu. Dictionary's external-open operation moves there when that mechanism
-is available. Privileged host actions are checked when invoked, not trusted
+action menu. Dictionary's external-open operation already uses that menu. Privileged host actions are checked when invoked, not trusted
 because they appeared in a rendered result. Enter is not a grant. Open-path
 actions use broker-issued resource handles scoped to that plugin, not arbitrary
 guest paths. URLs require granted schemes/destinations. Clipboard read and write

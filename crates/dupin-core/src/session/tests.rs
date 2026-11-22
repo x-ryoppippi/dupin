@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::{CommandId, CommandRegistry, CommandSpec, ItemKind, QueryPresentation};
+use crate::{CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
 
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
@@ -63,8 +63,8 @@ fn session_with_clock(history: History, clock: fn() -> u64) -> Session {
     .unwrap()
 }
 
-fn item(kind: ItemKind, name: &str) -> Item {
-    Item::path(kind, PathBuf::from(format!("/x/{name}")), name.to_owned(), vec![])
+fn item(name: &str) -> Item {
+    Item::path(PathBuf::from(format!("/x/{name}")), name.to_owned(), vec![])
 }
 
 fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
@@ -94,7 +94,7 @@ fn actions_run_the_named_result_even_after_selection_moves() {
     let generation = searched(&s.set_query("note")).1;
     s.deliver(Delivery::Batch {
         generation,
-        items: vec![item(ItemKind::File, "notes.md"), item(ItemKind::File, "other.md")],
+        items: vec![item("notes.md"), item("other.md")],
     });
     assert_eq!(
         s.intent(Intent::Actions).unwrap(),
@@ -117,7 +117,7 @@ fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
         let generation = searched(&s.set_query("note")).1;
         s.deliver(Delivery::Batch {
             generation,
-            items: vec![item(ItemKind::File, "notes.md")],
+            items: vec![item("notes.md")],
         });
         match boundary {
             0 => {
@@ -141,7 +141,7 @@ fn unknown_actions_and_missing_results_do_nothing() {
     let generation = searched(&s.set_query("note")).1;
     s.deliver(Delivery::Batch {
         generation,
-        items: vec![item(ItemKind::File, "notes.md")],
+        items: vec![item("notes.md")],
     });
     assert!(s.run_action(generation, "/x/notes.md", "unknown").is_empty());
     assert!(s.run_action(generation, "/x/missing.md", "open").is_empty());
@@ -155,7 +155,7 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
         let old_generation = searched(&s.set_query("old")).1;
         s.deliver(Delivery::Batch {
             generation: old_generation,
-            items: vec![item(ItemKind::File, "old.md")],
+            items: vec![item("old.md")],
         });
         let generation = searched(&s.set_query("new")).1;
         assert_eq!(s.items()[0].id, "/x/old.md");
@@ -164,7 +164,7 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
         assert_eq!(s.history(), &History::default());
         s.deliver(Delivery::Batch {
             generation,
-            items: vec![item(ItemKind::File, "new.md")],
+            items: vec![item("new.md")],
         });
         assert!(!s.intent(intent).unwrap().is_empty());
     }
@@ -178,7 +178,12 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
     s.set_query("d");
     s.intent(Intent::Space);
     let generation = searched(&s.set_query("serendipity")).1;
-    let mut result = item(ItemKind::Dictionary, "serendipity");
+    let mut result = item("serendipity");
+    result.record_usage = false;
+    result.view = View::Detail {
+        title: "serendipity".into(),
+        body: "Definition".into(),
+    };
     let action = Action::OpenUrl("dict://serendipity".into());
     result.primary = None;
     result.actions = vec![crate::ItemAction::new(
@@ -302,13 +307,13 @@ fn a_pasted_mode_switch_discards_previous_results_and_late_deliveries() {
     let generation = searched(&s.set_query("saf")).1;
     s.deliver(Delivery::Batch {
         generation,
-        items: vec![item(ItemKind::Application, "Safari")],
+        items: vec![item("Safari")],
     });
     s.set_query("d word");
     assert!(s.items().is_empty());
     assert!(!s.deliver(Delivery::Batch {
         generation,
-        items: vec![item(ItemKind::Application, "Safari")]
+        items: vec![item("Safari")]
     }));
 }
 
@@ -379,9 +384,11 @@ fn enter_offers_dictionary_actions_before_launching() {
         generation,
         items: vec![Item {
             id: "dictionary:serendipity".into(),
-            title: "serendipity".into(),
-            subtitle: "The occurrence of events by chance.".into(),
-            kind: ItemKind::Dictionary,
+            view: View::Detail {
+                title: "serendipity".into(),
+                body: "The occurrence of events by chance.".into(),
+            },
+            record_usage: false,
             icon: None,
             matched: Vec::new(),
             score: None,
@@ -449,7 +456,7 @@ fn results_replace_on_first_batch_and_append_after() {
     let g1 = searched(&s.set_query("s")).1;
     assert!(s.deliver(Delivery::Batch {
         generation: g1,
-        items: vec![item(ItemKind::Application, "Safari")]
+        items: vec![item("Safari")]
     }));
     assert!(s.deliver(Delivery::Done { generation: g1 }));
     let g2 = searched(&s.set_query("sa")).1;
@@ -458,13 +465,13 @@ fn results_replace_on_first_batch_and_append_after() {
     assert_eq!(s.results(), Results::Searching { replaced: false });
     s.deliver(Delivery::Batch {
         generation: g2,
-        items: vec![item(ItemKind::Application, "Safari 2")],
+        items: vec![item("Safari 2")],
     });
     s.deliver(Delivery::Batch {
         generation: g2,
-        items: vec![item(ItemKind::Application, "Safari 3")],
+        items: vec![item("Safari 3")],
     });
-    let titles: Vec<_> = s.items().iter().map(|i| i.title.as_str()).collect();
+    let titles: Vec<_> = s.items().iter().map(|i| i.display_title()).collect();
     assert_eq!(titles, ["Safari 2", "Safari 3"]);
 }
 
@@ -475,7 +482,7 @@ fn stale_answers_are_dropped() {
     let _g2 = searched(&s.set_query("sa")).1;
     assert!(!s.deliver(Delivery::Batch {
         generation: g1,
-        items: vec![item(ItemKind::Application, "Old")]
+        items: vec![item("Old")]
     }));
     assert!(s.items().is_empty());
 }
@@ -486,7 +493,7 @@ fn done_without_batches_clears_old_rows() {
     let g1 = searched(&s.set_query("s")).1;
     s.deliver(Delivery::Batch {
         generation: g1,
-        items: vec![item(ItemKind::Application, "Safari")],
+        items: vec![item("Safari")],
     });
     let g2 = searched(&s.set_query("sxq")).1;
     s.deliver(Delivery::Done { generation: g2 });
@@ -501,7 +508,7 @@ fn clearing_the_query_cancels_and_ignores_late_answers() {
     assert_eq!(s.set_query(""), vec![Effect::CancelSearch]);
     assert!(!s.deliver(Delivery::Batch {
         generation: g,
-        items: vec![item(ItemKind::Application, "Late")]
+        items: vec![item("Late")]
     }));
     assert_eq!(s.results(), Results::Idle);
 }
@@ -512,7 +519,7 @@ fn switching_modes_never_shows_the_other_modes_rows() {
     let g = searched(&s.set_query("s")).1;
     s.deliver(Delivery::Batch {
         generation: g,
-        items: vec![item(ItemKind::Application, "Safari")],
+        items: vec![item("Safari")],
     });
     s.set_query("");
     s.intent(Intent::Space);
@@ -524,7 +531,7 @@ fn switching_modes_never_shows_the_other_modes_rows() {
 fn arrows_wrap_and_reveal_the_selection() {
     let mut s = session();
     let g = searched(&s.set_query("a")).1;
-    let items = ["A", "B", "C"].map(|n| item(ItemKind::Application, n)).to_vec();
+    let items = ["A", "B", "C"].map(item).to_vec();
     s.deliver(Delivery::Batch { generation: g, items });
     assert_eq!(s.intent(Intent::Up), Some(vec![Effect::RevealSelection]));
     assert_eq!(s.selected(), 2);
@@ -538,7 +545,7 @@ fn enter_runs_the_primary_action_then_hides_and_resets() {
     let g = searched(&s.set_query("saf")).1;
     s.deliver(Delivery::Batch {
         generation: g,
-        items: vec![item(ItemKind::Application, "Safari")],
+        items: vec![item("Safari")],
     });
     s.deliver(Delivery::Done { generation: g });
     let effects = s.intent(Intent::Open).unwrap();
@@ -561,7 +568,7 @@ fn command_enter_reveals_in_the_file_manager() {
     let g = searched(&s.set_query("notes")).1;
     s.deliver(Delivery::Batch {
         generation: g,
-        items: vec![item(ItemKind::File, "notes.md")],
+        items: vec![item("notes.md")],
     });
     let effects = s.intent(Intent::OpenAlternate).unwrap();
     assert_eq!(effects[0], Effect::Run(Action::Reveal("/x/notes.md".into())));
@@ -590,10 +597,10 @@ fn escape_hides_and_resets_file_mode() {
 fn a_click_selects_by_id_even_after_rows_move() {
     let mut s = session();
     let g = searched(&s.set_query("a")).1;
-    let items = ["A", "B", "C"].map(|n| item(ItemKind::Application, n)).to_vec();
+    let items = ["A", "B", "C"].map(item).to_vec();
     s.deliver(Delivery::Batch { generation: g, items });
     assert!(s.select_id("/x/C"));
-    assert_eq!(s.selected_item().unwrap().title, "C");
+    assert_eq!(s.selected_item().unwrap().display_title(), "C");
     assert!(!s.select_id("/x/gone"));
     assert_eq!(s.selected(), 2);
 }
@@ -658,7 +665,7 @@ fn content_results_stay_on_screen_while_the_query_grows() {
     let g = searched(&s.set_query("tax")).1;
     s.deliver(Delivery::Batch {
         generation: g,
-        items: vec![item(ItemKind::File, "2026.pdf")],
+        items: vec![item("2026.pdf")],
     });
     searched(&s.set_query("tax 2"));
     assert_eq!(s.items().len(), 1, "no flash of an empty list between keystrokes");
@@ -667,7 +674,7 @@ fn content_results_stay_on_screen_while_the_query_grows() {
 fn ranked(name: &str, score: i32) -> Item {
     Item {
         score: Some(score),
-        ..item(ItemKind::Application, name)
+        ..item(name)
     }
 }
 
@@ -694,7 +701,7 @@ fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
         generation: g,
         items: vec![ranked("Safari", 120), ranked("Shareful", 80)],
     });
-    assert_eq!(s.selected_item().unwrap().title, "Shareful");
+    assert_eq!(s.selected_item().unwrap().display_title(), "Shareful");
 }
 
 #[test]
@@ -713,11 +720,15 @@ fn reordering_on_a_later_batch_keeps_the_selected_item() {
         items: vec![ranked("C", 10)],
     });
     assert_eq!(
-        s.items()[0].title,
+        s.items()[0].display_title(),
         "C",
         "the item picked for this query moves to the top"
     );
-    assert_eq!(s.selected_item().unwrap().title, "B", "the selection stays on B");
+    assert_eq!(
+        s.selected_item().unwrap().display_title(),
+        "B",
+        "the selection stays on B"
+    );
 }
 
 #[test]
@@ -734,13 +745,13 @@ fn refreshing_keeps_the_selected_item_when_results_reorder() {
         generation,
         items: vec![ranked("C", 110), ranked("A", 100), ranked("B", 90)],
     });
-    assert_eq!(s.selected_item().unwrap().title, "B");
+    assert_eq!(s.selected_item().unwrap().display_title(), "B");
     let generation = searched(&s.refresh()).1;
     s.deliver(Delivery::Batch {
         generation,
         items: vec![ranked("A", 100)],
     });
-    assert_eq!(s.selected_item().unwrap().title, "A");
+    assert_eq!(s.selected_item().unwrap().display_title(), "A");
 }
 
 #[test]
@@ -988,4 +999,74 @@ fn dismissing_after_a_typo_correction_records_the_completed_query() {
     s.intent(Intent::Dismiss);
     s.intent(Intent::Up);
     assert_eq!(s.query(), "safar");
+}
+
+#[test]
+fn history_policy_is_independent_of_view() {
+    for (view, record_usage) in [
+        (
+            View::Detail {
+                title: "Details".into(),
+                body: "Body".into(),
+            },
+            true,
+        ),
+        (
+            View::Text {
+                title: "Text".into(),
+                subtitle: String::new(),
+            },
+            false,
+        ),
+    ] {
+        let mut s = session();
+        let generation = searched(&s.set_query("query")).1;
+        let mut result = item("result");
+        result.view = view;
+        result.record_usage = record_usage;
+        let id = result.id.clone();
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![result],
+        });
+        let effects = s.run_action(generation, &id, "open");
+        assert!(effects.iter().any(|effect| matches!(effect, Effect::Run(_))));
+        assert_eq!(effects.contains(&Effect::SaveHistory), record_usage);
+        assert_eq!(s.history().boost(&id, "query", 1_800_000_000) > 0, record_usage);
+    }
+}
+
+#[test]
+fn non_text_actions_obey_generation_and_selection() {
+    for view in [
+        View::Detail {
+            title: "Details".into(),
+            body: "Body".into(),
+        },
+        View::Pair {
+            source: "Source".into(),
+            result: "Result".into(),
+        },
+    ] {
+        let mut s = session();
+        let generation = searched(&s.set_query("first")).1;
+        let mut result = item("result");
+        result.view = view;
+        let id = result.id.clone();
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("text"), result.clone()],
+        });
+        assert!(s.select_id(&id));
+        assert_eq!(s.selected_item(), Some(&result));
+        assert!(s.run_action(generation.wrapping_sub(1), &id, "open").is_empty());
+        let next = searched(&s.set_query("second")).1;
+        s.deliver(Delivery::Batch {
+            generation: next,
+            items: vec![result],
+        });
+        assert!(s.run_action(generation, &id, "open").is_empty());
+        let effects = s.run_action(next, &id, "open");
+        assert!(effects.contains(&Effect::Run(Action::Open(PathBuf::from("/x/result")))));
+    }
 }

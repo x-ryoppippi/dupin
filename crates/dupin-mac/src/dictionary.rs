@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, ItemKind, Provider, Request};
+use dupin_core::{Action, Item, ItemAction, Provider, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -67,9 +67,11 @@ fn full_range(text: &CFString) -> CFRange {
 fn item(term: &str, definition: String) -> Item {
     Item {
         id: format!("dictionary:{term}"),
-        title: term.to_owned(),
-        subtitle: definition,
-        kind: ItemKind::Dictionary,
+        view: View::Detail {
+            title: term.to_owned(),
+            body: definition,
+        },
+        record_usage: false,
         icon: None,
         matched: Vec::new(),
         score: None,
@@ -98,6 +100,12 @@ fn dictionary_url(term: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn detail_body(item: &dupin_core::Item) -> &str {
+        let dupin_core::View::Detail { body, .. } = &item.view else {
+            panic!("expected detail")
+        };
+        body
+    }
     use super::*;
 
     fn fixture_definition(term: &str) -> Option<String> {
@@ -114,8 +122,8 @@ mod tests {
         provider.search(&request, &mut |items| batches.push(items));
 
         assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0][0].title, "serendipity");
-        assert_eq!(batches[0][0].subtitle, "The occurrence of events by chance.");
+        assert_eq!(batches[0][0].display_title(), "serendipity");
+        assert_eq!(detail_body(&batches[0][0]), "The occurrence of events by chance.");
     }
 
     #[test]
@@ -131,9 +139,9 @@ mod tests {
     #[test]
     fn definition_result_displays_the_definition_and_opens_dictionary() {
         let item = item("serendipity", "The occurrence of events by chance.".into());
-        assert_eq!(item.kind, ItemKind::Dictionary);
-        assert_eq!(item.title, "serendipity");
-        assert_eq!(item.subtitle, "The occurrence of events by chance.");
+        assert!(!item.record_usage);
+        assert_eq!(item.display_title(), "serendipity");
+        assert_eq!(detail_body(&item), "The occurrence of events by chance.");
         assert_eq!(item.primary, None);
         assert_eq!(
             item.action("open-dictionary"),

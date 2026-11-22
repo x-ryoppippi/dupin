@@ -5,7 +5,7 @@
 use std::collections::VecDeque;
 
 use crate::searcher::Delivery;
-use crate::{Action, CommandId, CommandRegistry, History, Item, ItemKind};
+use crate::{Action, CommandId, CommandRegistry, History, Item};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 
@@ -203,7 +203,7 @@ impl Session {
 
     fn activate(&mut self, item: &Item, action: Action) -> Vec<Effect> {
         let mut effects = vec![Effect::Run(action)];
-        if item.kind != ItemKind::Dictionary {
+        if item.record_usage {
             self.history.record(&item.id, &self.query, (self.clock)());
             effects.push(Effect::SaveHistory);
         }
