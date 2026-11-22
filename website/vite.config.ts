@@ -2,7 +2,7 @@ import { cloudflare } from '@cloudflare/vite-plugin';
 import { oxContentCustomHost, type OxContentOptions } from '@ox-content/vite-plugin';
 import { svelte } from '@rsvelte/vite-plugin-svelte';
 import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
 const oxContentOptions = {
@@ -18,10 +18,12 @@ const oxContentOptions = {
 	},
 } satisfies OxContentOptions;
 
+const workerEnvironment = 'redirect';
+
 export default defineConfig({
 	appType: 'mpa',
 	plugins: [
-		cloudflare(),
+		cloudflare({ viteEnvironment: { name: workerEnvironment } }),
 		svelte({ configFile: false }),
 		cloudflareRedirect({
 			mode: 'generate',
@@ -35,7 +37,18 @@ export default defineConfig({
 			oxContent: oxContentOptions,
 			dev: { routeDependencies: [{ path: 'src', kind: 'directory' }] },
 			build: { transformHtml: false },
-		}),
+		}).map(
+			(plugin) =>
+				({
+					...plugin,
+					applyToEnvironment(environment) {
+						return (
+							environment.name !== workerEnvironment &&
+							(plugin.applyToEnvironment?.(environment) ?? true)
+						);
+					},
+				}) satisfies Plugin,
+		),
 	],
 	build: { rollupOptions: { input: 'index.html' } },
 	// The site reads the logo and VERSION from the repository root, one level up.
