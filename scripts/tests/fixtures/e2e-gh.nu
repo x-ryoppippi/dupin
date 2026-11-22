@@ -20,11 +20,10 @@ def --wrapped main [...args: string] {
         print '123'
         return
     }
-    if ($request | str contains 'run download') {
+    if ($request | str contains '/zip') {
         if $env.GH_TOKEN != 'fixture-comment-token' { exit 22 }
-        let at = $args | enumerate | where item == '--dir' | get 0.index
-        let directory = $args | get ($at + 1)
-        cp ($env.GH_FIXTURES | path join frame.png) ($env.GH_FIXTURES | path join clip.mp4) $directory
+        if not ($request | str contains '/artifacts/10/zip') { exit 26 }
+        open --raw ($env.GH_FIXTURES | path join media.zip) | print --raw --no-newline
         return
     }
     if ($request | str contains 'body=@') {
@@ -34,13 +33,7 @@ def --wrapped main [...args: string] {
         return
     }
     if ($request | str contains '/artifacts') {
-        if ($request | str contains 'e2e-media') {
-            if $env.GH_LEGACY != '1' { print 'https://github.com/owner/repo/actions/runs/42/artifacts/10' }
-        } else if ($request | str contains 'e2e-screenshots') {
-            if $env.GH_LEGACY == '1' { print 'https://github.com/owner/repo/actions/runs/42/artifacts/11' }
-        } else {
-            print 'https://github.com/owner/repo/actions/runs/42/artifacts/12'
-        }
+        open --raw $env.GH_ARTIFACTS | print --raw
         return
     }
     if ($request | str contains '/jobs') {

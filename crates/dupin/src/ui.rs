@@ -375,7 +375,9 @@ impl Ui {
 
     /// The hotkey: show the panel, or hide it when it already shows.
     pub fn toggle(&mut self, tx: &mut Tx) {
-        if self.me.is_visible() {
+        let visible = self.me.is_visible();
+        crate::trace::panel("toggle", visible, self.shown);
+        if visible {
             self.dismiss(tx);
         } else {
             self.show(tx);
@@ -440,6 +442,7 @@ impl Ui {
     }
 
     pub fn closed(&mut self, _: &mut Tx) {
+        crate::trace::panel("closed", self.me.is_visible(), self.shown);
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
             self.prefs.open();
@@ -447,6 +450,7 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.close();

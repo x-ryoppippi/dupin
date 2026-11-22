@@ -16,6 +16,7 @@ let failure = try {
     mkdir $fixtures
     0x[89 50 4E 47 0D 0A 1A 0A] | save ($fixtures | path join frame.png)
     0x[00 00 00 0C 66 74 79 70 69 73 6F 6D] | save ($fixtures | path join clip.mp4)
+    ^zip --junk-paths ($fixtures | path join media.zip) ($fixtures | path join frame.png) ($fixtures | path join clip.mp4) | ignore
     let report = $root | path join report.bash
     open .github/workflows/e2e-comment.yml | get jobs.comment.steps | last | get run | save $report
     let cases = [
@@ -90,6 +91,66 @@ let failure = try {
         mkdir $work
         let posted = $work | path join posted.md
         let calls = $work | path join calls
+        let artifacts = $work | path join artifacts.json
+        let media_name = if $case.legacy { 'e2e-screenshots' } else { 'e2e-media' }
+        [
+            {
+                artifacts: [
+                    {
+                        id: 90
+                        name: $media_name
+                        expired: false
+                        created_at: '2026-11-22T21:00:00Z'
+                    }
+                    {
+                        id: 12
+                        name: e2e
+                        expired: false
+                        created_at: '2026-11-22T22:00:00Z'
+                    }
+                    {
+                        id: 99
+                        name: $media_name
+                        expired: true
+                        created_at: '2026-11-22T23:00:00Z'
+                    }
+                ]
+            }
+            {
+                artifacts: [
+                    {
+                        id: 98
+                        name: e2e
+                        expired: true
+                        created_at: '2026-11-22T23:00:00Z'
+                    }
+                    {
+                        id: 10
+                        name: $media_name
+                        expired: false
+                        created_at: '2026-11-22T22:00:00Z'
+                    }
+                    {
+                        id: 11
+                        name: e2e
+                        expired: false
+                        created_at: '2026-11-22T22:00:00Z'
+                    }
+                    {
+                        id: 91
+                        name: e2e
+                        expired: false
+                        created_at: '2026-11-22T21:00:00Z'
+                    }
+                    {
+                        id: 9
+                        name: $media_name
+                        expired: false
+                        created_at: '2026-11-22T22:00:00Z'
+                    }
+                ]
+            }
+        ] | to json | save $artifacts
         let run = with-env {
             PATH: ($env.PATH | prepend $bin)
             GH_TOKEN: fixture-comment-token
@@ -100,6 +161,7 @@ let failure = try {
             GH_STALE: (if $case.stale { '1' } else { '0' })
             GH_LATE_STALE: (if ($case.late? | default false) { '1' } else { '0' })
             GH_FIXTURES: $fixtures
+            GH_ARTIFACTS: $artifacts
             GH_POSTED: $posted
             GH_CALLS: $calls
             REPO: owner/repo
@@ -126,19 +188,30 @@ let failure = try {
             let body = open --raw $posted
             assert ($body | str starts-with '<!-- dupin-e2e -->') 'report marker must survive'
             assert ($body | str contains 'E2E passed on 1234567') 'report must preserve the tested commit and result'
-            assert ($body | str contains '[Log and detailed evidence]') 'report must retain the logs'
+            assert (
+                $body
+                | str contains '[Log and detailed evidence](https://github.com/owner/repo/actions/runs/42/artifacts/12)'
+            ) 'detailed evidence must select one latest non-expired artifact'
+            assert (not ($commands | str contains 'run download')) 'downloads must use the selected artifact ID'
             if $case.token and not $case.failed and not ($case.fork? | default false) {
                 assert (
                     $body
                     | str contains '![E2E frame.png](https://github.com/user-attachments/assets/'
                 ) 'images must render inline'
                 assert (
+                    $commands
+                    | str contains 'repos/owner/repo/actions/artifacts/10/zip'
+                ) 'inline media must download the exact selected archive'
+                assert (
                     $body
                     | str contains "\nhttps://github.com/user-attachments/assets/12345678-1234-1234-1234-123456789def\n"
                 ) 'video must use a standalone player URL'
                 assert (not ($body | str contains 'Download media')) 'successful inline media must replace the ZIP link'
             } else {
-                assert ($body | str contains '[Download media]') 'upload failure must retain downloadable evidence'
+                assert (
+                    $body
+                    | str contains '[Download media](https://github.com/owner/repo/actions/runs/42/artifacts/10)'
+                ) 'fallback media must select one latest non-expired artifact'
                 if not $case.token {
                     assert (not ($commands | str contains 'uploads.github.com')) 'missing credentials must not attempt upload'
                 }
