@@ -12,7 +12,7 @@ pub mod session;
 
 pub use config::{Backdrop, Config, InputSource, Position};
 pub use history::History;
-pub use item::{Action, Item, ItemKind};
+pub use item::{Action, Item, ItemAction, ItemKind};
 pub use provider::{Provider, Request};
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Mode, Session};

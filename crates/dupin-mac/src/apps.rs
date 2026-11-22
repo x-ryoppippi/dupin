@@ -576,7 +576,10 @@ mod tests {
             icon: PathBuf::from("/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app"),
         };
         let item = rank(std::slice::from_ref(&app), "saf", 1).remove(0);
-        assert_eq!(item.primary, dupin_core::Action::Open(app.path.clone()));
+        assert_eq!(
+            item.action("open"),
+            Some(&dupin_core::Action::Open(app.path.clone()))
+        );
         assert_eq!(item.icon, Some(app.icon));
     }
 

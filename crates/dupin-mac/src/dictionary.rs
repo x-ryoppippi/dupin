@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemKind, Provider, Request};
+use dupin_core::{Action, Item, ItemAction, ItemKind, Provider, Request};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -73,8 +73,13 @@ fn item(term: &str, definition: String) -> Item {
         icon: None,
         matched: Vec::new(),
         score: None,
-        primary: Action::OpenUrl(dictionary_url(term)),
+        primary: None,
         alternate: None,
+        actions: vec![ItemAction::new(
+            "open-dictionary",
+            "Open in Dictionary",
+            Action::OpenUrl(dictionary_url(term)),
+        )],
     }
 }
 
@@ -129,7 +134,11 @@ mod tests {
         assert_eq!(item.kind, ItemKind::Dictionary);
         assert_eq!(item.title, "serendipity");
         assert_eq!(item.subtitle, "The occurrence of events by chance.");
-        assert_eq!(item.primary, Action::OpenUrl("dict://serendipity".into()));
+        assert_eq!(item.primary, None);
+        assert_eq!(
+            item.action("open-dictionary"),
+            Some(&Action::OpenUrl("dict://serendipity".into()))
+        );
         assert_eq!(item.alternate, None);
     }
 

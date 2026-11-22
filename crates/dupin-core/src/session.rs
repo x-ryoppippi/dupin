@@ -39,6 +39,7 @@ pub enum Intent {
     Open,
     /// ⌘Enter.
     OpenAlternate,
+    Actions,
     /// Esc.
     Dismiss,
 }
@@ -53,6 +54,10 @@ pub enum Effect {
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
     Run(Action),
+    ShowActions {
+        id: String,
+        generation: u64,
+    },
     /// Hide the panel. The session has already reset itself for the next show.
     Hide,
     /// The selection moved; keep the selected row on screen.
@@ -170,6 +175,42 @@ impl Session {
         self.items.get(self.selected)
     }
 
+    fn actions(&self) -> Vec<Effect> {
+        self.selected_item()
+            .filter(|item| !item.actions.is_empty())
+            .map(|item| {
+                vec![Effect::ShowActions {
+                    id: item.id.clone(),
+                    generation: self.generation,
+                }]
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn run_action(&mut self, generation: u64, item_id: &str, action_id: &str) -> Vec<Effect> {
+        if generation != self.generation {
+            return Vec::new();
+        }
+        let Some(item) = self.items.iter().find(|item| item.id == item_id).cloned() else {
+            return Vec::new();
+        };
+        let Some(action) = item.action(action_id).cloned() else {
+            return Vec::new();
+        };
+        self.activate(&item, action)
+    }
+
+    fn activate(&mut self, item: &Item, action: Action) -> Vec<Effect> {
+        let mut effects = vec![Effect::Run(action)];
+        if item.kind != ItemKind::Dictionary {
+            self.history.record(&item.id, &self.query, (self.clock)());
+            effects.push(Effect::SaveHistory);
+        }
+        self.remember_query(true);
+        effects.extend(self.dismiss());
+        effects
+    }
+
     pub fn results(&self) -> Results {
         self.results
     }
@@ -256,6 +297,7 @@ impl Session {
     pub fn intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
         let empty = self.query.is_empty();
         Some(match intent {
+            Intent::Actions => self.actions(),
             Intent::Space if empty => match self.mode {
                 Mode::Apps => self.switch(Mode::Files),
                 // A leading space finds nothing in a file search; swallow it.
@@ -291,23 +333,23 @@ impl Session {
                 let Some(item) = self.selected_item() else {
                     return Some(Vec::new());
                 };
-                let action = if intent == Intent::Open {
-                    Some(item.primary.clone())
+                let id = if intent == Intent::Open {
+                    item.primary.as_deref()
                 } else {
-                    item.alternate.clone()
+                    item.alternate.as_deref()
                 };
-                let Some(action) = action else {
+                let Some(id) = id else {
+                    return Some(if intent == Intent::Open {
+                        self.actions()
+                    } else {
+                        Vec::new()
+                    });
+                };
+                let Some(action) = item.action(id).cloned() else {
                     return Some(Vec::new());
                 };
-                let mut effects = vec![Effect::Run(action)];
-                if item.kind != ItemKind::Dictionary {
-                    let id = item.id.clone();
-                    self.history.record(&id, &self.query, (self.clock)());
-                    effects.push(Effect::SaveHistory);
-                }
-                self.remember_query(true);
-                effects.extend(self.dismiss());
-                effects
+                let item = item.clone();
+                self.activate(&item, action)
             }
             Intent::Dismiss => self.dismiss(),
         })

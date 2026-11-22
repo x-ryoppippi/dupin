@@ -192,12 +192,12 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                                     .wrap(),
                             )
                             .child(
-                                text("↩ Open in Dictionary")
+                                text("→ Actions")
                                     .font(type_::BODY)
                                     .color(accent)
                                     .cursor(rune::Cursor::Pointer)
                                     .hover(t.hover)
-                                    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                                    .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
                             ),
                     )
                     .child(

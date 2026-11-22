@@ -11,6 +11,7 @@ pub fn run(action: &Action) -> bool {
     match action {
         Action::Open(path) => open(path),
         Action::OpenUrl(url) => open_url(url),
+        Action::Copy(_) => false,
         Action::Reveal(path) => {
             reveal(path);
             true

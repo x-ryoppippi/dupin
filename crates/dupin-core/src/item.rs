@@ -9,6 +9,24 @@ pub enum Action {
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
     OpenUrl(String),
+    Copy(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ItemAction {
+    pub id: String,
+    pub title: String,
+    pub action: Action,
+}
+
+impl ItemAction {
+    pub fn new(id: &str, title: &str, action: Action) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            action,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,10 +51,11 @@ pub struct Item {
     /// How well the item matched, for providers that rank their results; the history adds
     /// to it. None for results that arrive in a provider's own order (Spotlight's).
     pub score: Option<i32>,
-    /// Enter.
-    pub primary: Action,
-    /// ⌘Enter.
-    pub alternate: Option<Action>,
+    /// The action ID for Enter; without one, Enter offers the action menu.
+    pub primary: Option<String>,
+    /// The action ID for ⌘Enter.
+    pub alternate: Option<String>,
+    pub actions: Vec<ItemAction>,
 }
 
 impl Item {
@@ -54,9 +73,25 @@ impl Item {
             icon: Some(path.clone()),
             matched,
             score: None,
-            primary: Action::Open(path.clone()),
-            alternate: Some(Action::Reveal(path)),
+            primary: Some("open".into()),
+            alternate: Some("reveal".into()),
+            actions: vec![
+                ItemAction::new("open", "Open", Action::Open(path.clone())),
+                ItemAction::new("reveal", "Reveal in Finder", Action::Reveal(path.clone())),
+                ItemAction::new(
+                    "copy-path",
+                    "Copy path",
+                    Action::Copy(path.to_string_lossy().into_owned()),
+                ),
+            ],
         }
+    }
+
+    pub fn action(&self, id: &str) -> Option<&Action> {
+        self.actions
+            .iter()
+            .find(|action| action.id == id)
+            .map(|action| &action.action)
     }
 }
 

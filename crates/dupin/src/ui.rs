@@ -296,6 +296,9 @@ impl Ui {
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         crate::trace::key(ev);
+        if self.query.is_composing() {
+            return false;
+        }
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
         let intent = match &ev.key {
@@ -303,6 +306,15 @@ impl Ui {
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,
             Key::Down => Intent::Down,
+            Key::Right
+                if plain
+                    && !m.shift
+                    && self.query.anchor == self.query.focus
+                    && self.query.focus == self.query.text.len() =>
+            {
+                Intent::Actions
+            }
+            Key::Command('k') => Intent::Actions,
             Key::Enter if m.cmd => Intent::OpenAlternate,
             Key::Enter => Intent::Open,
             Key::Escape => Intent::Dismiss,
@@ -335,6 +347,13 @@ impl Ui {
         }
     }
 
+    pub fn actions(&mut self, id: &str, tx: &mut Tx) {
+        if self.session.select_id(id) {
+            let effects = self.session.intent(Intent::Actions).unwrap_or_default();
+            self.apply(effects, tx);
+        }
+    }
+
     fn deliver(&mut self, delivery: Delivery) {
         if self.session.deliver(delivery) {
             self.fetch_icons();
@@ -351,6 +370,22 @@ impl Ui {
     fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
         for effect in effects {
             match effect {
+                Effect::ShowActions { id, generation } => {
+                    let Some(item) = self.session.items().iter().find(|item| item.id == id) else {
+                        continue;
+                    };
+                    let menu = rune::PopupMenu::new().items(
+                        item.actions
+                            .iter()
+                            .map(|action| rune::PopupItem::new(action.id.clone(), action.title.clone())),
+                    );
+                    tx.popup_menu(menu, "query", move |s: &mut Ui, picked, tx| {
+                        if let Some(action_id) = picked {
+                            let effects = s.session.run_action(generation, &id, action_id);
+                            s.apply(effects, tx);
+                        }
+                    });
+                }
                 Effect::Search {
                     mode,
                     generation,
@@ -374,6 +409,10 @@ impl Ui {
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
+                    if let dupin_core::Action::Copy(text) = action {
+                        tx.copy(text);
+                        continue;
+                    }
                     // Launch Services can take a moment to answer; don't hold the frame for it.
                     let running = self.running.clone();
                     running.fetch_add(1, Ordering::AcqRel);

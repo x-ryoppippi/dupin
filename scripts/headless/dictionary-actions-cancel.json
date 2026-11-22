@@ -1,0 +1,12 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "d serendipity" },
+		{ "t": 1.5, "type": "key", "name": "Right" },
+		{ "t": 1.7, "type": "menu-cancel" },
+		{ "t": 1.9, "type": "type", "text": "x" },
+		{ "t": 2.0, "type": "key", "name": "Backspace" },
+		{ "t": 2.5, "type": "key", "name": "k", "cmd": true },
+		{ "t": 2.7, "type": "menu-cancel" },
+		{ "t": 3.0, "type": "mark", "name": "end" }
+	]
+}

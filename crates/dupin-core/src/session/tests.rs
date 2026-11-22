@@ -29,6 +29,66 @@ fn starts_in_apps_mode_with_nothing_shown() {
 }
 
 #[test]
+fn actions_run_the_named_result_even_after_selection_moves() {
+    let mut s = Session::default();
+    let generation = searched(&s.set_query("note")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item(ItemKind::File, "notes.md"), item(ItemKind::File, "other.md")],
+    });
+    assert_eq!(
+        s.intent(Intent::Actions).unwrap(),
+        vec![Effect::ShowActions {
+            id: "/x/notes.md".into(),
+            generation
+        }]
+    );
+    s.intent(Intent::Down);
+    let effects = s.run_action(generation, "/x/notes.md", "copy-path");
+    assert_eq!(effects[0], Effect::Run(Action::Copy("/x/notes.md".into())));
+    assert!(effects.contains(&Effect::Hide));
+    assert!(s.items().is_empty());
+}
+
+#[test]
+fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
+    for boundary in 0..3 {
+        let mut s = Session::default();
+        let generation = searched(&s.set_query("note")).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item(ItemKind::File, "notes.md")],
+        });
+        match boundary {
+            0 => {
+                s.set_query("other");
+            }
+            1 => {
+                s.refresh();
+            }
+            _ => {
+                s.reset();
+            }
+        }
+        assert!(s.run_action(generation, "/x/notes.md", "open").is_empty());
+    }
+}
+
+#[test]
+fn unknown_actions_and_missing_results_do_nothing() {
+    let mut s = Session::default();
+    assert!(s.intent(Intent::Actions).unwrap().is_empty());
+    let generation = searched(&s.set_query("note")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item(ItemKind::File, "notes.md")],
+    });
+    assert!(s.run_action(generation, "/x/notes.md", "unknown").is_empty());
+    assert!(s.run_action(generation, "/x/missing.md", "open").is_empty());
+    assert_eq!(s.query(), "note");
+}
+
+#[test]
 fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let mut history = History::default();
     history.record("/Applications/Safari.app", "saf", 1_800_000_000);
@@ -38,12 +98,21 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let generation = searched(&s.set_query("serendipity")).1;
     let mut result = item(ItemKind::Dictionary, "serendipity");
     let action = Action::OpenUrl("dict://serendipity".into());
-    result.primary = action.clone();
+    result.primary = None;
+    result.actions = vec![crate::ItemAction::new(
+        "dictionary",
+        "Open in Dictionary",
+        action.clone(),
+    )];
     s.deliver(Delivery::Batch {
         generation,
         items: vec![result],
     });
-    let effects = s.intent(Intent::Open).unwrap();
+    assert!(matches!(
+        s.intent(Intent::Open).unwrap().as_slice(),
+        [Effect::ShowActions { .. }]
+    ));
+    let effects = s.run_action(generation, "/x/serendipity", "dictionary");
     assert!(effects.contains(&Effect::Run(action)));
     assert!(!effects.contains(&Effect::SaveHistory));
     assert_eq!(s.history(), &history);
@@ -187,7 +256,7 @@ fn backspace_from_an_empty_dictionary_query_returns_to_apps() {
 }
 
 #[test]
-fn enter_opens_the_selected_dictionary_term() {
+fn enter_offers_dictionary_actions_before_launching() {
     let mut s = Session::default();
     s.set_query("define");
     s.intent(Intent::Space);
@@ -202,13 +271,25 @@ fn enter_opens_the_selected_dictionary_term() {
             icon: None,
             matched: Vec::new(),
             score: None,
-            primary: Action::OpenUrl("dict://serendipity".into()),
+            primary: None,
             alternate: None,
+            actions: vec![crate::ItemAction::new(
+                "dictionary",
+                "Open in Dictionary",
+                Action::OpenUrl("dict://serendipity".into()),
+            )],
         }],
     });
 
     assert_eq!(
-        s.intent(Intent::Open).unwrap()[0],
+        s.intent(Intent::Open).unwrap(),
+        vec![Effect::ShowActions {
+            id: "dictionary:serendipity".into(),
+            generation
+        }]
+    );
+    assert_eq!(
+        s.run_action(generation, "dictionary:serendipity", "dictionary")[0],
         Effect::Run(Action::OpenUrl("dict://serendipity".into()))
     );
 }

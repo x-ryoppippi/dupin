@@ -17,6 +17,7 @@ export type Marking = 'letters' | 'run' | 'none';
 
 export type Scenario = {
 	mode?: 'Files' | 'In files';
+	actions?: boolean;
 	query: string;
 	/** The rows after each prefix of `query`. */
 	steps: Record<string, Row[]>;
@@ -170,6 +171,7 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 	},
 	{
 		mode: 'Files',
+		actions: true,
 		query: 'invoice',
 		steps: {
 			i: [index, ideas, install, interview, inventory, invitation, invoice10, invoice09],

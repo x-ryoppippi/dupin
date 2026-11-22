@@ -16,6 +16,7 @@
 	let found = $state('');
 	let searching = $state(false);
 	let selected = $state(0);
+	let actionsOpen = $state(false);
 	const rows = $derived(found ? (shown.steps[found.toLowerCase()] ?? []) : []);
 	let keys = $state<{ id: number; label: string }[]>([]);
 	let keysShown = $state(false);
@@ -223,6 +224,14 @@
 					await down();
 					await sleep(500);
 				}
+				if (scenario.actions) {
+					press('→', true);
+					actionsOpen = true;
+					await sleep(1800);
+					press('Esc', true);
+					actionsOpen = false;
+					await sleep(600);
+				}
 				press('↩', true);
 				launching = true;
 				await sleep(220);
@@ -232,6 +241,7 @@
 				found = '';
 				selected = 0;
 				mode = undefined;
+				actionsOpen = false;
 				await sleep(1300);
 			}
 		};
@@ -285,6 +295,13 @@
 			</ul>
 		{/if}
 	</div>
+	{#if actionsOpen}
+		<div class="action-menu">
+			<div>Open</div>
+			<div>Reveal in Finder</div>
+			<div>Copy path</div>
+		</div>
+	{/if}
 	<div class={['keycast', keysShown && 'is-shown']}>
 		{#each keys as key (key.id)}<span>{key.label}</span>{/each}
 	</div>
@@ -307,10 +324,31 @@
 	/* The panel in Dupin's own measures and colors (crates/dupin/src/view.rs and Rune's dark
 	   theme), so the demo looks like the app: Rune's blue accent, which the shaders get too. */
 	.desk {
+		position: relative;
 		--dupin-accent: oklch(0.66 0.17 256);
 		--dupin-text: oklch(0.955 0.003 265);
 		--dupin-text-secondary: oklch(0.72 0.008 265);
 		--dupin-separator: oklch(1 0 0 / 0.055);
+	}
+
+	.action-menu {
+		position: absolute;
+		top: 64px;
+		left: max(20px, calc((100% - 680px) / 2 + 20px));
+		z-index: 2;
+		min-width: 200px;
+		padding: 5px;
+		border: 1px solid rgb(255 255 255 / 0.16);
+		border-radius: 7px;
+		background: #303034;
+		box-shadow: 0 8px 20px rgb(0 0 0 / 0.35);
+		color: white;
+		font-size: 14px;
+		line-height: 24px;
+	}
+
+	.action-menu > div {
+		padding: 0 12px;
 	}
 
 	.panel {
