@@ -1,6 +1,6 @@
 {
 	"metadata": {
-		"git_commit": "a287934b1508bd4993f79d1323fbf1efd8795ea3",
+		"git_commit": "a9eb2a716becb537f1be33b07aff3ce1cef83871",
 		"clean_tree": true,
 		"nixpkgs": {
 			"lastModified": 1795217999,
@@ -21,7 +21,7 @@
 		"cpu": "Apple M5 Max",
 		"guest_bytes": 766406,
 		"guest_sha256": "bff14694b6005d445de67887798d5e711753927fdccb226b6329fd7d590b06e6",
-		"script_sha256": "e8d9eb54a76917720fbc7dd55359fa4b74db458e909e5a5e331756b24a5e3467",
+		"script_sha256": "92a0017c87ab9e2cb7934d201005e51ab689cb37f676696ee99002add22168d6",
 		"sources": [
 			{
 				"path": "Cargo.toml",
@@ -67,50 +67,50 @@
 			"runtime": "wasmi",
 			"executable_bytes": 2091392,
 			"executable_sha256": "e90198c09862ac9a3c1de9259385d1395fcc0000ae6b1d05a40dd1bf3acc365e",
-			"maximum_resident_bytes": 25313280,
-			"peak_footprint_bytes": 23118208,
-			"process_statistics": "        3.54 real         3.35 user         0.00 sys\n            25313280  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1736  page reclaims\n                   5  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 354  involuntary context switches\n         35255671709  instructions retired\n         15084449493  cycles elapsed\n            23118208  peak memory footprint\n",
+			"maximum_resident_bytes": 25362432,
+			"peak_footprint_bytes": 23167360,
+			"process_statistics": "        3.59 real         3.40 user         0.01 sys\n            25362432  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1739  page reclaims\n                   5  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 369  involuntary context switches\n         35221904168  instructions retired\n         14982384016  cycles elapsed\n            23167360  peak memory footprint\n",
 			"measurements": {
 				"compilation_mode": "LazyTranslation",
 				"fuel_cutoff_verified": true,
-				"instantiate_ns": 58125,
+				"instantiate_ns": 57042,
 				"iterations": 1000,
 				"memory_growth_limit_verified": true,
 				"memory_limit_bytes": 16777216,
-				"module_load_ns": 2657167,
+				"module_load_ns": 2534166,
 				"pathological_fuel_limit": 20000000,
 				"queries": [
 					{
-						"first_wasm_ns": 4621958,
+						"first_wasm_ns": 4322833,
 						"max_warm_fuel": 8008300,
 						"query": "560 km to mi",
 						"result": "approx. 347.9678676529 mi",
-						"warm_native_mean_ns": 65168,
-						"warm_wasm_mean_ns": 950512
+						"warm_native_mean_ns": 61603,
+						"warm_wasm_mean_ns": 975604
 					},
 					{
-						"first_wasm_ns": 362834,
+						"first_wasm_ns": 383083,
 						"max_warm_fuel": 1153723,
 						"query": "30*(60+1)",
 						"result": "1830",
-						"warm_native_mean_ns": 7924,
-						"warm_wasm_mean_ns": 130101
+						"warm_native_mean_ns": 8125,
+						"warm_wasm_mean_ns": 131366
 					},
 					{
-						"first_wasm_ns": 1137375,
+						"first_wasm_ns": 1179333,
 						"max_warm_fuel": 9066083,
 						"query": "60 mph in m/s",
 						"result": "26.8224 m / s",
-						"warm_native_mean_ns": 64614,
-						"warm_wasm_mean_ns": 1110594
+						"warm_native_mean_ns": 65943,
+						"warm_wasm_mean_ns": 1117672
 					},
 					{
-						"first_wasm_ns": 1005917,
+						"first_wasm_ns": 1077584,
 						"max_warm_fuel": 7909398,
 						"query": "1 acre in m^2",
 						"result": "4046.8564224 m^2",
-						"warm_native_mean_ns": 55182,
-						"warm_wasm_mean_ns": 963414
+						"warm_native_mean_ns": 57861,
+						"warm_wasm_mean_ns": 985509
 					}
 				],
 				"query_fuel_limit": 20000000,
@@ -120,51 +120,51 @@
 		{
 			"runtime": "wasmtime",
 			"executable_bytes": 7618528,
-			"executable_sha256": "b1def4fc67d44ef4864b394abd203298c6cbf29420f804f6cae57a16412a0efe",
-			"maximum_resident_bytes": 46759936,
-			"peak_footprint_bytes": 41320904,
-			"process_statistics": "        1.15 real         0.94 user         0.01 sys\n            46759936  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                3125  page reclaims\n                  10  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 141  involuntary context switches\n         17267066267  instructions retired\n          4074799478  cycles elapsed\n            41320904  peak memory footprint\n",
+			"executable_sha256": "15592e4f9e19a3ccec3deb8bc78d695fbccee1259d989af311b0e3b0a0342a7a",
+			"maximum_resident_bytes": 48005120,
+			"peak_footprint_bytes": 42598856,
+			"process_statistics": "        1.15 real         0.93 user         0.01 sys\n            48005120  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                3201  page reclaims\n                  10  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 110  involuntary context switches\n         17283029392  instructions retired\n          4035791390  cycles elapsed\n            42598856  peak memory footprint\n",
 			"measurements": {
 				"compilation_mode": "Cranelift",
 				"fuel_cutoff_verified": true,
-				"instantiate_ns": 85708,
+				"instantiate_ns": 71917,
 				"iterations": 1000,
 				"memory_growth_limit_verified": true,
 				"memory_limit_bytes": 16777216,
-				"module_load_ns": 382893625,
+				"module_load_ns": 373449792,
 				"pathological_fuel_limit": 20000000,
 				"queries": [
 					{
-						"first_wasm_ns": 297541,
+						"first_wasm_ns": 290042,
 						"max_warm_fuel": 1808177,
 						"query": "560 km to mi",
 						"result": "approx. 347.9678676529 mi",
-						"warm_native_mean_ns": 58494,
-						"warm_wasm_mean_ns": 117921
+						"warm_native_mean_ns": 60961,
+						"warm_wasm_mean_ns": 117135
 					},
 					{
-						"first_wasm_ns": 28209,
+						"first_wasm_ns": 25250,
 						"max_warm_fuel": 242116,
 						"query": "30*(60+1)",
 						"result": "1830",
-						"warm_native_mean_ns": 7998,
-						"warm_wasm_mean_ns": 16367
+						"warm_native_mean_ns": 8150,
+						"warm_wasm_mean_ns": 16500
 					},
 					{
-						"first_wasm_ns": 161291,
+						"first_wasm_ns": 147959,
 						"max_warm_fuel": 2021948,
 						"query": "60 mph in m/s",
 						"result": "26.8224 m / s",
-						"warm_native_mean_ns": 65004,
-						"warm_wasm_mean_ns": 129393
+						"warm_native_mean_ns": 65772,
+						"warm_wasm_mean_ns": 129952
 					},
 					{
-						"first_wasm_ns": 129000,
+						"first_wasm_ns": 127708,
 						"max_warm_fuel": 1796764,
 						"query": "1 acre in m^2",
 						"result": "4046.8564224 m^2",
-						"warm_native_mean_ns": 55074,
-						"warm_wasm_mean_ns": 114711
+						"warm_native_mean_ns": 56610,
+						"warm_wasm_mean_ns": 115063
 					}
 				],
 				"query_fuel_limit": 20000000,
