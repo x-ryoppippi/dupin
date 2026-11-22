@@ -29,7 +29,6 @@ objc2-foundation = { workspace = true, features = [
 	"NSURL",
 ] }
 objc2-app-kit = { workspace = true, features = [
-	"NSApplication",
 	"std",
 	"NSEvent",
 	"NSResponder",

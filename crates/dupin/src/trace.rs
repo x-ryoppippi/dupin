@@ -15,11 +15,7 @@ fn on() -> bool {
 
 pub fn settings(event: &str) {
     if on() {
-        eprintln!(
-            "dupin-trace: settings {event} activation={:?} wall={:.3}",
-            dupin_mac::window::application_activation(),
-            wall_ms()
-        );
+        eprintln!("dupin-trace: settings {event} wall={:.3}", wall_ms());
     }
 }
 

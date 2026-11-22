@@ -93,12 +93,29 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
+    # Accessory windows can receive keys while System Events names another frontmost app.
     let settings = {|r| $r.ok and (
         $r.data
         | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
     ) }
     poll $out settings-window $settings list-windows --app Dupin
     snap $out settings-created
+    let before_key = (ad
+        $out
+        settings-before-key
+        find
+        --app
+        Dupin
+        --role
+        group
+        --name
+        General
+        --exact
+        --first
+    )
+    if not $before_key.ok or $before_key.data?.match? == null or 'focused' in ($before_key.data?.match?.states? | default []) {
+        error make {msg: 'General must exist without keyboard focus before the Tab test'}
+    }
     ad $out settings-tab press tab | ignore
     (poll
         $out
@@ -114,7 +131,6 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
-    snap $out settings-after-key
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
