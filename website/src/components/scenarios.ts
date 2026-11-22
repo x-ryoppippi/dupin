@@ -16,7 +16,9 @@ export type Row = {
 export type Marking = 'letters' | 'run' | 'none';
 
 export type Scenario = {
-	mode?: 'Files' | 'In files';
+	mode?: 'Files' | 'In files' | 'Define';
+	keyword?: string;
+	detail?: string;
 	actions?: boolean;
 	query: string;
 	/** The rows after each prefix of `query`. */
@@ -147,12 +149,12 @@ const tah = [trip, booking, packing, budget];
 const meeting = file('meeting-notes.md', '~/Notes', 'doc');
 const reading = file('reading-list.md', '~/Notes', 'doc');
 
-export const scenarios: [Scenario, ...Scenario[]] = [
-	{
+const scenarios = {
+	apps: {
 		query: 'cl',
 		steps: { c, cl: [claude, clock, calculator, calendar, console_, colorsync] },
 	},
-	{
+	codex: {
 		query: 'codex',
 		steps: {
 			c,
@@ -162,14 +164,14 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			codex: [codex],
 		},
 	},
-	{
+	t3: {
 		query: 't3',
 		steps: {
 			t: [tv, tips, t3code, terminal, textedit, shortcuts, fontbook, activity],
 			t3: [t3code],
 		},
 	},
-	{
+	files: {
 		mode: 'Files',
 		actions: true,
 		query: 'invoice',
@@ -183,7 +185,7 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			invoice: invo,
 		},
 	},
-	{
+	contents: {
 		mode: 'In files',
 		query: 'tahoe',
 		steps: {
@@ -197,10 +199,26 @@ export const scenarios: [Scenario, ...Scenario[]] = [
 			tahoe: tah,
 		},
 	},
-];
+} satisfies Record<string, Scenario>;
 
 export const marking = (mode: Scenario['mode']): Marking =>
-	mode === 'Files' ? 'run' : mode === 'In files' ? 'none' : 'letters';
+	mode === 'Files' ? 'run' : mode ? 'none' : 'letters';
+
+export const features = [
+	{ label: 'Apps', scenario: scenarios.apps },
+	{ label: 'Files', scenario: scenarios.files },
+	{ label: 'In files', scenario: scenarios.contents },
+	{
+		label: 'Dictionary',
+		scenario: {
+			mode: 'Define',
+			keyword: 'define',
+			query: 'serendipity',
+			detail: 'The occurrence of events by chance in a happy or beneficial way.',
+			steps: {},
+		},
+	},
+] satisfies { label: string; scenario: Scenario }[];
 
 /** `title` split into runs, marking the characters `query` matched as `marking` says. */
 export function marked(
