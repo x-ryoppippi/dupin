@@ -57,6 +57,7 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
+    file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
@@ -142,6 +143,7 @@ impl Ui {
             icon_cache: None,
             searchers,
             web: registration.web,
+            file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
@@ -159,6 +161,14 @@ impl Ui {
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
         let previous_limit = self.session.command().result_limit;
+        let ranking_changed = {
+            let mut rules = self.file_demotions.write().unwrap();
+            let changed = *rules != config.file_demotions;
+            if changed {
+                rules.clone_from(&config.file_demotions);
+            }
+            changed
+        };
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         let web_changed = {
@@ -173,6 +183,7 @@ impl Ui {
         self.registration_notice = registration.notice;
         if self.session.command().result_limit != previous_limit
             || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
+            || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
         {
             let effects = self.session.refresh();
             self.apply(effects, tx);
@@ -531,7 +542,7 @@ impl Ui {
                     query,
                 } => {
                     let spec = self.session.provider_spec(&command).expect("registered provider");
-                    let limit = spec.result_limit;
+                    let limit = spec.candidate_limit();
                     let due = tx.clock() + spec.deadline.as_secs_f64();
                     self.deadlines.retain(|id, (g, _)| {
                         let keep = self.session.pending(id, *g);

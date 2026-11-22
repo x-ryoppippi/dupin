@@ -126,8 +126,7 @@ impl History {
     }
 
     /// Sort ranked items (all with a `score`) by score plus boost, keeping the providers'
-    /// order among equals. Items without scores, which arrive in a provider's own order
-    /// (Spotlight's), are left as they are.
+    /// order among equals. Items without scores keep the provider's order.
     pub(crate) fn rerank(&self, items: &mut [Item], query: &str, now: u64) {
         if items.is_empty() || items.iter().any(|item| item.score.is_none()) {
             return;
