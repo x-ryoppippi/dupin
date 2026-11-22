@@ -212,12 +212,31 @@ impl Previewer {
         self.controller.set_item(url);
         // SAFETY: Quick Look's shared panel is main-thread-only.
         let Some(panel) = (unsafe { QLPreviewPanel::sharedPreviewPanel(mtm) }) else {
+            trace_preview("shared panel unavailable");
             self.controller.clear_item();
             return false;
         };
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
         if !current_controller_is(&panel, &self.controller) {
+            if std::env::var_os("DUPIN_TRACE").is_some() {
+                let app = NSApplication::sharedApplication(mtm);
+                let mut responder = self.view.window().and_then(|window| window.firstResponder());
+                let mut chain = Vec::new();
+                for _ in 0..16 {
+                    let Some(current) = responder else { break };
+                    chain.push(current.class().name().to_string_lossy().into_owned());
+                    // SAFETY: The responder is retained while reading its unretained next link.
+                    responder = unsafe { current.nextResponder() };
+                }
+                trace_preview(&format!(
+                    "controller not adopted; owner_key={} app_active={} app_key={} responders={}",
+                    self.owner_is_key(),
+                    app.isActive(),
+                    app.keyWindow().is_some(),
+                    chain.join(" -> ")
+                ));
+            }
             self.controller.clear_item();
             return false;
         }
@@ -335,6 +354,12 @@ impl Drop for Previewer {
             // SAFETY: The responder chain changed without a key-window notification.
             unsafe { panel.updateController() };
         }
+    }
+}
+
+fn trace_preview(message: &str) {
+    if std::env::var_os("DUPIN_TRACE").is_some() {
+        eprintln!("dupin-trace: quick-look {message}");
     }
 }
 
