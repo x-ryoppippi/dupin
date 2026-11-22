@@ -299,14 +299,13 @@ impl Updater {
         }
     }
 
-    /// Swap in the staged update and start it once this process has exited, and exit.
-    /// `Ok(false)` means no update was staged. Errors keep this process running.
-    pub fn restart(&self) -> Result<bool, String> {
+    /// Swap in the staged update. `Ok(false)` means no update was staged.
+    pub fn install_staged(&self) -> Result<bool, String> {
         let Some(staged) = self.take_staged() else {
             return Ok(false);
         };
         match swap(&staged.update, &staged.installed) {
-            Ok(()) => crate::relaunch::bundle(&staged.installed).map(|()| true),
+            Ok(()) => Ok(true),
             Err(e) => {
                 let e = format!("couldn't install Dupin {}: {e}", staged.version);
                 self.shared.lock().applied = false;
@@ -692,6 +691,72 @@ mod tests {
 
     fn marker(path: &Path) -> String {
         std::fs::read_to_string(path.join("Contents/marker")).unwrap()
+    }
+
+    fn staged_updater(staged: Staged) -> Updater {
+        let prefs: AppHandle<Prefs> = rune::App::new(rune::AppSpec::new(
+            "test",
+            (1.0, 1.0),
+            || unreachable!(),
+            |_, _| rune::el(),
+        ))
+        .handle();
+        Updater {
+            shared: Arc::new(Shared {
+                enabled: AtomicBool::new(false),
+                available: false,
+                download_only: false,
+                version: "test".into(),
+                inner: Mutex::new(Inner {
+                    status: Status::Ready(staged.version.clone()),
+                    staged: Some(staged),
+                    applied: false,
+                }),
+                wake: Mutex::new(false),
+                signal: Condvar::new(),
+                prefs,
+            }),
+        }
+    }
+
+    #[test]
+    fn installing_a_staged_update_only_swaps_once_and_returns_to_the_caller() {
+        let root = temporary("install-staged");
+        let installed = root.join("Dupin.app");
+        let update = root.join("update/Dupin.app");
+        bundle(&installed, "old");
+        bundle(&update, "new");
+        let updater = staged_updater(Staged {
+            update: update.clone(),
+            installed: installed.clone(),
+            version: "next".into(),
+        });
+
+        assert_eq!(updater.install_staged(), Ok(true));
+        assert!(updater.shared.lock().applied);
+        assert_eq!(marker(&installed), "new");
+        assert_eq!(marker(&update), "old");
+        assert_eq!(updater.install_staged(), Ok(false));
+        assert_eq!(marker(&installed), "new");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_install_reports_failure_without_applying_or_relaunching() {
+        let root = temporary("install-failed");
+        let installed = root.join("Dupin.app");
+        bundle(&installed, "old");
+        let updater = staged_updater(Staged {
+            update: root.join("missing.app"),
+            installed: installed.clone(),
+            version: "next".into(),
+        });
+
+        assert!(updater.install_staged().is_err());
+        assert!(!updater.shared.lock().applied);
+        assert!(matches!(updater.status(), Status::Failed(_)));
+        assert_eq!(marker(&installed), "old");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

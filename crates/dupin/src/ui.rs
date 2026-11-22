@@ -174,17 +174,17 @@ impl Ui {
         } else if self.running.load(Ordering::Acquire) > 0 {
             self.relaunch_when_idle(request);
         } else {
-            let result = self.updater.restart().and_then(|handled| {
-                if !handled && request == Restart::Requested {
-                    crate::relaunch::current()
-                } else {
-                    Ok(())
+            match self.updater.install_staged() {
+                Ok(installed) => {
+                    if installed || request == Restart::Requested {
+                        tx.relaunch();
+                    }
                 }
-            });
-            if let Err(error) = result {
-                crate::log::warn(&error);
-                if request == Restart::Requested {
-                    self.show_notice(error, tx);
+                Err(error) => {
+                    crate::log::warn(&error);
+                    if request == Restart::Requested {
+                        self.show_notice(error, tx);
+                    }
                 }
             }
         }
