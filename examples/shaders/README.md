@@ -41,6 +41,6 @@ fn backdrop(p: vec2f, b: Backdrop) -> vec4f
 
 Dupin defines these names too, so a shader can't reuse them: `Backdrop`, anything starting with `dupin_`, and Rune's clip helpers `clip_alpha`, `ramp`, `sd_rounded`, `sd_continuous`, `unpack_clip_radii` and `CONTINUOUS_K`.
 
-A shader reads only `b`: it can't declare an `override` or bind resources of its own.
+A shader reads only `b`: it can't declare an `override` or bind resources of its own. Dupin checks a file as Metal will draw it, and refuses one Metal can't compile or draw, such as a function whose local arrays pass the GPU's stack. A file can be at most 32 KB.
 
 The shader runs for every pixel of the panel on every frame while the panel shows, so keep loops short.

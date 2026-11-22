@@ -21,6 +21,17 @@ serde_json = { workspace = true }
 toml = { workspace = true, features = ["display"] }
 wgpu = { workspace = true }
 naga = { workspace = true }
+# Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
+# Rune's backend will draw it.
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true, features = ["std", "NSError", "NSProcessInfo", "NSString"] }
+objc2-metal = { workspace = true, features = [
+	"std",
+	"MTLDevice",
+	"MTLLibrary",
+	"MTLPixelFormat",
+	"MTLRenderPipeline",
+] }
 
 [lints]
 workspace = true

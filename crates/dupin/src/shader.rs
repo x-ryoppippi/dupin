@@ -7,6 +7,8 @@ use std::sync::Arc;
 
 use dupin_core::Backdrop;
 
+mod metal;
+
 const FLOW: &str = include_str!("shaders/flow.wgsl");
 const PRELUDE: &str = include_str!("shaders/prelude.wgsl");
 const ENTRY: &str = include_str!("shaders/entry.wgsl");
@@ -157,8 +159,17 @@ impl Source {
     }
 }
 
+/// Flow, wrapped but not run through Metal: the tests check it compiles, and Dupin draws it from
+/// launch, where a Metal compile would add to the time before the panel can show.
 fn builtin() -> Arc<str> {
-    compile(FLOW).expect("the built-in backdrop shader is valid")
+    wrap(FLOW).0.into()
+}
+
+/// `user` between Dupin's prelude and entry point, and the line in the result that `user` starts on.
+fn wrap(user: &str) -> (String, u32) {
+    let head = format!("{}\n{PRELUDE}\n", rune::render::CLIP_WGSL);
+    let first_user_line = head.lines().count() as u32 + 1;
+    (format!("{head}{user}\n{ENTRY}"), first_user_line)
 }
 
 /// `~/x` under the home directory; a relative path beside config.toml.
@@ -175,13 +186,36 @@ pub fn resolve(path: &str) -> PathBuf {
     }
 }
 
+/// The longest backdrop shader Dupin checks. Real ones are a few KB; the limit bounds how deeply
+/// a file can nest, which naga's parser and writer recurse on.
+const MAX_LEN: usize = 32 * 1024;
+/// The checking thread's stack: deep enough for anything within `MAX_LEN`, which on the main
+/// thread overflows naga's recursion and aborts. Only touched pages are committed.
+const CHECK_STACK: usize = 1 << 30;
+
 /// `user` (which defines `fn backdrop(p: vec2f, b: Backdrop) -> vec4f`) wrapped into a module
 /// with Dupin's uniforms and entry points, validated. An error reads `line:column: message`,
 /// counted in `user`.
 pub fn compile(user: &str) -> Result<Arc<str>, String> {
-    let head = format!("{}\n{PRELUDE}\n", rune::render::CLIP_WGSL);
-    let full = format!("{head}{user}\n{ENTRY}");
-    let first_user_line = head.lines().count() as u32 + 1;
+    if user.len() > MAX_LEN {
+        return Err(format!(
+            " is {} KB; a backdrop shader can be at most {} KB",
+            user.len() / 1024,
+            MAX_LEN / 1024
+        ));
+    }
+    let user = user.to_owned();
+    std::thread::Builder::new()
+        .name("backdrop check".into())
+        .stack_size(CHECK_STACK)
+        .spawn(move || check(&user))
+        .map_err(|e| format!(" couldn't be checked: {e}"))?
+        .join()
+        .map_err(|_| " couldn't be checked".to_owned())?
+}
+
+fn check(user: &str) -> Result<Arc<str>, String> {
+    let (full, first_user_line) = wrap(user);
     let at = |loc: Option<naga::SourceLocation>| match loc {
         Some(loc) if loc.line_number >= first_user_line => {
             format!(
@@ -216,46 +250,8 @@ pub fn compile(user: &str) -> Result<Arc<str>, String> {
             ));
         }
     }
-    metal(&module, &info)?;
+    metal::check(&module, &info)?;
     Ok(full.into())
-}
-
-/// Translate both entry points to MSL as Rune's Metal backend will, with `dupin_u` in buffer
-/// 0: Rune panics on a shader it can't translate, so it has to be caught here.
-fn metal(module: &naga::Module, info: &naga::valid::ModuleInfo) -> Result<(), String> {
-    use naga::back::msl;
-    use naga::proc::{BoundsCheckPolicies, BoundsCheckPolicy};
-    let mut resources = msl::EntryPointResources::default();
-    resources.resources.insert(
-        naga::ResourceBinding { group: 0, binding: 0 },
-        msl::BindTarget {
-            buffer: Some(0),
-            ..Default::default()
-        },
-    );
-    for (stage, entry) in [
-        (naga::ShaderStage::Vertex, "dupin_vs"),
-        (naga::ShaderStage::Fragment, "dupin_fs"),
-    ] {
-        let options = msl::Options {
-            lang_version: (3, 0),
-            per_entry_point_map: [(entry.to_owned(), resources.clone())].into(),
-            bounds_check_policies: BoundsCheckPolicies {
-                index: BoundsCheckPolicy::Restrict,
-                buffer: BoundsCheckPolicy::Restrict,
-                image_load: BoundsCheckPolicy::Restrict,
-                binding_array: BoundsCheckPolicy::Unchecked,
-            },
-            ..Default::default()
-        };
-        let pipeline = msl::PipelineOptions {
-            entry_point: Some((stage, entry.to_owned())),
-            ..Default::default()
-        };
-        msl::write_string(module, info, &options, &pipeline)
-            .map_err(|e| format!(" can't be compiled for Metal: {e}"))?;
-    }
-    Ok(())
 }
 
 /// An error and its causes, innermost last: naga's outer errors only name the function.
@@ -276,7 +272,7 @@ mod tests {
 
     #[test]
     fn the_builtin_shader_compiles() {
-        builtin();
+        compile(FLOW).unwrap();
     }
 
     #[test]
@@ -343,6 +339,69 @@ mod tests {
         )
         .unwrap_err();
         assert!(e.starts_with("1:") && e.contains("`mine`"), "{e}");
+    }
+
+    /// Shaders naga accepts, and writes MSL for, that Metal itself refuses; each would end Dupin
+    /// in Rune's backend.
+    #[test]
+    fn what_metal_refuses_is_an_error() {
+        if !metal::available() {
+            return;
+        }
+        let sum = vec!["p.x"; 2000].join(" + ");
+        let cases = [
+            (
+                "a fragment stack past the GPU's",
+                "var a: array<f32, 65536>;\n    return vec4f(a[u32(p.x)], 0.0, 0.0, 1.0);".to_owned(),
+            ),
+            (
+                "a naga MSL bug",
+                "let u = u32(p.x);\n    return vec4f(f32(dot4U8Packed(u, u)), 0.0, 0.0, 1.0);".to_owned(),
+            ),
+            (
+                "a macro of Metal's",
+                "let MAXBFLOAT = p.x;\n    return vec4f(MAXBFLOAT, 0.0, 0.0, 1.0);".to_owned(),
+            ),
+            (
+                "a C keyword",
+                "let _Generic = p.x;\n    return vec4f(_Generic, 0.0, 0.0, 1.0);".to_owned(),
+            ),
+            (
+                "nesting past the compiler's",
+                format!("return vec4f({sum}, 0.0, 0.0, 1.0);"),
+            ),
+        ];
+        for (what, body) in cases {
+            let e = compile(&format!(
+                "fn backdrop(p: vec2f, b: Backdrop) -> vec4f {{\n    {body}\n}}\n"
+            ));
+            assert!(e.as_ref().is_err_and(|e| e.contains("Metal")), "{what}: {e:?}");
+        }
+        let e = compile(
+            "fn ulong() -> f32 { return 1.0; }\nfn backdrop(p: vec2f, b: Backdrop) -> vec4f {\n    return vec4f(ulong());\n}\n",
+        );
+        assert!(
+            e.as_ref().is_err_and(|e| e.contains("Metal")),
+            "a type of Metal's: {e:?}"
+        );
+    }
+
+    /// The deepest expression a file within the limit can hold is an error, not a stack overflow.
+    #[test]
+    fn the_longest_chain_within_the_limit_is_checked() {
+        let head = "fn backdrop(p: vec2f, b: Backdrop) -> vec4f {\n    let x = p.x;\n    return vec4f(x";
+        let n = (MAX_LEN - head.len() - 8) / 2;
+        let user = format!("{head}{});\n}}", "+x".repeat(n));
+        assert!(user.len() <= MAX_LEN);
+        if metal::available() {
+            assert!(compile(&user).is_err_and(|e| e.contains("Metal")));
+        }
+    }
+
+    #[test]
+    fn a_file_past_the_limit_is_an_error() {
+        let e = compile(&" ".repeat(MAX_LEN + 1)).unwrap_err();
+        assert!(e.contains("at most"), "{e}");
     }
 
     #[test]
