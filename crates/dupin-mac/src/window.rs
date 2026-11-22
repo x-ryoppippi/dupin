@@ -4,7 +4,23 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWindowAnimationBehavior};
+use objc2_app_kit::{NSApplication, NSEvent, NSScreen, NSView, NSWindow, NSWindowAnimationBehavior};
+
+#[derive(Debug)]
+pub struct Activation {
+    pub active: bool,
+    pub policy: isize,
+    pub key_window: bool,
+}
+
+pub fn application_activation() -> Option<Activation> {
+    let app = NSApplication::sharedApplication(MainThreadMarker::new()?);
+    Some(Activation {
+        active: app.isActive(),
+        policy: app.activationPolicy().0,
+        key_window: app.keyWindow().is_some(),
+    })
+}
 
 /// Make the window holding `ns_view` appear and disappear at once. AppKit animates a panel's
 /// ordering in by default, which held Dupin's panel off screen for about 265 ms after its

@@ -356,6 +356,7 @@ impl Ui {
                 return true;
             }
             Key::Command(',') => {
+                crate::trace::settings("requested");
                 self.dismiss(tx);
                 self.prefs.open();
                 return true;

@@ -70,8 +70,11 @@ fn main() {
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()
-    // Work around Rune's first-open activation issue until its open() lifecycle is fixed.
-    .on_ready(|window| window.focus())
+    .on_window(|_| trace::settings("created"))
+    .on_ready(|_| trace::settings("ready"))
+    .on_focus(|_, focused, _| {
+        trace::settings(if focused { "focused" } else { "unfocused" });
+    })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
