@@ -342,7 +342,9 @@ mod tests {
     }
 
     /// Shaders naga accepts, and writes MSL for, that Metal itself refuses; each would end Dupin
-    /// in Rune's backend.
+    /// in Rune's backend. A function whose locals pass the GPU's stack is refused too, but where
+    /// that limit falls depends on the GPU (a CI runner's virtual one takes 256 KB), so it has no
+    /// case here.
     #[test]
     fn what_metal_refuses_is_an_error() {
         if !metal::available() {
@@ -350,10 +352,6 @@ mod tests {
         }
         let sum = vec!["p.x"; 2000].join(" + ");
         let cases = [
-            (
-                "a fragment stack past the GPU's",
-                "var a: array<f32, 65536>;\n    return vec4f(a[u32(p.x)], 0.0, 0.0, 1.0);".to_owned(),
-            ),
             (
                 "a naga MSL bug",
                 "let u = u32(p.x);\n    return vec4f(f32(dot4U8Packed(u, u)), 0.0, 0.0, 1.0);".to_owned(),
@@ -393,8 +391,9 @@ mod tests {
         let n = (MAX_LEN - head.len() - 8) / 2;
         let user = format!("{head}{});\n}}", "+x".repeat(n));
         assert!(user.len() <= MAX_LEN);
+        let checked = compile(&user);
         if metal::available() {
-            assert!(compile(&user).is_err_and(|e| e.contains("Metal")));
+            assert!(checked.is_err_and(|e| e.contains("Metal")));
         }
     }
 

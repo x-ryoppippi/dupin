@@ -77,7 +77,16 @@ fn translate(
         entry_point: Some((stage, entry.to_owned())),
         ..Default::default()
     };
-    let (source, translated) = msl::write_string(module, info, &options, &pipeline)
+    // Rune evaluates override expressions first; Dupin refuses overrides, but the pass also
+    // rewrites what Rune hands the writer.
+    let (module, info) = naga::back::pipeline_constants::process_overrides(
+        module,
+        info,
+        Some((stage, entry)),
+        &Default::default(),
+    )
+    .map_err(|e| format!(" can't be compiled for Metal: {e}"))?;
+    let (source, translated) = msl::write_string(&module, &info, &options, &pipeline)
         .map_err(|e| format!(" can't be compiled for Metal: {e}"))?;
     let name = match translated.entry_point_names.first() {
         Some(Ok(name)) => name.clone(),
