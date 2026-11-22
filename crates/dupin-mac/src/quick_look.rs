@@ -65,6 +65,7 @@ define_class!(
     unsafe impl NSWindowDelegate for PreviewController {
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &NSNotification) {
+            self.clear_item();
             let callback = &self.ivars().panel_resigned;
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
         }
