@@ -83,7 +83,7 @@ def main [
     let metadata = {
         baseline_commit: $BASELINE
         system: $system
-        runtime: 'wasmi 2.0.2; std, validate; fuel enabled; 16 MiB linear-memory limit'
+        runtime: 'wasmi 2.0.2; std, validate, auto-dispatch; fuel enabled; 16 MiB linear-memory limit'
         release_profile: 'fat LTO; one codegen unit; package.nix stripping'
         signing: 'ad-hoc; hardened runtime; no additional entitlements; no notary submission'
         archive: 'ditto ZIP, as used by the updater; no DMG measurement'

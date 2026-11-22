@@ -24,7 +24,7 @@ without compiling the application.
 The variants are:
 
 - unchanged Dupin;
-- Wasmi 2.0.2 with `std` and `validate`, fuel enabled and a 16 MiB linear-memory
+- Wasmi 2.0.2 with `std`, `validate` and `auto-dispatch`, fuel enabled and a 16 MiB linear-memory
   limit, loading an empty module;
 - the runtime plus a minimal external guest that returns 42;
 - the runtime plus the calculator and minimal guests as separate resources.
@@ -50,6 +50,9 @@ installed under the runtime-only label.
 The recorded Apple silicon run is in
 [`results/2026-11-22-aarch64-darwin.json`](results/2026-11-22-aarch64-darwin.json).
 All three signed-app probes passed, without additional entitlements.
+This historical run used the patch before `auto-dispatch` was enabled. Its
+recorded patch hash and measurements remain unchanged; the current patch needs a
+new full run before claiming its bundle sizes.
 
 | Variant                              | Signed app bytes |  ZIP bytes | App increase | ZIP increase |
 | ------------------------------------ | ---------------: | ---------: | -----------: | -----------: |

@@ -178,7 +178,7 @@
  toml = { workspace = true, features = ["display"] }
  wgpu = { workspace = true }
  naga = { workspace = true }
-+wasmi = { version = "=2.0.2", optional = true, default-features = false, features = ["std", "validate"] }
++wasmi = { version = "=2.0.2", optional = true, default-features = false, features = ["std", "validate", "auto-dispatch"] }
 +
 +[features]
 +default = []

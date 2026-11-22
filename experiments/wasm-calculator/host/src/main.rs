@@ -7,15 +7,19 @@ const QUERY_FUEL: u64 = 20_000_000;
 const ITERATIONS: u32 = 1_000;
 const OUTPUT_CAP: i32 = 128;
 
+fn engine() -> Engine {
+    let mut config = Config::default();
+    config.consume_fuel(true);
+    config.compilation_mode(CompilationMode::LazyTranslation);
+    Engine::new(&config)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::args_os()
         .nth(1)
         .ok_or("pass the calculator Wasm path")?;
     let wasm = std::fs::read(path)?;
-    let mut config = Config::default();
-    config.consume_fuel(true);
-    config.compilation_mode(CompilationMode::LazyTranslation);
-    let engine = Engine::new(&config);
+    let engine = engine();
     let started = Instant::now();
     let module = Module::new(&engine, &wasm)?;
     let load_ns = started.elapsed().as_nanos();
@@ -122,4 +126,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn trap(body: &str, fuel: u64) -> TrapCode {
+        let engine = engine();
+        let wasm = wat::parse_str(format!("(module (func $run (export \"run\") {body}))")).unwrap();
+        let module = Module::new(&engine, &wasm).unwrap();
+        let mut store = Store::new(&engine, ());
+        store.set_fuel(fuel).unwrap();
+        let instance = Linker::new(&engine)
+            .instantiate_and_start(&mut store, &module)
+            .unwrap();
+        instance
+            .get_typed_func::<(), ()>(&store, "run")
+            .unwrap()
+            .call(&mut store, ())
+            .unwrap_err()
+            .as_trap_code()
+            .unwrap()
+    }
+
+    #[test]
+    fn an_infinite_loop_exhausts_fuel() {
+        assert_eq!(trap("(loop (br 0))", 10_000), TrapCode::OutOfFuel);
+    }
+
+    #[test]
+    fn guest_recursion_traps_without_overflowing_the_native_stack() {
+        assert_eq!(trap("(call $run)", QUERY_FUEL), TrapCode::StackOverflow);
+    }
 }

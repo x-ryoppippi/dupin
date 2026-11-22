@@ -10,6 +10,16 @@ meters execution in the host with fuel and a 16 MiB linear-memory limit. The
 benchmark checks result equality for arithmetic, length, speed and area; then
 verifies a fuel trap and rejection of memory growth beyond the limit.
 
+The host enables Wasmi's `auto-dispatch` feature. This keeps the portable
+dispatcher available in builds where LLVM cannot guarantee tail calls, including
+debug builds; forcing tail dispatch there can overflow the native stack before
+fuel runs out. Run the loop and guest-recursion regression tests in both profiles:
+
+```sh
+cargo test --manifest-path experiments/wasm-calculator/Cargo.toml --locked -p dupin-wasm-calculator-bench
+cargo test --manifest-path experiments/wasm-calculator/Cargo.toml --locked --release -p dupin-wasm-calculator-bench
+```
+
 ## Run
 
 Use the repository's Rust toolchain (initial experiment: Rust 1.99.1 on
@@ -39,6 +49,9 @@ An initial run is recorded in
 [results/2026-11-22-aarch64-darwin.json](results/2026-11-22-aarch64-darwin.json),
 including toolchain and source/artifact hashes. The baseline commit identifies
 the app revision the experiment was added to; source hashes identify the fixture.
+That historical run predates `auto-dispatch` and the regression tests. Its source
+hashes and measurements are retained unchanged; it does not measure the current
+host configuration.
 
 ## Boundaries
 
