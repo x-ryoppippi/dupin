@@ -96,7 +96,16 @@
 		const resized = new ResizeObserver(redraw);
 		resized.observe(panel);
 		document.addEventListener('visibilitychange', redraw);
-		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--dupin-accent')))
+		// A lost GPU device stops drawing for good: back to Glass, with the shaders disabled.
+		const lost = () => {
+			picks++;
+			cancelAnimationFrame(frame);
+			drawing = false;
+			backdrop = 'glass';
+			webgpu = false;
+			renderer = undefined;
+		};
+		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--dupin-accent')), lost)
 			.catch(() => undefined)
 			.then((r) => {
 				if (!alive) return r?.destroy();

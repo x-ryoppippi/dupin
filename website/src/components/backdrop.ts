@@ -82,15 +82,18 @@ export type Renderer = {
 	destroy(): void;
 };
 
-/** A renderer drawing into `canvas`, or undefined where WebGPU isn't available. */
+/** A renderer drawing into `canvas`, or undefined where WebGPU isn't available. `lost` runs if
+ * the GPU device goes away, after which the renderer draws nothing. */
 export async function createRenderer(
 	canvas: HTMLCanvasElement,
 	accent: [number, number, number],
+	lost: () => void,
 ): Promise<Renderer | undefined> {
 	const adapter = await navigator.gpu?.requestAdapter();
 	const device = await adapter?.requestDevice();
 	const context = canvas.getContext('webgpu');
 	if (!device || !context) return undefined;
+	void device.lost.then(lost);
 	const format = navigator.gpu.getPreferredCanvasFormat();
 	context.configure({ device, format, alphaMode: 'premultiplied' });
 
