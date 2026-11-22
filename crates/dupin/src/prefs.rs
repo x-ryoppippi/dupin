@@ -53,7 +53,7 @@ fn anchor(key: &str) -> String {
     format!("{key}-trigger")
 }
 
-/// Settings' pages, in the sidebar's order.
+/// Settings' pages; Updates is reached through the sidebar footer.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     General,
@@ -63,15 +63,6 @@ enum Page {
 }
 
 impl Page {
-    /// The pages this build has: Updates only where there's an update feed.
-    fn all(updates: bool) -> Vec<Page> {
-        let mut pages = vec![Page::General, Page::Search, Page::Appearance];
-        if updates {
-            pages.push(Page::Updates);
-        }
-        pages
-    }
-
     fn title(self) -> &'static str {
         match self {
             Page::General => "General",
@@ -494,7 +485,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_group()
         .focus_follows()
         .gap(4.0);
-    for page in Page::all(s.updater.available()) {
+    for page in [Page::General, Page::Search, Page::Appearance] {
         let on = s.page == page;
         let mut item = row()
             .key(page.key())
@@ -556,6 +547,57 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .child(pages)
         .child(el().grow(1.0))
         .child(config)
+        .children(s.updater.available().then(|| update_footer(s, k)))
+}
+
+fn update_footer(s: &Prefs, k: &Kit) -> El {
+    let status = s.updater.status();
+    let title = match &status {
+        Status::Off => "Update settings",
+        Status::Checking => "Checking…",
+        Status::Downloading => "Downloading…",
+        Status::Ready(_) => "Update ready",
+        Status::Download { .. } => "Update available",
+        _ => "Check for Updates",
+    };
+    let version = format!("Version {}", s.updater.version());
+    col()
+        .key("update-footer")
+        .w_full()
+        .mt(12.0)
+        .child(
+            text(version.clone())
+                .key("current-version")
+                .label(version)
+                .w_full()
+                .px(6.0)
+                .font(k.ty.small.lh(20.0))
+                .color(k.c.text_muted)
+                .truncate(),
+        )
+        .child(
+            row()
+                .key(Page::Updates.key())
+                .role("button")
+                .label(format!("{title}. Open update settings"))
+                .focusable(true)
+                .focus_ring(2.0, 0.0, k.c.border_focus)
+                .w_full()
+                .h(24.0)
+                .px(6.0)
+                .center_y()
+                .radius(k.radius.sm)
+                .hover(k.c.hover)
+                .press(k.c.pressed)
+                .on_press(|s: &mut Prefs| {
+                    s.page = Page::Updates;
+                    let status = s.updater.status();
+                    if status.can_check() && !matches!(status, Status::Download { .. }) {
+                        s.updater.check_now();
+                    }
+                })
+                .child(text(title).font(k.ty.small).color(k.c.text_muted).truncate()),
+        )
 }
 
 fn general(s: &Prefs, k: &Kit) -> Vec<El> {
