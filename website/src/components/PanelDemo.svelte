@@ -206,7 +206,19 @@
 				}
 				for (const char of scenario.query) await type(char);
 				await sleep(1200);
-				if (rows.length > 2) {
+				if (i === 0) {
+					press('⌘A', true);
+					await sleep(250);
+					press('⌫');
+					setQuery('');
+					found = '';
+					await sleep(800);
+					press('↑', true);
+					setQuery(scenario.query);
+					found = scenario.query;
+					await sleep(1200);
+				}
+				if (i !== 0 && rows.length > 2) {
 					await down(true);
 					await down();
 					await sleep(500);

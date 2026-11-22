@@ -565,3 +565,149 @@ fn pasting_an_empty_keyword_cancels_the_previous_search() {
     }));
     assert!(s.items().is_empty());
 }
+
+fn complete_query(s: &mut Session, query: &str) {
+    let generation = searched(&s.set_query(query)).1;
+    s.deliver(Delivery::Done { generation });
+}
+
+#[test]
+fn query_recall_walks_backwards_and_forwards_to_the_empty_draft() {
+    let mut s = Session::default();
+    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+    for query in ["first", "second"] {
+        complete_query(&mut s, query);
+        s.set_query("");
+    }
+    for (intent, expected) in [
+        (Intent::Up, "second"),
+        (Intent::Up, "first"),
+        (Intent::Up, "first"),
+        (Intent::Down, "second"),
+        (Intent::Down, ""),
+    ] {
+        s.intent(intent);
+        assert_eq!(s.query(), expected);
+    }
+    assert!(s.recalled.is_none());
+}
+
+#[test]
+fn dictionary_words_are_recalled_without_opening_dictionary() {
+    let mut s = Session::default();
+    s.set_query("d ");
+    complete_query(&mut s, "serendipity");
+    s.intent(Intent::Dismiss);
+    s.set_query("d ");
+    let effects = s.intent(Intent::Up).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("serendipity".into()));
+    assert_eq!(searched(&effects[1..]).0, Mode::Dictionary);
+    assert_eq!(s.history(), &History::default());
+}
+
+#[test]
+fn recall_is_separate_for_each_search_mode() {
+    let mut s = Session::default();
+    complete_query(&mut s, "Safari");
+    s.reset();
+    s.set_query("d ");
+    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+    complete_query(&mut s, "word");
+    s.reset();
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "Safari");
+    s.reset();
+    s.set_query("d ");
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "word");
+}
+
+#[test]
+fn editing_a_recalled_query_restores_result_navigation() {
+    let mut s = Session::default();
+    complete_query(&mut s, "Safari");
+    s.set_query("");
+    s.intent(Intent::Up);
+    let generation = searched(&s.set_query("Saf")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("Safari", 100), ranked("Shareful", 90)],
+    });
+    assert_eq!(s.intent(Intent::Up), Some(vec![Effect::RevealSelection]));
+    assert_eq!(s.selected(), 1);
+    assert_eq!(s.query(), "Saf");
+}
+
+#[test]
+fn recall_deduplicates_completed_terms_and_bounds_storage() {
+    let mut s = Session::default();
+    for _ in 0..2 {
+        complete_query(&mut s, "word");
+        s.set_query("");
+    }
+    assert_eq!(s.queries.len(), 1);
+    for i in 0..QUERY_HISTORY_LIMIT {
+        complete_query(&mut s, &format!("query {i}"));
+        s.set_query("");
+    }
+    assert_eq!(s.queries.len(), QUERY_HISTORY_LIMIT);
+    assert_eq!(s.queries.front().unwrap().1, "query 0");
+}
+
+#[test]
+fn unfinished_edits_are_not_recorded_but_activated_queries_are() {
+    let mut s = Session::default();
+    s.set_query("unfinished");
+    s.reset();
+    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+    let generation = searched(&s.set_query("saf")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![ranked("Safari", 100)],
+    });
+    s.intent(Intent::Open);
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "saf");
+}
+
+#[test]
+fn clearing_one_character_at_a_time_recalls_the_completed_word() {
+    let mut s = Session::default();
+    complete_query(&mut s, "abc");
+    for prefix in ["ab", "a"] {
+        complete_query(&mut s, prefix);
+    }
+    s.set_query("");
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "abc");
+}
+
+#[test]
+fn deleting_an_unfinished_query_does_not_save_its_completed_fragments() {
+    let mut s = Session::default();
+    s.set_query("abc");
+    complete_query(&mut s, "ab");
+    complete_query(&mut s, "a");
+    s.set_query("");
+    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+}
+
+#[test]
+fn editing_after_deletion_starts_a_new_term() {
+    let mut s = Session::default();
+    complete_query(&mut s, "abc");
+    complete_query(&mut s, "ab");
+    complete_query(&mut s, "about");
+    s.set_query("");
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "about");
+}
+
+#[test]
+fn consuming_a_keyword_does_not_add_it_to_query_history() {
+    let mut s = Session::default();
+    complete_query(&mut s, "d");
+    s.set_query("d word");
+    s.reset();
+    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+}

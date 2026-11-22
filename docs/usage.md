@@ -4,20 +4,27 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 
 ## Keys
 
-| Key                         | In the panel                                          |
-| --------------------------- | ----------------------------------------------------- |
-| Hotkey                      | Show or hide the panel                                |
-| Type                        | Fuzzy-search installed apps                           |
-| Space on an empty query     | Search files with Spotlight, by file and display name |
-| `in` then Space             | Search inside files with Spotlight, as Alfred's `in`  |
-| `define` or `d`, then Space | Look up a word in macOS dictionaries                  |
-| ⌫ on an empty query         | Leave file, content or dictionary search              |
-| ↑ ↓                         | Move the selection                                    |
-| ↩                           | Open the app or file                                  |
-| ⌘↩                          | Reveal the file in Finder                             |
-| Esc, or clicking elsewhere  | Hide the panel                                        |
-| ⌘Q                          | Quit Dupin                                            |
-| ⌘,                          | Open Settings                                         |
+| Key                           | In the panel                                          |
+| ----------------------------- | ----------------------------------------------------- |
+| Hotkey                        | Show or hide the panel                                |
+| Type                          | Fuzzy-search installed apps                           |
+| Space on an empty query       | Search files with Spotlight, by file and display name |
+| `in` then Space               | Search inside files with Spotlight, as Alfred's `in`  |
+| `define` or `d`, then Space   | Look up a word in macOS dictionaries                  |
+| ⌫ on an empty query           | Leave file, content or dictionary search              |
+| ↑ ↓                           | Move the selection                                    |
+| ↑ on an empty query, then ↑ ↓ | Recall searches in the current mode                   |
+| ↩                             | Open the app or file                                  |
+| ⌘↩                            | Reveal the file in Finder                             |
+| Esc, or clicking elsewhere    | Hide the panel                                        |
+| ⌘Q                            | Quit Dupin                                            |
+| ⌘,                            | Open Settings                                         |
+
+Completed searches are remembered for the current Dupin process when you clear
+the input, hide the panel or activate a result. With an empty input, ↑ recalls the
+latest term in the current mode; further ↑ and ↓ walk through those terms and
+back to the empty input. Editing a recalled term restores normal result selection.
+This history holds up to 100 terms and is separate from app-ranking history.
 
 ## Apps
 

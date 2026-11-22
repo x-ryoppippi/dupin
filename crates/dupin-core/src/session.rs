@@ -2,6 +2,8 @@
 //! selected. The UI forwards query edits and key intents; the session answers with effects
 //! (start a search, run an action, hide) for the UI and platform layers to carry out.
 
+use std::collections::VecDeque;
+
 use crate::searcher::Delivery;
 use crate::{Action, History, Item, ItemKind};
 
@@ -22,6 +24,8 @@ pub enum Mode {
 
 /// Typed before Space in the apps search, enters [`Mode::Contents`].
 pub const CONTENTS_KEYWORD: &str = "in";
+
+const QUERY_HISTORY_LIMIT: usize = 100;
 
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,7 +59,7 @@ pub enum Effect {
     RevealSelection,
     /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
     ClearQuery,
-    /// Replace the input with the term left after a pasted mode keyword.
+    /// Replace the input with the session's query after routing or recall.
     ReplaceQuery(String),
     /// The history learned a pick; persist `Session::history`.
     SaveHistory,
@@ -86,6 +90,10 @@ pub struct Session {
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
     dictionary_keywords: Vec<String>,
+    queries: VecDeque<(Mode, String)>,
+    recalled: Option<usize>,
+    deleting: bool,
+    before_deletion: Option<String>,
 }
 
 impl Default for Session {
@@ -119,6 +127,10 @@ impl Session {
             history,
             clock: unix_now,
             dictionary_keywords,
+            queries: VecDeque::new(),
+            recalled: None,
+            deleting: false,
+            before_deletion: None,
         }
     }
 
@@ -176,9 +188,27 @@ impl Session {
         if text == self.query {
             return Vec::new();
         }
+        if self.query.starts_with(text) {
+            if !self.deleting {
+                self.before_deletion = (self.results == Results::Done).then(|| self.query.trim().to_owned());
+                self.deleting = true;
+            }
+        } else {
+            self.deleting = false;
+            self.before_deletion = None;
+        }
+        if text.trim().is_empty() {
+            if let Some(query) = self.before_deletion.take() {
+                self.record_query(query);
+            }
+            self.deleting = false;
+        }
+        self.recalled = None;
         if self.mode == Mode::Apps
             && let Some((mode, term)) = self.keyword_query(text)
         {
+            self.deleting = false;
+            self.before_deletion = None;
             self.items.clear();
             self.selected = 0;
             self.query = term.to_owned();
@@ -240,6 +270,8 @@ impl Session {
                 Mode::Apps => return None,
             },
             Intent::Space | Intent::Backspace => return None,
+            Intent::Up if empty || self.recalled.is_some() => self.recall(true),
+            Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 let n = self.items.len();
                 if n == 0 {
@@ -270,6 +302,7 @@ impl Session {
                     self.history.record(&id, &self.query, (self.clock)());
                     effects.push(Effect::SaveHistory);
                 }
+                self.remember_query(true);
                 effects.extend(self.dismiss());
                 effects
             }
@@ -316,6 +349,10 @@ impl Session {
 
     /// Back to an empty apps search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
+        self.remember_query(false);
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
         let was_searching = matches!(self.results, Results::Searching { .. });
         self.mode = Mode::Apps;
         self.query.clear();
@@ -330,6 +367,44 @@ impl Session {
     fn dismiss(&mut self) -> Vec<Effect> {
         let mut effects = self.reset();
         effects.push(Effect::Hide);
+        effects
+    }
+
+    fn remember_query(&mut self, activated: bool) {
+        let query = self.query.trim();
+        if (!activated && self.results != Results::Done) || query.is_empty() {
+            return;
+        }
+        self.record_query(query.to_owned());
+    }
+
+    fn record_query(&mut self, query: String) {
+        let previous = self.queries.iter().rev().find(|(mode, _)| *mode == self.mode);
+        if previous.is_some_and(|(_, text)| *text == query) {
+            return;
+        }
+        self.queries.push_back((self.mode, query));
+        if self.queries.len() > QUERY_HISTORY_LIMIT {
+            self.queries.pop_front();
+        }
+    }
+
+    fn recall(&mut self, backwards: bool) -> Vec<Effect> {
+        let next = if backwards {
+            let end = self.recalled.unwrap_or(self.queries.len());
+            (0..end).rev().find(|&i| self.queries[i].0 == self.mode)
+        } else {
+            (self.recalled.unwrap() + 1..self.queries.len()).find(|&i| self.queries[i].0 == self.mode)
+        };
+        if backwards && next.is_none() {
+            return Vec::new();
+        }
+        self.recalled = next;
+        self.deleting = false;
+        self.before_deletion = None;
+        self.query = next.map_or_else(String::new, |i| self.queries[i].1.clone());
+        let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+        effects.extend(self.search());
         effects
     }
 
