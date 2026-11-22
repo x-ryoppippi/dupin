@@ -5,9 +5,11 @@
 # panel draws the built-in backdrop shader, so the screenshots show it.
 # Snapshots hold whatever the panel lists, so run this only on a disposable machine.
 
+use e2e-recording.nu record
+
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
-def "main run" [app: path, --out: path = 'target/e2e'] {
+def "main run" [app: path, --out: path = 'target/e2e', --record] {
     mkdir $out
     let out = $out | path expand
     let app = $app | path expand
@@ -41,6 +43,22 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     wait-for-log $log 'dupin-trace: hotkey alt+space registered'
     snap $out launched
 
+    if $record {
+        record $out { scenario $out }
+    } else {
+        scenario $out
+    }
+
+    job kill $dupin
+    # A shader that fails falls back to the built-in one with a warning, which the
+    # screenshots alone wouldn't show.
+    if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
+        error make {msg: $"the backdrop shader failed; see ($log)"}
+    }
+    print 'e2e: the panel opened Calculator, and Settings showed its pages'
+}
+
+def scenario [out: path] {
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
@@ -51,7 +69,12 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     # `type` needs a settable AX value or the main window, and the field has neither: the
     # panel never activates, so it is key but not main. Press keys as a person would, from one
     # process: one `agent-desktop press` per key lost keys before they reached Dupin.
-    ^osascript -e 'tell application "System Events" to keystroke "calculator"'
+    ^osascript -e 'tell application "System Events"
+        repeat with character in characters of "calculator"
+            keystroke (character as text)
+            delay 0.12
+        end repeat
+    end tell'
     snap $out typed
     # Fuzzy matching would still find Calculator from a query missing keys, so check every key
     # reached the field.
@@ -142,14 +165,6 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     )
     poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
-
-    job kill $dupin
-    # A shader that fails falls back to the built-in one with a warning, which the
-    # screenshots alone wouldn't show.
-    if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
-        error make {msg: $"the backdrop shader failed; see ($log)"}
-    }
-    print 'e2e: the panel opened Calculator, and Settings showed its pages'
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -219,5 +234,5 @@ def wait-frontmost [app: string, --tries: int = 20] {
 }
 
 def main [] {
-    print 'usage: scripts/e2e.nu run <Dupin.app> [--out <dir>]'
+    print 'usage: scripts/e2e.nu run <Dupin.app> [--out <dir>] [--record]'
 }

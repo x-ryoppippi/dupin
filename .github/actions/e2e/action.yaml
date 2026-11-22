@@ -23,7 +23,7 @@ runs:
       run: tar -xzf "$RUNNER_TEMP/e2e-app/Dupin.app.tar.gz" -C "$RUNNER_TEMP/e2e-app"
 
     - shell: bash
-      run: scripts/e2e.nu run "$RUNNER_TEMP/e2e-app/Dupin.app"
+      run: scripts/e2e.nu run "$RUNNER_TEMP/e2e-app/Dupin.app" --record
 
     - if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

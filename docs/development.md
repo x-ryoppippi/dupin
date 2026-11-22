@@ -84,8 +84,14 @@ nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e --upload
 nu scripts/tests/e2e-assets.nu
 ```
 
-The current native suite captures PNG stages; it does not record videos yet.
-Recordings will be included when a test writes them into `target/e2e`.
+The native CI suite also records the first 45 seconds of its real interaction:
+summoning the panel, typing the search term character by character, showing the
+results and opening Calculator. `--record` uses the runner's existing Screen
+Recording grant; it does not request or change permissions. It waits for macOS's
+timed capture to finish, including after a scenario failure, then converts the
+movie to a 1080p H.264 MP4. Raw footage and conversion logs remain in the full
+artifact. Local runs record only when explicitly given `--record`; use a
+disposable machine. Native capture and encoding must be verified by CI.
 
 ## Peak memory
 
