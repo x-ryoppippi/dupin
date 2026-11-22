@@ -683,6 +683,23 @@ fn clearing_one_character_at_a_time_recalls_the_completed_word() {
 }
 
 #[test]
+fn deletion_anywhere_preserves_the_completed_term_when_cleared() {
+    for (original, shortened) in [
+        ("serendipity", "erendipity"),
+        ("serendipity", "serendity"),
+        ("日本語", "本語"),
+        ("日本語", "日語"),
+    ] {
+        let mut s = Session::default();
+        complete_query(&mut s, original);
+        complete_query(&mut s, shortened);
+        s.set_query("");
+        s.intent(Intent::Up);
+        assert_eq!(s.query(), original);
+    }
+}
+
+#[test]
 fn deleting_an_unfinished_query_does_not_save_its_completed_fragments() {
     let mut s = Session::default();
     s.set_query("abc");

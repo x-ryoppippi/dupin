@@ -188,7 +188,12 @@ impl Session {
         if text == self.query {
             return Vec::new();
         }
-        if self.query.starts_with(text) {
+        let mut previous = self.query.chars();
+        let deletion = text.len() < self.query.len()
+            && text
+                .chars()
+                .all(|ch| previous.by_ref().any(|before| before == ch));
+        if deletion {
             if !self.deleting {
                 self.before_deletion = (self.results == Results::Done).then(|| self.query.trim().to_owned());
                 self.deleting = true;
