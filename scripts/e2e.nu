@@ -95,6 +95,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     )
     let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
     poll $out settings-window $settings list-windows --app Dupin
+    snap $out settings-created
     wait-frontmost Dupin --window "Dupin Settings"
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page

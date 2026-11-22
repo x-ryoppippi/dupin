@@ -54,6 +54,7 @@ pub struct Ui {
     restore_input: Option<dupin_mac::input_source::Previous>,
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
+    settings_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -131,6 +132,7 @@ impl Ui {
             input_source: config.input_source,
             restore_input: None,
             relaunch: None,
+            settings_after_close: false,
             running: Arc::new(AtomicUsize::new(0)),
             updater,
             me,
@@ -275,6 +277,13 @@ impl Ui {
         self.hide(tx);
     }
 
+    pub fn closed(&mut self, _: &mut Tx) {
+        if std::mem::take(&mut self.settings_after_close) {
+            crate::trace::settings("panel closed");
+            self.prefs.open();
+        }
+    }
+
     fn hide(&mut self, tx: &mut Tx) {
         if let Some(previous) = self.restore_input.take() {
             previous.restore();
@@ -357,8 +366,8 @@ impl Ui {
             }
             Key::Command(',') => {
                 crate::trace::settings("requested");
+                self.settings_after_close = true;
                 self.dismiss(tx);
-                self.prefs.open();
                 return true;
             }
             _ => return false,

@@ -99,6 +99,7 @@ fn main() {
             }
         })
         .on_frame_encoded(trace::frame)
+        .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
             if !focused {
                 s.dismiss(tx);
