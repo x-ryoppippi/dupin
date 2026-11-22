@@ -72,6 +72,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     ) }
     poll --tries 15 $out quick-look-window $preview list-windows --app Dupin
     snap $out quick-look
+    let left_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: key Left ' } | length
     ad $out close-preview press escape | ignore
     let restored = {|r|
         $r.ok and $r.data?.match?.value? == 'calculator'
@@ -88,6 +89,9 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         textfield
         --first
     )
+    ^osascript -e 'tell application "System Events" to key code 123'
+    wait-for-log --after $left_before $log 'dupin-trace: key Left '
+    ^osascript -e 'tell application "System Events" to key code 124'
     snap $out quick-look-restored
 
     let before = poll $out before-return {|r| $r.ok } list-apps
@@ -241,9 +245,14 @@ def --wrapped poll [
     error make {msg: $"timed out waiting for ($name): ($reply | to json --raw)"}
 }
 
-def wait-for-log [log: path, line: string, --tries: int = 30] {
+def wait-for-log [
+    log: path
+    line: string
+    --tries: int = 30
+    --after: int = 0
+] {
     for attempt in 1..$tries {
-        if ($log | path exists) and (open --raw $log | str contains $line) { return }
+        if ($log | path exists) and ((open --raw $log | lines | where {|entry| $entry | str contains $line } | length) > $after) { return }
         sleep 1sec
     }
     error make {msg: $"timed out waiting for ($line) in ($log)"}

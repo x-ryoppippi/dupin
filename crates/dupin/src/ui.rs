@@ -671,7 +671,15 @@ impl Ui {
     }
 
     pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
-        if !self.preview_focus_is_active() {
+        if !self.shown {
+            return;
+        }
+        let keep = self
+            .quick_look
+            .borrow()
+            .as_ref()
+            .is_some_and(|preview| preview.finish_focus_transfer());
+        if !keep {
             self.dismiss(tx);
         }
     }

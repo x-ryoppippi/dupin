@@ -9,14 +9,14 @@ use dupin_core::{Action, Item, ItemAction};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
-use objc2_app_kit::{NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate};
+use objc2_app_kit::{NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate};
 use objc2_foundation::{NSNotification, NSObjectProtocol, NSString, NSURL};
 use objc2_quick_look_ui::{QLPreviewItem, QLPreviewPanel, QLPreviewPanelDataSource, QLPreviewPanelDelegate};
 
 pub const ACTION_ID: &str = "quick-look";
 
 /// Add Quick Look to a result created by `Item::path`.
-pub fn add_action(item: &mut Item) {
+pub(crate) fn add_action(item: &mut Item) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };
@@ -81,6 +81,8 @@ define_class!(
             if event.r#type() != NSEventType::KeyDown || event.keyCode() != 53 {
                 return Bool::NO;
             }
+            if !current_controller_is(panel, self) { return Bool::NO; }
+            self.clear_item();
             panel.orderOut(None);
             if let Some(window) = self.ivars().owner.window() {
                 window.makeKeyWindow();
@@ -147,6 +149,10 @@ impl PreviewController {
         unsafe { msg_send![super(this), init] }
     }
 
+    fn clear_item(&self) {
+        self.ivars().item.borrow_mut().take();
+    }
+
     fn set_item(&self, item: Retained<NSURL>) {
         *self.ivars().item.borrow_mut() = Some(item);
     }
@@ -197,6 +203,7 @@ impl Previewer {
     }
 
     pub fn show(&self, path: &Path) -> bool {
+        self.controller.clear_item();
         let Some(mtm) = MainThreadMarker::new() else {
             return false;
         };
@@ -204,11 +211,13 @@ impl Previewer {
         self.controller.set_item(url);
         // SAFETY: Quick Look's shared panel is main-thread-only.
         let Some(panel) = (unsafe { QLPreviewPanel::sharedPreviewPanel(mtm) }) else {
+            self.controller.clear_item();
             return false;
         };
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
         if !current_controller_is(&panel, &self.controller) {
+            self.controller.clear_item();
             return false;
         }
         panel.makeKeyAndOrderFront(None);
@@ -222,7 +231,7 @@ impl Previewer {
         let Some(panel) = shared_panel_if_created(mtm) else {
             return false;
         };
-        panel.isKeyWindow()
+        current_controller_is(&panel, &self.controller) && panel.isKeyWindow()
     }
 
     pub fn owner_is_key(&self) -> bool {
@@ -233,7 +242,49 @@ impl Previewer {
                 .is_some_and(|window: Retained<NSWindow>| window.isKeyWindow())
     }
 
+    pub fn finish_focus_transfer(&self) -> bool {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let panel = shared_panel_if_created(mtm);
+        // SAFETY: This main-thread query retains the current controller while inspecting it.
+        if panel.as_ref().is_some_and(|panel| unsafe {
+            panel
+                .currentController()
+                .is_some_and(|current| !same_object(&*current, &*self.controller))
+        }) {
+            self.controller.clear_item();
+            return self.owner_is_key();
+        }
+        let visible = panel.as_ref().is_some_and(|panel| panel.isVisible());
+        if !visible {
+            self.controller.clear_item();
+        }
+        let app = NSApplication::sharedApplication(mtm);
+        let owner = self.view.window();
+        match focus_transfer(
+            panel
+                .as_ref()
+                .is_some_and(|panel| current_controller_is(panel, &self.controller) && panel.isKeyWindow()),
+            visible,
+            owner.as_ref().is_some_and(|window| window.isKeyWindow()),
+            owner.as_ref().is_some_and(|window| window.isVisible()),
+            app.isActive(),
+            app.keyWindow().is_some(),
+        ) {
+            FocusTransfer::Keep => true,
+            FocusTransfer::Restore => {
+                if let Some(owner) = owner {
+                    owner.makeKeyWindow();
+                }
+                true
+            }
+            FocusTransfer::Dismiss => false,
+        }
+    }
+
     pub fn close(&self) {
+        self.controller.clear_item();
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
@@ -248,6 +299,7 @@ impl Previewer {
 
 impl Drop for Previewer {
     fn drop(&mut self) {
+        self.controller.clear_item();
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
@@ -285,6 +337,30 @@ impl Drop for Previewer {
     }
 }
 
+#[derive(Debug, PartialEq)]
+enum FocusTransfer {
+    Keep,
+    Restore,
+    Dismiss,
+}
+
+fn focus_transfer(
+    panel_key: bool,
+    panel_visible: bool,
+    owner_key: bool,
+    owner_visible: bool,
+    app_active: bool,
+    any_key: bool,
+) -> FocusTransfer {
+    if panel_key || owner_key {
+        FocusTransfer::Keep
+    } else if !panel_visible && owner_visible && app_active && !any_key {
+        FocusTransfer::Restore
+    } else {
+        FocusTransfer::Dismiss
+    }
+}
+
 fn shared_panel_if_created(mtm: MainThreadMarker) -> Option<Retained<QLPreviewPanel>> {
     // SAFETY: `sharedPreviewPanelExists` is a main-thread-only query.
     unsafe {
@@ -310,6 +386,33 @@ fn same_object<T: ?Sized, U: ?Sized>(object: &T, other: &U) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_transfer_restores_only_an_uncontested_in_app_close() {
+        assert_eq!(
+            focus_transfer(false, false, false, true, true, false),
+            FocusTransfer::Restore
+        );
+        assert_eq!(
+            focus_transfer(true, true, false, true, true, true),
+            FocusTransfer::Keep
+        );
+        assert_eq!(
+            focus_transfer(false, false, true, true, true, true),
+            FocusTransfer::Keep
+        );
+        for (visible, owner_visible, active, any_key) in [
+            (true, true, true, false),
+            (false, true, false, false),
+            (false, true, true, true),
+            (false, false, true, false),
+        ] {
+            assert_eq!(
+                focus_transfer(false, visible, false, owner_visible, active, any_key),
+                FocusTransfer::Dismiss
+            );
+        }
+    }
 
     #[test]
     fn adds_quick_look_to_path_results_before_copy_path() {
