@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
-	import { scenarios, type Row } from './scenarios.ts';
+	import { scenarios, type Row, type Scenario } from './scenarios.ts';
 
 	const [first] = scenarios;
 	let query = $state(first.query);
@@ -110,6 +110,10 @@
 				hideTimer = setTimeout(() => (keys = []), 300);
 			}, 1100);
 		};
+		// Results follow every key, as Dupin's do: a scenario's rows with as much of each match
+		// highlighted as has been typed.
+		const matching = (scenario: Scenario, typed: string): Row[] =>
+			typed ? scenario.rows.map((row) => ({ ...row, hit: row.hit?.slice(0, typed.length) })) : [];
 		const type = async (char: string) => {
 			press(char === ' ' ? '␣' : char);
 			setQuery(query + char);
@@ -120,6 +124,7 @@
 		// mode; Space on an empty query enters file search, and `in` then Space enters content search.
 		// After the last search, Esc closes the panel and the hotkey starts the round again.
 		const play = async () => {
+			let shown: Scenario = first;
 			for (let i = 1; alive; i = (i + 1) % scenarios.length) {
 				await sleep(2600);
 				while (alive && (!visible || document.hidden)) await sleep(400);
@@ -140,6 +145,7 @@
 					while (query.length > 0) {
 						press('⌫');
 						setQuery(query.slice(0, -1));
+						rows = matching(shown, query);
 						await sleep(70);
 					}
 					rows = [];
@@ -159,9 +165,12 @@
 					mode = scenario.mode;
 					await sleep(350);
 				}
-				for (const char of scenario.query) await type(char);
-				await sleep(120);
-				rows = scenario.rows;
+				shown = scenario;
+				for (const char of scenario.query) {
+					const typing = type(char);
+					rows = matching(scenario, query);
+					await typing;
+				}
 			}
 		};
 		void play();
