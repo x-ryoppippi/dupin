@@ -52,11 +52,12 @@ struct Program {
 
 impl Drop for Program {
     /// The module holds Rune's parse of the user's shader, which drops recursively: a long
-    /// `else if` chain is deep, so drop it on the deep stack too.
+    /// `else if` chain is deep, so drop it on the deep stack too, with the pipelines, which can
+    /// hold the last reference to it.
     fn drop(&mut self) {
-        if let Some(module) = self.module.take() {
-            crate::shader::deep(move || drop(module));
-        }
+        let module = self.module.take();
+        let pipes = std::mem::take(&mut self.pipes);
+        crate::shader::deep(move || drop((pipes, module)));
     }
 }
 
