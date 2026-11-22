@@ -73,7 +73,8 @@ def main [
     ) | ignore
     let plugins = $variant | path join crates dupin assets plugins
     mkdir $plugins
-    cp $guest ($plugins | path join fend_calculator.wasm)
+    let copied_guest = $plugins | path join fend_calculator.wasm
+    cp $guest $copied_guest
     0x[0061736d010000000105016000017f03020100070801046576616c00000a06010400412a0b]
     | save ($plugins | path join minimal_eval.wasm)
     let lock = open --raw ($baseline | path join flake.lock) | from json
@@ -87,8 +88,8 @@ def main [
         signing: 'ad-hoc; hardened runtime; no additional entitlements; no notary submission'
         archive: 'ditto ZIP, as used by the updater; no DMG measurement'
         nixpkgs: $nixpkgs
-        guest_bytes: (bytes $guest)
-        guest_sha256: (open --raw $guest | hash sha256)
+        guest_bytes: (bytes $copied_guest)
+        guest_sha256: (open --raw $copied_guest | hash sha256)
         patch_sha256: (open --raw ($env.FILE_PWD | path join probe.patch) | hash sha256)
         script_sha256: (open --raw ($env.FILE_PWD | path join measure.nu) | hash sha256)
         unlink_store_sha256: (

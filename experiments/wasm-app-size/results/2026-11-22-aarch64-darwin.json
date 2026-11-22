@@ -17,7 +17,7 @@
 		"guest_bytes": 766406,
 		"guest_sha256": "bff14694b6005d445de67887798d5e711753927fdccb226b6329fd7d590b06e6",
 		"patch_sha256": "93cc87ee01c9ac985e651aa31c0b81814b28d41c7a19a4ad6d48eaed1c571bbb",
-		"script_sha256": "49b75c4ef5ada22332c05343bdd965bdca0a4473d51ba7a6286975b8a494b484",
+		"script_sha256": "dac7d9b91018112240b70cdd39b2c9e60da08d8811bdac6b3b080e5dd541832b",
 		"unlink_store_sha256": "7be4242a9d568a2881f99917cd91a8c7dc29be7f25572b2a2890756e76d0f23d",
 		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
 		"nix_outputs": {
