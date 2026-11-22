@@ -21,12 +21,27 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
+        Self::start_with_scope(roots, true, changed)
+    }
+
+    pub fn start_shallow(
+        roots: Vec<PathBuf>,
+        changed: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::start_with_scope(roots, false, changed)
+    }
+
+    fn start_with_scope(
+        roots: Vec<PathBuf>,
+        recursive: bool,
+        changed: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
         let (events, received) = mpsc::channel();
         let debounce = std::thread::Builder::new()
             .name("dupin-path-watch-debounce".into())
             .spawn(move || debounce_events(received, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
-        match watch_roots(roots, events) {
+        match watch_roots(roots, recursive, events) {
             Ok(mut watcher) => {
                 watcher.debounce = Some(debounce);
                 Ok(watcher)
@@ -92,6 +107,7 @@ struct FSEventStreamContext {
 struct WatchContext {
     events: mpsc::Sender<()>,
     roots: Vec<PathBuf>,
+    recursive: bool,
 }
 
 type FSEventCallback = unsafe extern "C" fn(
@@ -134,7 +150,11 @@ unsafe extern "C" {
     fn dispatch_release(object: *mut std::ffi::c_void);
 }
 
-fn watch_roots(roots: Vec<PathBuf>, events: mpsc::Sender<()>) -> Result<PathWatcher, &'static str> {
+fn watch_roots(
+    roots: Vec<PathBuf>,
+    recursive: bool,
+    events: mpsc::Sender<()>,
+) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
     use objc2_foundation::{NSArray, NSString};
 
@@ -158,7 +178,12 @@ fn watch_roots(roots: Vec<PathBuf>, events: mpsc::Sender<()>) -> Result<PathWatc
         return Err("no paths can be watched");
     }
     let paths = NSArray::from_retained_slice(&paths);
-    let context_info = Box::into_raw(Box::new(WatchContext { events, roots })).cast::<std::ffi::c_void>();
+    let context_info = Box::into_raw(Box::new(WatchContext {
+        events,
+        roots,
+        recursive,
+    }))
+    .cast::<std::ffi::c_void>();
     let mut context = FSEventStreamContext {
         version: 0,
         info: context_info,
@@ -225,11 +250,15 @@ unsafe extern "C" fn paths_changed(
                 context
                     .roots
                     .iter()
-                    .any(|root| path.starts_with(root) || root.starts_with(path))
+                    .any(|root| matches_event_path(path, root, context.recursive))
             })
     }) {
         let _ = context.events.send(());
     }
+}
+
+fn matches_event_path(path: &Path, root: &Path, recursive: bool) -> bool {
+    path == root || root.starts_with(path) || (recursive && path.starts_with(root))
 }
 
 pub fn canonical_root(root: &Path) -> PathBuf {
@@ -246,4 +275,45 @@ pub fn canonical_root(root: &Path) -> PathBuf {
         path.push(name);
     }
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::matches_event_path;
+    use std::path::Path;
+
+    #[test]
+    fn shallow_scope_matches_the_root_and_its_missing_ancestors_only() {
+        let root = Path::new("/home/user/.config/dupin");
+
+        assert!(matches_event_path(root, root, false));
+        assert!(matches_event_path(Path::new("/home/user/.config"), root, false));
+        assert!(matches_event_path(Path::new("/home/user"), root, false));
+        assert!(!matches_event_path(
+            Path::new("/home/user/.config/other"),
+            root,
+            false
+        ));
+        assert!(!matches_event_path(
+            Path::new("/home/user/.config/dupin/extra"),
+            root,
+            false
+        ));
+    }
+
+    #[test]
+    fn recursive_scope_also_matches_descendants() {
+        let root = Path::new("/Applications");
+
+        assert!(matches_event_path(
+            Path::new("/Applications/Utilities"),
+            root,
+            true
+        ));
+        assert!(!matches_event_path(
+            Path::new("/ApplicationsElsewhere"),
+            root,
+            true
+        ));
+    }
 }

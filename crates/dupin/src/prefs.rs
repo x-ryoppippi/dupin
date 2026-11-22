@@ -3,6 +3,8 @@
 //! Changes apply to the panel at once and are written back to config.toml. A read-only
 //! config.toml (one Nix manages) shows its values, locked.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
@@ -160,6 +162,7 @@ fn backdrop_title(backdrop: &Backdrop) -> String {
 
 pub struct Prefs {
     config: Config,
+    current: Rc<RefCell<Config>>,
     page: Page,
     recorder: ShortcutRecorderState,
     /// Who holds the chord the last refusal was for, when known.
@@ -174,18 +177,20 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn new(
-        config: Config,
+        current: Rc<RefCell<Config>>,
         binding: Arc<Binding>,
         panel: AppHandle<Ui>,
         updater: Updater,
         settings: Arc<crate::settings::Service>,
     ) -> Prefs {
+        let config = current.borrow().clone();
         let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
         if binding.failed_at_launch() {
             recorder.mark_unregistered();
         }
         Prefs {
             config,
+            current,
             page: Page::General,
             recorder,
             owner: None,
@@ -239,12 +244,14 @@ impl Prefs {
             _ => None,
         };
         result?;
+        self.config = self.current.borrow().clone();
         self.config.hotkey = next.map(ToString::to_string).unwrap_or_default();
         self.save();
         Ok(())
     }
 
     fn set(&mut self, change: impl FnOnce(&mut Config)) {
+        self.config = self.current.borrow().clone();
         change(&mut self.config);
         self.save();
     }
@@ -388,6 +395,7 @@ impl Prefs {
 
     /// Persist the settings and hand them to the panel.
     fn save(&mut self) {
+        *self.current.borrow_mut() = self.config.clone();
         // The panel must see this edit before the worker can echo its saved file back.
         self.publish();
         if let Err(error) = self.settings.save(&self.config) {
@@ -657,11 +665,12 @@ fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
 /// Whether to install updates by themselves, and where the updater is: the version, what it
 /// is doing, and the one thing to do next.
 fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
+    let next_auto_update = !s.config.auto_update;
     let auto = Switch::new(s.config.auto_update)
         .label("Install updates automatically")
         .hide_label()
         .disabled(s.read_only)
-        .on_toggle(|s: &mut Prefs| s.set(|c| c.auto_update = !c.auto_update))
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.auto_update = next_auto_update))
         .build(k);
     let status = s.updater.status();
     let action = match &status {
@@ -793,4 +802,65 @@ fn setting(k: &Kit, glyph: &'static Icon, label: &str, detail: Option<&str>, con
         .child(icon(glyph, 16.0).color(k.c.icon_base))
         .child(words)
         .child(control)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn editing_stale_preferences_preserves_the_latest_external_values() {
+        let panel = rune::App::new(rune::AppSpec::new(
+            "test panel",
+            (1.0, 1.0),
+            || unreachable!(),
+            crate::view::view,
+        ))
+        .handle();
+        let prefs = rune::App::new(rune::AppSpec::new(
+            "test prefs",
+            (1.0, 1.0),
+            || unreachable!(),
+            view,
+        ))
+        .handle();
+        let path = std::env::temp_dir().join(format!(
+            "dupin-prefs-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        let (sent, received) = mpsc::channel();
+        let settings = Arc::new(crate::settings::Service::new(Some(path.clone()), move |update| {
+            sent.send(update).unwrap();
+        }));
+        let current = Rc::new(RefCell::new(Config::default()));
+        let binding = Arc::new(Binding::new(panel.clone()));
+        let updater = Updater::start(false, panel.clone(), prefs);
+        let mut state = Prefs::new(current.clone(), binding, panel, updater, settings.clone());
+        let external = Config {
+            hotkey: "ctrl+alt+k".into(),
+            dictionary_keywords: vec!["lookup".into()],
+            ..Config::default()
+        };
+        *current.borrow_mut() = external.clone();
+        state.set(|config| config.file_limit = 123);
+        let expected = Config {
+            file_limit: 123,
+            ..external
+        };
+        assert_eq!(*current.borrow(), expected);
+        let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(saved.result.unwrap(), expected);
+        assert_eq!(saved.revision, settings.revision());
+        let persisted = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(toml::from_str::<Config>(&persisted).unwrap(), expected);
+        drop(state);
+        drop(settings);
+        std::fs::remove_file(path).unwrap();
+    }
 }

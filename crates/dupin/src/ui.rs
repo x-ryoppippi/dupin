@@ -2,7 +2,9 @@
 //! field, icons, a notice). Handlers translate keys into session intents and carry out the
 //! effects the session returns.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -23,7 +25,7 @@ const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
 pub struct Configuration {
-    pub values: Config,
+    pub values: Rc<RefCell<Config>>,
     pub hotkey: Arc<crate::hotkey::Binding>,
     pub files: Arc<crate::settings::Service>,
 }
@@ -72,9 +74,9 @@ impl Ui {
         history: History,
         notice: Option<String>,
     ) -> Ui {
-        let config = &configuration.values;
+        let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(config, apps_provider.clone())
+        let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -157,7 +159,6 @@ impl Ui {
             self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();
         }
-        self.configuration.values = config.clone();
     }
 
     pub fn reload_config(&mut self, update: crate::settings::Update) {
@@ -168,7 +169,7 @@ impl Ui {
             let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
                 "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
             })?;
-            let previous = crate::hotkey::parse(&self.configuration.values.hotkey);
+            let previous = crate::hotkey::parse(&self.configuration.values.borrow().hotkey);
             if previous.as_ref().ok() != Some(&shortcut) {
                 self.configuration.hotkey.replace(shortcut.as_ref()).map_err(|error| {
                     format!("Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration.")
@@ -178,12 +179,16 @@ impl Ui {
         });
         let problem = match accepted {
             Ok(config) => {
-                if self.configuration.values != config {
+                if *self.configuration.values.borrow() != config {
+                    *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config);
                 }
                 update.watch_problem
             }
-            Err(error) => Some(error),
+            Err(error) => Some(match update.watch_problem {
+                Some(watch) => format!("{error} {watch}"),
+                None => error,
+            }),
         };
         if self.config_problem != problem
             && let Some(problem) = &problem
@@ -191,7 +196,7 @@ impl Ui {
             crate::log::warn(problem);
         }
         self.config_problem = problem.clone();
-        let config = self.configuration.values.clone();
+        let config = self.configuration.values.borrow().clone();
         self.prefs.update(move |prefs, _| {
             prefs.reflect_config(update.revision, config, update.read_only, problem);
         });

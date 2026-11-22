@@ -15,6 +15,8 @@ mod ui;
 mod update;
 mod view;
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
@@ -76,9 +78,10 @@ fn main() {
         move |update| panel.update(move |s, _| s.reload_config(update))
     }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
+    let current_config = Rc::new(RefCell::new(config.clone()));
     let prefs = prefs.init({
         let (config, binding, panel, updater, settings) = (
-            config.clone(),
+            current_config.clone(),
             binding.clone(),
             handle.clone(),
             updater.clone(),
@@ -93,7 +96,7 @@ fn main() {
         .init({
             let handle = handle.clone();
             let configuration = ui::Configuration {
-                values: config,
+                values: current_config,
                 hotkey: binding.clone(),
                 files: settings.clone(),
             };

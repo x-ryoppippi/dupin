@@ -157,21 +157,21 @@ where
     fn run(mut self) {
         while let Ok(first) = self.receiver.recv() {
             let batch = Batch::collect(first, &self.receiver);
-            if batch.stop {
-                break;
-            }
-
             if batch.activate {
                 self.activated = true;
             }
-            if self.activated && (batch.activate || batch.changed || batch.save.is_some()) {
+            if !batch.stop && self.activated && (batch.activate || batch.changed || batch.save.is_some()) {
                 self.refresh_watcher();
             }
 
             if let Some((revision, config)) = batch.save {
                 self.process_save(revision, config);
-            } else if batch.activate || batch.changed {
+            } else if !batch.stop && (batch.activate || batch.changed) {
                 self.emit_snapshot(self.last_processed_revision);
+            }
+
+            if batch.stop {
+                break;
             }
         }
         self.watcher.take();
@@ -249,7 +249,7 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start(roots.paths.clone(), move || {
+        match PathWatcher::start_shallow(roots.paths.clone(), move || {
             let _ = sender.send(Job::Changed);
         }) {
             Ok(watcher) => {
@@ -443,6 +443,37 @@ mod tests {
         assert_eq!(revision, 2);
         assert_eq!(config.file_limit, 500);
         assert!(batch.changed);
+    }
+
+    #[test]
+    fn worker_persists_the_latest_queued_save_before_stopping() {
+        let temp = TempDir::new();
+        let path = temp.path().join("config.toml");
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(Job::Save {
+                revision: 1,
+                config: Config {
+                    file_limit: 50,
+                    ..Config::default()
+                },
+            })
+            .unwrap();
+        let latest = Config {
+            file_limit: 500,
+            ..Config::default()
+        };
+        sender
+            .send(Job::Save {
+                revision: 2,
+                config: latest.clone(),
+            })
+            .unwrap();
+        sender.send(Job::Stop).unwrap();
+
+        Worker::new(Some(path.clone()), receiver, sender, |_| {}).run();
+
+        assert_eq!(Config::parse(&fs::read_to_string(path).unwrap()).unwrap(), latest);
     }
 
     #[test]
