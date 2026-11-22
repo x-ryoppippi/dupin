@@ -167,12 +167,6 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
             return col().key("dictionary-results");
         };
         let id = item.id.clone();
-        let selected = s.session.selected() == 0;
-        let (ink, sub) = if selected {
-            (Color::WHITE, Color::WHITE.alpha(0.86))
-        } else {
-            (t.text, t.text_secondary)
-        };
         return col()
             .key("dictionary-results")
             .w_full()
@@ -182,30 +176,34 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                 col()
                     .key(row_key(&item.id))
                     .w_full()
-                    .px(18.0)
-                    .py(14.0)
-                    .gap(8.0)
+                    .px(22.0)
+                    .py(18.0)
+                    .gap(16.0)
                     .radius(8.0)
-                    .fill(if selected { accent } else { Color::TRANSPARENT })
-                    .hover(if selected { accent } else { t.hover })
-                    .child(title(item, ink, if selected { Color::WHITE } else { accent }))
+                    .fill(t.card)
+                    .child(
+                        row()
+                            .w_full()
+                            .gap(12.0)
+                            .child(
+                                text(item.title.as_str())
+                                    .font(TextStyle::new(24.0, 600.0))
+                                    .color(t.text)
+                                    .wrap(),
+                            )
+                            .child(text("↩ Open in Dictionary").font(type_::BODY).color(accent))
+                            .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                    )
                     .child(
                         col()
                             .key("dictionary-definition")
                             .w_full()
                             .shrink()
                             .min_h(20.0)
-                            .max_h(280.0)
+                            .max_h(340.0)
                             .scroll(ScrollSpec { stick_bottom: false })
-                            .child(
-                                text(item.subtitle.as_str())
-                                    .w_full()
-                                    .font(type_::BODY.lh(20.0))
-                                    .color(sub)
-                                    .wrap(),
-                            ),
-                    )
-                    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+                            .child(dictionary_definition(&item.subtitle, t)),
+                    ),
             );
     }
     let shown = items.len().min(VISIBLE_ROWS) as f32;
@@ -231,6 +229,31 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                     .children(rows),
             ),
     )
+}
+
+fn dictionary_definition(definition: &str, t: &tok::Theme) -> El {
+    let boundaries: Vec<usize> = std::iter::once(0)
+        .chain(
+            definition
+                .match_indices('•')
+                .map(|(index, _)| index)
+                .filter(|&index| index > 0),
+        )
+        .chain(std::iter::once(definition.len()))
+        .collect();
+    col()
+        .w_full()
+        .gap(12.0)
+        .selection_group(true)
+        .children(boundaries.windows(2).enumerate().map(|(index, range)| {
+            text(&definition[range[0]..range[1]])
+                .key(format!("definition-paragraph-{index}"))
+                .w_full()
+                .font(TextStyle::new(16.0, 400.0).lh(25.0))
+                .color(t.text)
+                .wrap()
+                .selectable(true)
+        }))
 }
 
 fn result_row(s: &Ui, item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
