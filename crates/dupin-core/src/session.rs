@@ -203,9 +203,7 @@ impl Session {
             self.before_deletion = None;
         }
         if text.trim().is_empty() {
-            if let Some(query) = self.before_deletion.take() {
-                self.record_query(query);
-            }
+            self.remember_query(false);
             self.deleting = false;
         }
         self.recalled = None;
@@ -376,6 +374,13 @@ impl Session {
     }
 
     fn remember_query(&mut self, activated: bool) {
+        if activated {
+            self.deleting = false;
+            self.before_deletion = None;
+        } else if let Some(query) = self.before_deletion.take() {
+            self.record_query(query);
+            return;
+        }
         let query = self.query.trim();
         if (!activated && self.results != Results::Done) || query.is_empty() {
             return;
@@ -414,6 +419,9 @@ impl Session {
     }
 
     fn switch(&mut self, mode: Mode) -> Vec<Effect> {
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
         self.mode = mode;
         self.search()
     }

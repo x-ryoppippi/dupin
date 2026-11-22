@@ -700,13 +700,14 @@ fn deletion_anywhere_preserves_the_completed_term_when_cleared() {
 }
 
 #[test]
-fn deleting_an_unfinished_query_does_not_save_its_completed_fragments() {
+fn deleting_an_unfinished_query_records_the_latest_completed_term() {
     let mut s = Session::default();
     s.set_query("abc");
     complete_query(&mut s, "ab");
     complete_query(&mut s, "a");
     s.set_query("");
-    assert_eq!(s.intent(Intent::Up), Some(vec![]));
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "a");
 }
 
 #[test]
@@ -727,4 +728,69 @@ fn consuming_a_keyword_does_not_add_it_to_query_history() {
     s.set_query("d word");
     s.reset();
     assert_eq!(s.intent(Intent::Up), Some(vec![]));
+}
+
+#[test]
+fn switching_modes_starts_recall_from_that_modes_latest_term() {
+    let mut s = Session::default();
+    complete_query(&mut s, "d");
+    s.reset();
+    s.set_query("d ");
+    complete_query(&mut s, "word");
+    s.reset();
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "d");
+    s.intent(Intent::Space);
+    assert_eq!(s.mode(), Mode::Dictionary);
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "word");
+}
+
+#[test]
+fn dismissing_after_deletion_preserves_the_completed_term() {
+    for finished in [false, true] {
+        for escape in [false, true] {
+            let mut s = Session::default();
+            complete_query(&mut s, "serendipity");
+            let generation = searched(&s.set_query("serendipit")).1;
+            if finished {
+                s.deliver(Delivery::Done { generation });
+            }
+            if escape {
+                s.intent(Intent::Dismiss);
+            } else {
+                s.reset();
+            }
+            s.intent(Intent::Up);
+            assert_eq!(s.query(), "serendipity");
+        }
+    }
+}
+
+#[test]
+fn activation_after_deletion_records_only_the_activated_query() {
+    for finished in [false, true] {
+        let mut s = Session::default();
+        complete_query(&mut s, "safari");
+        let generation = searched(&s.set_query("safar")).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![ranked("Safari", 100)],
+        });
+        if finished {
+            s.deliver(Delivery::Done { generation });
+        }
+        s.intent(Intent::Open);
+        assert_eq!(s.queries, VecDeque::from([(Mode::Apps, "safar".into())]));
+    }
+}
+
+#[test]
+fn dismissing_after_a_typo_correction_records_the_completed_query() {
+    let mut s = Session::default();
+    s.set_query("safarx");
+    complete_query(&mut s, "safar");
+    s.intent(Intent::Dismiss);
+    s.intent(Intent::Up);
+    assert_eq!(s.query(), "safar");
 }
