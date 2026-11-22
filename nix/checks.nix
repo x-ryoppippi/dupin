@@ -21,24 +21,7 @@ in
         inherit dupin;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
-        lint-and-test = pkgs.rustPlatform.buildRustPackage (
-          dupin.passthru.commonArgs
-          // {
-            pname = "dupin-lint-and-test";
-            nativeBuildInputs = [ pkgs.clippy ];
-            buildPhase = ''
-              runHook preBuild
-              cargo clippy --workspace --all-targets --offline -- -D warnings
-              runHook postBuild
-            '';
-            checkPhase = ''
-              runHook preCheck
-              cargo test --workspace --offline
-              runHook postCheck
-            '';
-            installPhase = "touch $out";
-          }
-        );
+        lint-and-test = dupin.lintAndTest;
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
           ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';

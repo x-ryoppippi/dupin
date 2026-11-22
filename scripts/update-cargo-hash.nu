@@ -7,5 +7,6 @@
 def main []: nothing -> nothing {
     cd ($env.FILE_PWD | path dirname)
     nix flake archive --json | from json | ignore
-    nix-update --flake --version=skip default
+    # The baseline owns the vendor hash and complete Cargo source tree.
+    nix-update --flake --version=skip default.baseline
 }

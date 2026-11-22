@@ -1,8 +1,14 @@
+{ inputs, ... }:
 {
   perSystem =
     { pkgs, ... }:
     let
-      dupin = pkgs.callPackage ../package.nix { };
+      native = pkgs.callPackage ../package.nix { };
+      dupin = import ./cargo-artifacts.nix {
+        inherit pkgs;
+        inherit (inputs) crane;
+        inherit native;
+      };
       # scripts/package-app.nu lays out Dupin.dmg over this.
       dmg-background =
         pkgs.runCommand "dupin-dmg-background"

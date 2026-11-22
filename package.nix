@@ -10,17 +10,31 @@ let
   # tagpr bumps VERSION; crate versions stay 0.0.0 (see Cargo.toml).
   version = lib.fileContents (root + /VERSION);
 
+  cargoFiles = lib.fileset.unions [
+    (root + /Cargo.toml)
+    (root + /Cargo.lock)
+    (root + /rustfmt.toml)
+    (root + /crates)
+    # The backdrop shader examples, which a test compiles.
+    (root + /examples/shaders)
+  ];
+  bundleFiles = lib.fileset.unions [
+    (root + /packaging)
+    (root + /assets/logo/dupin.svg)
+  ];
+  cargoSrc = lib.fileset.toSource {
+    inherit root;
+    fileset = cargoFiles;
+  };
+  bundleSrc = lib.fileset.toSource {
+    inherit root;
+    fileset = bundleFiles;
+  };
   src = lib.fileset.toSource {
     inherit root;
     fileset = lib.fileset.unions [
-      (root + /Cargo.toml)
-      (root + /Cargo.lock)
-      (root + /rustfmt.toml)
-      (root + /crates)
-      # The backdrop shader examples, which a test compiles.
-      (root + /examples/shaders)
-      (root + /packaging)
-      (root + /assets/logo/dupin.svg)
+      cargoFiles
+      bundleFiles
     ];
   };
 
@@ -44,16 +58,7 @@ let
     pname = "dupin";
     inherit version src cargoDeps;
   };
-in
-rustPlatform.buildRustPackage (
-  commonArgs
-  // {
-    cargoBuildFlags = [
-      "--package"
-      "dupin"
-    ];
-    # Tests run in the lint-and-test check, in debug as cargo runs them.
-    doCheck = false;
+  packagingArgs = {
     # The app icon is drawn from the logo here, so no generated image is committed. iconutil
     # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
     nativeBuildInputs = [
@@ -89,13 +94,32 @@ rustPlatform.buildRustPackage (
       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
       ln -s $app/MacOS/dupin $out/bin/dupin
     '';
-    passthru = { inherit commonArgs; };
     meta = {
       description = "A lightweight resident launcher for Apple silicon Macs";
       homepage = "https://dupin.app";
       license = lib.licenses.gpl3Plus;
       mainProgram = "dupin";
       platforms = [ "aarch64-darwin" ];
+    };
+  };
+in
+rustPlatform.buildRustPackage (
+  commonArgs
+  // packagingArgs
+  // {
+    cargoBuildFlags = [
+      "--package"
+      "dupin"
+    ];
+    # Tests run in the lint-and-test check, in debug as cargo runs them.
+    doCheck = false;
+    passthru = {
+      inherit
+        commonArgs
+        packagingArgs
+        cargoSrc
+        bundleSrc
+        ;
     };
   }
 )
