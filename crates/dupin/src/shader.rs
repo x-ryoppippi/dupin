@@ -74,7 +74,8 @@ pub fn install_example(name: &str) -> std::io::Result<Backdrop> {
         .ok_or_else(|| std::io::Error::other(format!("no example named {name}")))?;
     let pick = example_pick(name);
     let path = resolve(&pick);
-    if path.exists() {
+    // Whatever is there, a broken link included, is the user's; the panel reports one that can't be read.
+    if path.symlink_metadata().is_ok() {
         return Ok(Backdrop::File(pick));
     }
     if let Some(dir) = path.parent() {
