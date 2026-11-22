@@ -19,7 +19,6 @@ in
     {
       checks = {
         inherit dupin;
-        blacksmith = config.packages.blacksmith;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = pkgs.rustPlatform.buildRustPackage (

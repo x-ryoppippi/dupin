@@ -23,7 +23,7 @@ cargo run -p dupin-mac --example search -- in invoice # a provider from the term
 ## Remote development with Testbox
 
 The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
-`testbox-dev.yml` workflow warms the app and test builds on a disposable Apple
+`testbox-dev.yml` workflow compiles native test dependencies on a disposable Apple
 silicon runner, then keeps it available for commands. It follows ccusage's
 Testbox setup and uses the same macOS runner and Nix setup as CI.
 
@@ -35,7 +35,9 @@ blacksmith auth status
 blacksmith --org <account> testbox warmup .github/workflows/testbox-dev.yml \
   --ref <pushed-branch> --job dev --idle-timeout 15
 blacksmith --org <account> testbox run --id <id> \
-  'nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.dupin'
+  'nix develop --command cargo clippy --workspace --all-targets -- -D warnings'
+blacksmith --org <account> testbox run --id <id> \
+  'nix develop --command cargo test --workspace'
 blacksmith --org <account> testbox stop --id <id>
 ```
 
@@ -46,15 +48,14 @@ that Git does not ignore. Ignored build directories stay on the runner. Check
 which files will be exported before the first run; a Git-ignored file is not
 evidence that every other local file is safe to send.
 
-The box holds its own application, configuration and build outputs. Do not use a
-shared box to drive the user's local app. Native E2E still needs agent-desktop
-and the disposable runner's existing accessibility, automation and screen
-recording grants, as described in the E2E action. Download generated evidence
-before stopping the box:
+Use Cargo directly for iteration. Synced new files are present on disk but are
+not added to the remote Git index, so a Git flake build can omit them. Cargo
+reads them directly and reuses the box's ignored `target/` between runs. Push
+new Nix inputs before warming a ref that needs them.
 
-```sh
-blacksmith --org <account> testbox download --id <id> target/e2e/ /tmp/dupin-e2e/
-```
+The box holds its own configuration and build outputs. Native E2E additionally
+needs agent-desktop and the disposable runner's accessibility, automation and
+screen recording grants; this workflow does not configure or verify those.
 
 Stop a box when finished; the idle timeout is a fallback and the workflow has a
 four-hour limit. CLI builds and workflow checks do not prove that remote
@@ -67,7 +68,8 @@ authentication, warmup or native E2E succeeded.
 | `flake.nix`            | Inputs and the flake-parts modules below                                                                                    |
 | `package.nix`          | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg` |
 | `default.nix`          | `package.nix` for non-flake use                                                                                             |
-| `nix/packages.nix`     | `packages.dupin` and `packages.default`                                                                                     |
+| `nix/packages.nix`     | `packages.dupin`, `packages.default` and `packages.blacksmith`                                                              |
+| `nix/blacksmith.nix`   | The pinned Testbox CLI and its SSH/rsync tools                                                                              |
 | `nix/home-manager.nix` | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                 |
 | `nix/checks.nix`       | Clippy and the tests in one debug build                                                                                     |
 | `nix/treefmt.nix`      | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
