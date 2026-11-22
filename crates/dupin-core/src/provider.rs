@@ -10,6 +10,10 @@ use crate::Item;
 /// in batches as they arrive and should return soon after `request.is_cancelled()` turns true.
 pub trait Provider: Send + Sync + 'static {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>));
+    fn search_result(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.search(request, emit);
+        Ok(())
+    }
 }
 
 pub struct Request {
@@ -40,3 +44,6 @@ impl Request {
         self.current.load(Ordering::Acquire) != self.generation
     }
 }
+
+#[derive(Debug)]
+pub struct ProviderError;

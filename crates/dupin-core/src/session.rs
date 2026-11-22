@@ -2,7 +2,7 @@
 //! one is selected. The UI forwards query edits and key intents; the session answers with
 //! effects for the UI and platform layers to carry out.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use crate::searcher::Delivery;
 use crate::{Action, CommandId, CommandRegistry, History, Item};
@@ -68,12 +68,18 @@ pub enum Results {
 pub struct Session {
     commands: CommandRegistry,
     command: CommandId,
+    explicit: bool,
     query: String,
     items: Vec<Item>,
+    origins: Vec<CommandId>,
+    providers: BTreeMap<CommandId, ProviderState>,
+    active_order: Vec<CommandId>,
+    active_pin: Option<CommandId>,
+    active_limit: usize,
     selected: usize,
     generation: u64,
     results: Results,
-    refresh_selection: Option<String>,
+    refresh_selection: Option<(CommandId, String)>,
     history: History,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
@@ -81,6 +87,21 @@ pub struct Session {
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+}
+
+#[derive(Debug)]
+struct ProviderState {
+    items: Vec<Item>,
+    phase: ProviderPhase,
+    limit: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ProviderPhase {
+    Pending,
+    Done,
+    Failed,
+    Expired,
 }
 
 fn unix_now() -> u64 {
@@ -96,8 +117,14 @@ impl Session {
         Ok(Session {
             commands,
             command,
+            explicit: false,
             query: String::new(),
             items: Vec::new(),
+            origins: Vec::new(),
+            providers: BTreeMap::new(),
+            active_order: Vec::new(),
+            active_pin: None,
+            active_limit: 0,
             selected: 0,
             generation: 0,
             results: Results::Idle,
@@ -166,9 +193,9 @@ impl Session {
         self.actionable_items()
             .get(self.selected)
             .filter(|item| !item.actions.is_empty())
-            .map(|item| {
+            .map(|_| {
                 vec![Effect::ShowActions {
-                    id: item.id.clone(),
+                    id: self.result_key(self.selected),
                     generation: self.generation,
                 }]
             })
@@ -190,7 +217,9 @@ impl Session {
         let Some(item) = self
             .actionable_items()
             .iter()
-            .find(|item| item.id == item_id)
+            .enumerate()
+            .find(|(i, item)| item.id == item_id && self.origins[*i] == self.command)
+            .map(|(_, item)| item)
             .cloned()
         else {
             return Vec::new();
@@ -218,10 +247,16 @@ impl Session {
 
     /// Select the result with this id, as a click on its row does. False when it's gone.
     pub fn select_id(&mut self, id: &str) -> bool {
-        let Some(i) = self.items.iter().position(|item| item.id == id) else {
+        let Some(i) = self
+            .items
+            .iter()
+            .enumerate()
+            .position(|(i, item)| item.id == id && self.origins[i] == self.command)
+        else {
             return false;
         };
         self.selected = i;
+        self.refresh_selection = None;
         true
     }
 
@@ -278,7 +313,9 @@ impl Session {
 
     /// Search the current query again after a provider's underlying data changes.
     pub fn refresh(&mut self) -> Vec<Effect> {
-        let selected = self.selected_item().map(|item| item.id.clone());
+        let selected = self
+            .selected_item()
+            .map(|item| (self.origins[self.selected].clone(), item.id.clone()));
         let effects = self.search();
         self.refresh_selection = selected;
         effects
@@ -303,13 +340,16 @@ impl Session {
                 effects
             }
             Intent::Backspace if empty && self.command != *self.commands.default() => {
-                self.switch(self.commands.default().clone())
+                let effects = self.switch(self.commands.default().clone());
+                self.explicit = false;
+                effects
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
             Intent::Up if empty || self.recalled.is_some() => self.recall(true),
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
+                self.refresh_selection = None;
                 let n = self.items.len();
                 if n == 0 {
                     return Some(Vec::new());
@@ -347,39 +387,138 @@ impl Session {
         })
     }
 
-    /// A provider's answer. Returns whether anything visible changed.
-    pub fn deliver(&mut self, delivery: Delivery) -> bool {
-        if delivery.generation() != self.generation {
+    pub fn provider_spec(&self, id: &CommandId) -> Option<&crate::CommandSpec> {
+        self.commands.command(id)
+    }
+    pub fn provider_ids(&self) -> Vec<CommandId> {
+        if self.explicit {
+            vec![self.command.clone()]
+        } else {
+            self.commands.providers(&self.command)
+        }
+    }
+    pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
+        self.providers.iter().filter_map(|(id, state)| match state.phase {
+            ProviderPhase::Failed => Some((id, "Provider failed")),
+            ProviderPhase::Expired => Some((id, "Provider deadline exceeded")),
+            _ => None,
+        })
+    }
+    pub fn pending(&self, origin: &CommandId, generation: u64) -> bool {
+        generation == self.generation
+            && self
+                .providers
+                .get(origin)
+                .is_some_and(|s| s.phase == ProviderPhase::Pending)
+    }
+    pub fn icon_key(&self, index: usize) -> String {
+        format!("{}:{}", self.origins[index], self.items[index].id)
+    }
+    pub fn result_key(&self, index: usize) -> String {
+        format!(
+            "{}:{}:{}",
+            self.generation, self.origins[index], self.items[index].id
+        )
+    }
+    pub fn select_key(&mut self, key: &str) -> bool {
+        if matches!(self.results, Results::Searching { replaced: false }) {
             return false;
         }
-        match (delivery, self.results) {
-            (Delivery::Batch { items, .. }, Results::Searching { replaced: false }) => {
-                self.items = items;
-                self.history.rerank(&mut self.items, &self.query, (self.clock)());
-                self.selected = 0;
-                if let Some(id) = self.refresh_selection.take() {
-                    self.select_id(&id);
+        if let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) {
+            self.selected = index;
+            self.refresh_selection = None;
+            true
+        } else {
+            false
+        }
+    }
+    pub fn run_key_action(&mut self, key: &str, action_id: &str) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        let Some(action) = item.action(action_id).cloned() else {
+            return Vec::new();
+        };
+        self.activate(&item, action)
+    }
+    pub fn deliver(&mut self, delivery: Delivery) -> bool {
+        self.deliver_from(self.command.clone(), delivery)
+    }
+    pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {
+        if !self.pending(&origin, delivery.generation()) {
+            return false;
+        }
+        let selected = if matches!(self.results, Results::Searching { replaced: true }) {
+            self.items
+                .get(self.selected)
+                .map(|item| (self.origins[self.selected].clone(), item.id.clone()))
+        } else {
+            None
+        };
+        let state = self.providers.get_mut(&origin).unwrap();
+        let limit = state.limit;
+        match delivery {
+            Delivery::Batch { items, .. } => {
+                for item in items {
+                    if state.items.len() >= limit {
+                        break;
+                    }
+                    if !state.items.iter().any(|old| old.id == item.id) {
+                        state.items.push(item);
+                    }
                 }
-                self.results = Results::Searching { replaced: true };
+                self.history.rerank(&mut state.items, &self.query, (self.clock)());
             }
-            (Delivery::Batch { items, .. }, Results::Searching { replaced: true }) => {
-                // Keep the selection on the same item while the list reorders.
-                let selected = self.selected_item().map(|item| item.id.clone());
-                self.items.extend(items);
-                self.history.rerank(&mut self.items, &self.query, (self.clock)());
-                if let Some(id) = selected {
-                    self.select_id(&id);
+            Delivery::Done { .. } => state.phase = ProviderPhase::Done,
+            Delivery::Failed { .. } => {
+                state.phase = ProviderPhase::Failed;
+                state.items.clear();
+            }
+            Delivery::Expired { .. } => {
+                state.phase = ProviderPhase::Expired;
+                state.items.clear();
+            }
+        }
+        let any_items = self.providers.values().any(|s| !s.items.is_empty());
+        let pending = self.providers.values().any(|s| s.phase == ProviderPhase::Pending);
+        if any_items || !pending || matches!(self.results, Results::Searching { replaced: true }) {
+            self.items.clear();
+            self.origins.clear();
+            let mut order = self.active_order.clone();
+            if let Some(pin) = &self.active_pin {
+                order.sort_by_key(|id| id != pin);
+            }
+            for id in order {
+                let state = &self.providers[&id];
+                let count = if self.active_pin.as_ref() == Some(&id) {
+                    1
+                } else {
+                    state.items.len()
+                };
+                for item in state.items.iter().take(count) {
+                    if self.items.len() >= self.active_limit {
+                        break;
+                    }
+                    self.items.push(item.clone());
+                    self.origins.push(id.clone());
                 }
             }
-            (Delivery::Done { .. }, Results::Searching { replaced }) => {
-                if !replaced {
-                    self.items.clear();
-                    self.selected = 0;
-                }
-                self.results = Results::Done;
+            self.selected = 0;
+            if let Some((origin, id)) = self.refresh_selection.clone().or(selected)
+                && let Some(i) = self
+                    .items
+                    .iter()
+                    .enumerate()
+                    .position(|(i, item)| item.id == id && self.origins[i] == origin)
+            {
+                self.selected = i;
             }
-            // Late answers for a search that already finished or was abandoned.
-            (_, Results::Idle | Results::Done) => return false,
+            self.results = if pending {
+                Results::Searching { replaced: true }
+            } else {
+                Results::Done
+            };
         }
         true
     }
@@ -392,6 +531,7 @@ impl Session {
         self.before_deletion = None;
         let was_searching = matches!(self.results, Results::Searching { .. });
         self.command = self.commands.default().clone();
+        self.explicit = false;
         self.query.clear();
         self.clear_results();
         if was_searching {
@@ -461,6 +601,7 @@ impl Session {
         self.deleting = false;
         self.before_deletion = None;
         self.command = command;
+        self.explicit = true;
         self.search()
     }
 
@@ -480,17 +621,39 @@ impl Session {
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
-        vec![Effect::Search {
-            command: self.command.clone(),
-            generation: self.generation,
-            query,
-        }]
+        self.active_order = self.provider_ids();
+        self.active_pin = self.commands.pinned().filter(|_| !self.explicit).cloned();
+        self.active_limit = self.command().result_limit;
+        self.providers = self
+            .provider_ids()
+            .into_iter()
+            .map(|id| {
+                (
+                    id.clone(),
+                    ProviderState {
+                        items: Vec::new(),
+                        phase: ProviderPhase::Pending,
+                        limit: self.commands.command(&id).unwrap().result_limit,
+                    },
+                )
+            })
+            .collect();
+        self.provider_ids()
+            .into_iter()
+            .map(|command| Effect::Search {
+                command,
+                generation: self.generation,
+                query: query.clone(),
+            })
+            .collect()
     }
 
     fn clear_results(&mut self) {
         // Bump the generation so answers still in flight are recognized as stale.
         self.generation += 1;
         self.items.clear();
+        self.origins.clear();
+        self.providers.clear();
         self.selected = 0;
         self.results = Results::Idle;
     }

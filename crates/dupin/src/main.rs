@@ -41,6 +41,7 @@ fn main() {
 
     let spec = AppSpec {
         setup: Some(ui::Ui::setup),
+        poll: Some(ui::Ui::poll),
         on_key: Some(ui::Ui::unfocused_key),
         fonts,
         families: FAMILIES,

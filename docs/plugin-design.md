@@ -105,7 +105,7 @@ real calculator guest. Its runtime-independent Text/Detail/Pair view type is now
 shared by launcher items; its guest transport is not yet used by the launcher.
 Internal command registration and routes are implemented. External
 manifest/package registration, runtime integration, plugin grants, capability
-brokerage, production cancellation/deadlines, action invocation and streaming
+brokerage, guest execution cancellation/deadlines, guest action invocation and transport streaming
 still need implementation and review before external plugins run.
 
 ## Views, actions and saved state
@@ -181,3 +181,32 @@ is exercised and reviewed.
 - [Wasmi configuration and limits](https://docs.rs/wasmi/latest/wasmi/struct.Config.html)
 - [Wasmtime resource limits](https://docs.wasmtime.dev/api/wasmtime/runtime/limits/trait.ResourceLimiter.html)
 - [Wasmtime compilation cache](https://docs.wasmtime.dev/examples-fast-compilation.html)
+
+## Concurrent native command queries
+
+The host registry chooses an ordered list of default-query commands and optionally
+one pinned command. The pinned command contributes at most one row. Explicit
+keyword and Space routes invoke only their command. The default registration
+still invokes app search alone; this change ships no calculator or new Settings UI.
+
+Each registered provider has one long-lived worker and one replaceable queued job.
+Native cancellation is cooperative: expiry invalidates the request and results,
+but cannot kill blocked native code. A replacement waits on that provider's worker
+without delaying other providers. Dropping a worker cancels its request, clears
+the mailbox and closes the waiting loop; a running native call must return before
+its thread can exit.
+
+The host binds command identity in each delivery callback. Session keeps separate
+pending, completed, failed and expired state for each origin and generation.
+History ranks within provider groups using the original item IDs. Host row keys
+combine generation, command and local item ID, so equal local action and item IDs
+cannot cross commands. Late batches and stale menu callbacks are rejected.
+
+Command policy supplies a native deadline (30 seconds by default) and a result
+limit. The active route's result limit also caps the combined list. Rune revision
+86b903de exposes Tx::wake_at and AppSpec::poll; the UI uses that existing clock and
+timer, storing only the current generation's deadlines. Superseded and completed
+deadlines are inert. Failures use bounded host messages, separate from valid rows;
+fresh queries and dismissal clear them. These trusted native contracts provide
+neither guest isolation nor capability grants. Resource accounting, suspension,
+Settings controls and runtime enforcement remain future work.

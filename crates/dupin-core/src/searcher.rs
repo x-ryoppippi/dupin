@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex};
+
 use std::thread;
 
 use crate::{Item, Provider, Request};
@@ -10,12 +10,17 @@ use crate::{Item, Provider, Request};
 pub enum Delivery {
     Batch { generation: u64, items: Vec<Item> },
     Done { generation: u64 },
+    Failed { generation: u64 },
+    Expired { generation: u64 },
 }
 
 impl Delivery {
     pub fn generation(&self) -> u64 {
         match self {
-            Delivery::Batch { generation, .. } | Delivery::Done { generation } => *generation,
+            Delivery::Batch { generation, .. }
+            | Delivery::Done { generation }
+            | Delivery::Failed { generation }
+            | Delivery::Expired { generation } => *generation,
         }
     }
 }
@@ -26,13 +31,19 @@ struct Job {
     generation: u64,
 }
 
+#[derive(Default)]
+struct Mailbox {
+    job: Option<Job>,
+    closed: bool,
+}
+
 /// Runs one provider on its own long-lived thread, newest request wins.
 ///
 /// A request supersedes every earlier one: queued ones never start, and a running one sees
 /// `Request::is_cancelled` and its later batches are dropped here before they reach `deliver`.
 /// `deliver` runs on the worker thread; hand its value to the UI thread from there.
 pub struct Searcher {
-    jobs: Sender<Job>,
+    jobs: Arc<(Mutex<Mailbox>, Condvar)>,
     current: Arc<AtomicU64>,
 }
 
@@ -45,7 +56,8 @@ impl Searcher {
         provider: Arc<dyn Provider>,
         deliver: impl Fn(Delivery) + Send + 'static,
     ) -> Searcher {
-        let (jobs, rx) = mpsc::channel();
+        let jobs = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let rx = jobs.clone();
         let current = Arc::new(AtomicU64::new(NONE));
         let worker_current = current.clone();
         thread::Builder::new()
@@ -59,38 +71,65 @@ impl Searcher {
     pub fn search(&self, generation: u64, query: String, limit: usize) {
         debug_assert_ne!(generation, NONE);
         self.current.store(generation, Ordering::Release);
-        let _ = self.jobs.send(Job {
+        self.jobs.0.lock().unwrap().job = Some(Job {
             query,
             limit,
             generation,
         });
+        self.jobs.1.notify_one();
     }
 
     /// Stop the running search and drop queued ones.
     pub fn cancel(&self) {
         self.current.store(NONE, Ordering::Release);
+        self.jobs.0.lock().unwrap().job = None;
     }
 }
 
-fn run(rx: Receiver<Job>, provider: &dyn Provider, current: &Arc<AtomicU64>, deliver: &dyn Fn(Delivery)) {
-    while let Ok(mut job) = rx.recv() {
-        // Requests that piled up while the last search ran: only the newest matters.
-        while let Ok(newer) = rx.try_recv() {
-            job = newer;
-        }
+impl Drop for Searcher {
+    fn drop(&mut self) {
+        self.cancel();
+        self.jobs.0.lock().unwrap().closed = true;
+        self.jobs.1.notify_one();
+    }
+}
+fn run(
+    rx: Arc<(Mutex<Mailbox>, Condvar)>,
+    provider: &dyn Provider,
+    current: &Arc<AtomicU64>,
+    deliver: &dyn Fn(Delivery),
+) {
+    loop {
+        let job = {
+            let mut mailbox = rx.0.lock().unwrap();
+            while mailbox.job.is_none() && !mailbox.closed {
+                mailbox = rx.1.wait(mailbox).unwrap();
+            }
+            if mailbox.closed {
+                return;
+            }
+            mailbox.job.take().unwrap()
+        };
         let is_current = |g: u64| current.load(Ordering::Acquire) == g;
         if !is_current(job.generation) {
             continue;
         }
         let request = Request::new(job.query, job.limit, job.generation, current.clone());
         let generation = job.generation;
-        provider.search(&request, &mut |items| {
+        let mut remaining = job.limit;
+        let outcome = provider.search_result(&request, &mut |mut items| {
+            items.truncate(remaining);
+            remaining -= items.len();
             if !items.is_empty() && is_current(generation) {
                 deliver(Delivery::Batch { generation, items });
             }
         });
         if is_current(generation) {
-            deliver(Delivery::Done { generation });
+            deliver(if outcome.is_ok() {
+                Delivery::Done { generation }
+            } else {
+                Delivery::Failed { generation }
+            });
         }
     }
 }
@@ -101,7 +140,7 @@ mod tests {
 
     use std::path::PathBuf;
     use std::sync::Mutex;
-    use std::sync::mpsc::RecvTimeoutError;
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
     use std::time::Duration;
 
     struct Echo {

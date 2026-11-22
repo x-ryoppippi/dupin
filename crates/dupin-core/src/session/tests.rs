@@ -99,7 +99,7 @@ fn actions_run_the_named_result_even_after_selection_moves() {
     assert_eq!(
         s.intent(Intent::Actions).unwrap(),
         vec![Effect::ShowActions {
-            id: "/x/notes.md".into(),
+            id: s.result_key(0),
             generation
         }]
     );
@@ -405,7 +405,7 @@ fn enter_offers_dictionary_actions_before_launching() {
     assert_eq!(
         s.intent(Intent::Open).unwrap(),
         vec![Effect::ShowActions {
-            id: "dictionary:serendipity".into(),
+            id: s.result_key(0),
             generation
         }]
     );

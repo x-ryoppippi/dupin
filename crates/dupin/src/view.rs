@@ -67,6 +67,20 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             ),
         );
     }
+    for (origin, failure) in s.session.failures() {
+        panel = panel.child(
+            row()
+                .key(format!("failure-{origin}"))
+                .w_full()
+                .px(18.0)
+                .py(8.0)
+                .child(
+                    text(format!("{origin}: {failure}"))
+                        .font(type_::BODY)
+                        .color(t.text_secondary),
+                ),
+        );
+    }
     let items = s.session.items();
     if !items.is_empty() {
         panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
@@ -144,7 +158,7 @@ fn hint(s: &Ui) -> Option<&str> {
     let presentation = &s.session.command().presentation;
     if s.session.query().trim().is_empty() {
         presentation.empty_hint.as_deref()
-    } else if s.session.results() == Results::Done {
+    } else if s.session.results() == Results::Done && s.session.failures().next().is_none() {
         presentation.no_results_hint.as_deref()
     } else {
         None
@@ -157,9 +171,9 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
             .iter()
             .enumerate()
             .map(|(index, item)| match &item.view {
-                View::Text { .. } => result_row(s, item, index == s.session.selected(), t, accent),
+                View::Text { .. } => result_row(s, item, index, index == s.session.selected(), t, accent),
                 View::Detail { .. } | View::Pair { .. } => {
-                    content_card(item, index == s.session.selected(), t, accent)
+                    content_card(s, item, index, index == s.session.selected(), t, accent)
                 }
             })
             .collect::<Vec<_>>();
@@ -179,7 +193,7 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
     let rows: Vec<El> = items
         .iter()
         .enumerate()
-        .map(|(i, item)| result_row(s, item, i == selected, t, accent))
+        .map(|(i, item)| result_row(s, item, i, i == selected, t, accent))
         .collect();
     col().key("results").w_full().py(LIST_PAD).child(
         col()
@@ -199,8 +213,8 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
     )
 }
 
-fn content_card(item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
-    let id = item.id.clone();
+fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accent: Color) -> El {
+    let id = s.session.result_key(index);
     let mut card = col()
         .w_full()
         .px(22.0)
@@ -239,7 +253,7 @@ fn content_card(item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
     }
     let body = match &item.view {
         View::Detail { body, .. } => col()
-            .key(format!("{}-body", row_key(&item.id)))
+            .key(format!("{}-body", row_key(&s.session.result_key(index))))
             .w_full()
             .shrink()
             .min_h(20.0)
@@ -247,7 +261,7 @@ fn content_card(item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
             .scroll(ScrollSpec { stick_bottom: false })
             .child(detail_body(&item.id, body, t)),
         View::Pair { source, result } => row()
-            .key(format!("{}-pair", row_key(&item.id)))
+            .key(format!("{}-pair", row_key(&s.session.result_key(index))))
             .w_full()
             .gap(16.0)
             .center_y()
@@ -262,7 +276,7 @@ fn content_card(item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
         View::Text { .. } => unreachable!("text row"),
     };
     col()
-        .key(row_key(&item.id))
+        .key(row_key(&s.session.result_key(index)))
         .w_full()
         .px(LIST_PAD)
         .py(LIST_PAD)
@@ -318,7 +332,7 @@ fn detail_body(id: &str, body: &str, t: &tok::Theme) -> El {
         }))
 }
 
-fn result_row(s: &Ui, item: &Item, on: bool, t: &tok::Theme, accent: Color) -> El {
+fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accent: Color) -> El {
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
@@ -327,33 +341,38 @@ fn result_row(s: &Ui, item: &Item, on: bool, t: &tok::Theme, accent: Color) -> E
     } else {
         (t.text, t.text_secondary)
     };
-    let icon = match s.icons.get(&item.id) {
+    let icon = match s.icons.get(&s.session.icon_key(index)) {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
         None => el().size(ICON_SIZE, ICON_SIZE),
     };
-    let id = item.id.clone();
+    let id = s.session.result_key(index);
     // Rows of a virtual list keep their padding inside, not in gaps between them.
-    row().key(row_key(&item.id)).w_full().h(ROW_H).px(LIST_PAD).child(
-        row()
-            .w_full()
-            .h_full()
-            .px(10.0)
-            .gap(12.0)
-            .radius(8.0)
-            .center_y()
-            .fill(if on { accent } else { Color::TRANSPARENT })
-            .hover(if on { accent } else { t.hover })
-            .child(icon)
-            .child(
-                col()
-                    .grow(1.0)
-                    .min_w(0.0)
-                    .gap(2.0)
-                    .child(title(item, ink, if on { Color::WHITE } else { accent }))
-                    .child(text(subtitle.as_str()).font(type_::LABEL).color(sub).truncate()),
-            )
-            .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
-    )
+    row()
+        .key(row_key(&s.session.result_key(index)))
+        .w_full()
+        .h(ROW_H)
+        .px(LIST_PAD)
+        .child(
+            row()
+                .w_full()
+                .h_full()
+                .px(10.0)
+                .gap(12.0)
+                .radius(8.0)
+                .center_y()
+                .fill(if on { accent } else { Color::TRANSPARENT })
+                .hover(if on { accent } else { t.hover })
+                .child(icon)
+                .child(
+                    col()
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .gap(2.0)
+                        .child(title(item, ink, if on { Color::WHITE } else { accent }))
+                        .child(text(subtitle.as_str()).font(type_::LABEL).color(sub).truncate()),
+                )
+                .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+        )
 }
 
 /// The title with the characters the query matched in bold.

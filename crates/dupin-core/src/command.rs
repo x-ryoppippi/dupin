@@ -63,6 +63,7 @@ pub struct CommandSpec {
     pub id: CommandId,
     pub result_limit: usize,
     pub presentation: QueryPresentation,
+    pub deadline: std::time::Duration,
 }
 
 impl CommandSpec {
@@ -71,6 +72,7 @@ impl CommandSpec {
             id,
             result_limit,
             presentation,
+            deadline: std::time::Duration::from_secs(30),
         }
     }
 }
@@ -120,16 +122,54 @@ pub struct CommandRegistry {
     space_on_empty: Option<CommandId>,
     commands: HashMap<CommandId, CommandSpec>,
     keywords: HashMap<String, CommandId>,
+    defaults: Vec<CommandId>,
+    pinned: Option<CommandId>,
 }
 
 impl CommandRegistry {
     pub fn new(default: CommandId, space_on_empty: Option<CommandId>) -> Self {
         Self {
+            defaults: vec![default.clone()],
+            pinned: None,
             default,
             space_on_empty,
             commands: HashMap::new(),
             keywords: HashMap::new(),
         }
+    }
+
+    pub fn set_default_providers(
+        &mut self,
+        providers: Vec<CommandId>,
+        pinned: Option<CommandId>,
+    ) -> Result<(), CommandError> {
+        if providers.is_empty() {
+            return Err(CommandError::MissingDefault(self.default.clone()));
+        }
+        for id in providers.iter().chain(pinned.iter()) {
+            if !self.contains(id) || !providers.contains(id) {
+                return Err(CommandError::UnknownCommand(id.clone()));
+            }
+        }
+        let mut unique = std::collections::HashSet::new();
+        self.defaults = providers
+            .into_iter()
+            .filter(|id| unique.insert(id.clone()))
+            .collect();
+        self.pinned = pinned;
+        Ok(())
+    }
+
+    pub fn providers(&self, command: &CommandId) -> Vec<CommandId> {
+        if command == &self.default {
+            self.defaults.clone()
+        } else {
+            vec![command.clone()]
+        }
+    }
+
+    pub fn pinned(&self) -> Option<&CommandId> {
+        self.pinned.as_ref()
     }
 
     pub fn register(&mut self, command: CommandSpec) -> Result<(), CommandError> {

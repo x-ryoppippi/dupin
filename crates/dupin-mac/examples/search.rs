@@ -30,7 +30,7 @@ fn main() {
                     println!("{}\t{:?}", item.display_title(), item.view);
                 }
             }
-            Delivery::Done { .. } => {
+            Delivery::Done { .. } | Delivery::Failed { .. } | Delivery::Expired { .. } => {
                 println!("-- done at {:?}", start.elapsed());
                 break;
             }
