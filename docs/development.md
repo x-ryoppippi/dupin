@@ -62,13 +62,17 @@ Automatic attachment uploads need the optional repository secret
 with write access to the repository. The ordinary `GITHUB_TOKEN` can post the
 comment but currently cannot upload user attachments. No upload credential is
 created automatically. Without it, or if the upload fails, the comment retains
-the media download and logs.
+the media download and logs. Inline uploads are limited to runs whose source
+repository is this repository; fork PRs keep the download link rather than
+publishing contributor-controlled files under the upload account.
 
 The privileged reporting job checks out only the default branch and never runs
 PR code. Its uploader accepts top-level regular media files with safe names and
 matching signatures, up to 50 files, 10 MB per image or 100 MB per video; GitHub
 may impose a lower account limit. Uploaded URLs must belong to GitHub's
-attachment service. The raw upload protocol follows GitHub CLI 2.104.0 and is
+attachment service. Optional setup, download and upload operations have bounded
+timeouts so they leave time to post the result and fallback links. The raw
+upload protocol follows GitHub CLI 2.104.0 and is
 not a documented REST contract, so compatibility failures use the same fallback.
 
 For local inspection, the uploader defaults to a JSON manifest without network

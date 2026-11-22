@@ -54,7 +54,6 @@ export def inspect-assets [directory: path]: nothing -> table {
 
     let assets = ls --all --long $root
     | where type == 'file'
-    | where {|entry| ($entry.name | path type) == 'file'}
     | each {|entry|
         let name = $entry.name | path basename
         let extension = $name | path parse | get extension | str lowercase
@@ -93,7 +92,7 @@ export def inspect-assets [directory: path]: nothing -> table {
             error make {msg: $'E2E ($asset.kind) file exceeds ($max_size): ($asset.name)'}
         }
 
-        let data = open --raw $asset.path | into binary
+        let data = open --raw $asset.path | bytes at 0..11 | into binary
         if not (valid-signature $data $asset.extension) {
             error make {msg: $'E2E media signature does not match ($asset.name)'}
         }
@@ -120,10 +119,6 @@ def repository-id [repository: string]: nothing -> int {
 }
 
 def upload-one [repo_id: int, asset: record]: nothing -> string {
-    if ($asset.path | path type) != 'file' {
-        error make {msg: $'E2E media file changed during upload: ($asset.name)'}
-    }
-
     let result = ^gh api --hostname github.com 'https://uploads.github.com/user-attachments/assets' --method POST --input $asset.path --header 'Content-Type: application/octet-stream' --header 'Accept: application/vnd.github+json' --field $'name=($asset.name)' --field $'content_type=($asset.mime_type)' --field $'repository_id=($repo_id)' | complete
 
     if $result.exit_code != 0 {

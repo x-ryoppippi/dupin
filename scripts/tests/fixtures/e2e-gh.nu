@@ -16,6 +16,7 @@ def --wrapped main [...args: string] {
         return
     }
     if ($request | str contains '--jq .id') {
+        if $env.GH_TOKEN != 'fixture-upload-token' { exit 25 }
         print '123'
         return
     }

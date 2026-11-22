@@ -64,6 +64,16 @@ let failure = try {
             legacy: false
             stale: true
         }
+        {
+            name: fork
+            event: pull_request
+            token: true
+            failed: false
+            existing: false
+            legacy: false
+            stale: false
+            fork: true
+        }
     ]
     for case in $cases {
         let work = $root | path join $case.name
@@ -88,6 +98,7 @@ let failure = try {
             SHA: '1234567890123456789012345678901234567890'
             HEAD_OWNER: owner
             HEAD_BRANCH: feature
+            SOURCE_REPO: (if ($case.fork? | default false) { 'contributor/fork' } else { 'owner/repo' })
             RUNNER_TEMP: $work
         } { ^bash --noprofile --norc $report | complete }
         if $run.exit_code != 0 { print --stderr $run.stderr }
@@ -101,7 +112,7 @@ let failure = try {
             assert ($body | str starts-with '<!-- dupin-e2e -->') 'report marker must survive'
             assert ($body | str contains 'E2E passed on 1234567') 'report must preserve the tested commit and result'
             assert ($body | str contains '[Log and detailed evidence]') 'report must retain the logs'
-            if $case.token and not $case.failed {
+            if $case.token and not $case.failed and not ($case.fork? | default false) {
                 assert (
                     $body
                     | str contains '![E2E frame.png](https://github.com/user-attachments/assets/'
@@ -115,6 +126,9 @@ let failure = try {
                 assert ($body | str contains '[Download media]') 'upload failure must retain downloadable evidence'
                 if not $case.token {
                     assert (not ($commands | str contains 'uploads.github.com')) 'missing credentials must not attempt upload'
+                }
+                if ($case.fork? | default false) {
+                    assert (not ($commands | str contains 'uploads.github.com')) 'fork media must not be published under the upload account'
                 }
             }
             let route = if $case.event == 'pull_request' {
