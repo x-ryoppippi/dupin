@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -139,6 +138,7 @@ struct Worker<F> {
     watcher_roots: Option<Vec<PathBuf>>,
     watch_problem: Option<String>,
     save_problem: Option<String>,
+    uncommitted: Option<(Config, Config)>,
     last_processed_revision: u64,
     last_emitted: Option<Emitted>,
     activated: bool,
@@ -158,6 +158,7 @@ where
             watcher_roots: None,
             watch_problem: None,
             save_problem: None,
+            uncommitted: None,
             last_processed_revision: 0,
             last_emitted: None,
             activated: false,
@@ -188,7 +189,7 @@ where
     }
 
     fn process_saves(&mut self, saves: Vec<Save>) {
-        let saves: Vec<_> = saves
+        let mut saves: Vec<_> = saves
             .into_iter()
             .filter(|save| save.revision > self.last_processed_revision)
             .collect();
@@ -196,6 +197,12 @@ where
             return;
         };
         self.last_processed_revision = latest_revision;
+
+        if let Some((base, desired)) = self.uncommitted.take()
+            && saves[0].base == desired
+        {
+            saves[0].base = base;
+        }
 
         let Some(path) = &self.path else {
             return;
@@ -214,6 +221,9 @@ where
             });
 
         self.save_problem = saved.err();
+        if self.save_problem.is_some() {
+            self.uncommitted = Some((saves[0].base.clone(), saves.last().unwrap().desired.clone()));
+        }
         self.emit_snapshot(latest_revision);
     }
 
@@ -259,7 +269,11 @@ where
         };
 
         let requested = roots(path);
-        if !rebuild && self.watcher.is_some() && self.watcher_roots.as_ref() == Some(&requested.paths) {
+        if !rebuild
+            && self.watch_problem.is_none()
+            && self.watcher.is_some()
+            && self.watcher_roots.as_ref() == Some(&requested.paths)
+        {
             self.watch_problem = requested.problem;
             return;
         }
@@ -335,7 +349,7 @@ fn add_parent(path: &Path, roots: &mut Vec<PathBuf>) {
 
 fn read(path: &Path) -> (Option<String>, Result<Config, String>, bool) {
     let read_only = !super::writable(path);
-    match fs::read_to_string(path) {
+    match super::read_source(path) {
         Ok(source) => {
             let result = Config::parse(&source).map_err(|error| parse_problem(&source, &error));
             (Some(source), result, read_only)
@@ -381,7 +395,7 @@ fn merge(base: &Config, desired: &Config, current: &Config) -> Result<Config, St
 }
 
 fn ensure_unchanged(path: &Path, original: Option<&str>) -> Result<(), String> {
-    match fs::read_to_string(path) {
+    match super::read_source(path) {
         Ok(source) if original == Some(source.as_str()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound && original.is_none() => Ok(()),
         _ => Err("config.toml changed on disk while saving; no changes were written".into()),
@@ -407,6 +421,7 @@ fn parse_problem(source: &str, error: &toml::de::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
@@ -620,6 +635,52 @@ mod tests {
         assert!(error.contains("conflicting setting"));
         assert!(!error.contains("meaning"));
         assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+
+    #[test]
+    fn a_later_edit_can_replace_an_uncommitted_save_without_a_false_conflict() {
+        let temp = TempDir::new();
+        let path = temp.path().join("config.toml");
+        let base = Config::default();
+        fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
+        let blocked = path.with_extension("toml.tmp");
+        fs::create_dir(&blocked).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let (updates, received) = mpsc::channel();
+        let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+            updates.send(update).unwrap();
+        });
+        let first = Config {
+            file_limit: 50,
+            ..base.clone()
+        };
+        worker.process_saves(vec![Save {
+            revision: 1,
+            base,
+            desired: first.clone(),
+        }]);
+        assert!(
+            received
+                .try_recv()
+                .unwrap()
+                .save_problem
+                .unwrap()
+                .contains("could not save")
+        );
+        fs::remove_dir(&blocked).unwrap();
+        let latest = Config {
+            file_limit: 30,
+            ..first.clone()
+        };
+        worker.process_saves(vec![Save {
+            revision: 2,
+            base: first,
+            desired: latest.clone(),
+        }]);
+        let saved = received.try_recv().unwrap();
+        assert!(saved.save_problem.is_none());
+        assert_eq!(saved.result.unwrap(), latest);
+        assert_eq!(Config::parse(&fs::read_to_string(path).unwrap()).unwrap(), latest);
     }
 
     #[test]

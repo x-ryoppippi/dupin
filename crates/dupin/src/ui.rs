@@ -45,6 +45,7 @@ pub struct Ui {
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
+    acknowledged_config: Config,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -122,6 +123,7 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
@@ -177,7 +179,12 @@ impl Ui {
             return;
         }
         let previous = self.configuration.values.borrow().clone();
-        let accepted = update.result.and_then(|config| {
+        let (snapshot, read_problem) = reconcile_snapshot(
+            update.result,
+            &self.acknowledged_config,
+            update.save_problem.is_some(),
+        );
+        let accepted = snapshot.and_then(|config| {
             accept_config(config, &previous, |shortcut| {
                 if self.configuration.hotkey.is_installed(shortcut) {
                     Ok(())
@@ -188,6 +195,7 @@ impl Ui {
         });
         let problem = match accepted {
             Ok(config) => {
+                self.acknowledged_config = config.clone();
                 if *self.configuration.values.borrow() != config {
                     *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config, tx);
@@ -196,7 +204,7 @@ impl Ui {
             }
             Err(error) => Some(error),
         };
-        let problems: Vec<_> = [problem, update.save_problem, update.watch_problem]
+        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
             .into_iter()
             .flatten()
             .collect();
@@ -603,6 +611,17 @@ fn backdrop_source(pick: &Backdrop) -> crate::shader::Source {
     source
 }
 
+fn reconcile_snapshot(
+    snapshot: Result<Config, String>,
+    acknowledged: &Config,
+    save_failed: bool,
+) -> (Result<Config, String>, Option<String>) {
+    match snapshot {
+        Err(error) if save_failed => (Ok(acknowledged.clone()), Some(error)),
+        snapshot => (snapshot, None),
+    }
+}
+
 fn accept_config(
     config: Config,
     previous: &Config,
@@ -654,6 +673,27 @@ mod deadline_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+
+    #[test]
+    fn a_failed_save_and_invalid_snapshot_restore_acknowledged_values() {
+        let acknowledged = Config::default();
+        let (restored, problem) = reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, true);
+        assert_eq!(restored, Ok(acknowledged.clone()));
+        assert_eq!(problem.as_deref(), Some("invalid TOML"));
+        let disk = Config {
+            file_limit: 30,
+            ..acknowledged.clone()
+        };
+        assert_eq!(
+            reconcile_snapshot(Ok(disk.clone()), &acknowledged, true),
+            (Ok(disk), None)
+        );
+        assert!(
+            reconcile_snapshot(Err("invalid TOML".into()), &acknowledged, false)
+                .0
+                .is_err()
+        );
+    }
 
     #[test]
     fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {

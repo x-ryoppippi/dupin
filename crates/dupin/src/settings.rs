@@ -94,7 +94,7 @@ pub fn load() -> (Config, Option<String>) {
     let Some(path) = path() else {
         return (Config::default(), None);
     };
-    let src = match std::fs::read_to_string(&path) {
+    let src = match read_source(&path) {
         Ok(src) => src,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Config::default(), None),
         Err(e) => {
@@ -112,6 +112,25 @@ pub fn load() -> (Config, Option<String>) {
             e.message()
         )),
     }
+}
+
+fn read_source(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config.toml must be a regular file",
+        ));
+    }
+    let mut source = String::new();
+    file.read_to_string(&mut source)?;
+    Ok(source)
 }
 
 fn problem(message: String) -> (Config, Option<String>) {
@@ -146,6 +165,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn reads_only_regular_files_including_through_links() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = scratch("regular-source");
+        let real = dir.join("regular.toml");
+        std::fs::write(&real, "file_limit = 30\n").unwrap();
+        let link = dir.join("config.toml");
+        symlink(&real, &link).unwrap();
+        assert_eq!(read_source(&link).unwrap(), "file_limit = 30\n");
+        assert!(read_source(&dir).is_err());
+        let fifo = dir.join("pipe");
+        let name = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            read_source(&fifo).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidInput
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
