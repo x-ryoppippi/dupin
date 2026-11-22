@@ -7,4 +7,11 @@ extend-ignore-re = [
 
 [files]
 ignore-hidden = false
-extend-exclude = [".git", "target", "Cargo.lock", "flake.lock", "assets"]
+extend-exclude = [
+	".git",
+	"target",
+	"Cargo.lock",
+	"flake.lock",
+	"assets",
+	"experiments/cargo-cache/results/*.json",
+]
