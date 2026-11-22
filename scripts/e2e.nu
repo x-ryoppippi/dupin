@@ -230,6 +230,57 @@ def scenario [out: path] {
     )
     poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
+
+    ad $out close-settings press cmd+w | ignore
+    ad $out settings-search-hotkey press alt+space | ignore
+    (poll
+        $out
+        settings-search-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "dupin settings"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out
+        settings-search-query
+        {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    (poll
+        $out
+        settings-search-result
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Dupin Settings Preferences'
+        --exact
+        --first
+    )
+    let log = $out | path join dupin.log
+    let requests_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings requested ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings panel closed ' } | length
+    ad $out open-settings-result press return | ignore
+    wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
+    wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
+    poll $out settings-from-result $settings list-windows --app Dupin
+    snap $out settings-from-result
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.

@@ -434,6 +434,11 @@ impl Ui {
         self.hide(tx);
     }
 
+    fn prepare_settings(&mut self) {
+        crate::trace::settings("requested");
+        self.settings_after_close = true;
+    }
+
     pub fn closed(&mut self, _: &mut Tx) {
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
@@ -511,8 +516,7 @@ impl Ui {
                 return true;
             }
             Key::Command(',') => {
-                crate::trace::settings("requested");
-                self.settings_after_close = true;
+                self.prepare_settings();
                 self.dismiss(tx);
                 return true;
             }
@@ -699,6 +703,7 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
+                    dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
                         let shown = self
                             .quick_look

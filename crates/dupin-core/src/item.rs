@@ -14,6 +14,8 @@ pub enum Action {
     Copy(String),
     /// Show the path in the platform's native preview UI.
     Preview(PathBuf),
+    /// Open the host application's preferences.
+    OpenPreferences,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

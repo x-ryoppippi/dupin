@@ -39,6 +39,12 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 
 When an app matches through one of those other names, the name shows before its folder in the result.
 
+## Settings
+
+Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`, alongside apps. Enter opens the pane in System Settings. Dupin discovers panes that the installed macOS declares as settings extensions and explicitly allows opening through its settings URL scheme; availability and names follow that macOS version. Searching does not open or change settings.
+
+Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,.
+
 ## Web searches
 
 Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too. Select it and press Tab to add a space before typing the query.

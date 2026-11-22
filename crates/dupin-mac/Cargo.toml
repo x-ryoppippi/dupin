@@ -29,6 +29,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSRunLoop",
 	"NSString",
 	"NSURL",
+	"NSValue",
 ] }
 objc2-app-kit = { workspace = true, features = [
 	"std",
