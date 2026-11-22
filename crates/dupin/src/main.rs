@@ -71,7 +71,8 @@ fn main() {
         families: FAMILIES,
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
-    .windowless();
+    .windowless()
+    .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
