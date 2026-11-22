@@ -19,11 +19,13 @@ in
     {
       checks = {
         inherit dupin;
-        e2e-assets = repoCheck "dupin-e2e-assets" [ pkgs.coreutils pkgs.jq pkgs.bash ] ''
-          nu scripts/tests/e2e-assets.nu
-          nu scripts/tests/e2e-comment.nu
-          nu scripts/tests/e2e-recording.nu
-        '';
+        e2e-assets =
+          repoCheck "dupin-e2e-assets" [ pkgs.coreutils pkgs.jq pkgs.bash pkgs.zip pkgs.unzip ]
+            ''
+              nu scripts/tests/e2e-assets.nu
+              nu scripts/tests/e2e-comment.nu
+              nu scripts/tests/e2e-recording.nu
+            '';
         hawk = pkgs.rustPlatform.buildRustPackage (
           dupin.passthru.commonArgs
           // {
