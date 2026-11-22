@@ -10,11 +10,20 @@ use objc2_foundation::{NSArray, NSString, NSURL};
 pub fn run(action: &Action) -> bool {
     match action {
         Action::Open(path) => open(path),
+        Action::OpenUrl(url) => open_url(url),
         Action::Reveal(path) => {
             reveal(path);
             true
         }
     }
+}
+
+/// Open a URL with its registered handler.
+pub fn open_url(value: &str) -> bool {
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(value)) else {
+        return false;
+    };
+    NSWorkspace::sharedWorkspace().openURL(&url)
 }
 
 /// Open with the default handler: launches an app bundle, opens a document or folder.

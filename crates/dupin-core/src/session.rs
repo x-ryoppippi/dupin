@@ -16,11 +16,12 @@ pub enum Mode {
     /// Spotlight search inside files, entered by typing the keyword `in` and Space (Alfred's
     /// `in`).
     Contents,
+    /// Look up a term in macOS dictionaries, entered by typing `define` and Space.
+    Dictionary,
 }
 
 /// Typed before Space in the apps search, enters [`Mode::Contents`].
 pub const CONTENTS_KEYWORD: &str = "in";
-
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Intent {
@@ -80,6 +81,7 @@ pub struct Session {
     history: History,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
+    dictionary_keywords: Vec<String>,
 }
 
 impl Default for Session {
@@ -97,6 +99,11 @@ fn unix_now() -> u64 {
 impl Session {
     /// A session that ranks with, and learns into, `history`.
     pub fn new(history: History) -> Session {
+        Self::with_dictionary_keywords(history, crate::Config::default().dictionary_keywords)
+    }
+
+    /// A session with configured keywords for macOS Dictionary search.
+    pub fn with_dictionary_keywords(history: History, dictionary_keywords: Vec<String>) -> Session {
         Session {
             mode: Mode::Apps,
             query: String::new(),
@@ -106,7 +113,12 @@ impl Session {
             results: Results::Idle,
             history,
             clock: unix_now,
+            dictionary_keywords,
         }
+    }
+
+    pub fn set_dictionary_keywords(&mut self, dictionary_keywords: Vec<String>) {
+        self.dictionary_keywords = dictionary_keywords;
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -171,7 +183,7 @@ impl Session {
             Intent::Space if empty => match self.mode {
                 Mode::Apps => self.switch(Mode::Files),
                 // A leading space finds nothing in a file search; swallow it.
-                Mode::Files | Mode::Contents => Vec::new(),
+                Mode::Files | Mode::Contents | Mode::Dictionary => Vec::new(),
             },
             Intent::Space if self.mode == Mode::Apps && self.query == CONTENTS_KEYWORD => {
                 self.query.clear();
@@ -179,8 +191,20 @@ impl Session {
                 effects.extend(self.switch(Mode::Contents));
                 effects
             }
+            Intent::Space
+                if self.mode == Mode::Apps
+                    && self
+                        .dictionary_keywords
+                        .iter()
+                        .any(|keyword| keyword == &self.query) =>
+            {
+                self.query.clear();
+                let mut effects = vec![Effect::ClearQuery];
+                effects.extend(self.switch(Mode::Dictionary));
+                effects
+            }
             Intent::Backspace if empty => match self.mode {
-                Mode::Files | Mode::Contents => self.switch(Mode::Apps),
+                Mode::Files | Mode::Contents | Mode::Dictionary => self.switch(Mode::Apps),
                 Mode::Apps => return None,
             },
             Intent::Space | Intent::Backspace => return None,

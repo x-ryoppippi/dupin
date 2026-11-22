@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dupin_core::{
     Backdrop, Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, SpotlightProvider, Target};
+use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -42,6 +42,7 @@ pub struct Ui {
     apps: Searcher,
     files: Searcher,
     contents: Searcher,
+    dictionary: Searcher,
     file_limit: usize,
     saver: crate::store::Saver,
     position: Position,
@@ -76,7 +77,7 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
-            session: Session::new(history),
+            session: Session::with_dictionary_keywords(history, config.dictionary_keywords.clone()),
             saver: crate::store::Saver::spawn(),
             query,
             notice,
@@ -98,6 +99,11 @@ impl Ui {
                 Arc::new(SpotlightProvider::new(Target::Contents)),
                 deliver(me.clone()),
             ),
+            dictionary: Searcher::spawn(
+                "dictionary",
+                Arc::new(DictionaryProvider::default()),
+                deliver(me.clone()),
+            ),
             file_limit: config.file_limit,
             position: config.position,
             input_source: config.input_source,
@@ -114,6 +120,8 @@ impl Ui {
     /// re-register; the rest takes effect from the next summon.
     pub fn apply_config(&mut self, config: &Config) {
         self.file_limit = config.file_limit;
+        self.session
+            .set_dictionary_keywords(config.dictionary_keywords.clone());
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -315,10 +323,10 @@ impl Ui {
                     generation,
                     query,
                 } => {
-                    let limit = if mode == Mode::Apps {
-                        APP_LIMIT
-                    } else {
-                        self.file_limit
+                    let limit = match mode {
+                        Mode::Apps => APP_LIMIT,
+                        Mode::Dictionary => 1,
+                        Mode::Files | Mode::Contents => self.file_limit,
                     };
                     for (m, searcher) in self.searchers() {
                         if m == mode {
@@ -352,11 +360,12 @@ impl Ui {
         }
     }
 
-    fn searchers(&self) -> [(Mode, &Searcher); 3] {
+    fn searchers(&self) -> [(Mode, &Searcher); 4] {
         [
             (Mode::Apps, &self.apps),
             (Mode::Files, &self.files),
             (Mode::Contents, &self.contents),
+            (Mode::Dictionary, &self.dictionary),
         ]
     }
 

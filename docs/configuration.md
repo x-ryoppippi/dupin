@@ -7,6 +7,7 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
+dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -14,6 +15,8 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
 An unknown key or an invalid value makes Dupin fall back to the defaults and say why, in the log and in the panel.
+
+Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. These keywords are read at launch.
 
 ## Updates
 

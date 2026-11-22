@@ -4,6 +4,7 @@
 pub mod apps;
 pub mod bundle;
 mod bundle_names;
+pub mod dictionary;
 pub mod font;
 pub mod input_source;
 pub mod spotlight;
@@ -11,4 +12,5 @@ pub mod window;
 pub mod workspace;
 
 pub use apps::AppsProvider;
+pub use dictionary::DictionaryProvider;
 pub use spotlight::{SpotlightProvider, Target};

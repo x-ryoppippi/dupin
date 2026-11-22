@@ -14,7 +14,7 @@
 > A lightweight, resident launcher for Apple silicon Macs.
 
 - Fuzzy-search and open apps, by any name macOS knows them by
-- Space on an empty query searches files with Spotlight; `in` and Space search inside them
+- Space on an empty query searches files with Spotlight; `in` and Space search inside them; `define` and Space looks up a word in macOS dictionaries
 - A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
 - An optional shader animates behind the panel and reacts to typing; bring your own WGSL, as with Ghostty's custom shaders ([examples](./examples/shaders))
 

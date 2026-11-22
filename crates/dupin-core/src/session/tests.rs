@@ -46,6 +46,69 @@ fn space_on_an_empty_query_enters_file_mode_and_is_consumed() {
 }
 
 #[test]
+fn define_then_space_enters_dictionary_mode_and_searches_the_term() {
+    let mut s = Session::default();
+    s.set_query("define");
+    let effects = s.intent(Intent::Space).unwrap();
+    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.query(), "");
+    assert_eq!(effects, [Effect::ClearQuery, Effect::CancelSearch]);
+
+    let effects = s.set_query("serendipity");
+    assert_eq!(searched(&effects).0, Mode::Dictionary);
+    assert_eq!(searched(&effects).2, "serendipity");
+}
+
+#[test]
+fn configured_dictionary_keywords_are_matched_as_a_list() {
+    let mut s = Session::with_dictionary_keywords(History::default(), vec!["word".into(), "lookup".into()]);
+    s.set_query("lookup");
+    s.intent(Intent::Space);
+    assert_eq!(s.mode(), Mode::Dictionary);
+
+    let mut s = Session::with_dictionary_keywords(History::default(), vec!["lookup".into()]);
+    s.set_query("define");
+    assert_eq!(s.intent(Intent::Space), None);
+    assert_eq!(s.mode(), Mode::Apps);
+}
+
+#[test]
+fn backspace_from_an_empty_dictionary_query_returns_to_apps() {
+    let mut s = Session::default();
+    s.set_query("define");
+    s.intent(Intent::Space);
+    assert_eq!(s.intent(Intent::Backspace), Some(vec![]));
+    assert_eq!(s.mode(), Mode::Apps);
+}
+
+#[test]
+fn enter_opens_the_selected_dictionary_term() {
+    let mut s = Session::default();
+    s.set_query("define");
+    s.intent(Intent::Space);
+    let generation = searched(&s.set_query("serendipity")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![Item {
+            id: "dictionary:serendipity".into(),
+            title: "serendipity".into(),
+            subtitle: "The occurrence of events by chance.".into(),
+            kind: ItemKind::Dictionary,
+            icon: None,
+            matched: Vec::new(),
+            score: None,
+            primary: Action::OpenUrl("dict://serendipity".into()),
+            alternate: None,
+        }],
+    });
+
+    assert_eq!(
+        s.intent(Intent::Open).unwrap()[0],
+        Effect::Run(Action::OpenUrl("dict://serendipity".into()))
+    );
+}
+
+#[test]
 fn space_inside_a_query_is_left_to_the_field() {
     let mut s = Session::default();
     s.set_query("visual");

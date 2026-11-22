@@ -238,6 +238,7 @@ impl Compositor<Ui> for Backdrop {
                 Mode::Apps => 0.0,
                 Mode::Files => 1.0,
                 Mode::Contents => 2.0,
+                Mode::Dictionary => 3.0,
             },
         };
         let (device, queue, size) = (f.device, f.queue, f.size);

@@ -7,12 +7,15 @@ pub enum Action {
     Open(PathBuf),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
+    /// Open a URL with its registered handler.
+    OpenUrl(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemKind {
     Application,
     File,
+    Dictionary,
 }
 
 /// One candidate row, as every provider returns it.

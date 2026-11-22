@@ -20,7 +20,7 @@ Each provider runs on its own long-lived thread behind a `Searcher`. The newest 
 
 ## The session
 
-`Session` is the launcher's state machine. The UI hands it query edits and key intents, and it answers with effects: start or cancel a search, run an action, clear the field, hide the panel, keep the selection on screen. It owns the mode rules (Space on an empty query enters file search, `in` and Space enter content search, Backspace on an empty query goes back to apps) and drops answers from earlier searches by generation.
+`Session` is the launcher's state machine. The UI hands it query edits and key intents, and it answers with effects: start or cancel a search, run an action, clear the field, hide the panel, keep the selection on screen. It owns the mode rules (Space on an empty query enters file search, `in` and Space enter content search, configured dictionary keywords and Space enter Dictionary search, Backspace on an empty query goes back to apps) and drops answers from earlier searches by generation.
 
 Every mode change passes through an empty query, which clears the rows, so the rows on screen always belong to the current mode.
 

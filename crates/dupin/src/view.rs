@@ -101,6 +101,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         Mode::Apps => ("Search apps", None),
         Mode::Files => ("Search files", Some("Files")),
         Mode::Contents => ("Search inside files", Some("In files")),
+        Mode::Dictionary => ("Look up a word", Some("Define")),
     };
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0).lh(30.0))
         .key("query")
@@ -153,12 +154,60 @@ fn hint(s: &Ui) -> Option<&'static str> {
     ) {
         (Mode::Files, true, _) => Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
         (Mode::Contents, true, _) => Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
+        (Mode::Dictionary, true, _) => Some("Type a word  ·  ⌫ back to apps"),
+        (Mode::Dictionary, false, Results::Done) => Some("No definition found"),
         (_, false, Results::Done) => Some("No matches"),
         _ => None,
     }
 }
 
 fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
+    if s.session.mode() == Mode::Dictionary {
+        let Some(item) = items.first() else {
+            return col().key("dictionary-results");
+        };
+        let id = item.id.clone();
+        let selected = s.session.selected() == 0;
+        let (ink, sub) = if selected {
+            (Color::WHITE, Color::WHITE.alpha(0.86))
+        } else {
+            (t.text, t.text_secondary)
+        };
+        return col()
+            .key("dictionary-results")
+            .w_full()
+            .px(LIST_PAD)
+            .py(LIST_PAD)
+            .child(
+                col()
+                    .key(row_key(&item.id))
+                    .w_full()
+                    .px(18.0)
+                    .py(14.0)
+                    .gap(8.0)
+                    .radius(8.0)
+                    .fill(if selected { accent } else { Color::TRANSPARENT })
+                    .hover(if selected { accent } else { t.hover })
+                    .child(title(item, ink, if selected { Color::WHITE } else { accent }))
+                    .child(
+                        col()
+                            .key("dictionary-definition")
+                            .w_full()
+                            .shrink()
+                            .min_h(20.0)
+                            .max_h(280.0)
+                            .scroll(ScrollSpec { stick_bottom: false })
+                            .child(
+                                text(item.subtitle.as_str())
+                                    .w_full()
+                                    .font(type_::BODY.lh(20.0))
+                                    .color(sub)
+                                    .wrap(),
+                            ),
+                    )
+                    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
+            );
+    }
     let shown = items.len().min(VISIBLE_ROWS) as f32;
     let selected = s.session.selected();
     let rows: Vec<El> = items

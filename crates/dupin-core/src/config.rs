@@ -10,6 +10,8 @@ pub struct Config {
     pub hotkey: String,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
+    /// Keywords followed by Space that enter macOS Dictionary search.
+    pub dictionary_keywords: Vec<String>,
     /// Where the panel opens on the display under the pointer.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
@@ -107,6 +109,7 @@ impl Default for Config {
         Config {
             hotkey: "cmd+space".into(),
             file_limit: 200,
+            dictionary_keywords: vec!["define".into(), "d".into()],
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
@@ -152,6 +155,13 @@ mod tests {
             Position::Top
         );
         assert!(Config::parse("position = \"middle\"").is_err());
+    }
+
+    #[test]
+    fn dictionary_keywords_default_and_can_be_configured() {
+        assert_eq!(Config::parse("").unwrap().dictionary_keywords, ["define", "d"]);
+        let config = Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
+        assert_eq!(config.dictionary_keywords, ["word", "lookup"]);
     }
 
     #[test]
