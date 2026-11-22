@@ -218,6 +218,7 @@ impl Previewer {
         };
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
+        panel.makeKeyAndOrderFront(None);
         if !current_controller_is(&panel, &self.controller) {
             if std::env::var_os("DUPIN_TRACE").is_some() {
                 let app = NSApplication::sharedApplication(mtm);
@@ -238,9 +239,12 @@ impl Previewer {
                 ));
             }
             self.controller.clear_item();
+            // SAFETY: An unclaimed panel has no other controller whose presentation we could close.
+            if unsafe { panel.currentController().is_none() } {
+                panel.orderOut(None);
+            }
             return false;
         }
-        panel.makeKeyAndOrderFront(None);
         true
     }
 
