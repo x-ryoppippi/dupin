@@ -269,6 +269,7 @@ def main [
             applications: {baseline: $baseline_app, candidate: $candidate_app}
             validation: {
                 binary_size_equal: ($baseline_app.binary_bytes == $candidate_app.binary_bytes)
+                binary_sha256_equal: ($baseline_app.binary_sha256 == $candidate_app.binary_sha256)
                 audit_metadata_equal: ($baseline_app.audit == $candidate_app.audit)
                 runtime_references_equal: ($baseline_app.references == $candidate_app.references)
             }

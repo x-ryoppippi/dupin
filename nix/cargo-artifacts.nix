@@ -82,6 +82,7 @@ let
     // {
       cargoArtifacts = releaseArtifacts;
       dontStrip = true;
+      doRemapPathPrefix = false;
     }
   );
 in
