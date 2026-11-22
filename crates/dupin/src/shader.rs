@@ -14,7 +14,7 @@ const ENTRY: &str = include_str!("shaders/entry.wgsl");
 
 /// The shaders in `examples/shaders`, for Settings to copy beside config.toml: `(name, title,
 /// source)`.
-pub const EXAMPLES: [(&str, &str, &str); 5] = [
+pub const EXAMPLES: [(&str, &str, &str); 4] = [
     (
         "aurora",
         "Aurora",
@@ -29,11 +29,6 @@ pub const EXAMPLES: [(&str, &str, &str); 5] = [
         "snow",
         "Snow",
         include_str!("../../../examples/shaders/snow.wgsl"),
-    ),
-    (
-        "ripple",
-        "Ripple",
-        include_str!("../../../examples/shaders/ripple.wgsl"),
     ),
     (
         "matrix",

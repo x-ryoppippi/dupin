@@ -6,13 +6,12 @@ A new shader here also goes in `EXAMPLES` in [`crates/dupin/src/shader.rs`](../.
 
 Dupin reads the file again when it changes, so saving it and pressing the hotkey shows the new version. If it doesn't compile, the panel says why and keeps the last version that did.
 
-| Shader                       | What it draws                                                    | Source                                                                                      |
-| ---------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| [`aurora.wgsl`](aurora.wgsl) | Green and purple curtains of light with twinkling stars          | Ported from [snedea/ghostty-themes](https://github.com/snedea/ghostty-themes) (MIT)         |
-| [`embers.wgsl`](embers.wgsl) | Sparks rising from a flickering fire                             | Ported from [snedea/ghostty-themes](https://github.com/snedea/ghostty-themes) (MIT)         |
-| [`snow.wgsl`](snow.wgsl)     | Flakes drifting down in three parallax layers                    | Ported from [an0sunshy/ghostty-shaders](https://github.com/an0sunshy/ghostty-shaders) (MIT) |
-| [`ripple.wgsl`](ripple.wgsl) | A ring at the caret on each keystroke, over a wash of the accent | Dupin                                                                                       |
-| [`matrix.wgsl`](matrix.wgsl) | Columns of glyphs raining down, brightening as you type          | Dupin                                                                                       |
+| Shader                       | What it draws                                           | Source                                                                                      |
+| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [`aurora.wgsl`](aurora.wgsl) | Green and purple curtains of light with twinkling stars | Ported from [snedea/ghostty-themes](https://github.com/snedea/ghostty-themes) (MIT)         |
+| [`embers.wgsl`](embers.wgsl) | Sparks rising from a flickering fire                    | Ported from [snedea/ghostty-themes](https://github.com/snedea/ghostty-themes) (MIT)         |
+| [`snow.wgsl`](snow.wgsl)     | Flakes drifting down in three parallax layers           | Ported from [an0sunshy/ghostty-shaders](https://github.com/an0sunshy/ghostty-shaders) (MIT) |
+| [`matrix.wgsl`](matrix.wgsl) | Columns of glyphs raining down, brightening as you type | Dupin                                                                                       |
 
 The built-in `flow` shader is [`crates/dupin/src/shaders/flow.wgsl`](../../crates/dupin/src/shaders/flow.wgsl). The ported shaders keep their MIT notices in their headers.
 
