@@ -66,17 +66,18 @@
 	};
 
 	const pick = async (id: string) => {
-		backdrop = id;
 		const pickNumber = ++picks;
+		const choice = backdrops.find((b) => b.id === id);
+		const pipeline = renderer && choice ? await renderer.compile(choice.source) : undefined;
+		if (pickNumber !== picks) return;
 		drawing = false;
 		cancelAnimationFrame(frame);
+		renderer?.use(pipeline);
 		renderer?.clear();
-		const choice = backdrops.find((b) => b.id === id);
-		if (!renderer || !choice) return;
-		const ok = await renderer.use(choice.source);
-		if (pickNumber !== picks) return;
-		drawing = ok;
-		if (ok) {
+		// The pressed button names what draws: a shader that didn't compile leaves plain glass.
+		backdrop = pipeline ? id : 'glass';
+		if (pipeline) {
+			drawing = true;
 			shownAt = performance.now();
 			tick();
 		}
@@ -85,21 +86,30 @@
 	onMount(() => {
 		still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 		let alive = true;
-		const observer = new IntersectionObserver(([entry]) => (seen = entry?.isIntersecting ?? true));
-		observer.observe(desk);
-		const resized = new ResizeObserver(() => still && draw());
-		resized.observe(panel);
-		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--dupin-accent'))).then((r) => {
-			if (!alive) return r?.destroy();
-			webgpu = r !== undefined;
-			renderer = r;
+		// A still frame drawn while hidden is skipped, so draw it again once it can be seen.
+		const redraw = () => still && draw();
+		const observer = new IntersectionObserver(([entry]) => {
+			seen = entry?.isIntersecting ?? true;
+			redraw();
 		});
+		observer.observe(desk);
+		const resized = new ResizeObserver(redraw);
+		resized.observe(panel);
+		document.addEventListener('visibilitychange', redraw);
+		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--dupin-accent')))
+			.catch(() => undefined)
+			.then((r) => {
+				if (!alive) return r?.destroy();
+				webgpu = r !== undefined;
+				renderer = r;
+			});
 		return () => {
 			alive = false;
 			picks++;
 			cancelAnimationFrame(frame);
 			observer.disconnect();
 			resized.disconnect();
+			document.removeEventListener('visibilitychange', redraw);
 			renderer?.destroy();
 		};
 	});
@@ -117,7 +127,10 @@
 		let visible = true;
 		let keyId = 0;
 		let hideTimer: ReturnType<typeof setTimeout> | undefined;
-		const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+		// A wait that outlives the component ends the replay instead of resuming it.
+		const stopped = new Error('stopped');
+		const sleep = (ms: number) =>
+			new Promise<void>((resolve, reject) => setTimeout(() => (alive ? resolve() : reject(stopped)), ms));
 		const observer = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
 		observer.observe(desk);
 
@@ -131,22 +144,22 @@
 				hideTimer = setTimeout(() => (keys = []), 300);
 			}, 1100);
 		};
-		let answer: ReturnType<typeof setTimeout> | undefined;
 		const type = async (char: string) => {
 			press(char);
 			setQuery(query + char);
 			selected = 0;
-			clearTimeout(answer);
 			if (mode) {
+				// Spotlight answers each key a moment later; the next key waits for it, so every
+				// prefix's results show.
 				searching = true;
-				answer = setTimeout(() => {
-					found = query;
-					searching = false;
-				}, 380);
+				await sleep(260);
+				found = query;
+				searching = false;
+				await sleep(90);
 			} else {
 				found = query;
+				await sleep(120 + Math.random() * 80);
 			}
-			await sleep(120 + Math.random() * 80);
 		};
 		const down = async (alone = false) => {
 			press('↓', alone);
@@ -201,13 +214,14 @@
 				await sleep(1300);
 			}
 		};
-		void play();
+		play().catch((e: unknown) => {
+			if (e !== stopped) throw e;
+		});
 
 		return () => {
 			alive = false;
 			observer.disconnect();
 			clearTimeout(hideTimer);
-			clearTimeout(answer);
 		};
 	});
 </script>
@@ -237,7 +251,7 @@
 						>
 						<span class="row-text">
 							<span class="row-title">
-								{#each marked(row.title, row.alias ? '' : query, marking(mode)) as run, k (k)}{#if run.hit}<mark
+								{#each marked(row.title, row.alias ? '' : found, marking(mode)) as run, k (k)}{#if run.hit}<mark
 											>{run.text}</mark
 										>{:else}{run.text}{/if}{/each}
 							</span>
@@ -260,7 +274,7 @@
 		<button
 			type="button"
 			aria-pressed={backdrop === b.id}
-			disabled={webgpu === false}
+			disabled={!webgpu}
 			title={webgpu === false ? 'Shaders need WebGPU, which this browser lacks' : undefined}
 			onclick={() => pick(b.id)}>{b.title}</button
 		>
@@ -323,6 +337,10 @@
 	}
 
 	.text {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		white-space: pre;
 	}
 
@@ -358,10 +376,10 @@
 	}
 
 	.hint {
-		white-space: pre;
+		white-space: pre-wrap;
 		display: flex;
 		align-items: center;
-		height: 44px;
+		min-height: 44px;
 		padding: 0 20px;
 		font-size: 13px;
 		color: var(--dupin-text-secondary);
@@ -438,6 +456,127 @@
 		font-size: 20px;
 		color: #fff;
 		background: var(--tint);
+	}
+
+	.desk {
+		position: relative;
+		max-width: 1080px;
+		margin: 64px auto 0;
+		/* Fixed so the page never shifts while the panel grows and shrinks with its results. */
+		height: calc(494px + var(--desk-pad) + 84px);
+		padding: var(--desk-pad) 20px 0;
+		--desk-pad: clamp(32px, 6vw, 72px);
+		border-radius: var(--radius);
+		box-shadow: 0 0 0 1px var(--border-strong);
+		overflow: hidden;
+		background:
+			radial-gradient(
+				ellipse 60% 70% at 30% 20%,
+				oklch(0.36 0.12 var(--accent-h) / 0.9),
+				transparent 70%
+			),
+			radial-gradient(ellipse 50% 60% at 80% 90%, oklch(0.32 0.1 200 / 0.8), transparent 70%), #07070a;
+	}
+
+	.app-icon {
+		flex: none;
+		width: 32px;
+		height: 32px;
+		border-radius: 8px;
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+	}
+
+	.app-icon--claude {
+		background: #faf9f5 url('/apps/claude.svg') center / 66% no-repeat;
+	}
+
+	.app-icon--clock {
+		background:
+			linear-gradient(#111, #111) 50% 30% / 2px 40% no-repeat,
+			linear-gradient(#111, #111) 66% 50% / 32% 2px no-repeat,
+			radial-gradient(circle, #fff 0 62%, #1c1c1e 64%);
+	}
+
+	.app-icon--t3code {
+		background: url('/apps/t3code.png') center / 125% no-repeat;
+	}
+
+	.app-icon--pdf,
+	.app-icon--doc,
+	.app-icon--sheet {
+		position: relative;
+		border-radius: 4px;
+		width: 26px;
+		margin: 0 3px;
+		background: #f5f5f5;
+	}
+
+	.app-icon--pdf::after,
+	.app-icon--doc::after,
+	.app-icon--sheet::after {
+		position: absolute;
+		inset: auto 0 4px;
+		text-align: center;
+		font-family: var(--font-mono);
+		font-size: 7px;
+		font-weight: 700;
+		color: #fff;
+	}
+
+	.app-icon--pdf::after {
+		content: 'PDF';
+		margin: 0 3px;
+		border-radius: 2px;
+		background: #dc2626;
+	}
+
+	.app-icon--doc::after {
+		content: 'MD';
+		color: #525252;
+	}
+
+	.app-icon--sheet::after {
+		content: 'NUM';
+		margin: 0 3px;
+		border-radius: 2px;
+		background: #16a34a;
+	}
+
+	.app-icon--chatgpt {
+		background: #000 url('/apps/openai.svg') center / 70% no-repeat;
+	}
+
+	.keycast {
+		position: absolute;
+		left: 50%;
+		bottom: clamp(16px, 3vw, 28px);
+		display: flex;
+		gap: 6px;
+		padding: 8px 12px;
+		border-radius: 12px;
+		background: rgba(0, 0, 0, 0.55);
+		backdrop-filter: blur(12px);
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+		font-size: 20px;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--fg);
+		opacity: 0;
+		translate: -50% 6px;
+		transition:
+			opacity 0.2s ease,
+			translate 0.2s ease;
+		pointer-events: none;
+	}
+
+	.keycast.is-shown {
+		opacity: 1;
+		translate: -50% 0;
+	}
+
+	.keycast span {
+		min-width: 0.7em;
+		text-align: center;
 	}
 
 	/* The backdrop draws under the panel's content and inside its glass. */

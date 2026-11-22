@@ -73,8 +73,10 @@ struct DupinVertex { @builtin(position) pos: vec4f }
 `;
 
 export type Renderer = {
-	/** Compile `source`; false if this browser's WebGPU rejects it. */
-	use(source: string): Promise<boolean>;
+	/** Compile `source`, or undefined if this browser's WebGPU rejects it. */
+	compile(source: string): Promise<GPURenderPipeline | undefined>;
+	/** Draw with `pipeline` from now on; a compile that finished late can't take over. */
+	use(pipeline: GPURenderPipeline | undefined): void;
 	draw(inputs: Inputs): void;
 	clear(): void;
 	destroy(): void;
@@ -123,12 +125,12 @@ export async function createRenderer(
 	};
 
 	return {
-		async use(source) {
+		async compile(source) {
 			const module = device.createShaderModule({ code: `${head}\n${source}\n${tail}` });
 			const info = await module.getCompilationInfo();
-			if (info.messages.some((m) => m.type === 'error')) return false;
+			if (info.messages.some((m) => m.type === 'error')) return undefined;
 			try {
-				pipeline = await device.createRenderPipelineAsync({
+				return await device.createRenderPipelineAsync({
 					layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
 					vertex: { module, entryPoint: 'dupin_vs' },
 					fragment: {
@@ -145,11 +147,12 @@ export async function createRenderer(
 						],
 					},
 				});
-				return true;
 			} catch {
-				pipeline = undefined;
-				return false;
+				return undefined;
 			}
+		},
+		use(next) {
+			pipeline = next;
 		},
 		draw(i) {
 			const scale = window.devicePixelRatio || 1;
