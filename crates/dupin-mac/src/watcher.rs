@@ -1,0 +1,249 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::mpsc;
+
+/// Watches filesystem roots and calls `changed` after their events settle.
+///
+/// The watched roots may not exist yet. In that case, the nearest existing parent is watched
+/// and events are filtered against the requested roots.
+pub struct PathWatcher {
+    stream: FSEventStreamRef,
+    queue: *mut std::ffi::c_void,
+    context: *mut WatchContext,
+    debounce: Option<std::thread::JoinHandle<()>>,
+}
+
+// SAFETY: the stream delivers only on its serial queue, and Drop drains that queue.
+unsafe impl Send for PathWatcher {}
+
+impl PathWatcher {
+    pub fn start(
+        roots: Vec<PathBuf>,
+        changed: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        let (events, received) = mpsc::channel();
+        let debounce = std::thread::Builder::new()
+            .name("dupin-path-watch-debounce".into())
+            .spawn(move || debounce_events(received, changed))
+            .map_err(|_| "could not spawn path watcher debounce")?;
+        match watch_roots(roots, events) {
+            Ok(mut watcher) => {
+                watcher.debounce = Some(debounce);
+                Ok(watcher)
+            }
+            Err(error) => {
+                let _ = debounce.join();
+                Err(error)
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn drained(_: *mut std::ffi::c_void) {}
+
+impl Drop for PathWatcher {
+    fn drop(&mut self) {
+        // Stop delivery and drain already queued callbacks before freeing their context.
+        unsafe {
+            FSEventStreamStop(self.stream);
+            FSEventStreamInvalidate(self.stream);
+            dispatch_sync_f(self.queue, std::ptr::null_mut(), drained);
+            FSEventStreamRelease(self.stream);
+            drop(Box::from_raw(self.context));
+            dispatch_release(self.queue);
+        }
+        if let Some(debounce) = self.debounce.take() {
+            let _ = debounce.join();
+        }
+    }
+}
+
+fn debounce_events(events: mpsc::Receiver<()>, changed: impl Fn()) {
+    const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
+    while events.recv().is_ok() {
+        loop {
+            match events.recv_timeout(QUIET) {
+                Ok(()) => continue,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    changed();
+                    break;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        }
+    }
+}
+
+type CFTypeRef = *const std::ffi::c_void;
+type FSEventStreamRef = *mut std::ffi::c_void;
+type FSEventId = u64;
+type FSEventFlags = u32;
+type CFTimeInterval = f64;
+
+#[repr(C)]
+struct FSEventStreamContext {
+    version: isize,
+    info: *mut std::ffi::c_void,
+    retain: Option<unsafe extern "C" fn(*const std::ffi::c_void) -> *const std::ffi::c_void>,
+    release: Option<unsafe extern "C" fn(*const std::ffi::c_void)>,
+    copy_description: Option<unsafe extern "C" fn(*const std::ffi::c_void) -> CFTypeRef>,
+}
+
+struct WatchContext {
+    events: mpsc::Sender<()>,
+    roots: Vec<PathBuf>,
+}
+
+type FSEventCallback = unsafe extern "C" fn(
+    FSEventStreamRef,
+    *mut std::ffi::c_void,
+    usize,
+    *mut std::ffi::c_void,
+    *const FSEventFlags,
+    *const FSEventId,
+);
+
+#[link(name = "CoreServices", kind = "framework")]
+unsafe extern "C" {
+    fn FSEventStreamCreate(
+        allocator: CFTypeRef,
+        callback: FSEventCallback,
+        context: *mut FSEventStreamContext,
+        paths: CFTypeRef,
+        since_when: FSEventId,
+        latency: CFTimeInterval,
+        flags: u32,
+    ) -> FSEventStreamRef;
+    fn FSEventStreamSetDispatchQueue(stream: FSEventStreamRef, queue: *mut std::ffi::c_void);
+    fn FSEventStreamStart(stream: FSEventStreamRef) -> u8;
+    fn FSEventStreamStop(stream: FSEventStreamRef);
+    fn FSEventStreamInvalidate(stream: FSEventStreamRef);
+    fn FSEventStreamRelease(stream: FSEventStreamRef);
+}
+
+unsafe extern "C" {
+    fn dispatch_queue_create(
+        label: *const std::ffi::c_char,
+        attr: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+    fn dispatch_sync_f(
+        queue: *mut std::ffi::c_void,
+        context: *mut std::ffi::c_void,
+        work: unsafe extern "C" fn(*mut std::ffi::c_void),
+    );
+    fn dispatch_release(object: *mut std::ffi::c_void);
+}
+
+fn watch_roots(roots: Vec<PathBuf>, events: mpsc::Sender<()>) -> Result<PathWatcher, &'static str> {
+    use objc2::rc::Retained;
+    use objc2_foundation::{NSArray, NSString};
+
+    let roots: Vec<_> = roots.iter().map(|root| canonical_root(root)).collect();
+    let watched: Vec<_> = roots
+        .iter()
+        .map(|root| {
+            let mut path = root.as_path();
+            while !path.exists() {
+                let Some(parent) = path.parent() else { break };
+                path = parent;
+            }
+            path.to_owned()
+        })
+        .collect();
+    let paths: Vec<Retained<NSString>> = watched
+        .iter()
+        .filter_map(|path| path.to_str().map(NSString::from_str))
+        .collect();
+    if paths.is_empty() {
+        return Err("no paths can be watched");
+    }
+    let paths = NSArray::from_retained_slice(&paths);
+    let context_info = Box::into_raw(Box::new(WatchContext { events, roots })).cast::<std::ffi::c_void>();
+    let mut context = FSEventStreamContext {
+        version: 0,
+        info: context_info,
+        retain: None,
+        release: None,
+        copy_description: None,
+    };
+    // FSEvents retains the roots while the stream is alive. The callback context stays allocated
+    // until the stream is invalidated below.
+    let stream = unsafe {
+        FSEventStreamCreate(
+            std::ptr::null(),
+            paths_changed,
+            &mut context,
+            Retained::as_ptr(&paths).cast(),
+            u64::MAX,
+            0.5,
+            1,
+        )
+    };
+    if stream.is_null() {
+        // SAFETY: context_info was allocated immediately above and is still uniquely owned.
+        drop(unsafe { Box::from_raw(context_info.cast::<WatchContext>()) });
+        return Err("could not create the FSEvents stream");
+    }
+    let queue = unsafe { dispatch_queue_create(c"dupin-path-watch".as_ptr(), std::ptr::null()) };
+    if queue.is_null() {
+        unsafe {
+            FSEventStreamRelease(stream);
+            drop(Box::from_raw(context_info.cast::<WatchContext>()));
+        }
+        return Err("could not create the path watcher queue");
+    }
+    unsafe { FSEventStreamSetDispatchQueue(stream, queue) };
+    let watcher = PathWatcher {
+        stream,
+        queue,
+        context: context_info.cast(),
+        debounce: None,
+    };
+    if unsafe { FSEventStreamStart(stream) } == 0 {
+        return Err("could not start the FSEvents stream");
+    }
+    Ok(watcher)
+}
+
+unsafe extern "C" fn paths_changed(
+    _stream: FSEventStreamRef,
+    info: *mut std::ffi::c_void,
+    _count: usize,
+    paths: *mut std::ffi::c_void,
+    _flags: *const FSEventFlags,
+    _ids: *const FSEventId,
+) {
+    // SAFETY: the callback context lives until the stream is stopped and released.
+    let context = unsafe { &*info.cast::<WatchContext>() };
+    // SAFETY: UseCFTypes supplies an array of strings for the event paths.
+    let paths = unsafe { &*paths.cast::<objc2_foundation::NSArray>() };
+    if paths.iter().any(|path| {
+        path.downcast_ref::<objc2_foundation::NSString>()
+            .is_some_and(|path| {
+                let value = path.to_string();
+                let path = Path::new(&value);
+                context
+                    .roots
+                    .iter()
+                    .any(|root| path.starts_with(root) || root.starts_with(path))
+            })
+    }) {
+        let _ = context.events.send(());
+    }
+}
+
+pub fn canonical_root(root: &Path) -> PathBuf {
+    let mut existing = root;
+    let mut tail = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else { break };
+        tail.push(name.to_owned());
+        let Some(parent) = existing.parent() else { break };
+        existing = parent;
+    }
+    let mut path = fs::canonicalize(existing).unwrap_or_else(|_| existing.to_owned());
+    for name in tail.iter().rev() {
+        path.push(name);
+    }
+    path
+}

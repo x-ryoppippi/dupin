@@ -4,6 +4,9 @@ use std::path::{Path, PathBuf};
 
 use dupin_core::Config;
 
+mod live;
+pub use live::{Service, Update};
+
 /// `$XDG_CONFIG_HOME/dupin/config.toml`, else `~/.config/dupin/config.toml`.
 pub fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
@@ -45,8 +48,13 @@ fn can_write(path: &Path) -> bool {
 
 /// Follow `path` through any symlinks to the file they name, which need not exist yet.
 fn resolve(path: &Path) -> std::io::Result<PathBuf> {
+    resolve_with(path, |_| {})
+}
+
+fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
     let mut path = path.to_owned();
     for _ in 0..40 {
+        visit(&path);
         match std::fs::read_link(&path) {
             Ok(target) => {
                 path = match path.parent() {
@@ -99,23 +107,6 @@ pub fn load() -> (Config, Option<String>) {
 fn problem(message: String) -> (Config, Option<String>) {
     crate::log::warn(&message);
     (Config::default(), Some(message))
-}
-
-/// Write `config` to config.toml on a thread of its own. Comments in a hand-written file are
-/// not kept.
-pub fn save(config: &dupin_core::Config) {
-    let toml = match toml::to_string(config) {
-        Ok(toml) => toml,
-        Err(e) => return crate::log::warn(&format!("couldn't serialize the settings: {e}")),
-    };
-    std::thread::spawn(move || {
-        let written = path()
-            .ok_or_else(|| std::io::Error::other("HOME is unset"))
-            .and_then(|path| write(&path, &toml));
-        if let Err(e) = written {
-            crate::log::warn(&format!("couldn't save the settings: {e}"));
-        }
-    });
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked

@@ -168,10 +168,18 @@ pub struct Prefs {
     panel: AppHandle<Ui>,
     updater: Updater,
     read_only: bool,
+    settings: Arc<crate::settings::Service>,
+    config_problem: Option<String>,
 }
 
 impl Prefs {
-    pub fn new(config: Config, binding: Arc<Binding>, panel: AppHandle<Ui>, updater: Updater) -> Prefs {
+    pub fn new(
+        config: Config,
+        binding: Arc<Binding>,
+        panel: AppHandle<Ui>,
+        updater: Updater,
+        settings: Arc<crate::settings::Service>,
+    ) -> Prefs {
         let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
         if binding.failed_at_launch() {
             recorder.mark_unregistered();
@@ -185,7 +193,43 @@ impl Prefs {
             panel,
             updater,
             read_only: crate::settings::read_only(),
+            settings,
+            config_problem: None,
         }
+    }
+
+    pub fn reflect_config(
+        &mut self,
+        revision: u64,
+        config: Config,
+        read_only: bool,
+        problem: Option<String>,
+    ) {
+        if revision != self.settings.revision() {
+            return;
+        }
+        let shortcut = crate::hotkey::parse(&config.hotkey).ok().flatten();
+        let previous = crate::hotkey::parse(&self.config.hotkey);
+        if previous.as_ref().ok() != Some(&shortcut) {
+            self.recorder = ShortcutRecorderState::new(shortcut);
+            self.owner = None;
+        }
+        if self.binding.failed_at_launch() {
+            self.recorder.mark_unregistered();
+        }
+        self.config = config;
+        self.read_only = read_only;
+        self.config_problem = problem;
+    }
+
+    fn set_problem(&mut self, problem: Option<String>) {
+        if self.config_problem != problem
+            && let Some(problem) = &problem
+        {
+            crate::log::warn(problem);
+        }
+        self.config_problem = problem.clone();
+        self.panel.update(move |ui, _| ui.config_problem = problem);
     }
 
     fn change_hotkey(&mut self, next: Option<&Shortcut>, _: &mut Tx) -> Result<(), ShortcutError> {
@@ -343,8 +387,15 @@ impl Prefs {
     }
 
     /// Persist the settings and hand them to the panel.
-    fn save(&self) {
-        crate::settings::save(&self.config);
+    fn save(&mut self) {
+        // The panel must see this edit before the worker can echo its saved file back.
+        self.publish();
+        if let Err(error) = self.settings.save(&self.config) {
+            self.set_problem(Some(error));
+        }
+    }
+
+    fn publish(&self) {
         let config = self.config.clone();
         self.panel.update(move |ui, _| ui.apply_config(&config));
     }
@@ -391,6 +442,14 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 .w_full()
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
+                .children(s.config_problem.as_ref().map(|problem| {
+                    text(problem)
+                        .key("config-problem")
+                        .w_full()
+                        .font(DESCRIPTION)
+                        .color(k.c.text_base)
+                        .wrap()
+                }))
                 .child(card(k, hair, rows))
                 .children(s.read_only.then(|| {
                     text("config.toml is read-only, so change these where it's managed.")

@@ -36,8 +36,9 @@ impl Binding {
 
     /// Register the configured hotkey at launch, reporting any failure.
     pub fn register_at_launch(&self, accelerator: &str) {
-        let shortcut = match accelerator.parse::<Shortcut>() {
-            Ok(shortcut) => shortcut,
+        let shortcut = match parse(accelerator) {
+            Ok(Some(shortcut)) => shortcut,
+            Ok(None) => return,
             Err(e) => return self.report(accelerator, &e.to_string()),
         };
         // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
@@ -115,6 +116,14 @@ impl Binding {
     }
 }
 
+pub fn parse(accelerator: &str) -> Result<Option<Shortcut>, ShortcutError> {
+    if accelerator.trim().is_empty() {
+        Ok(None)
+    } else {
+        accelerator.parse().map(Some)
+    }
+}
+
 fn notify(message: &str) {
     if rune_notify::available() {
         rune_notify::post(
@@ -144,6 +153,19 @@ pub fn keycaps(accelerator: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_hotkey_disables_registration() {
+        assert_eq!(super::parse(""), Ok(None));
+        assert_eq!(super::parse("  "), Ok(None));
+        assert!(super::parse("cmd+not-a-key").is_err());
+        assert!(super::parse("cmd+space").unwrap().is_some());
+    }
+
+    #[test]
+    fn equivalent_spellings_describe_the_same_hotkey() {
+        assert_eq!(super::parse("cmd+space"), super::parse("Command+Space"));
+    }
+
     #[test]
     fn a_recorded_shortcut_is_saved_in_a_form_that_reads_back() {
         for accelerator in ["cmd+space", "ctrl+space", "ctrl+alt+k", "shift+cmd+p"] {

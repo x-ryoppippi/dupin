@@ -22,13 +22,21 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Configuration {
+    pub values: Config,
+    pub hotkey: Arc<crate::hotkey::Binding>,
+    pub files: Arc<crate::settings::Service>,
+}
+
 pub struct Ui {
     pub session: Session,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
+    configuration: Configuration,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -60,12 +68,13 @@ impl Ui {
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
         updater: crate::update::Updater,
-        config: Config,
+        configuration: Configuration,
         history: History,
         notice: Option<String>,
     ) -> Ui {
+        let config = &configuration.values;
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
+        let registration = crate::commands::register(config, apps_provider.clone())
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -109,7 +118,8 @@ impl Ui {
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
-            notice,
+            notice: None,
+            config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
@@ -122,7 +132,8 @@ impl Ui {
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
-            input_source: config.input_source,
+            input_source: config.input_source.clone(),
+            configuration,
             restore_input: None,
             relaunch: false,
             running: Arc::new(AtomicUsize::new(0)),
@@ -132,8 +143,6 @@ impl Ui {
         }
     }
 
-    /// Settings changed in the settings window. The hotkey is the settings window's to
-    /// re-register; the rest takes effect from the next summon.
     pub fn apply_config(&mut self, config: &Config) {
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
@@ -148,6 +157,44 @@ impl Ui {
             self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();
         }
+        self.configuration.values = config.clone();
+    }
+
+    pub fn reload_config(&mut self, update: crate::settings::Update) {
+        if update.revision != self.configuration.files.revision() {
+            return;
+        }
+        let accepted = update.result.and_then(|config| {
+            let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
+                "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
+            })?;
+            let previous = crate::hotkey::parse(&self.configuration.values.hotkey);
+            if previous.as_ref().ok() != Some(&shortcut) {
+                self.configuration.hotkey.replace(shortcut.as_ref()).map_err(|error| {
+                    format!("Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration.")
+                })?;
+            }
+            Ok(config)
+        });
+        let problem = match accepted {
+            Ok(config) => {
+                if self.configuration.values != config {
+                    self.apply_config(&config);
+                }
+                update.watch_problem
+            }
+            Err(error) => Some(error),
+        };
+        if self.config_problem != problem
+            && let Some(problem) = &problem
+        {
+            crate::log::warn(problem);
+        }
+        self.config_problem = problem.clone();
+        let config = self.configuration.values.clone();
+        self.prefs.update(move |prefs, _| {
+            prefs.reflect_config(update.revision, config, update.read_only, problem);
+        });
     }
 
     /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
