@@ -1,0 +1,359 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -755,6 +755,7 @@
+  "serde",
+  "serde_json",
+  "toml",
++ "wasmi",
+  "wgpu",
+ ]
+ 
+@@ -3111,6 +3112,12 @@
+ ]
+ 
+ [[package]]
++name = "spin"
++version = "0.9.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
++
++[[package]]
+ name = "spirv"
+ version = "0.4.0+sdk-1.4.341.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3154,6 +3161,16 @@
+ ]
+ 
+ [[package]]
++name = "string-interner"
++version = "0.19.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23de088478b31c349c9ba67816fa55d9355232d63c3afea8bf513e31f0f1d2c0"
++dependencies = [
++ "hashbrown 0.15.5",
++ "serde",
++]
++
++[[package]]
+ name = "svgtypes"
+ version = "0.15.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -3609,6 +3626,56 @@
+ ]
+ 
+ [[package]]
++name = "wasmi"
++version = "2.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8762bb61dfbcfdbe0ab1a783a73d26d5149809cf7d882c9c9b76b7c0fb9417de"
++dependencies = [
++ "spin",
++ "wasmi_collections",
++ "wasmi_core",
++ "wasmi_ir",
++ "wasmparser",
++]
++
++[[package]]
++name = "wasmi_collections"
++version = "2.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e7e053dad75ea3b41b5a6973af3e923bd7c608e9d3b7415a7cf0018c280c16b3"
++dependencies = [
++ "string-interner",
++]
++
++[[package]]
++name = "wasmi_core"
++version = "2.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1709ad297d9dc05a4b109148e1c0908691b1553b1473f6b08f4f5b969c3c81fe"
++dependencies = [
++ "libm",
++]
++
++[[package]]
++name = "wasmi_ir"
++version = "2.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "746ed3ae294cf571d06020c9b8f4a3cb2be1ef228f8556279cc354cf6cf01df4"
++dependencies = [
++ "wasmi_core",
++]
++
++[[package]]
++name = "wasmparser"
++version = "0.228.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "4abf1132c1fdf747d56bbc1bb52152400c70f336870f968b85e89ea422198ae3"
++dependencies = [
++ "bitflags 2.13.2",
++ "indexmap",
++]
++
++[[package]]
+ name = "wayland-backend"
+ version = "0.3.17"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+--- a/package.nix
++++ b/package.nix
+@@ -1,6 +1,7 @@
+ {
+   lib,
+   rustPlatform,
++  rust,
+   resvg,
+   python3Packages,
+   inter,
+@@ -34,7 +35,7 @@
+   cargoDeps = rustPlatform.fetchCargoVendor {
+     inherit src;
+     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
+-    hash = "sha256-9fwmFSvoQf8x+cNcSUcRLDFwtmRhoQgpNYf2SYkFmT8=";
++    hash = "sha256-/ewTP+rJGYoNVgzyqZjiGSuTD0NgrbngkA2ZrAhMn7Q=";
+   };
+ 
+   # What every Rust derivation of the workspace shares (the package here, clippy and the
+@@ -51,7 +52,19 @@
+     cargoBuildFlags = [
+       "--package"
+       "dupin"
++      "--features"
++      "wasmi-runtime"
+     ];
++    postBuild = ''
++      variants="$NIX_BUILD_TOP/size-variants"
++      mkdir -p "$variants"
++      cp target/aarch64-apple-darwin/release/dupin "$variants/runtime"
++      for mode in minimal fend; do
++        ${rust.envVars.setEnv} cargo build --offline --target aarch64-apple-darwin --profile release --package dupin --features "wasmi-$mode"
++        cp target/aarch64-apple-darwin/release/dupin "$variants/$mode"
++      done
++      cp "$variants/runtime" target/aarch64-apple-darwin/release/dupin
++    '';
+     # Tests run in the lint-and-test check, in debug as cargo runs them.
+     doCheck = false;
+     # The app icon is drawn from the logo here, so no generated image is committed. iconutil
+@@ -63,7 +76,12 @@
+     # cargoBuildHook overrides the profile's `strip` and leaves stripping to stdenv, whose
+     # default flags include `-p`, which llvm-strip rejects for Mach-O; the hook ignores the
+     # failure and leaves every symbol in place.
+-    stripAllList = [ "Applications/Dupin.app/Contents/MacOS" ];
++    stripAllList = [
++      "Applications/Dupin.app/Contents/MacOS"
++      "Applications/Dupin-wasmi-runtime.app/Contents/MacOS"
++      "Applications/Dupin-wasmi-minimal.app/Contents/MacOS"
++      "Applications/Dupin-wasmi-fend.app/Contents/MacOS"
++    ];
+     stripAllFlags = [ "--strip-all" ];
+     postInstall = ''
+       app=$out/Applications/Dupin.app/Contents
+@@ -88,6 +106,23 @@
+       # scripts/package-app.nu points a nightly build at this one.
+       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
+       ln -s $app/MacOS/dupin $out/bin/dupin
++
++      cp -R $out/Applications/Dupin.app $out/Applications/Dupin-wasmi-runtime.app
++      chmod -R u+w $out/Applications/Dupin-wasmi-runtime.app
++
++      for mode in minimal fend; do
++        variant=$out/Applications/Dupin-wasmi-$mode.app
++        cp -R $out/Applications/Dupin.app $variant
++        chmod -R u+w $variant
++        cp $NIX_BUILD_TOP/size-variants/$mode $variant/Contents/MacOS/dupin
++        if [ "$mode" = minimal ] || [ "$mode" = fend ]; then
++          mkdir -p $variant/Contents/Resources/Plugins
++          cp crates/dupin/assets/plugins/minimal_eval.wasm $variant/Contents/Resources/Plugins/
++        fi
++        if [ "$mode" = fend ]; then
++          cp crates/dupin/assets/plugins/fend_calculator.wasm $variant/Contents/Resources/Plugins/
++        fi
++      done
+     '';
+     passthru = { inherit commonArgs; };
+     meta = {
+--- a/crates/dupin/Cargo.toml
++++ b/crates/dupin/Cargo.toml
+@@ -21,6 +21,13 @@
+ toml = { workspace = true, features = ["display"] }
+ wgpu = { workspace = true }
+ naga = { workspace = true }
++wasmi = { version = "=2.0.2", optional = true, default-features = false, features = ["std", "validate"] }
++
++[features]
++default = []
++wasmi-runtime = ["dep:wasmi"]
++wasmi-minimal = ["wasmi-runtime"]
++wasmi-fend = ["wasmi-minimal"]
+ 
+ [lints]
+ workspace = true
+--- a/crates/dupin/src/main.rs
++++ b/crates/dupin/src/main.rs
+@@ -14,6 +14,9 @@
+ mod update;
+ mod view;
+ 
++#[cfg(feature = "wasmi-runtime")]
++mod wasm_probe;
++
+ use std::sync::Arc;
+ 
+ use rune::{App, AppSpec, WindowOptions, WindowSpec};
+@@ -26,6 +29,10 @@
+ const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
+ 
+ fn main() {
++    #[cfg(feature = "wasmi-runtime")]
++    if wasm_probe::dispatch() {
++        return;
++    }
+     rune::prewarm_gpu();
+     let (config, config_problem) = settings::load();
+     let history = store::load();
+--- /dev/null
++++ b/crates/dupin/src/wasm_probe.rs
+@@ -0,0 +1,143 @@
++use std::{error::Error, fs, path::PathBuf};
++
++use wasmi::{Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
++
++const EMPTY_WASM: &[u8] = b"\0asm\x01\0\0\0";
++const QUERY_FUEL: u64 = 20_000_000;
++const MEMORY_LIMIT: usize = 16 * 1024 * 1024;
++
++struct HostState {
++    limits: StoreLimits,
++}
++
++pub(super) fn dispatch() -> bool {
++    let mut args = std::env::args();
++    let _ = args.next();
++    let Some(mode) = args.next() else {
++        return false;
++    };
++
++    match mode.as_str() {
++        "--dupin-wasmi-runtime-probe" => report(runtime_probe()),
++        #[cfg(feature = "wasmi-minimal")]
++        "--dupin-wasmi-minimal-probe" => report(minimal_guest_probe()),
++        #[cfg(feature = "wasmi-fend")]
++        "--dupin-wasmi-fend-probe" => {
++            let query = args.next().unwrap_or_else(|| "560 km to mi".to_owned());
++            report(fend_guest_probe(&query));
++        }
++        _ if mode.starts_with("--dupin-wasmi-") => {
++            report(Err(format!("unsupported probe argument {mode}").into()));
++        }
++        _ => return false,
++    }
++    true
++}
++
++fn report(result: Result<(), Box<dyn Error>>) {
++    if let Err(error) = result {
++        eprintln!("Wasm size probe failed: {error}");
++        std::process::exit(1);
++    }
++}
++
++fn engine() -> Engine {
++    let mut config = Config::default();
++    config.consume_fuel(true);
++    Engine::new(&config)
++}
++
++fn store(engine: &Engine) -> Result<Store<HostState>, wasmi::Error> {
++    let limits = StoreLimitsBuilder::new()
++        .memory_size(MEMORY_LIMIT)
++        .instances(1)
++        .tables(1)
++        .memories(1)
++        .trap_on_grow_failure(true)
++        .build();
++    let mut store = Store::new(engine, HostState { limits });
++    store.limiter(|state| &mut state.limits);
++    store.set_fuel(QUERY_FUEL)?;
++    Ok(store)
++}
++
++fn module(engine: &Engine, wasm: &[u8]) -> Result<Module, wasmi::Error> {
++    Module::new(engine, &mut &wasm[..])
++}
++
++fn ensure_no_imports(module: &Module) -> Result<(), Box<dyn Error>> {
++    if module.imports().next().is_some() {
++        return Err("size probe guests must not import host functions".into());
++    }
++    Ok(())
++}
++
++fn runtime_probe() -> Result<(), Box<dyn Error>> {
++    let engine = engine();
++    let module = module(&engine, EMPTY_WASM)?;
++    ensure_no_imports(&module)?;
++    let mut store = store(&engine)?;
++    Linker::new(&engine).instantiate_and_start(&mut store, &module)?;
++    println!("wasmi_runtime=ok memory_limit_bytes={MEMORY_LIMIT}");
++    Ok(())
++}
++
++#[cfg(feature = "wasmi-minimal")]
++fn minimal_guest_probe() -> Result<(), Box<dyn Error>> {
++    let wasm = plugin_resource("minimal_eval.wasm")?;
++    let engine = engine();
++    let module = module(&engine, &wasm)?;
++    ensure_no_imports(&module)?;
++    let mut store = store(&engine)?;
++    let instance = Linker::new(&engine).instantiate_and_start(&mut store, &module)?;
++    let eval = instance.get_typed_func::<(), i32>(&store, "eval")?;
++    let result = eval.call(&mut store, ())?;
++    println!("minimal_guest_result={result} wasm_bytes={}", wasm.len());
++    Ok(())
++}
++
++#[cfg(feature = "wasmi-fend")]
++fn fend_guest_probe(query: &str) -> Result<(), Box<dyn Error>> {
++    let wasm = plugin_resource("fend_calculator.wasm")?;
++    let engine = engine();
++    let module = module(&engine, &wasm)?;
++    ensure_no_imports(&module)?;
++    let mut store = store(&engine)?;
++    let instance = Linker::new(&engine).instantiate_and_start(&mut store, &module)?;
++    let abi_version = instance
++        .get_typed_func::<(), i32>(&store, "abi_version")?
++        .call(&mut store, ())?;
++    assert_eq!(abi_version, 1);
++    let alloc = instance.get_typed_func::<i32, i32>(&store, "dupin_alloc")?;
++    let eval = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "dupin_eval")?;
++    let free = instance.get_typed_func::<(i32, i32), ()>(&store, "dupin_free")?;
++    let memory = instance.get_memory(&store, "memory").ok_or("missing memory export")?;
++    let input = query.as_bytes();
++    let input_ptr = alloc.call(&mut store, input.len() as i32)?;
++    let output_ptr = alloc.call(&mut store, 128)?;
++    memory.write(&mut store, input_ptr as usize, input)?;
++    store.set_fuel(QUERY_FUEL)?;
++    let output_len = eval.call(
++        &mut store,
++        (input_ptr, input.len() as i32, output_ptr, 128),
++    )?;
++    if output_len <= 0 {
++        return Err(format!("guest returned error {output_len}").into());
++    }
++    let mut output = vec![0_u8; output_len as usize];
++    memory.read(&store, output_ptr as usize, &mut output)?;
++    println!("query={query:?} result={:?} wasm_bytes={}", String::from_utf8(output)?, wasm.len());
++    free.call(&mut store, (input_ptr, input.len() as i32))?;
++    free.call(&mut store, (output_ptr, 128))?;
++    Ok(())
++}
++
++fn plugin_resource(name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
++    let mut resources = std::env::current_exe()?;
++    resources.pop();
++    resources.pop();
++    resources.push("Resources");
++    resources.push("Plugins");
++    resources.push(PathBuf::from(name));
++    Ok(fs::read(resources)?)
++}

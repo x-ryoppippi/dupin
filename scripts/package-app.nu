@@ -8,6 +8,8 @@
 # Signing needs the Developer ID Application identity in a keychain. Notarizing needs an App
 # Store Connect API key: NOTARY_KEY_PATH (the .p8 file), NOTARY_KEY_ID and NOTARY_ISSUER.
 # Without `--notarize` the zip is signed but not notarized, for trying the bundle locally.
+use ./unlink-store.nu
+
 def main [
     --channel: string # "stable" or "nightly"
     --identity: string = "Developer ID Application" # A codesign identity, or "-" for ad-hoc
@@ -115,25 +117,4 @@ def notary-key []: nothing -> record {
 
 def notarize [file: path, key: record]: nothing -> nothing {
     ^/usr/bin/xcrun notarytool submit $file --key $key.path --key-id $key.id --issuer $key.issuer --wait
-}
-
-# Point the binary's /nix/store libraries at the copies macOS ships, so the bundle runs
-# without Nix. A library macOS doesn't ship stops the release instead.
-def unlink-store [binary: path]: nothing -> nothing {
-    let system = [libiconv.2.dylib]
-    let linked = ^/usr/bin/otool -L $binary
-    | lines
-    | skip 1
-    | str trim
-    | parse "{lib} (compatibility {rest}"
-    | get lib
-    | str trim
-    | where { str starts-with /nix/store/ }
-    for lib in $linked {
-        let name = $lib | path basename
-        if $name not-in $system {
-            error make {msg: $"($binary) links ($lib), which macOS doesn't ship"}
-        }
-        ^/usr/bin/install_name_tool -change $lib $"/usr/lib/($name)" $binary
-    }
 }
