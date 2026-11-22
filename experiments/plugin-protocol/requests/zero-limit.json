@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"request_id": "zero-1",
+	"generation": "3",
+	"command": "calculator",
+	"query": "2^1000000000",
+	"limit": 0,
+	"state": null
+}

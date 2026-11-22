@@ -91,9 +91,11 @@ and grant revocation invalidate pending completions as well as visible results.
 Guest code does not own the wall clock: host budgets and fuel enforce execution
 limits, with an explicit host import if an evaluator also needs cooperative checks.
 
-The wire format and guest-memory ownership rules remain to be specified in the
-runtime spike. They must define bounded allocation, UTF-8, malformed messages,
-unknown versions, cancellation and clean teardown before external plugins run.
+The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
+messages, versions, correlation and per-request guest-memory ownership with a
+real calculator guest. It is not yet used by the launcher. Registration,
+capability brokerage, cancellation/deadlines, action invocation and streaming
+still need implementation and review before external plugins run.
 
 ## Views, actions and saved state
 

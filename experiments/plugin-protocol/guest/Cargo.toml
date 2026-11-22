@@ -1,0 +1,12 @@
+[package]
+name = "dupin-protocol-calculator"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dupin-plugin-protocol = { path = "../../../crates/dupin-plugin-protocol" }
+fend-core = "=1.5.9"

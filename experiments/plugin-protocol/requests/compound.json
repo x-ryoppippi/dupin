@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"request_id": "compound-1",
+	"generation": "2",
+	"command": "calculator",
+	"query": "30*(60+1) km/h in m/s",
+	"limit": 1,
+	"state": null
+}

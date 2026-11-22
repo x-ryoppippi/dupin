@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"request_id": "arithmetic-1",
+	"generation": "18446744073709551615",
+	"command": "calculator",
+	"query": "30*(60+1)",
+	"limit": 1,
+	"state": null
+}
