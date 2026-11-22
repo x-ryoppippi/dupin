@@ -4,6 +4,7 @@
 //! terms from the supported semantic filters; platform-specific interpretation happens elsewhere.
 
 use std::{error::Error, fmt, ops::Range, time::Duration};
+use unicode_normalization::UnicodeNormalization;
 
 /// A parsed file query. `terms` retain their spelling and order from the input.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -264,7 +265,7 @@ fn parse_kind(value: &str) -> Result<FileKind, FileQueryError> {
 }
 
 fn parse_extension(value: &str) -> Result<String, FileQueryError> {
-    let extension = value.strip_prefix('.').unwrap_or(value);
+    let extension: String = value.strip_prefix('.').unwrap_or(value).nfc().collect();
     if extension.is_empty()
         || extension.split('.').any(|component| component.is_empty())
         || !extension
@@ -273,7 +274,7 @@ fn parse_extension(value: &str) -> Result<String, FileQueryError> {
     {
         return Err(FileQueryError::InvalidExtension);
     }
-    Ok(extension.to_owned())
+    Ok(extension)
 }
 
 fn parse_folder(value: &str) -> Result<String, FileQueryError> {
@@ -424,6 +425,17 @@ mod tests {
             FileQuery::parse("ext:\"rs\nname\"").unwrap_err(),
             FileQueryError::InvalidExtension
         );
+    }
+
+    #[test]
+    fn canonically_equivalent_extensions_use_the_same_literal_suffix() {
+        let composed = FileQuery::parse("ext:café").unwrap();
+        let decomposed = FileQuery::parse("ext:cafe\u{301}").unwrap();
+        assert_eq!(composed.extension, decomposed.extension);
+        assert_eq!(decomposed.extension.as_deref(), Some("café"));
+        for invalid in ["ext:cafe\u{301}.*", "ext:cafe\u{301}..rs"] {
+            assert!(FileQuery::parse(invalid).is_err());
+        }
     }
 
     #[test]
