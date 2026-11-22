@@ -83,13 +83,13 @@ and exact memory-boundary checks.
 
 | Measurement                |      Wasmi 2.0.2 | Wasmtime 51.0.0 / Cranelift |
 | -------------------------- | ---------------: | --------------------------: |
-| Module load / compilation  |         2.663 ms |                  351.979 ms |
-| Warm `560 km to mi` mean   |         0.969 ms |                    0.114 ms |
-| Warm `30*(60+1)` mean      |         0.138 ms |                    0.016 ms |
-| Warm `60 mph in m/s` mean  |         1.101 ms |                    0.127 ms |
-| Warm `1 acre in m^2` mean  |         0.972 ms |                    0.111 ms |
-| Process peak footprint     | 23,134,592 bytes |            42,336,712 bytes |
-| Standalone host executable |  2,091,376 bytes |             7,618,528 bytes |
+| Module load / compilation  |         2.657 ms |                  382.894 ms |
+| Warm `560 km to mi` mean   |         0.951 ms |                    0.118 ms |
+| Warm `30*(60+1)` mean      |         0.130 ms |                    0.016 ms |
+| Warm `60 mph in m/s` mean  |         1.111 ms |                    0.129 ms |
+| Warm `1 acre in m^2` mean  |         0.963 ms |                    0.115 ms |
+| Process peak footprint     | 23,118,208 bytes |            41,320,904 bytes |
+| Standalone host executable |  2,091,392 bytes |             7,618,528 bytes |
 
 Cranelift improves warm query time here while paying more at module load and in
 process memory. These exploratory numbers do not decide production adoption;
