@@ -1,9 +1,9 @@
 {
 	"format_version": 1,
-	"started_at": "2026-11-22T14:00:44.649188+00:00",
-	"baseline_revision": "21612d4e38153b006ded83dfb9d5a2d2c33f39c3",
-	"revision": "999932b8d7eb0f0d16c32147751f62415f142c6d",
-	"script_sha256": "fcc328932ec559cfa22edd66fc223312088c7c88413737bbb12b3c32151c0a49",
+	"started_at": "2026-11-22T14:24:36.093349+00:00",
+	"baseline_revision": "519d0d57d4c75a56831fd3104321ce0c70ce1e0e",
+	"revision": "b10d2bb8ed15cb766af10d65c2e84f8dcb0ae7b9",
+	"script_sha256": "415eda944d78d10ef24024f2b02386e2b4d043a31fc47331ac8fd81e8a035e8b",
 	"nix_version": "nix (Nix) 2.35.6",
 	"nixpkgs": {
 		"lastModified": 1795217999,
@@ -26,31 +26,31 @@
 	"audit_tool": "/nix/store/icndddfpb0rh22prznby8cqspdpafmab-rust-audit-info-0.5.4/bin/rust-audit-info",
 	"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
 	"hardware": "Mac17,7",
-	"temporary_root": "/private/tmp/dupin-nix-cache.7K3wxRC2",
+	"temporary_root": "/private/tmp/dupin-nix-cache.tSC581Fn",
 	"result": {
 		"status": "ok",
 		"resource_edit": {
 			"before": {
-				"binary": "/nix/store/l3c0ml29sa4dczpxb98l06c2ajrsp322-dupin-0.1.0",
-				"package": "/nix/store/gkay21y1sk0rnyihvbjn3whgvvsh5bgb-dupin-0.1.0",
+				"binary": "/nix/store/zhnn69vhkxy63dqara6yf9rga1577a0z-dupin-0.1.0",
+				"package": "/nix/store/4pmnaydp4j31dw84ax4xmjxm9pk0my56-dupin-0.1.0",
 				"artifacts": {
 					"release": "/nix/store/vbkwlvw14kkw7l2bqflhp1ls229lippg-dupin-deps-0.1.0",
 					"debug": "/nix/store/5476w0njn1xycjm1gq7bjxfzs5dpkacy-dupin-deps-0.1.0"
 				}
 			},
 			"after": {
-				"binary": "/nix/store/l3c0ml29sa4dczpxb98l06c2ajrsp322-dupin-0.1.0",
-				"package": "/nix/store/s89020x009bhk8g85sb8fdj4j7s7ab6w-dupin-0.1.0",
+				"binary": "/nix/store/zhnn69vhkxy63dqara6yf9rga1577a0z-dupin-0.1.0",
+				"package": "/nix/store/c5g9d509ibmp3sr12asi2cz0ipzzywzj-dupin-0.1.0",
 				"artifacts": {
 					"release": "/nix/store/vbkwlvw14kkw7l2bqflhp1ls229lippg-dupin-deps-0.1.0",
 					"debug": "/nix/store/5476w0njn1xycjm1gq7bjxfzs5dpkacy-dupin-deps-0.1.0"
 				}
 			},
-			"restored_package": "/nix/store/gkay21y1sk0rnyihvbjn3whgvvsh5bgb-dupin-0.1.0"
+			"restored_package": "/nix/store/4pmnaydp4j31dw84ax4xmjxm9pk0my56-dupin-0.1.0"
 		},
 		"edit": {
 			"file": "crates/dupin/src/ui.rs",
-			"contents": "\nconst _: &str = \"1a2f6f77-8c8c-4d91-b819-bdb1839fe5dc\";\n"
+			"contents": "\nconst _: &str = \"9a577de5-c3a0-4076-8591-68eaa2a194b6\";\n"
 		},
 		"dependency_artifacts_before": {
 			"release": "/nix/store/vbkwlvw14kkw7l2bqflhp1ls229lippg-dupin-deps-0.1.0",
@@ -66,13 +66,13 @@
 				"values": [
 					{
 						"label": "release",
-						"drv": "/nix/store/f4qbxa8zdl3b9m1vbv4wgig65z98adjw-dupin-0.1.0.drv",
-						"output": "/nix/store/zvq39s9q22ks10yhkql3m3x9ivl4d01w-dupin-0.1.0"
+						"drv": "/nix/store/6d2cx306jyaxzhpv0r9n9j33avsqzfb0-dupin-0.1.0.drv",
+						"output": "/nix/store/0yy4wkz22fhpj6qja53y6z8izlsvz9r4-dupin-0.1.0"
 					},
 					{
 						"label": "checks",
-						"drv": "/nix/store/gh30q8bpi5r8x80nr1mpvfjn4axcgkry-dupin-lint-and-test-0.1.0.drv",
-						"output": "/nix/store/xijcg1qfiv1k8mz3bh2qbfq35hv82b94-dupin-lint-and-test-0.1.0"
+						"drv": "/nix/store/lan47c1yr2flavcni72376z6pn1fs9cl-dupin-lint-and-test-0.1.0.drv",
+						"output": "/nix/store/n573dw851jifq09ry7593m1jg267iwxg-dupin-lint-and-test-0.1.0"
 					}
 				]
 			},
@@ -81,13 +81,13 @@
 				"values": [
 					{
 						"label": "release",
-						"drv": "/nix/store/aynjapx465w8aqkvk7vf3ssy0jcn0k98-dupin-0.1.0.drv",
-						"output": "/nix/store/gkay21y1sk0rnyihvbjn3whgvvsh5bgb-dupin-0.1.0"
+						"drv": "/nix/store/4yqihj824g92hah8xn76lpd2g7ch8ly0-dupin-0.1.0.drv",
+						"output": "/nix/store/4pmnaydp4j31dw84ax4xmjxm9pk0my56-dupin-0.1.0"
 					},
 					{
 						"label": "checks",
-						"drv": "/nix/store/dmphj3q2ac2hpm8r4791aggxqyrhy1dg-dupin-lint-and-test-0.1.0.drv",
-						"output": "/nix/store/cn5a0pxh3ga43xbdkm27dm6lvdi0r82h-dupin-lint-and-test-0.1.0"
+						"drv": "/nix/store/jpp5d9rawfpfzmiy4rbgdchp8xmwv7ks-dupin-lint-and-test-0.1.0.drv",
+						"output": "/nix/store/x2d777dqg13bd8q6v2r87j6kgz82awhp-dupin-lint-and-test-0.1.0"
 					}
 				]
 			}
@@ -98,13 +98,13 @@
 				"values": [
 					{
 						"label": "release",
-						"drv": "/nix/store/kmrh88cg0rmjyccyqwp08j7dhdc51iwz-dupin-0.1.0.drv",
-						"output": "/nix/store/x95jkv0ppq1wdg5gmg75jxa9yi8n5kal-dupin-0.1.0"
+						"drv": "/nix/store/cwrrfnm2nksv9r8095bp64h4qy9l3p5y-dupin-0.1.0.drv",
+						"output": "/nix/store/kvw4ib6pw122492mmwy978pjxam65kkh-dupin-0.1.0"
 					},
 					{
 						"label": "checks",
-						"drv": "/nix/store/n2apvdfb1yrlgw9wbwns2jga2d5nriv0-dupin-lint-and-test-0.1.0.drv",
-						"output": "/nix/store/xvm4mrpcp3x8w8lqyd36br3dz052lz4d-dupin-lint-and-test-0.1.0"
+						"drv": "/nix/store/l6pb0lscryickv93yn11bmi7f4pprg4d-dupin-lint-and-test-0.1.0.drv",
+						"output": "/nix/store/izn680gylw1ssn9sjgd4brgydznc54yl-dupin-lint-and-test-0.1.0"
 					}
 				]
 			},
@@ -113,13 +113,13 @@
 				"values": [
 					{
 						"label": "release",
-						"drv": "/nix/store/2fp6py1awh4k744xirgxlpgabvnz4xvn-dupin-0.1.0.drv",
-						"output": "/nix/store/76b3725b4c519zrkgm2jyhbi3h9c6r6r-dupin-0.1.0"
+						"drv": "/nix/store/mdaq7r7mzf9ximidli0443ys1kqrdl1w-dupin-0.1.0.drv",
+						"output": "/nix/store/hgbbrkyd1ghlbkrb025rpzxm9q3zh813-dupin-0.1.0"
 					},
 					{
 						"label": "checks",
-						"drv": "/nix/store/jyyllh6ixmbw3fkmk4qz4mfna41x4r06-dupin-lint-and-test-0.1.0.drv",
-						"output": "/nix/store/kxhvqi9jdj4r8y8655xvsqq91bglqdgp-dupin-lint-and-test-0.1.0"
+						"drv": "/nix/store/8v6j0jz7x7445hrr2k2jzwkn4r6df5mm-dupin-lint-and-test-0.1.0.drv",
+						"output": "/nix/store/d5j6mb4rmx4j041nm2rkjfm7al8m1mja-dupin-lint-and-test-0.1.0"
 					}
 				]
 			}
@@ -133,13 +133,13 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/release-cache",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#dupin.releaseArtifacts"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/release-cache",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#dupin.releaseArtifacts"
 				],
-				"elapsed_ns": 93315745375,
+				"elapsed_ns": 567381042,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/h8dlwxif3kvwz05f0vvfkc7dwk6cd7fc-dupin-deps-0.1.0.drv",
+						"drvPath": "/nix/store/y7iiqjbcdj90nmgj6047ascl83kd89qj-dupin-deps-0.1.0.drv",
 						"outputs": {
 							"out": "/nix/store/vbkwlvw14kkw7l2bqflhp1ls229lippg-dupin-deps-0.1.0"
 						}
@@ -154,13 +154,13 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/debug-cache",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#dupin.debugArtifacts"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/debug-cache",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#dupin.debugArtifacts"
 				],
-				"elapsed_ns": 73821624542,
+				"elapsed_ns": 563429042,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/sf9d566bybhqxiwczqx6pq326s8g49gn-dupin-deps-0.1.0.drv",
+						"drvPath": "/nix/store/fig7sckgdy7bgs18w9g2lcc3vdz0w1za-dupin-deps-0.1.0.drv",
 						"outputs": {
 							"out": "/nix/store/5476w0njn1xycjm1gq7bjxfzs5dpkacy-dupin-deps-0.1.0"
 						}
@@ -175,15 +175,15 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/warm-baseline-release",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/baseline#dupin"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/warm-baseline-release",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/baseline#dupin"
 				],
-				"elapsed_ns": 147755723667,
+				"elapsed_ns": 634990125,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/f4qbxa8zdl3b9m1vbv4wgig65z98adjw-dupin-0.1.0.drv",
+						"drvPath": "/nix/store/6d2cx306jyaxzhpv0r9n9j33avsqzfb0-dupin-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/zvq39s9q22ks10yhkql3m3x9ivl4d01w-dupin-0.1.0"
+							"out": "/nix/store/0yy4wkz22fhpj6qja53y6z8izlsvz9r4-dupin-0.1.0"
 						}
 					}
 				]
@@ -196,15 +196,15 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/warm-baseline-checks",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/baseline#checks.aarch64-darwin.lint-and-test"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/warm-baseline-checks",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/baseline#checks.aarch64-darwin.lint-and-test"
 				],
-				"elapsed_ns": 73132971750,
+				"elapsed_ns": 80516434417,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/gh30q8bpi5r8x80nr1mpvfjn4axcgkry-dupin-lint-and-test-0.1.0.drv",
+						"drvPath": "/nix/store/lan47c1yr2flavcni72376z6pn1fs9cl-dupin-lint-and-test-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/xijcg1qfiv1k8mz3bh2qbfq35hv82b94-dupin-lint-and-test-0.1.0"
+							"out": "/nix/store/n573dw851jifq09ry7593m1jg267iwxg-dupin-lint-and-test-0.1.0"
 						}
 					}
 				]
@@ -217,15 +217,15 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/warm-candidate-release",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#dupin"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/warm-candidate-release",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#dupin"
 				],
-				"elapsed_ns": 77506768500,
+				"elapsed_ns": 76210470708,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/aynjapx465w8aqkvk7vf3ssy0jcn0k98-dupin-0.1.0.drv",
+						"drvPath": "/nix/store/4yqihj824g92hah8xn76lpd2g7ch8ly0-dupin-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/gkay21y1sk0rnyihvbjn3whgvvsh5bgb-dupin-0.1.0"
+							"out": "/nix/store/4pmnaydp4j31dw84ax4xmjxm9pk0my56-dupin-0.1.0"
 						}
 					}
 				]
@@ -238,15 +238,15 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/warm-candidate-checks",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#checks.aarch64-darwin.lint-and-test"
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/warm-candidate-checks",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#checks.aarch64-darwin.lint-and-test"
 				],
-				"elapsed_ns": 16649961875,
+				"elapsed_ns": 194066875,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/dmphj3q2ac2hpm8r4791aggxqyrhy1dg-dupin-lint-and-test-0.1.0.drv",
+						"drvPath": "/nix/store/jpp5d9rawfpfzmiy4rbgdchp8xmwv7ks-dupin-lint-and-test-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/cn5a0pxh3ga43xbdkm27dm6lvdi0r82h-dupin-lint-and-test-0.1.0"
+							"out": "/nix/store/x2d777dqg13bd8q6v2r87j6kgz82awhp-dupin-lint-and-test-0.1.0"
 						}
 					}
 				]
@@ -261,16 +261,16 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/edited-baseline-release",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/baseline#dupin",
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/edited-baseline-release",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/baseline#dupin",
 					"--offline"
 				],
-				"elapsed_ns": 148151473875,
+				"elapsed_ns": 150800017875,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/kmrh88cg0rmjyccyqwp08j7dhdc51iwz-dupin-0.1.0.drv",
+						"drvPath": "/nix/store/cwrrfnm2nksv9r8095bp64h4qy9l3p5y-dupin-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/x95jkv0ppq1wdg5gmg75jxa9yi8n5kal-dupin-0.1.0"
+							"out": "/nix/store/kvw4ib6pw122492mmwy978pjxam65kkh-dupin-0.1.0"
 						}
 					}
 				]
@@ -283,16 +283,16 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/edited-candidate-release",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#dupin",
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/edited-candidate-release",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#dupin",
 					"--offline"
 				],
-				"elapsed_ns": 76032850583,
+				"elapsed_ns": 75543769959,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/2fp6py1awh4k744xirgxlpgabvnz4xvn-dupin-0.1.0.drv",
+						"drvPath": "/nix/store/mdaq7r7mzf9ximidli0443ys1kqrdl1w-dupin-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/76b3725b4c519zrkgm2jyhbi3h9c6r6r-dupin-0.1.0"
+							"out": "/nix/store/hgbbrkyd1ghlbkrb025rpzxm9q3zh813-dupin-0.1.0"
 						}
 					}
 				]
@@ -305,16 +305,16 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/edited-baseline-checks",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/baseline#checks.aarch64-darwin.lint-and-test",
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/edited-baseline-checks",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/baseline#checks.aarch64-darwin.lint-and-test",
 					"--offline"
 				],
-				"elapsed_ns": 77854134084,
+				"elapsed_ns": 73064554375,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/n2apvdfb1yrlgw9wbwns2jga2d5nriv0-dupin-lint-and-test-0.1.0.drv",
+						"drvPath": "/nix/store/l6pb0lscryickv93yn11bmi7f4pprg4d-dupin-lint-and-test-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/xvm4mrpcp3x8w8lqyd36br3dz052lz4d-dupin-lint-and-test-0.1.0"
+							"out": "/nix/store/izn680gylw1ssn9sjgd4brgydznc54yl-dupin-lint-and-test-0.1.0"
 						}
 					}
 				]
@@ -327,16 +327,16 @@
 					"--no-write-lock-file",
 					"--json",
 					"--out-link",
-					"/private/tmp/dupin-nix-cache.7K3wxRC2/roots/edited-candidate-checks",
-					"path:/private/tmp/dupin-nix-cache.7K3wxRC2/candidate#checks.aarch64-darwin.lint-and-test",
+					"/private/tmp/dupin-nix-cache.tSC581Fn/roots/edited-candidate-checks",
+					"path:/private/tmp/dupin-nix-cache.tSC581Fn/candidate#checks.aarch64-darwin.lint-and-test",
 					"--offline"
 				],
-				"elapsed_ns": 18413306834,
+				"elapsed_ns": 16560102666,
 				"outputs": [
 					{
-						"drvPath": "/nix/store/jyyllh6ixmbw3fkmk4qz4mfna41x4r06-dupin-lint-and-test-0.1.0.drv",
+						"drvPath": "/nix/store/8v6j0jz7x7445hrr2k2jzwkn4r6df5mm-dupin-lint-and-test-0.1.0.drv",
 						"outputs": {
-							"out": "/nix/store/kxhvqi9jdj4r8y8655xvsqq91bglqdgp-dupin-lint-and-test-0.1.0"
+							"out": "/nix/store/d5j6mb4rmx4j041nm2rkjfm7al8m1mja-dupin-lint-and-test-0.1.0"
 						}
 					}
 				]
@@ -344,9 +344,9 @@
 		],
 		"applications": {
 			"baseline": {
-				"output": "/nix/store/x95jkv0ppq1wdg5gmg75jxa9yi8n5kal-dupin-0.1.0",
+				"output": "/nix/store/kvw4ib6pw122492mmwy978pjxam65kkh-dupin-0.1.0",
 				"binary_bytes": 18537328,
-				"binary_sha256": "273262b710c29b5a500f406072ef9a59546b4933066d2ac3abede1f72c4623f2",
+				"binary_sha256": "d1a74d2046d98cde4f58b7fa0f9cb0770db0e6b1802091bfcfe2e2bd6172f3f6",
 				"references": ["/nix/store/hbm3p1v0bxydsbvy0zh2hbladdf9a4lh-libiconv-115.100.1"],
 				"audit": {
 					"packages": [
@@ -1771,9 +1771,9 @@
 				}
 			},
 			"candidate": {
-				"output": "/nix/store/76b3725b4c519zrkgm2jyhbi3h9c6r6r-dupin-0.1.0",
+				"output": "/nix/store/hgbbrkyd1ghlbkrb025rpzxm9q3zh813-dupin-0.1.0",
 				"binary_bytes": 18537328,
-				"binary_sha256": "273262b710c29b5a500f406072ef9a59546b4933066d2ac3abede1f72c4623f2",
+				"binary_sha256": "d1a74d2046d98cde4f58b7fa0f9cb0770db0e6b1802091bfcfe2e2bd6172f3f6",
 				"references": ["/nix/store/hbm3p1v0bxydsbvy0zh2hbladdf9a4lh-libiconv-115.100.1"],
 				"audit": {
 					"packages": [
@@ -3200,6 +3200,7 @@
 		},
 		"validation": {
 			"binary_size_equal": true,
+			"binary_sha256_equal": true,
 			"audit_metadata_equal": true,
 			"runtime_references_equal": true
 		}

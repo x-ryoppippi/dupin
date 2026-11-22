@@ -57,23 +57,44 @@ the measured dependency cache. CI cache reuse remains to be measured.
 ## Recorded source-edit run
 
 [Results](results/2026-11-22-aarch64-darwin.json) compare native builder
-`21612d4e38153b006ded83dfb9d5a2d2c33f39c3` with cache candidate
-`999932b8d7eb0f0d16c32147751f62415f142c6d`. Both snapshots contain the same
+`519d0d57d4c75a56831fd3104321ce0c70ce1e0e` with cache candidate
+`b10d2bb8ed15cb766af10d65c2e84f8dcb0ae7b9`. Both snapshots contain the same
 Rust, packaging, lockfile and version inputs. The unused source edit forces new
 application/check outputs while retaining both dependency-cache output paths.
 
 | Source-edit build | Native builder | Cached builder |
 | ----------------- | -------------: | -------------: |
-| Release app       |        148.2 s |         76.0 s |
-| Clippy and tests  |         77.9 s |         18.4 s |
+| Release app       |        150.8 s |         75.5 s |
+| Clippy and tests  |         73.1 s |         16.6 s |
 
-The initial release and debug dependency builds took 93.3 s and 73.8 s. The
-table measures subsequent edits with those outputs already available. This is
-one sequential run on a shared machine, with uncontrolled load; it does not
-establish repeatable timing improvements or CI cache performance.
+The same release and debug dependency outputs were first built in the
+[initial run](https://github.com/x-ryoppippi/dupin/blob/5262352/experiments/nix-cargo-cache/results/2026-11-22-aarch64-darwin.json),
+taking 93.3 s and 73.8 s. This repeat reused them, and each preparation command
+completed in about 0.6 s. The table measures subsequent source edits with those
+outputs available. This is one sequential run on a shared machine, with
+uncontrolled load; it does not establish repeatable timing improvements or CI
+cache performance.
 
 Both edited executables contain exactly the same bytes: 18,537,328 bytes, with
-SHA-256 `273262b710c29b5a500f406072ef9a59546b4933066d2ac3abede1f72c4623f2`.
+SHA-256 `d1a74d2046d98cde4f58b7fa0f9cb0770db0e6b1802091bfcfe2e2bd6172f3f6`.
 Decoded dependency audits and runtime references match. The resource-only
 Info.plist probe changes the app bundle output while preserving the binary and
 both dependency outputs. Full provenance and output paths are in the record.
+
+## Local storage cost
+
+The [storage record](results/2026-11-22-storage-aarch64-darwin.json) measures
+these same dependency outputs with `nix path-info`. NAR sizes describe the
+contents as encoded by Nix:
+
+| Output                  | Own NAR bytes |
+| ----------------------- | ------------: |
+| Release dependencies    |   321,583,704 |
+| Debug dependencies      |   766,593,104 |
+| Both dependency outputs | 1,088,176,808 |
+
+Keeping both outputs and their shared references retains 2,929,410,240 NAR
+bytes, including the vendor tree also used as an input by the native builder.
+The record computes that union once rather than adding overlapping closure
+sizes. Allocated disk space and CI pack/upload/storage costs are not measured.
+The exact commands, source revision and paths are included in the record.
