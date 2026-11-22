@@ -276,6 +276,12 @@ impl Ui {
         if tx.focused().is_some() {
             return false;
         }
+        if ev.key == Key::Backspace && !self.query.text.is_empty() {
+            tx.focus("query", false);
+            self.query.key(ev, None);
+            self.edited(tx);
+            return true;
+        }
         if let Key::Text(text) = &ev.key
             && !(ev.mods.cmd || ev.mods.ctrl || ev.mods.alt)
         {
