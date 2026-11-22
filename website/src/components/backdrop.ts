@@ -3,7 +3,7 @@
 // inputs and the same `backdrop(p, b)` call, with a full-canvas triangle for the panel's rect.
 import flow from '../../../crates/dupin/src/shaders/flow.wgsl?raw';
 
-const examples = import.meta.glob<string>('../../../examples/shaders/{matrix,embers}.wgsl', {
+const examples = import.meta.glob<string>('../../../examples/shaders/{aurora,matrix,embers}.wgsl', {
 	query: '?raw',
 	import: 'default',
 	eager: true,
@@ -14,7 +14,7 @@ const exampleSource = (name: string) => examples[`../../../examples/shaders/${na
 /** The backdrops the demo offers: the built-in one and some of the examples. */
 export const backdrops = [
 	{ id: 'flow', title: 'Flow', source: flow },
-	...['matrix', 'embers'].flatMap((id) => {
+	...['aurora', 'matrix', 'embers'].flatMap((id) => {
 		const source = exampleSource(id);
 		return source ? [{ id, title: id[0]!.toUpperCase() + id.slice(1), source }] : [];
 	}),
