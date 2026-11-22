@@ -510,6 +510,9 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
         &input_source_title(&s.config.input_source),
         Prefs::pick_input_source,
     );
+    let relaunch = value_button(k, "relaunch", "Relaunch", &icons::REFRESH).on_press(|s: &mut Prefs| {
+        s.panel.update(|ui, tx| ui.relaunch(tx));
+    });
     vec![
         setting(
             k,
@@ -531,6 +534,13 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             "Input source",
             Some("ASCII switches an input method to Roman while the panel shows"),
             input_source,
+        ),
+        setting(
+            k,
+            &icons::REFRESH,
+            "Relaunch Dupin",
+            Some("Restart and reload configuration"),
+            relaunch,
         ),
     ]
 }
@@ -607,7 +617,7 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
     let status = s.updater.status();
     let action = match &status {
         Status::Ready(_) => Button::new("Restart to Update").on_press(|s: &mut Prefs| {
-            s.panel.update(|ui, _| ui.restart_to_update());
+            s.panel.update(|ui, tx| ui.relaunch(tx));
         }),
         Status::Download { .. } => {
             Button::new("Download").on_press(|s: &mut Prefs| s.updater.open_download())
