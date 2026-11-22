@@ -3,7 +3,7 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use dupin_core::session::Results;
-use dupin_core::{Item, Mode};
+use dupin_core::{Item, ResultLayout};
 use rune::tok::{self, type_};
 use rune::{
     Color, Cx, El, GrowthSpec, ScrollSpec, Span, SystemMaterial, TextStyle, col, effect, el, rich, row, text,
@@ -53,6 +53,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     panel = panel.child(header(s, &t, accent));
     let notices = [
         ("notice", s.notice.as_deref()),
+        ("registration-notice", s.registration_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
@@ -95,13 +96,8 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
 }
 
 fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
-    let mode = s.session.mode();
-    let (placeholder, chip) = match mode {
-        Mode::Apps => ("Search apps", None),
-        Mode::Files => ("Search files", Some("Files")),
-        Mode::Contents => ("Search inside files", Some("In files")),
-        Mode::Dictionary => ("Look up a word", Some("Define")),
-    };
+    let presentation = &s.session.command().presentation;
+    let placeholder = presentation.placeholder.as_str();
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0).lh(30.0))
         .key("query")
         .label(placeholder)
@@ -119,8 +115,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if let Some(chip) = chip {
-        // The mode chip: Space or the `in` keyword put us here, Backspace takes us back.
+    bar = if let Some(chip) = presentation.chip.as_deref() {
         bar.child(
             row()
                 .key("mode")
@@ -139,29 +134,25 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         )
     };
     bar = bar.child(field);
-    if mode != Mode::Apps && matches!(s.session.results(), Results::Searching { .. }) {
+    if presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
         bar = bar.child(text("Searching…").font(type_::LABEL).color(t.text_secondary));
     }
     bar
 }
 
-fn hint(s: &Ui) -> Option<&'static str> {
-    match (
-        s.session.mode(),
-        s.session.query().trim().is_empty(),
-        s.session.results(),
-    ) {
-        (Mode::Files, true, _) => Some("Type to search files with Spotlight  ·  ⌫ back to apps"),
-        (Mode::Contents, true, _) => Some("Type to search inside files with Spotlight  ·  ⌫ back to apps"),
-        (Mode::Dictionary, true, _) => Some("Type a word  ·  ⌫ back to apps"),
-        (Mode::Dictionary, false, Results::Done) => Some("No definition found"),
-        (_, false, Results::Done) => Some("No matches"),
-        _ => None,
+fn hint(s: &Ui) -> Option<&str> {
+    let presentation = &s.session.command().presentation;
+    if s.session.query().trim().is_empty() {
+        presentation.empty_hint.as_deref()
+    } else if s.session.results() == Results::Done {
+        presentation.no_results_hint.as_deref()
+    } else {
+        None
     }
 }
 
 fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
-    if s.session.mode() == Mode::Dictionary {
+    if s.session.command().presentation.result_layout == ResultLayout::Detail {
         let Some(item) = items.first() else {
             return col().key("dictionary-results");
         };

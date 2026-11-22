@@ -1,36 +1,96 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::ItemKind;
+use crate::{CommandId, CommandRegistry, CommandSpec, ItemKind, QueryPresentation};
+
+fn command(value: &str) -> CommandId {
+    CommandId::new(value).unwrap()
+}
+
+fn app_command() -> CommandId {
+    command("sample.search")
+}
+
+fn files_command() -> CommandId {
+    command("sample.files")
+}
+
+fn contents_command() -> CommandId {
+    command("sample.contents")
+}
+
+fn dictionary_command() -> CommandId {
+    command("sample.lookup")
+}
+
+fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
+    let app = app_command();
+    let files = files_command();
+    let contents = contents_command();
+    let dictionary = dictionary_command();
+    let mut registry = CommandRegistry::new(app.clone(), Some(files.clone()));
+    for (id, label) in [
+        (app, "Search"),
+        (files, "Files"),
+        (contents.clone(), "Contents"),
+        (dictionary.clone(), "Lookup"),
+    ] {
+        registry
+            .register(CommandSpec::new(id, 10, QueryPresentation::new(label)))
+            .unwrap();
+    }
+    registry.add_keyword(&contents, "in").unwrap();
+    for keyword in dictionary_keywords {
+        registry.add_keyword(&dictionary, keyword).unwrap();
+    }
+    registry
+}
+
+fn session() -> Session {
+    session_with_keywords(History::default(), vec!["define".into(), "d".into()])
+}
+
+fn session_with_keywords(history: History, keywords: Vec<String>) -> Session {
+    Session::new(history, command_registry(keywords)).unwrap()
+}
+
+fn session_with_clock(history: History, clock: fn() -> u64) -> Session {
+    Session::with_clock(
+        history,
+        command_registry(vec!["define".into(), "d".into()]),
+        clock,
+    )
+    .unwrap()
+}
 
 fn item(kind: ItemKind, name: &str) -> Item {
     Item::path(kind, PathBuf::from(format!("/x/{name}")), name.to_owned(), vec![])
 }
 
-fn searched(effects: &[Effect]) -> (Mode, u64, &str) {
+fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
     match effects {
         [
             Effect::Search {
-                mode,
+                command,
                 generation,
                 query,
             },
-        ] => (*mode, *generation, query),
+        ] => (command.clone(), *generation, query),
         other => panic!("expected one search, got {other:?}"),
     }
 }
 
 #[test]
 fn starts_in_apps_mode_with_nothing_shown() {
-    let s = Session::default();
-    assert_eq!(s.mode(), Mode::Apps);
+    let s = session();
+    assert_eq!(s.command_id(), &app_command());
     assert_eq!(s.results(), Results::Idle);
     assert!(s.items().is_empty());
 }
 
 #[test]
 fn actions_run_the_named_result_even_after_selection_moves() {
-    let mut s = Session::default();
+    let mut s = session();
     let generation = searched(&s.set_query("note")).1;
     s.deliver(Delivery::Batch {
         generation,
@@ -53,7 +113,7 @@ fn actions_run_the_named_result_even_after_selection_moves() {
 #[test]
 fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
     for boundary in 0..3 {
-        let mut s = Session::default();
+        let mut s = session();
         let generation = searched(&s.set_query("note")).1;
         s.deliver(Delivery::Batch {
             generation,
@@ -76,7 +136,7 @@ fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
 
 #[test]
 fn unknown_actions_and_missing_results_do_nothing() {
-    let mut s = Session::default();
+    let mut s = session();
     assert!(s.intent(Intent::Actions).unwrap().is_empty());
     let generation = searched(&s.set_query("note")).1;
     s.deliver(Delivery::Batch {
@@ -91,7 +151,7 @@ fn unknown_actions_and_missing_results_do_nothing() {
 #[test]
 fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
     for intent in [Intent::Actions, Intent::Open, Intent::OpenAlternate] {
-        let mut s = Session::default();
+        let mut s = session();
         let old_generation = searched(&s.set_query("old")).1;
         s.deliver(Delivery::Batch {
             generation: old_generation,
@@ -114,7 +174,7 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
 fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let mut history = History::default();
     history.record("/Applications/Safari.app", "saf", 1_800_000_000);
-    let mut s = Session::new(history.clone());
+    let mut s = session_with_keywords(history.clone(), vec!["define".into(), "d".into()]);
     s.set_query("d");
     s.intent(Intent::Space);
     let generation = searched(&s.set_query("serendipity")).1;
@@ -142,71 +202,103 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
 
 #[test]
 fn typing_searches_apps() {
-    let mut s = Session::default();
+    let mut s = session();
     let effects = s.set_query("saf");
-    assert_eq!(searched(&effects).0, Mode::Apps);
+    assert_eq!(searched(&effects).0, app_command());
     assert_eq!(searched(&effects).2, "saf");
+}
+
+#[test]
+fn a_registered_extension_command_owns_its_trigger_and_search_identity() {
+    let launcher = command("shell.launch");
+    let converter = command("measure.convert");
+    let mut registry = CommandRegistry::new(launcher.clone(), None);
+    registry
+        .register(CommandSpec::new(
+            launcher,
+            50,
+            QueryPresentation::new("Type to launch"),
+        ))
+        .unwrap();
+    registry
+        .register(CommandSpec::new(
+            converter.clone(),
+            1,
+            QueryPresentation::new("Convert a value"),
+        ))
+        .unwrap();
+    registry.add_keyword(&converter, "convert").unwrap();
+    let mut s = Session::new(History::default(), registry).unwrap();
+
+    s.set_query("convert");
+    assert!(s.intent(Intent::Space).unwrap().contains(&Effect::ClearQuery));
+    assert_eq!(s.command_id(), &converter);
+    assert_eq!(
+        searched(&s.set_query("12 km to mi")).0,
+        converter,
+        "the session routes by the registered ID rather than a feature enum"
+    );
 }
 
 #[test]
 fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
     for (keyword, mode) in [
-        ("in", Mode::Contents),
-        ("define", Mode::Dictionary),
-        ("d", Mode::Dictionary),
-        ("word", Mode::Dictionary),
-        ("look up", Mode::Dictionary),
+        ("in", contents_command()),
+        ("define", dictionary_command()),
+        ("d", dictionary_command()),
+        ("word", dictionary_command()),
+        ("look up", dictionary_command()),
     ] {
-        let mut s = Session::with_dictionary_keywords(
+        let mut s = session_with_keywords(
             History::default(),
             vec!["define".into(), "d".into(), "word".into(), "look up".into()],
         );
         let effects = s.set_query(&format!("{keyword}  日本語 phrase"));
-        assert_eq!(s.mode(), mode);
+        assert_eq!(s.command_id(), &mode);
         assert_eq!(s.query(), "日本語 phrase");
         assert_eq!(effects[0], Effect::ReplaceQuery("日本語 phrase".into()));
         assert_eq!(searched(&effects[1..]).0, mode);
         assert_eq!(searched(&effects[1..]).2, "日本語 phrase");
         s.set_query("");
         s.intent(Intent::Backspace);
-        assert_eq!(s.mode(), Mode::Apps);
+        assert_eq!(s.command_id(), &app_command());
     }
 }
 
 #[test]
 fn compound_aliases_match_the_complete_keyword_and_separator() {
-    let mut s = Session::with_dictionary_keywords(History::default(), vec!["look up".into()]);
+    let mut s = session_with_keywords(History::default(), vec!["look up".into()]);
     s.set_query("look up");
     s.intent(Intent::Space);
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     s.reset();
     let effects = s.set_query("look up\t  日本語 phrase");
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     assert_eq!(s.query(), "日本語 phrase");
     assert_eq!(searched(&effects[1..]).2, "日本語 phrase");
     s.reset();
-    assert_eq!(searched(&s.set_query("look upper")).0, Mode::Apps);
+    assert_eq!(searched(&s.set_query("look upper")).0, app_command());
     s.set_query("look up ");
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     assert!(s.query().is_empty());
 }
 
 #[test]
 fn unknown_prefixes_and_non_app_modes_keep_literal_queries() {
     for query in ["unknown word", "define", "dictionary word"] {
-        let mut s = Session::default();
-        assert_eq!(searched(&s.set_query(query)).0, Mode::Apps);
+        let mut s = session();
+        assert_eq!(searched(&s.set_query(query)).0, app_command());
         assert_eq!(s.query(), query);
     }
-    let mut s = Session::default();
+    let mut s = session();
     s.intent(Intent::Space);
-    assert_eq!(searched(&s.set_query("d file name")).0, Mode::Files);
+    assert_eq!(searched(&s.set_query("d file name")).0, files_command());
     assert_eq!(s.query(), "d file name");
 }
 
 #[test]
 fn a_pasted_mode_switch_discards_previous_results_and_late_deliveries() {
-    let mut s = Session::default();
+    let mut s = session();
     let generation = searched(&s.set_query("saf")).1;
     s.deliver(Delivery::Batch {
         generation,
@@ -222,64 +314,64 @@ fn a_pasted_mode_switch_discards_previous_results_and_late_deliveries() {
 
 #[test]
 fn refreshing_repeats_the_current_apps_query_with_a_new_generation() {
-    let mut s = Session::default();
+    let mut s = session();
     let first_effects = s.set_query("saf");
     let first = searched(&first_effects);
     let refresh_effects = s.refresh();
     let refreshed = searched(&refresh_effects);
-    assert_eq!(refreshed.0, Mode::Apps);
+    assert_eq!(refreshed.0, app_command());
     assert_eq!(refreshed.2, "saf");
     assert!(refreshed.1 > first.1);
 }
 
 #[test]
 fn space_on_an_empty_query_enters_file_mode_and_is_consumed() {
-    let mut s = Session::default();
+    let mut s = session();
     assert_eq!(s.intent(Intent::Space), Some(vec![]));
-    assert_eq!(s.mode(), Mode::Files);
+    assert_eq!(s.command_id(), &files_command());
     let effects = s.set_query("report");
-    assert_eq!(searched(&effects).0, Mode::Files);
+    assert_eq!(searched(&effects).0, files_command());
 }
 
 #[test]
 fn define_then_space_enters_dictionary_mode_and_searches_the_term() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("define");
     let effects = s.intent(Intent::Space).unwrap();
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     assert_eq!(s.query(), "");
     assert_eq!(effects, [Effect::ClearQuery, Effect::CancelSearch]);
 
     let effects = s.set_query("serendipity");
-    assert_eq!(searched(&effects).0, Mode::Dictionary);
+    assert_eq!(searched(&effects).0, dictionary_command());
     assert_eq!(searched(&effects).2, "serendipity");
 }
 
 #[test]
 fn configured_dictionary_keywords_are_matched_as_a_list() {
-    let mut s = Session::with_dictionary_keywords(History::default(), vec!["word".into(), "lookup".into()]);
+    let mut s = session_with_keywords(History::default(), vec!["word".into(), "lookup".into()]);
     s.set_query("lookup");
     s.intent(Intent::Space);
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
 
-    let mut s = Session::with_dictionary_keywords(History::default(), vec!["lookup".into()]);
+    let mut s = session_with_keywords(History::default(), vec!["lookup".into()]);
     s.set_query("define");
     assert_eq!(s.intent(Intent::Space), None);
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn backspace_from_an_empty_dictionary_query_returns_to_apps() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("define");
     s.intent(Intent::Space);
     assert_eq!(s.intent(Intent::Backspace), Some(vec![]));
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn enter_offers_dictionary_actions_before_launching() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("define");
     s.intent(Intent::Space);
     let generation = searched(&s.set_query("serendipity")).1;
@@ -318,23 +410,23 @@ fn enter_offers_dictionary_actions_before_launching() {
 
 #[test]
 fn space_inside_a_query_is_left_to_the_field() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("visual");
     assert_eq!(s.intent(Intent::Space), None);
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn space_in_file_mode_with_an_empty_query_is_swallowed() {
-    let mut s = Session::default();
+    let mut s = session();
     s.intent(Intent::Space);
     assert_eq!(s.intent(Intent::Space), Some(vec![]));
-    assert_eq!(s.mode(), Mode::Files);
+    assert_eq!(s.command_id(), &files_command());
 }
 
 #[test]
 fn backspace_on_an_empty_query_leaves_file_mode() {
-    let mut s = Session::default();
+    let mut s = session();
     s.intent(Intent::Space);
     s.set_query("a");
     // Deleting the last character is the field's job...
@@ -342,18 +434,18 @@ fn backspace_on_an_empty_query_leaves_file_mode() {
     s.set_query("");
     // ...and the next Backspace, on an empty query, leaves the mode.
     assert_eq!(s.intent(Intent::Backspace), Some(vec![]));
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn backspace_on_an_empty_apps_query_is_left_to_the_field() {
-    let mut s = Session::default();
+    let mut s = session();
     assert_eq!(s.intent(Intent::Backspace), None);
 }
 
 #[test]
 fn results_replace_on_first_batch_and_append_after() {
-    let mut s = Session::default();
+    let mut s = session();
     let g1 = searched(&s.set_query("s")).1;
     assert!(s.deliver(Delivery::Batch {
         generation: g1,
@@ -378,7 +470,7 @@ fn results_replace_on_first_batch_and_append_after() {
 
 #[test]
 fn stale_answers_are_dropped() {
-    let mut s = Session::default();
+    let mut s = session();
     let g1 = searched(&s.set_query("s")).1;
     let _g2 = searched(&s.set_query("sa")).1;
     assert!(!s.deliver(Delivery::Batch {
@@ -390,7 +482,7 @@ fn stale_answers_are_dropped() {
 
 #[test]
 fn done_without_batches_clears_old_rows() {
-    let mut s = Session::default();
+    let mut s = session();
     let g1 = searched(&s.set_query("s")).1;
     s.deliver(Delivery::Batch {
         generation: g1,
@@ -404,7 +496,7 @@ fn done_without_batches_clears_old_rows() {
 
 #[test]
 fn clearing_the_query_cancels_and_ignores_late_answers() {
-    let mut s = Session::default();
+    let mut s = session();
     let g = searched(&s.set_query("s")).1;
     assert_eq!(s.set_query(""), vec![Effect::CancelSearch]);
     assert!(!s.deliver(Delivery::Batch {
@@ -416,7 +508,7 @@ fn clearing_the_query_cancels_and_ignores_late_answers() {
 
 #[test]
 fn switching_modes_never_shows_the_other_modes_rows() {
-    let mut s = Session::default();
+    let mut s = session();
     let g = searched(&s.set_query("s")).1;
     s.deliver(Delivery::Batch {
         generation: g,
@@ -430,7 +522,7 @@ fn switching_modes_never_shows_the_other_modes_rows() {
 
 #[test]
 fn arrows_wrap_and_reveal_the_selection() {
-    let mut s = Session::default();
+    let mut s = session();
     let g = searched(&s.set_query("a")).1;
     let items = ["A", "B", "C"].map(|n| item(ItemKind::Application, n)).to_vec();
     s.deliver(Delivery::Batch { generation: g, items });
@@ -442,7 +534,7 @@ fn arrows_wrap_and_reveal_the_selection() {
 
 #[test]
 fn enter_runs_the_primary_action_then_hides_and_resets() {
-    let mut s = Session::default();
+    let mut s = session();
     let g = searched(&s.set_query("saf")).1;
     s.deliver(Delivery::Batch {
         generation: g,
@@ -459,12 +551,12 @@ fn enter_runs_the_primary_action_then_hides_and_resets() {
         ]
     );
     assert_eq!(s.query(), "");
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn command_enter_reveals_in_the_file_manager() {
-    let mut s = Session::default();
+    let mut s = session();
     s.intent(Intent::Space);
     let g = searched(&s.set_query("notes")).1;
     s.deliver(Delivery::Batch {
@@ -482,21 +574,21 @@ fn command_enter_reveals_in_the_file_manager() {
 
 #[test]
 fn enter_with_no_results_does_nothing() {
-    let mut s = Session::default();
+    let mut s = session();
     assert_eq!(s.intent(Intent::Open), Some(vec![]));
 }
 
 #[test]
 fn escape_hides_and_resets_file_mode() {
-    let mut s = Session::default();
+    let mut s = session();
     s.intent(Intent::Space);
     assert_eq!(s.intent(Intent::Dismiss), Some(vec![Effect::Hide]));
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn a_click_selects_by_id_even_after_rows_move() {
-    let mut s = Session::default();
+    let mut s = session();
     let g = searched(&s.set_query("a")).1;
     let items = ["A", "B", "C"].map(|n| item(ItemKind::Application, n)).to_vec();
     s.deliver(Delivery::Batch { generation: g, items });
@@ -508,20 +600,20 @@ fn a_click_selects_by_id_even_after_rows_move() {
 
 #[test]
 fn the_in_keyword_enters_content_search_and_clears_the_field() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("in");
     let effects = s.intent(Intent::Space).unwrap();
     assert_eq!(effects.first(), Some(&Effect::ClearQuery));
-    assert_eq!(s.mode(), Mode::Contents);
+    assert_eq!(s.command_id(), &contents_command());
     assert_eq!(s.query(), "");
     let effects = s.set_query("quarterly report");
-    assert_eq!(searched(&effects).0, Mode::Contents);
+    assert_eq!(searched(&effects).0, contents_command());
     assert_eq!(searched(&effects).2, "quarterly report");
 }
 
 #[test]
 fn the_in_keyword_cancels_the_apps_search_it_started() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("i");
     s.set_query("in");
     assert_eq!(
@@ -533,7 +625,7 @@ fn the_in_keyword_cancels_the_apps_search_it_started() {
 
 #[test]
 fn in_is_only_a_keyword_on_its_own_in_the_apps_search() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("ins");
     assert_eq!(s.intent(Intent::Space), None);
     s.set_query("");
@@ -541,12 +633,12 @@ fn in_is_only_a_keyword_on_its_own_in_the_apps_search() {
     s.set_query("in");
     // In file search, "in " is an ordinary query.
     assert_eq!(s.intent(Intent::Space), None);
-    assert_eq!(s.mode(), Mode::Files);
+    assert_eq!(s.command_id(), &files_command());
 }
 
 #[test]
 fn backspace_on_an_empty_query_leaves_content_search() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("in");
     s.intent(Intent::Space);
     assert_eq!(
@@ -555,12 +647,12 @@ fn backspace_on_an_empty_query_leaves_content_search() {
         "a leading space is swallowed"
     );
     assert_eq!(s.intent(Intent::Backspace), Some(vec![]));
-    assert_eq!(s.mode(), Mode::Apps);
+    assert_eq!(s.command_id(), &app_command());
 }
 
 #[test]
 fn content_results_stay_on_screen_while_the_query_grows() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("in");
     s.intent(Intent::Space);
     let g = searched(&s.set_query("tax")).1;
@@ -581,7 +673,7 @@ fn ranked(name: &str, score: i32) -> Item {
 
 #[test]
 fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
-    let mut s = Session::with_clock(History::default(), || 1_800_000_000);
+    let mut s = session_with_clock(History::default(), || 1_800_000_000);
     let g = searched(&s.set_query("s")).1;
     s.deliver(Delivery::Batch {
         generation: g,
@@ -609,7 +701,7 @@ fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
 fn reordering_on_a_later_batch_keeps_the_selected_item() {
     let mut history = History::default();
     history.record("/x/C", "a", 1_800_000_000);
-    let mut s = Session::with_clock(history, || 1_800_000_000);
+    let mut s = session_with_clock(history, || 1_800_000_000);
     let g = searched(&s.set_query("a")).1;
     s.deliver(Delivery::Batch {
         generation: g,
@@ -630,7 +722,7 @@ fn reordering_on_a_later_batch_keeps_the_selected_item() {
 
 #[test]
 fn refreshing_keeps_the_selected_item_when_results_reorder() {
-    let mut s = Session::default();
+    let mut s = session();
     let generation = searched(&s.set_query("a")).1;
     s.deliver(Delivery::Batch {
         generation,
@@ -653,10 +745,10 @@ fn refreshing_keeps_the_selected_item_when_results_reorder() {
 
 #[test]
 fn pasting_an_empty_keyword_cancels_the_previous_search() {
-    let mut s = Session::default();
+    let mut s = session();
     let generation = searched(&s.set_query("Safari")).1;
     let effects = s.set_query("d ");
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     assert_eq!(s.query(), "");
     assert_eq!(
         effects,
@@ -676,7 +768,7 @@ fn complete_query(s: &mut Session, query: &str) {
 
 #[test]
 fn query_recall_walks_backwards_and_forwards_to_the_empty_draft() {
-    let mut s = Session::default();
+    let mut s = session();
     assert_eq!(s.intent(Intent::Up), Some(vec![]));
     for query in ["first", "second"] {
         complete_query(&mut s, query);
@@ -697,20 +789,20 @@ fn query_recall_walks_backwards_and_forwards_to_the_empty_draft() {
 
 #[test]
 fn dictionary_words_are_recalled_without_opening_dictionary() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("d ");
     complete_query(&mut s, "serendipity");
     s.intent(Intent::Dismiss);
     s.set_query("d ");
     let effects = s.intent(Intent::Up).unwrap();
     assert_eq!(effects[0], Effect::ReplaceQuery("serendipity".into()));
-    assert_eq!(searched(&effects[1..]).0, Mode::Dictionary);
+    assert_eq!(searched(&effects[1..]).0, dictionary_command());
     assert_eq!(s.history(), &History::default());
 }
 
 #[test]
 fn recall_is_separate_for_each_search_mode() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "Safari");
     s.reset();
     s.set_query("d ");
@@ -727,7 +819,7 @@ fn recall_is_separate_for_each_search_mode() {
 
 #[test]
 fn editing_a_recalled_query_restores_result_navigation() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "Safari");
     s.set_query("");
     s.intent(Intent::Up);
@@ -743,7 +835,7 @@ fn editing_a_recalled_query_restores_result_navigation() {
 
 #[test]
 fn recall_deduplicates_completed_terms_and_bounds_storage() {
-    let mut s = Session::default();
+    let mut s = session();
     for _ in 0..2 {
         complete_query(&mut s, "word");
         s.set_query("");
@@ -759,7 +851,7 @@ fn recall_deduplicates_completed_terms_and_bounds_storage() {
 
 #[test]
 fn unfinished_edits_are_not_recorded_but_activated_queries_are() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("unfinished");
     s.reset();
     assert_eq!(s.intent(Intent::Up), Some(vec![]));
@@ -775,7 +867,7 @@ fn unfinished_edits_are_not_recorded_but_activated_queries_are() {
 
 #[test]
 fn clearing_one_character_at_a_time_recalls_the_completed_word() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "abc");
     for prefix in ["ab", "a"] {
         complete_query(&mut s, prefix);
@@ -793,7 +885,7 @@ fn deletion_anywhere_preserves_the_completed_term_when_cleared() {
         ("日本語", "本語"),
         ("日本語", "日語"),
     ] {
-        let mut s = Session::default();
+        let mut s = session();
         complete_query(&mut s, original);
         complete_query(&mut s, shortened);
         s.set_query("");
@@ -804,7 +896,7 @@ fn deletion_anywhere_preserves_the_completed_term_when_cleared() {
 
 #[test]
 fn deleting_an_unfinished_query_records_the_latest_completed_term() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("abc");
     complete_query(&mut s, "ab");
     complete_query(&mut s, "a");
@@ -815,7 +907,7 @@ fn deleting_an_unfinished_query_records_the_latest_completed_term() {
 
 #[test]
 fn editing_after_deletion_starts_a_new_term() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "abc");
     complete_query(&mut s, "ab");
     complete_query(&mut s, "about");
@@ -826,7 +918,7 @@ fn editing_after_deletion_starts_a_new_term() {
 
 #[test]
 fn consuming_a_keyword_does_not_add_it_to_query_history() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "d");
     s.set_query("d word");
     s.reset();
@@ -835,7 +927,7 @@ fn consuming_a_keyword_does_not_add_it_to_query_history() {
 
 #[test]
 fn switching_modes_starts_recall_from_that_modes_latest_term() {
-    let mut s = Session::default();
+    let mut s = session();
     complete_query(&mut s, "d");
     s.reset();
     s.set_query("d ");
@@ -844,7 +936,7 @@ fn switching_modes_starts_recall_from_that_modes_latest_term() {
     s.intent(Intent::Up);
     assert_eq!(s.query(), "d");
     s.intent(Intent::Space);
-    assert_eq!(s.mode(), Mode::Dictionary);
+    assert_eq!(s.command_id(), &dictionary_command());
     s.intent(Intent::Up);
     assert_eq!(s.query(), "word");
 }
@@ -853,7 +945,7 @@ fn switching_modes_starts_recall_from_that_modes_latest_term() {
 fn dismissing_after_deletion_preserves_the_completed_term() {
     for finished in [false, true] {
         for escape in [false, true] {
-            let mut s = Session::default();
+            let mut s = session();
             complete_query(&mut s, "serendipity");
             let generation = searched(&s.set_query("serendipit")).1;
             if finished {
@@ -873,7 +965,7 @@ fn dismissing_after_deletion_preserves_the_completed_term() {
 #[test]
 fn activation_after_deletion_records_only_the_activated_query() {
     for finished in [false, true] {
-        let mut s = Session::default();
+        let mut s = session();
         complete_query(&mut s, "safari");
         let generation = searched(&s.set_query("safar")).1;
         s.deliver(Delivery::Batch {
@@ -884,13 +976,13 @@ fn activation_after_deletion_records_only_the_activated_query() {
             s.deliver(Delivery::Done { generation });
         }
         s.intent(Intent::Open);
-        assert_eq!(s.queries, VecDeque::from([(Mode::Apps, "safar".into())]));
+        assert_eq!(s.queries, VecDeque::from([(app_command(), "safar".into())]));
     }
 }
 
 #[test]
 fn dismissing_after_a_typo_correction_records_the_completed_query() {
-    let mut s = Session::default();
+    let mut s = session();
     s.set_query("safarx");
     complete_query(&mut s, "safar");
     s.intent(Intent::Dismiss);

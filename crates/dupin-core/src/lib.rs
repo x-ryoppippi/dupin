@@ -2,6 +2,7 @@
 //! result is, how providers hand results over, fuzzy matching, and the launcher session that
 //! turns keys and query edits into searches and actions.
 
+pub mod command;
 pub mod config;
 pub mod fuzzy;
 pub mod history;
@@ -10,9 +11,10 @@ pub mod provider;
 pub mod searcher;
 pub mod session;
 
+pub use command::{CommandError, CommandId, CommandRegistry, CommandSpec, QueryPresentation, ResultLayout};
 pub use config::{Backdrop, Config, InputSource, Position};
 pub use history::History;
 pub use item::{Action, Item, ItemAction, ItemKind};
 pub use provider::{Provider, Request};
 pub use searcher::{Delivery, Searcher};
-pub use session::{Effect, Intent, Mode, Session};
+pub use session::{Effect, Intent, Session};

@@ -1,0 +1,318 @@
+use std::collections::HashMap;
+use std::fmt;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CommandId(String);
+
+impl CommandId {
+    pub fn new(value: impl Into<String>) -> Result<Self, CommandError> {
+        let value = value.into();
+        let mut parts = value.split('.');
+        let valid_part = |part: &str| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        };
+        if parts.next().is_some_and(valid_part)
+            && parts.next().is_some_and(valid_part)
+            && parts.next().is_none()
+        {
+            Ok(Self(value))
+        } else {
+            Err(CommandError::InvalidId(value))
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for CommandId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResultLayout {
+    #[default]
+    List,
+    Detail,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct QueryPresentation {
+    pub placeholder: String,
+    pub chip: Option<String>,
+    pub empty_hint: Option<String>,
+    pub no_results_hint: Option<String>,
+    pub show_searching: bool,
+    pub result_layout: ResultLayout,
+    pub backdrop: f32,
+}
+
+impl QueryPresentation {
+    pub fn new(placeholder: impl Into<String>) -> Self {
+        Self {
+            placeholder: placeholder.into(),
+            chip: None,
+            empty_hint: None,
+            no_results_hint: None,
+            show_searching: false,
+            result_layout: ResultLayout::List,
+            backdrop: 0.0,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandSpec {
+    pub id: CommandId,
+    pub result_limit: usize,
+    pub presentation: QueryPresentation,
+}
+
+impl CommandSpec {
+    pub fn new(id: CommandId, result_limit: usize, presentation: QueryPresentation) -> Self {
+        Self {
+            id,
+            result_limit,
+            presentation,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommandError {
+    InvalidId(String),
+    DuplicateId(CommandId),
+    InvalidKeyword(String),
+    UnknownCommand(CommandId),
+    KeywordConflict { keyword: String, command: CommandId },
+    MissingDefault(CommandId),
+    MissingSpaceTarget(CommandId),
+    ActiveCommandRemoved(CommandId),
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidId(id) => write!(f, "command ID `{id}` must be plugin.command"),
+            Self::DuplicateId(id) => write!(f, "command `{id}` is registered more than once"),
+            Self::InvalidKeyword(keyword) => {
+                write!(
+                    f,
+                    "keyword `{keyword}` must not be empty or have outer whitespace"
+                )
+            }
+            Self::UnknownCommand(id) => write!(f, "command `{id}` is not registered"),
+            Self::KeywordConflict { keyword, command } => write!(
+                f,
+                "keyword `{keyword}` for `{command}` is already assigned to another command"
+            ),
+            Self::MissingDefault(id) => write!(f, "default command `{id}` is not registered"),
+            Self::MissingSpaceTarget(id) => write!(f, "Space target `{id}` is not registered"),
+            Self::ActiveCommandRemoved(id) => {
+                write!(f, "active command `{id}` cannot be removed")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CommandError {}
+
+#[derive(Clone, Debug)]
+pub struct CommandRegistry {
+    default: CommandId,
+    space_on_empty: Option<CommandId>,
+    commands: HashMap<CommandId, CommandSpec>,
+    keywords: HashMap<String, CommandId>,
+}
+
+impl CommandRegistry {
+    pub fn new(default: CommandId, space_on_empty: Option<CommandId>) -> Self {
+        Self {
+            default,
+            space_on_empty,
+            commands: HashMap::new(),
+            keywords: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, command: CommandSpec) -> Result<(), CommandError> {
+        if self.commands.contains_key(&command.id) {
+            return Err(CommandError::DuplicateId(command.id));
+        }
+        self.commands.insert(command.id.clone(), command);
+        Ok(())
+    }
+
+    pub fn add_keyword(
+        &mut self,
+        command: &CommandId,
+        keyword: impl Into<String>,
+    ) -> Result<(), CommandError> {
+        if !self.commands.contains_key(command) {
+            return Err(CommandError::UnknownCommand(command.clone()));
+        }
+        let keyword = keyword.into();
+        if keyword.trim().is_empty() || keyword.trim() != keyword {
+            return Err(CommandError::InvalidKeyword(keyword));
+        }
+        if let Some(existing) = self.keywords.get(&keyword) {
+            if existing != command {
+                return Err(CommandError::KeywordConflict {
+                    keyword,
+                    command: command.clone(),
+                });
+            }
+            return Ok(());
+        }
+        self.keywords.insert(keyword, command.clone());
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), CommandError> {
+        if !self.commands.contains_key(&self.default) {
+            return Err(CommandError::MissingDefault(self.default.clone()));
+        }
+        if let Some(target) = &self.space_on_empty
+            && !self.commands.contains_key(target)
+        {
+            return Err(CommandError::MissingSpaceTarget(target.clone()));
+        }
+        Ok(())
+    }
+
+    pub fn default(&self) -> &CommandId {
+        &self.default
+    }
+
+    pub fn space_on_empty(&self, current: &CommandId) -> Option<&CommandId> {
+        if current == &self.default {
+            self.space_on_empty.as_ref()
+        } else {
+            None
+        }
+    }
+
+    pub fn command(&self, id: &CommandId) -> Option<&CommandSpec> {
+        self.commands.get(id)
+    }
+
+    pub fn keyword(&self, keyword: &str) -> Option<&CommandId> {
+        self.keywords.get(keyword)
+    }
+
+    pub fn contains(&self, id: &CommandId) -> bool {
+        self.commands.contains_key(id)
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = &CommandId> {
+        self.commands.keys()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(value: &str) -> CommandId {
+        CommandId::new(value).unwrap()
+    }
+
+    #[test]
+    fn rejects_duplicate_ids_and_keyword_clashes() {
+        let primary = id("sample.search");
+        let alternate = id("sample.lookup");
+        let mut registry = CommandRegistry::new(primary.clone(), None);
+        let spec = || CommandSpec::new(primary.clone(), 10, QueryPresentation::new("Search"));
+        registry.register(spec()).unwrap();
+        assert_eq!(
+            registry.register(spec()),
+            Err(CommandError::DuplicateId(primary.clone()))
+        );
+        registry
+            .register(CommandSpec::new(
+                alternate.clone(),
+                10,
+                QueryPresentation::new("Lookup"),
+            ))
+            .unwrap();
+        registry.add_keyword(&primary, "find").unwrap();
+        assert_eq!(
+            registry.add_keyword(&alternate, "find"),
+            Err(CommandError::KeywordConflict {
+                keyword: "find".into(),
+                command: alternate.clone(),
+            })
+        );
+        assert_eq!(
+            registry.add_keyword(&alternate, " "),
+            Err(CommandError::InvalidKeyword(" ".into()))
+        );
+    }
+
+    #[test]
+    fn requires_registered_default_and_space_target() {
+        let default = id("sample.search");
+        let target = id("sample.files");
+        let mut registry = CommandRegistry::new(default.clone(), Some(target.clone()));
+        assert_eq!(
+            registry.validate(),
+            Err(CommandError::MissingDefault(default.clone()))
+        );
+        registry
+            .register(CommandSpec::new(default, 10, QueryPresentation::new("Search")))
+            .unwrap();
+        assert_eq!(registry.validate(), Err(CommandError::MissingSpaceTarget(target)));
+    }
+
+    #[test]
+    fn session_rejects_a_registry_that_removes_its_active_command() {
+        let active = id("sample.lookup");
+        let mut initial = CommandRegistry::new(id("sample.search"), None);
+        for command in [id("sample.search"), active.clone()] {
+            initial
+                .register(CommandSpec::new(command, 10, QueryPresentation::new("Search")))
+                .unwrap();
+        }
+        initial.add_keyword(&active, "lookup").unwrap();
+        let mut session = crate::Session::new(crate::History::default(), initial).unwrap();
+        session.set_query("lookup");
+        session.intent(crate::Intent::Space);
+        let effects = session.set_query("term");
+        let generation = match effects.as_slice() {
+            [crate::Effect::Search { generation, .. }] => *generation,
+            effects => panic!("expected a search effect, got {effects:?}"),
+        };
+
+        let default = id("sample.search");
+        let mut replacement = CommandRegistry::new(default.clone(), None);
+        replacement
+            .register(CommandSpec::new(default, 10, QueryPresentation::new("Search")))
+            .unwrap();
+        assert_eq!(
+            session.set_commands(replacement),
+            Err(CommandError::ActiveCommandRemoved(active.clone()))
+        );
+        assert_eq!(session.command_id(), &active);
+        assert_eq!(session.query(), "term");
+        assert_eq!(
+            session.results(),
+            crate::session::Results::Searching { replaced: false }
+        );
+        assert!(session.deliver(crate::searcher::Delivery::Done { generation }));
+        assert_eq!(session.results(), crate::session::Results::Done);
+    }
+
+    #[test]
+    fn command_ids_are_qualified_and_validated() {
+        assert_eq!(id("test.search").as_str(), "test.search");
+        for invalid in ["search", "Test.search", "test.search.extra", "test."] {
+            assert!(CommandId::new(invalid).is_err());
+        }
+    }
+}

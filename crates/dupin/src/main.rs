@@ -2,6 +2,7 @@
 //! press Space first to search files with Spotlight.
 
 mod backdrop;
+mod commands;
 mod hotkey;
 mod icons;
 mod log;

@@ -7,16 +7,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dupin_core::{
-    Backdrop, Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, DictionaryProvider, SpotlightProvider, Target};
+use dupin_mac::{AppsProvider, AppsWatcher};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
 };
 
-/// The most apps a search returns; the list shows a few rows and scrolls.
-const APP_LIMIT: usize = 50;
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
 /// The panel's top edge below the display's for `position = "top"`: about where Spotlight
@@ -30,6 +28,7 @@ pub struct Ui {
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    pub registration_notice: Option<String>,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -39,12 +38,8 @@ pub struct Ui {
     pub backdrop: crate::shader::Source,
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
-    apps: Searcher,
+    searchers: HashMap<CommandId, Searcher>,
     _apps_watcher: Option<AppsWatcher>,
-    files: Searcher,
-    contents: Searcher,
-    dictionary: Searcher,
-    file_limit: usize,
     saver: crate::store::Saver,
     position: Position,
     input_source: InputSource,
@@ -69,6 +64,8 @@ impl Ui {
         notice: Option<String>,
     ) -> Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
+        let registration = crate::commands::register(&config, apps_provider.clone())
+            .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_apps(tx))
@@ -85,13 +82,23 @@ impl Ui {
         std::thread::spawn(move || warm.warm());
         let deliver = |me: AppHandle<Ui>| move |d: Delivery| me.update(move |s, _| s.deliver(d));
         let backdrop = backdrop_source(&config.backdrop);
+        let searchers = registration
+            .providers
+            .into_iter()
+            .map(|(id, provider)| {
+                let name = id.as_str().replace('.', "-");
+                (id, Searcher::spawn(&name, provider, deliver(me.clone())))
+            })
+            .collect();
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
-            session: Session::with_dictionary_keywords(history, config.dictionary_keywords.clone()),
+            session: Session::new(history, registration.registry)
+                .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
             notice,
+            registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
             shown_at: 0.0,
@@ -99,24 +106,8 @@ impl Ui {
             backdrop,
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
-            apps: Searcher::spawn("apps", apps_provider, deliver(me.clone())),
+            searchers,
             _apps_watcher: apps_watcher,
-            files: Searcher::spawn(
-                "files",
-                Arc::new(SpotlightProvider::new(Target::Names)),
-                deliver(me.clone()),
-            ),
-            contents: Searcher::spawn(
-                "contents",
-                Arc::new(SpotlightProvider::new(Target::Contents)),
-                deliver(me.clone()),
-            ),
-            dictionary: Searcher::spawn(
-                "dictionary",
-                Arc::new(DictionaryProvider::default()),
-                deliver(me.clone()),
-            ),
-            file_limit: config.file_limit,
             position: config.position,
             input_source: config.input_source,
             restore_input: None,
@@ -131,9 +122,12 @@ impl Ui {
     /// Settings changed in the settings window. The hotkey is the settings window's to
     /// re-register; the rest takes effect from the next summon.
     pub fn apply_config(&mut self, config: &Config) {
-        self.file_limit = config.file_limit;
+        let registration =
+            crate::commands::configured(config).expect("built-in command registration is valid");
         self.session
-            .set_dictionary_keywords(config.dictionary_keywords.clone());
+            .set_commands(registration.registry)
+            .expect("built-in command registration is valid");
+        self.registration_notice = registration.notice;
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -361,7 +355,7 @@ impl Ui {
     }
 
     fn refresh_apps(&mut self, tx: &mut Tx) {
-        if self.session.mode() == Mode::Apps {
+        if self.session.command_id().as_str() == crate::commands::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
@@ -387,24 +381,20 @@ impl Ui {
                     });
                 }
                 Effect::Search {
-                    mode,
+                    command,
                     generation,
                     query,
                 } => {
-                    let limit = match mode {
-                        Mode::Apps => APP_LIMIT,
-                        Mode::Dictionary => 1,
-                        Mode::Files | Mode::Contents => self.file_limit,
-                    };
-                    for (m, searcher) in self.searchers() {
-                        if m == mode {
+                    let limit = self.session.command().result_limit;
+                    for (id, searcher) in &self.searchers {
+                        if id == &command {
                             searcher.search(generation, query.clone(), limit);
                         } else {
                             searcher.cancel();
                         }
                     }
                 }
-                Effect::CancelSearch => self.searchers().iter().for_each(|(_, s)| s.cancel()),
+                Effect::CancelSearch => self.searchers.values().for_each(Searcher::cancel),
                 Effect::ClearQuery => self.query.clear(),
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
@@ -431,15 +421,6 @@ impl Ui {
                 }
             }
         }
-    }
-
-    fn searchers(&self) -> [(Mode, &Searcher); 4] {
-        [
-            (Mode::Apps, &self.apps),
-            (Mode::Files, &self.files),
-            (Mode::Contents, &self.contents),
-            (Mode::Dictionary, &self.dictionary),
-        ]
     }
 
     /// Ask for the icons of the rows on screen. Handles live in `icons`, which the cache

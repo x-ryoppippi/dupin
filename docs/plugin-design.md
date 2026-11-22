@@ -41,6 +41,14 @@ Guest traps are contained; native host-import bugs remain host failures.
 
 ## Manifest and registration
 
+The launcher uses an internal host-owned command registry for bundled providers.
+Qualified command IDs identify the feature plugin and its command; query routing,
+recall, result limits and query presentation use those registrations. The host
+also owns the default command, the empty-query Space route and keyword ownership.
+Conflicting configured aliases are reported without replacing another command's
+trigger. This replaces the fixed search-mode table; it is not an external plugin
+installation API or a capability grant.
+
 A versioned manifest identifies the plugin and its version, entry module, commands,
 default-query providers, keyword triggers, state schema version and capabilities.
 User aliases are configuration layered over manifest defaults. The host owns

@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use dupin_core::Mode;
 use dupin_core::session::Results;
 use rune::compose::{Compositor, DeviceKey, Frame};
 use rune::render::EffectSite;
@@ -237,12 +236,7 @@ impl Compositor<Ui> for Backdrop {
             },
             query: s.query.text.chars().count() as f32,
             searching: (!still && matches!(s.session.results(), Results::Searching { .. })) as u8 as f32,
-            mode: match s.session.mode() {
-                Mode::Apps => 0.0,
-                Mode::Files => 1.0,
-                Mode::Contents => 2.0,
-                Mode::Dictionary => 3.0,
-            },
+            mode: s.session.command().presentation.backdrop,
         };
         let (device, queue, size) = (f.device, f.queue, f.size);
         let clear = f.rt.clear_color();

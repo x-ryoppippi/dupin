@@ -1,29 +1,11 @@
-//! The launcher session: which mode the panel is in, the results it shows and which one is
-//! selected. The UI forwards query edits and key intents; the session answers with effects
-//! (start a search, run an action, hide) for the UI and platform layers to carry out.
+//! The launcher session: which registered command is active, the results it shows and which
+//! one is selected. The UI forwards query edits and key intents; the session answers with
+//! effects for the UI and platform layers to carry out.
 
 use std::collections::VecDeque;
 
 use crate::searcher::Delivery;
-use crate::{Action, History, Item, ItemKind};
-
-/// Which provider the query goes to.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Mode {
-    /// Fuzzy search over installed apps.
-    #[default]
-    Apps,
-    /// Spotlight search by file name, entered with Space on an empty query (as Alfred does).
-    Files,
-    /// Spotlight search inside files, entered by typing the keyword `in` and Space (Alfred's
-    /// `in`).
-    Contents,
-    /// Look up a term in macOS dictionaries, entered by typing `define` and Space.
-    Dictionary,
-}
-
-/// Typed before Space in the apps search, enters [`Mode::Contents`].
-pub const CONTENTS_KEYWORD: &str = "in";
+use crate::{Action, CommandId, CommandRegistry, History, Item, ItemKind};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 
@@ -47,7 +29,7 @@ pub enum Intent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     Search {
-        mode: Mode,
+        command: CommandId,
         generation: u64,
         query: String,
     },
@@ -62,7 +44,7 @@ pub enum Effect {
     Hide,
     /// The selection moved; keep the selected row on screen.
     RevealSelection,
-    /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
+    /// Empty the text field: a command keyword was consumed. The session's query is already empty.
     ClearQuery,
     /// Replace the input with the session's query after routing or recall.
     ReplaceQuery(String),
@@ -84,7 +66,8 @@ pub enum Results {
 
 #[derive(Debug)]
 pub struct Session {
-    mode: Mode,
+    commands: CommandRegistry,
+    command: CommandId,
     query: String,
     items: Vec<Item>,
     selected: usize,
@@ -94,17 +77,10 @@ pub struct Session {
     history: History,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
-    dictionary_keywords: Vec<String>,
-    queries: VecDeque<(Mode, String)>,
+    queries: VecDeque<(CommandId, String)>,
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
-}
-
-impl Default for Session {
-    fn default() -> Self {
-        Session::new(History::default())
-    }
 }
 
 fn unix_now() -> u64 {
@@ -114,15 +90,12 @@ fn unix_now() -> u64 {
 }
 
 impl Session {
-    /// A session that ranks with, and learns into, `history`.
-    pub fn new(history: History) -> Session {
-        Self::with_dictionary_keywords(history, crate::Config::default().dictionary_keywords)
-    }
-
-    /// A session with configured keywords for macOS Dictionary search.
-    pub fn with_dictionary_keywords(history: History, dictionary_keywords: Vec<String>) -> Session {
-        Session {
-            mode: Mode::Apps,
+    pub fn new(history: History, commands: CommandRegistry) -> Result<Session, crate::CommandError> {
+        commands.validate()?;
+        let command = commands.default().clone();
+        Ok(Session {
+            commands,
+            command,
             query: String::new(),
             items: Vec::new(),
             selected: 0,
@@ -131,32 +104,46 @@ impl Session {
             refresh_selection: None,
             history,
             clock: unix_now,
-            dictionary_keywords,
             queries: VecDeque::new(),
             recalled: None,
             deleting: false,
             before_deletion: None,
-        }
+        })
     }
 
-    pub fn set_dictionary_keywords(&mut self, dictionary_keywords: Vec<String>) {
-        self.dictionary_keywords = dictionary_keywords;
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+        commands.validate()?;
+        if !commands.contains(&self.command) {
+            return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
+        }
+        self.commands = commands;
+        Ok(())
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
-    pub fn with_clock(history: History, clock: fn() -> u64) -> Session {
-        Session {
+    pub fn with_clock(
+        history: History,
+        commands: CommandRegistry,
+        clock: fn() -> u64,
+    ) -> Result<Session, crate::CommandError> {
+        Ok(Session {
             clock,
-            ..Session::new(history)
-        }
+            ..Session::new(history, commands)?
+        })
     }
 
     pub fn history(&self) -> &History {
         &self.history
     }
 
-    pub fn mode(&self) -> Mode {
-        self.mode
+    pub fn command_id(&self) -> &CommandId {
+        &self.command
+    }
+
+    pub fn command(&self) -> &crate::CommandSpec {
+        self.commands
+            .command(&self.command)
+            .expect("current command remains registered")
     }
 
     pub fn query(&self) -> &str {
@@ -262,8 +249,8 @@ impl Session {
             self.deleting = false;
         }
         self.recalled = None;
-        if self.mode == Mode::Apps
-            && let Some((mode, term)) = self.keyword_query(text)
+        if self.command == *self.commands.default()
+            && let Some((command, term)) = self.keyword_query(text)
         {
             self.deleting = false;
             self.before_deletion = None;
@@ -271,30 +258,21 @@ impl Session {
             self.selected = 0;
             self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
-            effects.extend(self.switch(mode));
+            effects.extend(self.switch(command));
             return effects;
         }
         self.query = text.to_owned();
         self.search()
     }
 
-    fn keyword_mode(&self, keyword: &str) -> Option<Mode> {
-        if keyword == CONTENTS_KEYWORD {
-            Some(Mode::Contents)
-        } else if self.dictionary_keywords.iter().any(|alias| alias == keyword) {
-            Some(Mode::Dictionary)
-        } else {
-            None
-        }
-    }
-
-    fn keyword_query<'a>(&self, text: &'a str) -> Option<(Mode, &'a str)> {
+    fn keyword_query<'a>(&self, text: &'a str) -> Option<(CommandId, &'a str)> {
         text.char_indices()
             .rev()
             .filter(|(_, ch)| ch.is_whitespace())
             .find_map(|(end, _)| {
-                self.keyword_mode(&text[..end])
-                    .map(|mode| (mode, text[end..].trim_start()))
+                self.commands
+                    .keyword(&text[..end])
+                    .map(|command| (command.clone(), text[end..].trim_start()))
             })
     }
 
@@ -312,22 +290,22 @@ impl Session {
         let empty = self.query.is_empty();
         Some(match intent {
             Intent::Actions => self.actions(),
-            Intent::Space if empty => match self.mode {
-                Mode::Apps => self.switch(Mode::Files),
-                // A leading space finds nothing in a file search; swallow it.
-                Mode::Files | Mode::Contents | Mode::Dictionary => Vec::new(),
-            },
-            Intent::Space if self.mode == Mode::Apps => {
-                let mode = self.keyword_mode(&self.query)?;
+            Intent::Space if empty => self
+                .commands
+                .space_on_empty(&self.command)
+                .cloned()
+                .map_or_else(Vec::new, |command| self.switch(command)),
+            Intent::Space if self.command == *self.commands.default() => {
+                let command = self.commands.keyword(&self.query)?.clone();
                 self.query.clear();
                 let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(mode));
+                effects.extend(self.switch(command));
                 effects
             }
-            Intent::Backspace if empty => match self.mode {
-                Mode::Files | Mode::Contents | Mode::Dictionary => self.switch(Mode::Apps),
-                Mode::Apps => return None,
-            },
+            Intent::Backspace if empty && self.command != *self.commands.default() => {
+                self.switch(self.commands.default().clone())
+            }
+            Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
             Intent::Up if empty || self.recalled.is_some() => self.recall(true),
             Intent::Down if self.recalled.is_some() => self.recall(false),
@@ -406,14 +384,14 @@ impl Session {
         true
     }
 
-    /// Back to an empty apps search, as the panel should look the next time it shows.
+    /// Back to an empty default-command search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
         self.remember_query(false);
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;
         let was_searching = matches!(self.results, Results::Searching { .. });
-        self.mode = Mode::Apps;
+        self.command = self.commands.default().clone();
         self.query.clear();
         self.clear_results();
         if was_searching {
@@ -445,11 +423,15 @@ impl Session {
     }
 
     fn record_query(&mut self, query: String) {
-        let previous = self.queries.iter().rev().find(|(mode, _)| *mode == self.mode);
+        let previous = self
+            .queries
+            .iter()
+            .rev()
+            .find(|(command, _)| *command == self.command);
         if previous.is_some_and(|(_, text)| *text == query) {
             return;
         }
-        self.queries.push_back((self.mode, query));
+        self.queries.push_back((self.command.clone(), query));
         if self.queries.len() > QUERY_HISTORY_LIMIT {
             self.queries.pop_front();
         }
@@ -458,9 +440,9 @@ impl Session {
     fn recall(&mut self, backwards: bool) -> Vec<Effect> {
         let next = if backwards {
             let end = self.recalled.unwrap_or(self.queries.len());
-            (0..end).rev().find(|&i| self.queries[i].0 == self.mode)
+            (0..end).rev().find(|&i| self.queries[i].0 == self.command)
         } else {
-            (self.recalled.unwrap() + 1..self.queries.len()).find(|&i| self.queries[i].0 == self.mode)
+            (self.recalled.unwrap() + 1..self.queries.len()).find(|&i| self.queries[i].0 == self.command)
         };
         if backwards && next.is_none() {
             return Vec::new();
@@ -474,11 +456,11 @@ impl Session {
         effects
     }
 
-    fn switch(&mut self, mode: Mode) -> Vec<Effect> {
+    fn switch(&mut self, command: CommandId) -> Vec<Effect> {
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;
-        self.mode = mode;
+        self.command = command;
         self.search()
     }
 
@@ -496,10 +478,10 @@ impl Session {
         }
         let query = query.to_owned();
         self.generation += 1;
-        // A mode change clears the previous mode's rows before starting a search.
+        // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
         vec![Effect::Search {
-            mode: self.mode,
+            command: self.command.clone(),
             generation: self.generation,
             query,
         }]
