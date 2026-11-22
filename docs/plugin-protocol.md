@@ -92,7 +92,14 @@ Initialisation/version/allocation share 1M fuel; the query receives a separate
 portable dispatch available when native tail calls cannot be guaranteed, notably
 in debug builds; increasing the native stack is not a substitute for it.
 
-Fuel bounds guest execution, not total parsing, translation, rendering or host
-memory. This prototype has no wall-clock deadline, permission-bearing imports,
-host operation completions or external-plugin installation. It is not a claim
-that the production isolation and permission design is complete.
+The experimental host can poll a host cancellation predicate and absolute
+deadline between resumable fuel slices. The CLI uses a five-second fixture
+deadline. These checks do not pre-empt module loading, instantiation/start,
+host parsing/translation, allocations or individual charged operations; the
+start function remains bounded by initialization fuel. See the fixture README
+for the execution policy and its limits.
+
+Fuel bounds guest execution, not rendering or total host memory. This prototype
+has no permission-bearing imports, host operation completions or external-plugin
+installation. Production cancellation/deadline integration is still required;
+this is not a claim that the production isolation and permission design is complete.

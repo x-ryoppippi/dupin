@@ -41,6 +41,29 @@ builds. Disabling default Wasmi features without preserving that fallback made
 the debug loop test overflow its native stack; release-only measurements did
 not expose it.
 
+`query_controlled` accepts a host-owned cancellation predicate and absolute
+deadline. Exported calls run in resumable 50,000-fuel slices, checking control
+before each call/resumption and after execution. Refueling spends the original
+1M initialization or 20M query budget; it never resets that total. An operation
+whose fuel cost exceeds one slice can receive the larger amount it requires,
+provided the total budget permits it. Allocation limits still apply.
+Modules compile eagerly during loading: Wasmi's lazy translation can consume
+fuel without yielding a resumable invocation, so it must finish before these
+small execution slices begin. This changes the fixture's loading policy and
+does not replace the historical lazy-translation benchmark measurements.
+
+The convenience `query` method used by the CLI has a five-second deadline and
+no external cancellation signal. This is a fixture default, not a production
+launcher latency budget. Cancellation, deadline and fuel exhaustion have
+distinct payload-free errors; a stopped invocation drops its store.
+
+This is cooperative control, not a hard real-time limit. Module loading is
+outside the query deadline. Instantiation/start is checked before and after
+and bounded by initialization fuel; Wasmi does not expose a resumable start
+through this linker API. Host parsing/translation, allocation and a single
+charged operation cannot be pre-emptied by these checks. Startup and host
+resource limits still need review before external modules run in the app.
+
 This validates a query-only path. Manifest registration, action execution,
-capability grants, cancellation/deadlines and the production renderer remain
+capability grants, production cancellation/deadline integration and rendering remain
 required before this is a usable plugin platform.

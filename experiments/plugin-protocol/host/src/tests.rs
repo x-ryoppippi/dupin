@@ -178,3 +178,125 @@ fn imports_missing_exports_and_unknown_abi_are_rejected() {
         Err(HostError::ModuleTooLarge)
     ));
 }
+
+fn execution_fixture(body: &str) -> (Store<()>, TypedFunc<(), i32>) {
+    let mut config = Config::default();
+    config.consume_fuel(true);
+    let engine = Engine::new(&config);
+    let wasm = wat::parse_str(format!(
+        "(module (func (export \"run\") (result i32) (local $n i32) {body}))"
+    ))
+    .unwrap();
+    let module = Module::new(&engine, &wasm).unwrap();
+    let mut store = Store::new(&engine, ());
+    let instance = Linker::new(&engine)
+        .instantiate_and_start(&mut store, &module)
+        .unwrap();
+    let function = instance.get_typed_func::<(), i32>(&store, "run").unwrap();
+    (store, function)
+}
+
+#[test]
+fn a_suspended_call_continues_instead_of_restarting() {
+    let (mut store, function) = execution_fixture(
+        "(loop $again local.get $n i32.const 1 i32.add local.tee $n i32.const 100000 i32.lt_u br_if $again) local.get $n",
+    );
+    let checks = std::cell::Cell::new(0);
+    let cancelled = || {
+        checks.set(checks.get() + 1);
+        false
+    };
+    let control = QueryControl {
+        deadline: Instant::now() + Duration::from_secs(60),
+        is_cancelled: &cancelled,
+    };
+    let mut budget = QUERY_FUEL;
+    assert_eq!(
+        call(&function, &mut store, (), &mut budget, &control).unwrap(),
+        100000
+    );
+    assert!(checks.get() > 2, "the query must cross more than one fuel slice");
+    assert!(budget < QUERY_FUEL);
+}
+
+#[test]
+fn cancellation_stops_an_executing_loop_before_the_total_fuel_budget() {
+    let (mut store, function) = execution_fixture("(loop $spin br $spin) i32.const 0");
+    let checks = std::cell::Cell::new(0);
+    let cancelled = || {
+        let previous = checks.get();
+        checks.set(previous + 1);
+        previous > 0
+    };
+    let control = QueryControl {
+        deadline: Instant::now() + Duration::from_secs(60),
+        is_cancelled: &cancelled,
+    };
+    let mut budget = QUERY_FUEL;
+    assert_eq!(
+        call(&function, &mut store, (), &mut budget, &control),
+        Err(HostError::Cancelled)
+    );
+    assert!(budget > 0 && budget < QUERY_FUEL);
+}
+
+#[test]
+fn cancelled_or_expired_requests_do_not_enter_the_guest() {
+    let module = fixture("i32.const 2", ALLOC, "i32.const 0", b"");
+    for (cancelled, expected) in [(true, HostError::Cancelled), (false, HostError::Deadline)] {
+        let is_cancelled = || cancelled;
+        let control = QueryControl {
+            deadline: Instant::now(),
+            is_cancelled: &is_cancelled,
+        };
+        assert_eq!(module.query_controlled(&request(), &control), Err(expected));
+    }
+    let good = replying(&response().encode(&request()).unwrap());
+    assert_eq!(good.query(&request()).unwrap(), response());
+}
+
+#[test]
+fn growth_fuel_checkpoints_preserve_fatal_allocation_limits() {
+    let mut limits = Limits(
+        StoreLimitsBuilder::new()
+            .memory_size(MEMORY_BYTES)
+            .table_elements(1024)
+            .trap_on_grow_failure(true)
+            .build(),
+    );
+    assert!(
+        limits
+            .memory_grow_failed(&MemoryError::OutOfFuel { required_fuel: 100 })
+            .is_ok()
+    );
+    assert!(
+        limits
+            .table_grow_failed(&TableError::OutOfFuel { required_fuel: 100 })
+            .is_ok()
+    );
+    assert!(
+        limits
+            .memory_grow_failed(&MemoryError::OutOfBoundsGrowth)
+            .is_err()
+    );
+    assert!(limits.table_grow_failed(&TableError::GrowOutOfBounds).is_err());
+    assert!(
+        limits
+            .memory_growing(MEMORY_BYTES, MEMORY_BYTES + 65536, None)
+            .is_err()
+    );
+    assert!(limits.table_growing(1024, 1025, None).is_err());
+}
+
+#[test]
+fn translation_happens_before_small_execution_slices() {
+    let bytes = response().encode(&request()).unwrap();
+    let body = format!(
+        "{} local.get 2 i32.const 400000 i32.const {} memory.copy i32.const {}",
+        "i32.const 0 drop ".repeat(6000),
+        bytes.len(),
+        bytes.len()
+    );
+    let module = fixture("i32.const 1", ALLOC, &body, &bytes);
+    assert_eq!(module.query(&request()).unwrap(), response());
+}
