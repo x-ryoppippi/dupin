@@ -189,7 +189,7 @@ where
     }
 
     fn process_saves(&mut self, saves: Vec<Save>) {
-        let mut saves: Vec<_> = saves
+        let saves: Vec<_> = saves
             .into_iter()
             .filter(|save| save.revision > self.last_processed_revision)
             .collect();
@@ -198,11 +198,11 @@ where
         };
         self.last_processed_revision = latest_revision;
 
-        if let Some((base, desired)) = self.uncommitted.take()
-            && saves[0].base == desired
-        {
-            saves[0].base = base;
-        }
+        let original_base = self
+            .uncommitted
+            .take()
+            .filter(|(_, desired)| saves[0].base == *desired)
+            .map(|(base, _)| base);
 
         let Some(path) = &self.path else {
             return;
@@ -211,8 +211,13 @@ where
         let saved = current
             .map_err(|error| format!("could not save config.toml: {error}"))
             .and_then(|mut current| {
-                for save in &saves {
-                    current = merge(&save.base, &save.desired, &current)?;
+                for (index, save) in saves.iter().enumerate() {
+                    current = merge(
+                        &save.base,
+                        &save.desired,
+                        &current,
+                        original_base.as_ref().filter(|_| index == 0),
+                    )?;
                 }
                 let source =
                     toml::to_string(&current).map_err(|_| "could not encode config.toml".to_owned())?;
@@ -222,7 +227,10 @@ where
 
         self.save_problem = saved.err();
         if self.save_problem.is_some() {
-            self.uncommitted = Some((saves[0].base.clone(), saves.last().unwrap().desired.clone()));
+            self.uncommitted = Some((
+                original_base.unwrap_or_else(|| saves[0].base.clone()),
+                saves.last().unwrap().desired.clone(),
+            ));
         }
         self.emit_snapshot(latest_revision);
     }
@@ -269,11 +277,7 @@ where
         };
 
         let requested = roots(path);
-        if !rebuild
-            && self.watch_problem.is_none()
-            && self.watcher.is_some()
-            && self.watcher_roots.as_ref() == Some(&requested.paths)
-        {
+        if !rebuild && self.watcher.is_some() && self.watcher_roots.as_ref() == Some(&requested.paths) {
             self.watch_problem = requested.problem;
             return;
         }
@@ -291,6 +295,7 @@ where
                 self.watch_problem = requested.problem;
             }
             Err(error) => {
+                self.watcher_roots = None;
                 self.watch_problem = Some(match requested.problem {
                     Some(problem) => format!("{problem}; could not watch config.toml: {error}"),
                     None => format!("could not watch config.toml: {error}"),
@@ -363,10 +368,19 @@ fn read(path: &Path) -> (Option<String>, Result<Config, String>, bool) {
     }
 }
 
-fn merge(base: &Config, desired: &Config, current: &Config) -> Result<Config, String> {
+fn merge(
+    base: &Config,
+    desired: &Config,
+    current: &Config,
+    original_base: Option<&Config>,
+) -> Result<Config, String> {
     let base = serde_json::to_value(base).map_err(|_| "could not compare config.toml".to_owned())?;
     let desired = serde_json::to_value(desired).map_err(|_| "could not compare config.toml".to_owned())?;
     let mut merged = serde_json::to_value(current).map_err(|_| "could not compare config.toml".to_owned())?;
+    let original_base = original_base
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(|_| "could not compare config.toml".to_owned())?;
 
     let (Some(base), Some(desired), Some(merged)) =
         (base.as_object(), desired.as_object(), merged.as_object_mut())
@@ -378,12 +392,17 @@ fn merge(base: &Config, desired: &Config, current: &Config) -> Result<Config, St
         let Some(base_value) = base.get(key) else {
             return Err("could not compare config.toml".into());
         };
-        if desired_value == base_value {
-            continue;
-        }
         let Some(current_value) = merged.get(key) else {
             return Err("could not compare config.toml".into());
         };
+        let base_value = original_base
+            .as_ref()
+            .and_then(|base| base.get(key))
+            .filter(|original| *original == current_value)
+            .unwrap_or(base_value);
+        if desired_value == base_value {
+            continue;
+        }
         if current_value != base_value && current_value != desired_value {
             return Err("config.toml changed on disk; resolve the conflicting setting before saving".into());
         }
@@ -681,6 +700,77 @@ mod tests {
         assert!(saved.save_problem.is_none());
         assert_eq!(saved.result.unwrap(), latest);
         assert_eq!(Config::parse(&fs::read_to_string(path).unwrap()).unwrap(), latest);
+    }
+
+    #[test]
+    fn reverting_after_a_manual_repair_keeps_the_latest_edit() {
+        for external_position in [dupin_core::Position::Center, dupin_core::Position::Top] {
+            let temp = TempDir::new();
+            let path = temp.path().join("config.toml");
+            let base = Config {
+                file_limit: 30,
+                ..Config::default()
+            };
+            fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
+            let blocked = path.with_extension("toml.tmp");
+            fs::create_dir(&blocked).unwrap();
+            let (sender, receiver) = mpsc::channel();
+            let (updates, received) = mpsc::channel();
+            let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+                updates.send(update).unwrap();
+            });
+            let first = Config {
+                file_limit: 50,
+                ..base.clone()
+            };
+            worker.process_saves(vec![Save {
+                revision: 1,
+                base: base.clone(),
+                desired: first.clone(),
+            }]);
+            assert!(received.try_recv().unwrap().save_problem.is_some());
+            fs::remove_dir(&blocked).unwrap();
+            let repaired = Config {
+                position: external_position,
+                ..first.clone()
+            };
+            fs::write(&path, toml::to_string(&repaired).unwrap()).unwrap();
+            worker.emit_snapshot(1);
+            assert_eq!(received.try_recv().unwrap().result.unwrap(), repaired);
+            worker.process_saves(vec![Save {
+                revision: 2,
+                base: first,
+                desired: base,
+            }]);
+            let saved = received.try_recv().unwrap();
+            assert!(saved.save_problem.is_none());
+            let expected = Config {
+                file_limit: 30,
+                ..repaired
+            };
+            assert_eq!(saved.result.unwrap(), expected);
+            assert_eq!(
+                Config::parse(&fs::read_to_string(path).unwrap()).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn reverting_an_uncommitted_edit_does_not_overwrite_a_third_value() {
+        let original = Config {
+            file_limit: 30,
+            ..Config::default()
+        };
+        let pending = Config {
+            file_limit: 50,
+            ..original.clone()
+        };
+        let external = Config {
+            file_limit: 40,
+            ..original.clone()
+        };
+        assert!(merge(&pending, &original, &external, Some(&original)).is_err());
     }
 
     #[test]
