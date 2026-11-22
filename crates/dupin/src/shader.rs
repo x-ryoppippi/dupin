@@ -4,7 +4,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use dupin_core::Backdrop;
 
@@ -91,8 +90,8 @@ pub fn install_example(name: &str) -> std::io::Result<Backdrop> {
 /// What the panel draws behind its content, as config.toml picked it.
 pub struct Source {
     file: Option<PathBuf>,
-    /// The file's modification time when it was last read, to read it again only once it changes.
-    read_at: Option<SystemTime>,
+    /// The file's text when it was last read, so a summon compiles it only once it changes.
+    read: Option<String>,
     module: Option<Arc<str>>,
     /// Why the picked file isn't what's drawing, until a version of it is.
     problem: Option<String>,
@@ -103,7 +102,7 @@ impl Source {
     pub fn new(pick: &Backdrop) -> Source {
         let mut source = Source {
             file: None,
-            read_at: None,
+            read: None,
             module: None,
             problem: None,
         };
@@ -112,7 +111,7 @@ impl Source {
             Backdrop::Flow => source.module = Some(builtin()),
             Backdrop::File(path) => {
                 source.file = Some(resolve(path));
-                source.reload();
+                source.refresh();
             }
         }
         source
@@ -128,27 +127,21 @@ impl Source {
         self.problem.as_deref()
     }
 
-    /// Read a user's file again if it changed since it was last read, so editing it shows on the
-    /// next summon.
-    pub fn refresh(&mut self) {
-        if let Some(path) = &self.file
-            && (self.read_at.is_none() || modified(path) != self.read_at)
-        {
-            self.reload();
-        }
-    }
-
-    fn reload(&mut self) {
-        let Some(path) = self.file.as_ref() else {
-            return;
-        };
-        let stamp = modified(path);
+    /// Read a user's file again, so editing it shows on the next summon, and compile it if its
+    /// text changed. Returns the problem when it is new or different, for the caller to log.
+    pub fn refresh(&mut self) -> Option<&str> {
+        let path = self.file.as_ref()?;
         let result = match std::fs::read_to_string(path) {
+            Ok(user) if self.read.as_ref() == Some(&user) => return None,
             Ok(user) => {
-                self.read_at = stamp;
-                compile(&user).map_err(|e| format!("{}:{e}", path.display()))
+                let compiled = compile(&user).map_err(|e| format!("{}:{e}", path.display()));
+                self.read = Some(user);
+                compiled
             }
-            Err(e) => Err(format!("couldn't read {}: {e}", path.display())),
+            Err(e) => {
+                self.read = None;
+                Err(format!("couldn't read {}: {e}", path.display()))
+            }
         };
         let problem = match result {
             Ok(module) => {
@@ -163,21 +156,14 @@ impl Source {
                 Some(format!("backdrop shader {message}"))
             }
         };
-        if let Some(p) = &problem
-            && self.problem.as_ref() != Some(p)
-        {
-            crate::log::warn(p);
-        }
+        let changed = problem.is_some() && problem != self.problem;
         self.problem = problem;
+        self.problem.as_deref().filter(|_| changed)
     }
 }
 
 fn builtin() -> Arc<str> {
     compile(FLOW).expect("the built-in backdrop shader is valid")
-}
-
-fn modified(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 /// `~/x` under the home directory; a relative path beside config.toml.
@@ -277,11 +263,18 @@ mod tests {
         let mut source = Source::new(&Backdrop::File(path.to_string_lossy().into_owned()));
         assert!(source.problem().is_some_and(|p| p.contains("couldn't read")));
         assert!(source.module().is_some(), "falls back to flow");
-        source.refresh();
+        assert_eq!(source.refresh(), None, "an unchanged problem isn't logged again");
         assert!(source.problem().is_some(), "still reported on the next summon");
         std::fs::write(&path, FLOW).unwrap();
         source.refresh();
         assert_eq!(source.problem(), None);
+
+        let away = dir.join("away.wgsl");
+        std::fs::rename(&path, &away).unwrap();
+        assert!(source.refresh().is_some());
+        std::fs::rename(&away, &path).unwrap();
+        source.refresh();
+        assert_eq!(source.problem(), None, "the same file, moved back, works again");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

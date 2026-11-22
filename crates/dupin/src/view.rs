@@ -51,10 +51,14 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     panel = panel.child(header(s, &t, accent));
-    for notice in s.notice.as_deref().into_iter().chain(s.backdrop.problem()) {
+    let notices = [
+        ("notice", s.notice.as_deref()),
+        ("backdrop-notice", s.backdrop.problem()),
+    ];
+    for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
         panel = panel.child(divider(&t)).child(
             row()
-                .key("notice")
+                .key(key)
                 .w_full()
                 .px(18.0)
                 .py(12.0)
