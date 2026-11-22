@@ -159,19 +159,23 @@ impl Source {
     }
 }
 
-/// Flow, wrapped but not run through Metal: the tests check it compiles, and Dupin draws it from
-/// launch, where a Metal compile would add to the time before the panel can show.
 /// The file's text, read only as far as one byte past `MAX_LEN`: `compile` refuses anything longer,
 /// and a backdrop pointed at a huge file shouldn't load it all first.
 fn read_at_most(path: &Path) -> std::io::Result<String> {
-    let mut text = String::new();
-    std::io::Read::read_to_string(
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(
         &mut std::io::Read::take(std::fs::File::open(path)?, MAX_LEN as u64 + 1),
-        &mut text,
+        &mut bytes,
     )?;
-    Ok(text)
+    if bytes.len() > MAX_LEN {
+        // Cut at the limit, possibly inside a character; `compile` refuses it for its length.
+        return Ok(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
+/// Flow, wrapped but not run through Metal: the tests check it compiles, and Dupin draws it from
+/// launch, where a Metal compile would add to the time before the panel can show.
 fn builtin() -> Arc<str> {
     wrap(FLOW).0.into()
 }
@@ -414,6 +418,21 @@ mod tests {
         if metal::available() {
             assert!(checked.is_err_and(|e| e.contains("Metal")));
         }
+    }
+
+    #[test]
+    fn a_file_cut_inside_a_character_at_the_limit_reports_its_size() {
+        let dir = std::env::temp_dir().join(format!("dupin-limit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("long.wgsl");
+        std::fs::write(&path, format!("{}日本", "a".repeat(MAX_LEN - 1))).unwrap();
+        let source = Source::new(&Backdrop::File(path.to_string_lossy().into_owned()));
+        assert!(
+            source.problem().is_some_and(|p| p.contains("at most")),
+            "{:?}",
+            source.problem()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

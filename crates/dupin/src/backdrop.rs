@@ -45,8 +45,19 @@ struct Gpu {
 /// than the window's.
 struct Program {
     source: Arc<str>,
-    module: wgpu::ShaderModule,
+    /// Always set until the program drops.
+    module: Option<wgpu::ShaderModule>,
     pipes: Vec<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+}
+
+impl Drop for Program {
+    /// The module holds Rune's parse of the user's shader, which drops recursively: a long
+    /// `else if` chain is deep, so drop it on the deep stack too.
+    fn drop(&mut self) {
+        if let Some(module) = self.module.take() {
+            crate::shader::deep(move || drop(module));
+        }
+    }
 }
 
 impl Gpu {
@@ -110,7 +121,7 @@ impl Gpu {
         });
         self.program = Some(Program {
             source: source.clone(),
-            module,
+            module: Some(module),
             pipes: Vec::new(),
         });
     }
@@ -120,7 +131,7 @@ impl Gpu {
         let at = match program.pipes.iter().position(|(f, _)| *f == format) {
             Some(at) => at,
             None => {
-                let module = &program.module;
+                let module = program.module.as_ref()?;
                 let layout = &self.layout;
                 let pipe = crate::shader::deep(|| {
                     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
