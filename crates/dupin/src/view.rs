@@ -95,7 +95,9 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     let items = s.session.items();
-    if !items.is_empty() {
+    if !items.is_empty()
+        && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
+    {
         panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
     } else if let Some(hint) = hint(s) {
         panel = panel.child(divider(&t)).child(
