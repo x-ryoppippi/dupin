@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick as tickDOM } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
 	import { repo } from '../site.ts';
 	import { features, marked, marking, type Scenario } from './scenarios.ts';
@@ -131,7 +131,7 @@
 		query = '';
 		found = '';
 		mode = undefined;
-		open = true;
+		open = false;
 		launching = false;
 		searching = false;
 		selected = 0;
@@ -144,6 +144,8 @@
 			query = scenario.query;
 			found = scenario.query;
 			mode = scenario.mode;
+			open = true;
+			void tickDOM().then(draw);
 			return;
 		}
 
@@ -301,8 +303,8 @@
 			<div class="definition"><strong>{found}</strong><p>{shown.detail}</p></div>
 		{:else if rows.length === 0 && mode && !query}
 			<div class="hint">{hints[mode]}</div>
-		{:else if rows.length === 0 && found && !searching}
-			<div class="hint">No matches</div>
+		{:else if rows.length === 0 && found && !searching && !(shown.detail && found !== shown.query)}
+			<div class="hint">{mode === 'Define' ? 'No definition found' : 'No matches'}</div>
 		{:else if rows.length > 0}
 			<ul class="rows">
 				{#each rows as row, i (row.title)}
@@ -590,9 +592,6 @@
 			radial-gradient(circle, #fff 0 62%, #1c1c1e 64%);
 	}
 
-	.app-icon--t3code {
-		background: url('/apps/t3code.png') center / 125% no-repeat;
-	}
 
 	.app-icon--pdf,
 	.app-icon--doc,

@@ -52,7 +52,6 @@ const calendar = glyph(
 	'#ff3b30',
 );
 const chatgpt = app('ChatGPT', '/Applications', 'chatgpt');
-const codex = app('ChatGPT', '/Applications', 'chatgpt', { alias: 'Codex' });
 const chess = glyph('Chess', '/System/Applications', 'icon-[ph--horse-fill]', '#8d6e4f');
 const claude = app('Claude', '/Applications', 'claude');
 const clock = app('Clock', '/System/Applications', 'clock');
@@ -74,30 +73,6 @@ const contacts = glyph(
 	'icon-[ph--address-book-fill]',
 	'#a2845e',
 );
-const t3code = app('T3 Code', '/Applications', 't3code');
-const terminal = glyph(
-	'Terminal',
-	'/System/Applications/Utilities',
-	'icon-[ph--terminal-fill]',
-	'#1c1c1e',
-);
-const textedit = glyph(
-	'TextEdit',
-	'/System/Applications',
-	'icon-[ph--note-pencil-fill]',
-	'#8e8e93',
-);
-const tips = glyph('Tips', '/System/Applications', 'icon-[ph--lightbulb-fill]', '#f5b300');
-const tv = glyph('TV', '/System/Applications', 'icon-[ph--television-simple-fill]', '#1c1c1e');
-
-const activity = glyph(
-	'Activity Monitor',
-	'/System/Applications/Utilities',
-	'icon-[ph--pulse-fill]',
-	'#1c1c1e',
-);
-const fontbook = glyph('Font Book', '/System/Applications', 'icon-[ph--text-aa-fill]', '#8e8e93');
-const shortcuts = glyph('Shortcuts', '/System/Applications', 'icon-[ph--stack-fill]', '#e5486b');
 const finder = glyph('Finder', '/System/Library/CoreServices', 'icon-[ph--smiley-fill]', '#1e88f5');
 const imageCapture = glyph(
 	'Image Capture',
@@ -119,6 +94,20 @@ const mission = glyph(
 );
 const music = glyph('Music', '/System/Applications', 'icon-[ph--music-note-fill]', '#fa2d48');
 const itunes = { ...music, alias: 'iTunes' };
+
+const dictionary = glyph('Dictionary', '/System/Applications', 'icon-[ph--book-fill]', '#b91c1c');
+const diskUtility = glyph(
+	'Disk Utility',
+	'/System/Applications/Utilities',
+	'icon-[ph--hard-drive-fill]',
+	'#8e8e93',
+);
+const defaultFolder = glyph(
+	'Default Folder X',
+	'/Applications',
+	'icon-[ph--folder-fill]',
+	'#1e88f5',
+);
 
 const file = (title: string, sub: string, icon: 'pdf' | 'doc' | 'sheet'): Row => ({
 	icon,
@@ -153,23 +142,6 @@ const scenarios = {
 	apps: {
 		query: 'cl',
 		steps: { c, cl: [claude, clock, calculator, calendar, console_, colorsync] },
-	},
-	codex: {
-		query: 'codex',
-		steps: {
-			c,
-			co: [console_, contacts, colorsync, codex, clock, calculator],
-			cod: [codex],
-			code: [codex],
-			codex: [codex],
-		},
-	},
-	t3: {
-		query: 't3',
-		steps: {
-			t: [tv, tips, t3code, terminal, textedit, shortcuts, fontbook, activity],
-			t3: [t3code],
-		},
 	},
 	files: {
 		mode: 'Files',
@@ -215,7 +187,11 @@ export const features = [
 			keyword: 'define',
 			query: 'serendipity',
 			detail: 'The occurrence of events by chance in a happy or beneficial way.',
-			steps: {},
+			steps: {
+				d: [dictionary, diskUtility, defaultFolder],
+				de: [defaultFolder],
+				def: [defaultFolder],
+			},
 		},
 	},
 ] satisfies { label: string; scenario: Scenario }[];
