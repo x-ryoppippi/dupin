@@ -1,0 +1,11 @@
+[[production]]
+package = "dupin"
+bin = "dupin"
+reason = "the distributed launcher"
+
+[[override]]
+lint = "hawk::unnecessary_public"
+crate = "dupin_core"
+item = "command::CommandRegistry::set_default_providers"
+level = "expect"
+reason = "The host composition API must accept multiple providers, beyond the launcher's current single-provider default."

@@ -20,7 +20,7 @@ pub fn run(action: &Action) -> bool {
 }
 
 /// Open a URL with its registered handler.
-pub fn open_url(value: &str) -> bool {
+fn open_url(value: &str) -> bool {
     let Some(url) = NSURL::URLWithString(&NSString::from_str(value)) else {
         return false;
     };
@@ -33,7 +33,7 @@ pub fn open(path: &Path) -> bool {
 }
 
 /// Show in Finder with the item selected.
-pub fn reveal(path: &Path) {
+fn reveal(path: &Path) {
     NSWorkspace::sharedWorkspace()
         .activateFileViewerSelectingURLs(&NSArray::from_retained_slice(&[file_url(path)]));
 }

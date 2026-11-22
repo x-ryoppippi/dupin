@@ -116,10 +116,44 @@ def scenario [out: path] {
         --exact
         --first
     )
-    # Settings comes to the front over Calculator, though Dupin, an accessory app, doesn't become
-    # the active app, so wait for the window rather than for Dupin to be frontmost.
-    let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
+    # Accessory windows can receive keys while System Events names another frontmost app.
+    let settings = {|r| $r.ok and (
+        $r.data
+        | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
+    ) }
     poll $out settings-window $settings list-windows --app Dupin
+    snap $out settings-created
+    let before_key = (ad
+        $out
+        settings-before-key
+        find
+        --app
+        Dupin
+        --role
+        group
+        --name
+        General
+        --exact
+        --first
+    )
+    if not $before_key.ok or $before_key.data?.match? == null or 'focused' in ($before_key.data?.match?.states? | default []) {
+        error make {msg: 'General must exist without keyboard focus before the Tab test'}
+    }
+    ad $out settings-tab press tab | ignore
+    (poll
+        $out
+        settings-keyboard-focused
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        group
+        --name
+        General
+        --exact
+        --first
+    )
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
@@ -221,13 +255,12 @@ def wait-frontmost [app: string, --tries: int = 20] {
     let script = 'tell application "System Events" to get name of first application process whose frontmost is true'
     mut front = ''
     for attempt in 1..$tries {
-        $front = (
-            ^osascript -e $script
-            | complete
-            | get stdout
-            | str trim
-        )
-        if ($front | str lowercase) == ($app | str lowercase) { return }
+        let reply = (^osascript -e $script | complete)
+        $front = ($reply.stdout | str trim)
+        if (
+            $reply.exit_code == 0
+            and ($front | str lowercase) == ($app | str lowercase)
+        ) { return }
         sleep 500ms
     }
     error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}

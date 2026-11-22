@@ -18,7 +18,7 @@ pub struct PathWatcher {
 unsafe impl Send for PathWatcher {}
 
 impl PathWatcher {
-    pub fn start(
+    pub(crate) fn start(
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {

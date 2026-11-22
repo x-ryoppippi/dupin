@@ -46,7 +46,8 @@ pub struct QueryPresentation {
 }
 
 impl QueryPresentation {
-    pub fn new(placeholder: impl Into<String>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(placeholder: impl Into<String>) -> Self {
         Self {
             placeholder: placeholder.into(),
             chip: None,
@@ -60,7 +61,7 @@ impl QueryPresentation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandSpec {
-    pub id: CommandId,
+    id: CommandId,
     pub result_limit: usize,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
@@ -160,7 +161,7 @@ impl CommandRegistry {
         Ok(())
     }
 
-    pub fn providers(&self, command: &CommandId) -> Vec<CommandId> {
+    pub(crate) fn providers(&self, command: &CommandId) -> Vec<CommandId> {
         if command == &self.default {
             self.defaults.clone()
         } else {
@@ -168,7 +169,7 @@ impl CommandRegistry {
         }
     }
 
-    pub fn pinned(&self) -> Option<&CommandId> {
+    pub(crate) fn pinned(&self) -> Option<&CommandId> {
         self.pinned.as_ref()
     }
 
@@ -205,7 +206,7 @@ impl CommandRegistry {
         Ok(())
     }
 
-    pub fn validate(&self) -> Result<(), CommandError> {
+    pub(crate) fn validate(&self) -> Result<(), CommandError> {
         if !self.commands.contains_key(&self.default) {
             return Err(CommandError::MissingDefault(self.default.clone()));
         }
@@ -217,11 +218,11 @@ impl CommandRegistry {
         Ok(())
     }
 
-    pub fn default(&self) -> &CommandId {
+    pub(crate) fn default(&self) -> &CommandId {
         &self.default
     }
 
-    pub fn space_on_empty(&self, current: &CommandId) -> Option<&CommandId> {
+    pub(crate) fn space_on_empty(&self, current: &CommandId) -> Option<&CommandId> {
         if current == &self.default {
             self.space_on_empty.as_ref()
         } else {
@@ -229,7 +230,7 @@ impl CommandRegistry {
         }
     }
 
-    pub fn command(&self, id: &CommandId) -> Option<&CommandSpec> {
+    pub(crate) fn command(&self, id: &CommandId) -> Option<&CommandSpec> {
         self.commands.get(id)
     }
 
@@ -237,12 +238,8 @@ impl CommandRegistry {
         self.keywords.get(keyword)
     }
 
-    pub fn contains(&self, id: &CommandId) -> bool {
+    pub(crate) fn contains(&self, id: &CommandId) -> bool {
         self.commands.contains_key(id)
-    }
-
-    pub fn ids(&self) -> impl Iterator<Item = &CommandId> {
-        self.commands.keys()
     }
 }
 

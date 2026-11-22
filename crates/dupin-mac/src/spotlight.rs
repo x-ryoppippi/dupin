@@ -121,7 +121,7 @@ fn predicate(target: Target, query: &str) -> Option<Retained<NSPredicate>> {
 /// match. For names a word may appear anywhere in the file or display name; for contents it
 /// must start a word of the indexed text (`w`), which the index answers quickly where a
 /// substring of the whole text would scan it. None for a query with no words.
-pub fn query_string(target: Target, query: &str) -> Option<String> {
+fn query_string(target: Target, query: &str) -> Option<String> {
     let clauses: Vec<String> = query
         .split_whitespace()
         .map(|word| {
