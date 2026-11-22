@@ -69,7 +69,9 @@ fn main() {
         families: FAMILIES,
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
-    .windowless();
+    .windowless()
+    // macOS ignores a focus request until the new Settings window is visible.
+    .on_ready(|window| window.focus());
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let prefs = prefs.init({

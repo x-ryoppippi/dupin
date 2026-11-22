@@ -93,10 +93,9 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
         --exact
         --first
     )
-    # Settings comes to the front over Calculator, though Dupin, an accessory app, doesn't become
-    # the active app, so wait for the window rather than for Dupin to be frontmost.
     let settings = {|r| $r.ok and (mentions $r 'Dupin Settings') }
     poll $out settings-window $settings list-windows --app Dupin
+    wait-frontmost Dupin
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
