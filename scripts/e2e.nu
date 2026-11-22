@@ -244,8 +244,10 @@ def scenario [out: path] {
     )
     let log = $out | path join dupin.log
     let requests_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings requested ' } | length
+    let closed_before = open --raw $log | lines | where {|line| $line | str contains 'dupin-trace: settings panel closed ' } | length
     ad $out open-settings-result press return | ignore
     wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
+    wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app Dupin
     snap $out settings-from-result
 }
