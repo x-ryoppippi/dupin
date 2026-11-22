@@ -72,6 +72,11 @@ fn main() {
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()
+    .on_window(|_| trace::settings("created"))
+    .on_ready(|_| trace::settings("ready"))
+    .on_focus(|_, focused, _| {
+        trace::settings(if focused { "focused" } else { "unfocused" });
+    })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
     let settings = Arc::new(settings::Service::new(settings::path(), {
@@ -121,6 +126,7 @@ fn main() {
             }
         })
         .on_frame_encoded(trace::frame)
+        .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
             if !focused {
                 s.dismiss(tx);
