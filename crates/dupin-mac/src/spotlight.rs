@@ -281,10 +281,14 @@ fn expand_demotions(rules: &[String], home: Option<&Path>) -> Vec<PathBuf> {
         .filter(|rule| !rule.is_empty())
         .map(|rule| match (rule.as_str(), home) {
             ("~", Some(home)) => home.to_path_buf(),
-            (rule, Some(home)) if rule.starts_with("~/") => home.join(&rule[2..]),
+            (rule, Some(home)) if rule.starts_with("~/") => under_home(home, &rule[2..]),
             _ => PathBuf::from(rule),
         })
         .collect()
+}
+
+fn under_home(home: &Path, suffix: &str) -> PathBuf {
+    home.join(suffix.trim_start_matches('/'))
 }
 
 fn snapshot_demotions(rules: &RwLock<Vec<String>>, home: Option<&Path>) -> Vec<PathBuf> {
@@ -381,7 +385,7 @@ fn resolve_folder(folder: Option<&str>, home: Option<&Path>) -> Result<Option<Pa
     };
     let path = match folder {
         "~" => home.ok_or(())?.to_path_buf(),
-        folder if folder.starts_with("~/") => home.ok_or(())?.join(&folder[2..]),
+        folder if folder.starts_with("~/") => under_home(home.ok_or(())?, &folder[2..]),
         folder => PathBuf::from(folder),
     };
     path.is_absolute().then_some(Some(path)).ok_or(())
@@ -530,6 +534,18 @@ mod tests {
         );
         assert!(resolve_folder(Some("~/Documents"), None).is_err());
         assert_eq!(resolve_folder(None, None).unwrap(), None);
+        assert_eq!(
+            resolve_folder(Some("~//Documents"), Some(home)).unwrap(),
+            Some(home.join("Documents"))
+        );
+        assert_eq!(
+            expand_demotions(&["~//Documents".into()], Some(home)),
+            [home.join("Documents")]
+        );
+        assert_eq!(
+            resolve_folder(Some("~///"), Some(home)).unwrap(),
+            Some(home.to_owned())
+        );
 
         let scopes = search_scopes(Some(Path::new("/Users/test/Work Docs"))).unwrap();
         let url: Retained<NSURL> = scopes.objectAtIndex(0).downcast().unwrap();
