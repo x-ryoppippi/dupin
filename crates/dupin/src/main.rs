@@ -7,6 +7,7 @@ mod hotkey;
 mod icons;
 mod log;
 mod prefs;
+mod relaunch;
 mod settings;
 mod shader;
 mod store;

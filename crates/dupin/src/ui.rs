@@ -22,6 +22,12 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Restart {
+    Update,
+    Requested,
+}
+
 pub struct Ui {
     pub session: Session,
     pub query: TextEdit,
@@ -47,7 +53,7 @@ pub struct Ui {
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
     /// An update was staged while the panel showed: restart into it when the panel hides.
-    relaunch: bool,
+    relaunch: Option<Restart>,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -124,7 +130,7 @@ impl Ui {
             position: config.position,
             input_source: config.input_source,
             restore_input: None,
-            relaunch: false,
+            relaunch: None,
             running: Arc::new(AtomicUsize::new(0)),
             updater,
             me,
@@ -151,38 +157,50 @@ impl Ui {
     }
 
     /// An update is staged: restart into it now, or once neither the panel nor Settings shows.
-    pub fn updated(&mut self) {
-        self.restart_into_update(false);
+    pub fn updated(&mut self, tx: &mut Tx) {
+        self.restart(Restart::Update, tx);
     }
 
-    /// Settings' "Restart to Update".
-    pub fn restart_to_update(&mut self) {
-        self.restart_into_update(true);
+    /// Settings' explicit relaunch, installing a staged update first when present.
+    pub fn relaunch(&mut self, tx: &mut Tx) {
+        self.restart(Restart::Requested, tx);
     }
 
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
-    /// Unless asked, Settings showing defers the restart too: it would close under the user.
-    fn restart_into_update(&mut self, asked: bool) {
-        if self.me.is_visible() || (!asked && self.prefs.is_visible()) {
-            self.relaunch = true;
+    /// Automatic updates wait for both windows to hide; an explicit request closes them.
+    fn restart(&mut self, request: Restart, tx: &mut Tx) {
+        if request == Restart::Update && (self.me.is_visible() || self.prefs.is_visible()) {
+            self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
-            self.relaunch_when_idle(asked);
+            self.relaunch_when_idle(request);
         } else {
-            self.updater.restart();
+            let result = self.updater.restart().and_then(|handled| {
+                if !handled && request == Restart::Requested {
+                    crate::relaunch::current()
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(error) = result {
+                crate::log::warn(&error);
+                if request == Restart::Requested {
+                    self.show_notice(error, tx);
+                }
+            }
         }
     }
 
     /// Ask again once every action already handed off has been carried out, so exiting
     /// doesn't cut short the app or file the user just opened. The panel may have been
-    /// summoned meanwhile, so `restart_into_update` decides afresh.
-    fn relaunch_when_idle(&self, asked: bool) {
+    /// summoned meanwhile, so automatic updates check visibility again.
+    fn relaunch_when_idle(&self, request: Restart) {
         let running = self.running.clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
             while running.load(Ordering::Acquire) > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            me.update(move |s, _| s.restart_into_update(asked));
+            me.update(move |s, tx| s.restart(request, tx));
         });
     }
 
@@ -259,8 +277,8 @@ impl Ui {
         self.shown = false;
         self.notice = None;
         tx.close_window();
-        if std::mem::take(&mut self.relaunch) {
-            self.relaunch_when_idle(false);
+        if let Some(request) = self.relaunch.take() {
+            self.relaunch_when_idle(request);
         }
     }
 

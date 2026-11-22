@@ -300,16 +300,18 @@ impl Updater {
     }
 
     /// Swap in the staged update and start it once this process has exited, and exit.
-    /// Returns when nothing is staged or the swap failed.
-    pub fn restart(&self) {
-        let Some(staged) = self.take_staged() else { return };
+    /// `Ok(false)` means no update was staged. Errors keep this process running.
+    pub fn restart(&self) -> Result<bool, String> {
+        let Some(staged) = self.take_staged() else {
+            return Ok(false);
+        };
         match swap(&staged.update, &staged.installed) {
-            Ok(()) => relaunch(&staged.installed),
+            Ok(()) => crate::relaunch::bundle(&staged.installed).map(|()| true),
             Err(e) => {
                 let e = format!("couldn't install Dupin {}: {e}", staged.version);
-                crate::log::warn(&e);
                 self.shared.lock().applied = false;
-                self.shared.set_status(Status::Failed(e));
+                self.shared.set_status(Status::Failed(e.clone()));
+                Err(e)
             }
         }
     }
@@ -414,7 +416,7 @@ fn adopt(shared: &Shared, staged: Staged, panel: &AppHandle<Ui>) {
     inner.staged = Some(staged);
     drop(inner);
     shared.prefs.update(|_, _| {});
-    panel.update(|s, _| s.updated());
+    panel.update(|s, tx| s.updated(tx));
 }
 
 /// Stage the feed's build if it is newer, or say where to get it when this copy can't
@@ -564,23 +566,6 @@ fn info_value(bundle: &Path, key: &str) -> Result<String, String> {
             .arg(bundle.join("Contents/Info.plist")),
     )?;
     Ok(value.trim().to_owned())
-}
-
-/// Start the installed bundle once this process has exited, and exit.
-fn relaunch(bundle: &Path) -> ! {
-    let spawned = Command::new("/bin/sh")
-        .args([
-            "-c",
-            "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.1; done; exec /usr/bin/open \"$2\"",
-            "sh",
-        ])
-        .arg(std::process::id().to_string())
-        .arg(bundle)
-        .spawn();
-    if let Err(e) = spawned {
-        crate::log::warn(&format!("couldn't relaunch after the update: {e}"));
-    }
-    std::process::exit(0);
 }
 
 fn designated_requirement(bundle: &Path) -> Result<String, String> {
