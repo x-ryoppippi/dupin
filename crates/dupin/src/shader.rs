@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use dupin_core::Backdrop;
 
@@ -73,17 +74,38 @@ pub fn install_example(name: &str) -> std::io::Result<Backdrop> {
         .ok_or_else(|| std::io::Error::other(format!("no example named {name}")))?;
     let pick = example_pick(name);
     let path = resolve(&pick);
+    if path.exists() {
+        return Ok(Backdrop::File(pick));
+    }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Written whole beside it first, then linked into place: linking never replaces a file, so
-    // a copy made meanwhile stays, and a write that fails part way leaves no copy at all.
-    let staged = path.with_extension(format!("wgsl.{}.tmp", std::process::id()));
-    let linked = std::fs::write(&staged, src).and_then(|()| std::fs::hard_link(&staged, &path));
+    // Written whole to a file of its own first, then linked into place: linking never replaces
+    // a file, so a copy made meanwhile stays, and a write that fails part way leaves no copy.
+    let (staged, mut file) = staging_file(&path)?;
+    let linked = std::io::Write::write_all(&mut file, src.as_bytes())
+        .and_then(|()| std::fs::hard_link(&staged, &path));
+    drop(file);
     _ = std::fs::remove_file(&staged);
     match linked {
         Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => Err(e),
         _ => Ok(Backdrop::File(pick)),
+    }
+}
+
+/// A new file beside `path` that no one else has, so writing it can't touch another file.
+fn staging_file(path: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mut attempt = 0;
+    loop {
+        let staged = path.with_extension(format!("{}.{nanos}.{attempt}.tmp", std::process::id()));
+        match std::fs::File::create_new(&staged) {
+            Ok(file) => return Ok((staged, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 16 => attempt += 1,
+            Err(e) => return Err(e),
+        }
     }
 }
 
