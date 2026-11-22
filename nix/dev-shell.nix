@@ -13,6 +13,7 @@
             nushell
             nodejs
             config.packages.pnpm
+            config.packages.blacksmith
             just
             nufmt
             config.treefmt.build.wrapper

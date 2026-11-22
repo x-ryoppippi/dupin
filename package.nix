@@ -43,6 +43,10 @@ let
   commonArgs = {
     pname = "dupin";
     inherit version src cargoDeps;
+    # RUSTFLAGS would replace cargoSetupHook's target-specific flags.
+    prePatch = ''
+      export NIX_RUSTFLAGS="''${NIX_RUSTFLAGS-} --remap-path-prefix=$cargoDepsCopy=/vendor"
+    '';
   };
 in
 rustPlatform.buildRustPackage (
