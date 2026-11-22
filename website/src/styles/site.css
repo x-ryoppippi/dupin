@@ -252,7 +252,7 @@ code {
 	max-width: 1080px;
 	margin: 64px auto 0;
 	/* Fixed so the page never shifts while the panel grows and shrinks with its results. */
-	height: calc(272px + var(--desk-pad) + 84px);
+	height: calc(494px + var(--desk-pad) + 84px);
 	padding: var(--desk-pad) 20px 0;
 	--desk-pad: clamp(32px, 6vw, 72px);
 	border-radius: var(--radius);

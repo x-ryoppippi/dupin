@@ -2,13 +2,21 @@
 	import { onMount } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
 	import { repo } from '../site.ts';
-	import { scenarios, type Row, type Scenario } from './scenarios.ts';
+	import { marked, marking, scenarios, type Scenario } from './scenarios.ts';
 
 	const [first] = scenarios;
-	let query = $state(first.query);
-	let mode = $state(first.mode);
-	let rows = $state<Row[]>(first.rows);
-	let open = $state(true);
+	// The panel starts hidden; the demo opens it with the hotkey, as a person would.
+	let query = $state('');
+	let mode = $state<Scenario['mode']>();
+	let shown = $state<Scenario>(first);
+	let open = $state(false);
+	let launching = $state(false);
+	// File searches answer a moment after the key, as Spotlight does, so their rows follow `found`
+	// while the field says "Searching…"; app results follow the query at once.
+	let found = $state('');
+	let searching = $state(false);
+	let selected = $state(0);
+	const rows = $derived(found ? (shown.steps[found.toLowerCase()] ?? []) : []);
 	let keys = $state<{ id: number; label: string }[]>([]);
 	let keysShown = $state(false);
 	let desk: HTMLElement;
@@ -44,7 +52,7 @@
 			time: still ? 10 : (now - shownAt) / 1000,
 			keystroke: still ? 1e4 : Math.min((now - typedAt) / 1000, 1e4),
 			query: [...query].length,
-			searching: mode && query && rows.length === 0 ? 1 : 0,
+			searching: searching ? 1 : 0,
 			mode: (mode && modes[mode]) ?? 0,
 			field: field.offsetTop + field.offsetHeight,
 		};
@@ -97,7 +105,13 @@
 	});
 
 	onMount(() => {
-		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			// One still search in place of the loop.
+			open = true;
+			query = first.query;
+			found = first.query;
+			return;
+		}
 
 		let alive = true;
 		let visible = true;
@@ -107,8 +121,9 @@
 		const observer = new IntersectionObserver(([entry]) => (visible = entry?.isIntersecting ?? true));
 		observer.observe(desk);
 
-		const press = (label: string) => {
-			keys = [...keys, { id: keyId++, label }].slice(-8);
+		// The keycast shows what was pressed; `alone` clears it first, so a shortcut reads by itself.
+		const press = (label: string, alone = false) => {
+			keys = [...(alone ? [] : keys), { id: keyId++, label }].slice(-8);
 			keysShown = true;
 			clearTimeout(hideTimer);
 			hideTimer = setTimeout(() => {
@@ -116,68 +131,74 @@
 				hideTimer = setTimeout(() => (keys = []), 300);
 			}, 1100);
 		};
-		// Results follow every key, as Dupin's do: a scenario's rows with as much of each match
-		// highlighted as has been typed.
-		const matching = (scenario: Scenario, typed: string): Row[] =>
-			typed ? scenario.rows.map((row) => ({ ...row, hit: row.hit?.slice(0, typed.length) })) : [];
+		let answer: ReturnType<typeof setTimeout> | undefined;
 		const type = async (char: string) => {
-			press(char === ' ' ? '␣' : char);
+			press(char);
 			setQuery(query + char);
-			await sleep(90 + Math.random() * 70);
+			selected = 0;
+			clearTimeout(answer);
+			if (mode) {
+				searching = true;
+				answer = setTimeout(() => {
+					found = query;
+					searching = false;
+				}, 380);
+			} else {
+				found = query;
+			}
+			await sleep(120 + Math.random() * 80);
+		};
+		const down = async (alone = false) => {
+			press('↓', alone);
+			selected = Math.min(selected + 1, rows.length - 1);
+			await sleep(420);
 		};
 
-		// Replays the keys a person would press: ⌫ empties the query and, on an empty one, leaves a
-		// mode; Space on an empty query enters file search, and `in` then Space enters content search.
-		// After the last search, Esc closes the panel and the hotkey starts the round again.
+		// Each round is one use of Dupin: ⌘Space shows the bar, the query narrows the list key by
+		// key, and ↩ opens the top result and hides the panel. File searches enter their mode
+		// first: Space on an empty query for file names, `in` then Space for contents.
 		const play = async () => {
-			let shown: Scenario = first;
-			for (let i = 1; alive; i = (i + 1) % scenarios.length) {
-				await sleep(2600);
+			await sleep(900);
+			for (let i = 0; alive; i = (i + 1) % scenarios.length) {
 				while (alive && (!visible || document.hidden)) await sleep(400);
 				const scenario = scenarios[i]!;
-				if (i === 0) {
-					press('esc');
-					open = false;
-					await sleep(250);
-					query = '';
-					mode = undefined;
-					rows = [];
-					await sleep(1600);
-					press('⌘ Space');
-					open = true;
-					shownAt = performance.now();
-					await sleep(400);
-				} else {
-					while (query.length > 0) {
-						press('⌫');
-						setQuery(query.slice(0, -1));
-						rows = matching(shown, query);
-						await sleep(70);
-					}
-					rows = [];
-					if (mode && mode !== scenario.mode) {
-						press('⌫');
-						mode = undefined;
-						await sleep(250);
-					}
+				shown = scenario;
+				press('⌘ Space', true);
+				open = true;
+				shownAt = performance.now();
+				await sleep(1800);
+				keys = [];
+				if (scenario.mode === 'In files') {
+					await type('i');
+					await type('n');
+					await sleep(300);
 				}
-				if (scenario.mode && !mode) {
-					if (scenario.mode === 'In files') {
-						await type('i');
-						await type('n');
-						setQuery('');
-					}
+				if (scenario.mode) {
 					press('␣');
+					setQuery('');
+					found = '';
 					mode = scenario.mode;
 					// Long enough to read the hint the mode shows before the search starts.
 					await sleep(1600);
+					keys = [];
 				}
-				shown = scenario;
-				for (const char of scenario.query) {
-					const typing = type(char);
-					rows = matching(scenario, query);
-					await typing;
+				for (const char of scenario.query) await type(char);
+				await sleep(1200);
+				if (rows.length > 2) {
+					await down(true);
+					await down();
+					await sleep(500);
 				}
+				press('↩', true);
+				launching = true;
+				await sleep(220);
+				open = false;
+				launching = false;
+				query = '';
+				found = '';
+				selected = 0;
+				mode = undefined;
+				await sleep(1300);
 			}
 		};
 		void play();
@@ -186,6 +207,7 @@
 			alive = false;
 			observer.disconnect();
 			clearTimeout(hideTimer);
+			clearTimeout(answer);
 		};
 	});
 </script>
@@ -200,17 +222,24 @@
 						>{placeholders[mode ?? ''] ?? placeholders['']}</span
 					>{/if}
 			</span>
+			{#if searching}<span class="searching">Searching…</span>{/if}
 		</div>
 		{#if rows.length === 0 && mode && !query}
 			<div class="hint">{hints[mode]}</div>
+		{:else if rows.length === 0 && found && !searching}
+			<div class="hint">No matches</div>
 		{:else if rows.length > 0}
 			<ul class="rows">
 				{#each rows as row, i (row.title)}
-					<li class={['row', i === 0 && 'is-selected']}>
-						<span class={`app-icon app-icon--${row.icon}`}></span>
+					<li class={['row', i === selected && 'is-selected', i === selected && launching && 'is-launching']}>
+						<span class={`app-icon app-icon--${row.icon}`} style:--tint={row.tint}
+							>{#if row.glyph}<span class={row.glyph}></span>{/if}</span
+						>
 						<span class="row-text">
 							<span class="row-title">
-								{#if row.hit}<mark>{row.hit}</mark>{row.title.slice(row.hit.length)}{:else}{row.title}{/if}
+								{#each marked(row.title, row.alias ? '' : query, marking(mode)) as run, k (k)}{#if run.hit}<mark
+											>{run.text}</mark
+										>{:else}{run.text}{/if}{/each}
 							</span>
 							<span class="row-sub">
 								{#if row.alias}<span class="alias">{row.alias}</span>{/if}{row.sub}
@@ -320,6 +349,14 @@
 		background: oklch(from var(--dupin-accent) l c h / 0.16);
 	}
 
+	.searching {
+		margin-left: auto;
+		font-size: 12px;
+		font-weight: 500;
+		line-height: 1;
+		color: var(--dupin-text-secondary);
+	}
+
 	.hint {
 		white-space: pre;
 		display: flex;
@@ -389,6 +426,18 @@
 
 	.row.is-selected .row-title mark {
 		color: #fff;
+	}
+
+	.row.is-launching {
+		filter: brightness(0.85);
+	}
+
+	.app-icon--glyph {
+		display: grid;
+		place-items: center;
+		font-size: 20px;
+		color: #fff;
+		background: var(--tint);
 	}
 
 	/* The backdrop draws under the panel's content and inside its glass. */
