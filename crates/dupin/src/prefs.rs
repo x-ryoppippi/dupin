@@ -560,7 +560,11 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
         Status::Download { .. } => "Update available",
         _ => "Check for Updates",
     };
-    let version = format!("Version {}", s.updater.version());
+    let version = if s.updater.version().is_empty() {
+        "Updates".to_owned()
+    } else {
+        format!("Version {}", s.updater.version())
+    };
     col()
         .key("update-footer")
         .w_full()
@@ -568,7 +572,12 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
         .child(
             text(version.clone())
                 .key("current-version")
-                .label(version)
+                .role("button")
+                .label(format!("{version}. Open update settings"))
+                .focusable(true)
+                .focus_selected(s.page == Page::Updates)
+                .focus_ring(2.0, 0.0, k.c.border_focus)
+                .on_press(|s: &mut Prefs| s.page = Page::Updates)
                 .w_full()
                 .px(6.0)
                 .font(k.ty.small.lh(20.0))
@@ -579,7 +588,7 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
             row()
                 .key(Page::Updates.key())
                 .role("button")
-                .label(format!("{title}. Open update settings"))
+                .label(title)
                 .focusable(true)
                 .focus_ring(2.0, 0.0, k.c.border_focus)
                 .w_full()
