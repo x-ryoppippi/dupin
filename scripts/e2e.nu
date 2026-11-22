@@ -64,6 +64,32 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     poll $out result $found find --app Dupin --name $row --exact --first
     snap $out results
 
+    ad $out preview-shortcut press cmd+y | ignore
+    let preview = {|r| $r.ok and (
+        $r.data | any {|window|
+            $window.is_focused and ($window.title | str starts-with 'Calculator')
+        }
+    ) }
+    poll --tries 15 $out quick-look-window $preview list-windows --app Dupin
+    snap $out quick-look
+    ad $out close-preview press escape | ignore
+    let restored = {|r|
+        $r.ok and $r.data?.match?.value? == 'calculator'
+        and 'focused' in ($r.data?.match?.states? | default [])
+    }
+    (poll
+        $out
+        quick-look-restored
+        $restored
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    snap $out quick-look-restored
+
     let before = poll $out before-return {|r| $r.ok } list-apps
     if (mentions $before Calculator) {
         error make {
@@ -183,7 +209,7 @@ def "main run" [app: path, --out: path = 'target/e2e'] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: the panel opened Calculator, and Settings showed its pages'
+    print 'e2e: Quick Look returned to the query, the panel opened Calculator, and Settings showed its pages'
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.

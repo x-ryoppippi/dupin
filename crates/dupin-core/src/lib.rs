@@ -15,6 +15,7 @@ pub mod session;
 pub use command::{CommandError, CommandId, CommandRegistry, CommandSpec, QueryPresentation};
 pub use config::{Backdrop, Config, InputSource, Position};
 pub use history::History;
+pub(crate) use item::ActionDisposition;
 pub use item::{Action, Item, ItemAction, View};
 pub use provider::{Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};

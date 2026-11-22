@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher};
+use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -45,6 +45,7 @@ pub struct Ui {
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
+    quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     pub icons: HashMap<String, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
@@ -82,6 +83,7 @@ impl Ui {
         configuration: Configuration,
         history: History,
         notice: Option<String>,
+        quick_look: Rc<RefCell<Option<Previewer>>>,
     ) -> Ui {
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
@@ -152,6 +154,7 @@ impl Ui {
             settings_after_close: false,
             running: Arc::new(AtomicUsize::new(0)),
             updater,
+            quick_look,
             me,
             prefs,
         }
@@ -362,6 +365,9 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        if let Some(preview) = self.quick_look.borrow().as_ref() {
+            preview.close();
+        }
         if let Some(previous) = self.restore_input.take() {
             previous.restore();
         }
@@ -417,6 +423,21 @@ impl Ui {
         crate::trace::key(ev);
         if self.query.is_composing() {
             return false;
+        }
+        if is_quick_look_shortcut(&ev.key) {
+            if !self
+                .session
+                .selected_item()
+                .is_some_and(|item| item.item_action(dupin_mac::quick_look::ACTION_ID).is_some())
+            {
+                return false;
+            }
+            let key = self.session.result_key(self.session.selected());
+            let effects = self
+                .session
+                .run_key_action(&key, dupin_mac::quick_look::ACTION_ID);
+            self.apply(effects, tx);
+            return true;
         }
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
@@ -552,21 +573,28 @@ impl Ui {
                 Effect::ClearQuery => self.query.clear(),
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
-                Effect::Run(action) => {
-                    if let dupin_core::Action::Copy(text) = action {
-                        tx.copy(text);
-                        continue;
-                    }
-                    // Launch Services can take a moment to answer; don't hold the frame for it.
-                    let running = self.running.clone();
-                    running.fetch_add(1, Ordering::AcqRel);
-                    std::thread::spawn(move || {
-                        if !dupin_mac::workspace::run(&action) {
-                            crate::log::warn(&format!("the system couldn't carry out {action:?}"));
+                Effect::Run(action) => match action {
+                    dupin_core::Action::Copy(text) => tx.copy(text),
+                    dupin_core::Action::Preview(path) => {
+                        let shown = self
+                            .quick_look
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|preview| preview.show(&path));
+                        if !shown {
+                            crate::log::warn("couldn't show the Quick Look preview");
                         }
-                        running.fetch_sub(1, Ordering::AcqRel);
-                    });
-                }
+                    }
+                    dupin_core::Action::Open(path) => {
+                        self.run_workspace_action(dupin_mac::workspace::Action::Open(path))
+                    }
+                    dupin_core::Action::Reveal(path) => {
+                        self.run_workspace_action(dupin_mac::workspace::Action::Reveal(path))
+                    }
+                    dupin_core::Action::OpenUrl(url) => {
+                        self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url))
+                    }
+                },
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {
                     if self.session.selected_item().is_some() {
@@ -576,6 +604,30 @@ impl Ui {
                     }
                 }
             }
+        }
+    }
+
+    fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
+        let running = self.running.clone();
+        running.fetch_add(1, Ordering::AcqRel);
+        std::thread::spawn(move || {
+            if !dupin_mac::workspace::run(&action) {
+                crate::log::warn(&format!("the system couldn't carry out {action:?}"));
+            }
+            running.fetch_sub(1, Ordering::AcqRel);
+        });
+    }
+
+    pub fn preview_focus_is_active(&self) -> bool {
+        self.quick_look
+            .borrow()
+            .as_ref()
+            .is_some_and(|preview| preview.panel_is_key() || preview.owner_is_key())
+    }
+
+    pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
+        if !self.preview_focus_is_active() {
+            self.dismiss(tx);
         }
     }
 
@@ -664,6 +716,10 @@ fn accept_config(
     Ok(config)
 }
 
+fn is_quick_look_shortcut(key: &Key) -> bool {
+    matches!(key, Key::Command('y'))
+}
+
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
     let due: Vec<_> = deadlines
         .iter()
@@ -677,8 +733,16 @@ fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(
 }
 
 #[cfg(test)]
-mod deadline_tests {
+mod ui_helper_tests {
     use super::*;
+
+    #[test]
+    fn quick_look_shortcut_is_command_y() {
+        assert!(is_quick_look_shortcut(&Key::Command('y')));
+        assert!(!is_quick_look_shortcut(&Key::Command('k')));
+        assert!(!is_quick_look_shortcut(&Key::Text("y".into())));
+    }
+
     #[test]
     fn controlled_clock_expires_only_latest_deadline_once() {
         let id = CommandId::new("sample.search").unwrap();

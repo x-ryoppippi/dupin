@@ -194,6 +194,7 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
             let mut item = Item::path(app.path.clone(), app.name.clone(), positions);
+            crate::quick_look::add_action(&mut item);
             if let (Some(alias), View::Text { subtitle, .. }) = (alias, &mut item.view) {
                 *subtitle = format!("{alias} · {subtitle}");
             }
