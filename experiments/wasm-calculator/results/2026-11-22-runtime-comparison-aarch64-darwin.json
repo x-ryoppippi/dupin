@@ -1,0 +1,165 @@
+{
+	"metadata": {
+		"system": {
+			"name": "macos",
+			"arch": "aarch64",
+			"family": "unix",
+			"kernel_version": "27.2.0"
+		},
+		"toolchain": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.3",
+		"macos": "ProductName:\t\tmacOS\nProductVersion:\t\t27.2.1\nBuildVersion:\t\t26B131",
+		"cpu": "Apple M5 Max",
+		"guest_bytes": 766406,
+		"guest_sha256": "bff14694b6005d445de67887798d5e711753927fdccb226b6329fd7d590b06e6",
+		"script_sha256": "43cf805e9ae2d79cce218dd7df3ca60e05edd78ce1ca724bf716a0988f3ddfce",
+		"sources": [
+			{
+				"path": "Cargo.toml",
+				"sha256": "1fc569776bda9f250d51327ddd2b8178df7a6c5957e3837525e5d47786da38ba"
+			},
+			{
+				"path": "Cargo.lock",
+				"sha256": "93b060a876b01a7e3f6b75161998009256841ec84827ffdaaa835a9efaa36c9d"
+			},
+			{
+				"path": "guest/Cargo.toml",
+				"sha256": "53b7d7fd2e494e11e009f0b77af1d82feec48749dbee3f6be7b6acf2d51799ea"
+			},
+			{
+				"path": "guest/src/lib.rs",
+				"sha256": "1fbefba9f50556d0a5835f94655f33ce60d7f89a8cdc32b22ee9c44dc7efb701"
+			},
+			{
+				"path": "host/Cargo.toml",
+				"sha256": "ed5dee01ed763a47008124b6ab2d80a98e8fda8b54f71c5e7393324faa8397df"
+			},
+			{
+				"path": "host/src/main.rs",
+				"sha256": "b3074a30c920e74651515f5828059df73a510a0acffcdf2468e6adbd433d8a80"
+			},
+			{
+				"path": "compiled-host/Cargo.toml",
+				"sha256": "3a130994a84bc96170c3862b910952b7998a61655b1872ee875e4cb52dd3ef73"
+			},
+			{
+				"path": "compiled-host/src/main.rs",
+				"sha256": "3b7c3081ec1104ce561739fa0f1d1e067b7c75b9063cb33428ddb2ed9c25aab1"
+			}
+		],
+		"release_profile": "fat LTO; one codegen unit; stripped; separate experimental workspace",
+		"fuel": "20M per query in each runtime; fuel units are runtime-specific",
+		"memory": "16 MiB guest linear memory; host/runtime memory is not capped",
+		"signing": "unsigned benchmark executables; no app signing or entitlement changes"
+	},
+	"runs": [
+		{
+			"runtime": "wasmi",
+			"executable_bytes": 2091376,
+			"executable_sha256": "05e25aacaf9778b66d2bedc7ecad39ae6611613f483905984a1cdf3e6348a8ea",
+			"maximum_resident_bytes": 25313280,
+			"peak_footprint_bytes": 23134592,
+			"process_statistics": "        3.45 real         3.37 user         0.01 sys\n            25313280  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                1737  page reclaims\n                   5  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 363  involuntary context switches\n         35237676957  instructions retired\n         15208053219  cycles elapsed\n            23134592  peak memory footprint\n",
+			"measurements": {
+				"compilation_mode": "LazyTranslation",
+				"fuel_cutoff_verified": true,
+				"instantiate_ns": 61667,
+				"iterations": 1000,
+				"memory_growth_limit_verified": true,
+				"memory_limit_bytes": 16777216,
+				"module_load_ns": 2663125,
+				"pathological_fuel_limit": 20000000,
+				"queries": [
+					{
+						"first_wasm_ns": 4282208,
+						"max_warm_fuel": 8008300,
+						"query": "560 km to mi",
+						"result": "approx. 347.9678676529 mi",
+						"warm_native_mean_ns": 62533,
+						"warm_wasm_mean_ns": 969485
+					},
+					{
+						"first_wasm_ns": 390375,
+						"max_warm_fuel": 1153723,
+						"query": "30*(60+1)",
+						"result": "1830",
+						"warm_native_mean_ns": 7767,
+						"warm_wasm_mean_ns": 137685
+					},
+					{
+						"first_wasm_ns": 1168541,
+						"max_warm_fuel": 9066083,
+						"query": "60 mph in m/s",
+						"result": "26.8224 m / s",
+						"warm_native_mean_ns": 64325,
+						"warm_wasm_mean_ns": 1100969
+					},
+					{
+						"first_wasm_ns": 1026250,
+						"max_warm_fuel": 7909398,
+						"query": "1 acre in m^2",
+						"result": "4046.8564224 m^2",
+						"warm_native_mean_ns": 54385,
+						"warm_wasm_mean_ns": 971970
+					}
+				],
+				"query_fuel_limit": 20000000,
+				"wasm_bytes": 766406
+			}
+		},
+		{
+			"runtime": "wasmtime",
+			"executable_bytes": 7618528,
+			"executable_sha256": "b1def4fc67d44ef4864b394abd203298c6cbf29420f804f6cae57a16412a0efe",
+			"maximum_resident_bytes": 47775744,
+			"peak_footprint_bytes": 42336712,
+			"process_statistics": "        1.00 real         0.90 user         0.00 sys\n            47775744  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n                3186  page reclaims\n                  10  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                   0  messages sent\n                   0  messages received\n                   0  signals received\n                   0  voluntary context switches\n                 103  involuntary context switches\n         17325192020  instructions retired\n          4040436518  cycles elapsed\n            42336712  peak memory footprint\n",
+			"measurements": {
+				"compilation_mode": "Cranelift",
+				"fuel_cutoff_verified": true,
+				"instantiate_ns": 68375,
+				"iterations": 1000,
+				"memory_growth_limit_verified": true,
+				"memory_limit_bytes": 16777216,
+				"module_load_ns": 351978666,
+				"pathological_fuel_limit": 20000000,
+				"queries": [
+					{
+						"first_wasm_ns": 271083,
+						"max_warm_fuel": 1808177,
+						"query": "560 km to mi",
+						"result": "approx. 347.9678676529 mi",
+						"warm_native_mean_ns": 58823,
+						"warm_wasm_mean_ns": 113959
+					},
+					{
+						"first_wasm_ns": 25584,
+						"max_warm_fuel": 242116,
+						"query": "30*(60+1)",
+						"result": "1830",
+						"warm_native_mean_ns": 7930,
+						"warm_wasm_mean_ns": 16131
+					},
+					{
+						"first_wasm_ns": 139334,
+						"max_warm_fuel": 2021948,
+						"query": "60 mph in m/s",
+						"result": "26.8224 m / s",
+						"warm_native_mean_ns": 64593,
+						"warm_wasm_mean_ns": 127389
+					},
+					{
+						"first_wasm_ns": 119292,
+						"max_warm_fuel": 1796764,
+						"query": "1 acre in m^2",
+						"result": "4046.8564224 m^2",
+						"warm_native_mean_ns": 55724,
+						"warm_wasm_mean_ns": 111286
+					}
+				],
+				"query_fuel_limit": 20000000,
+				"runtime": "wasmtime 51.0.0",
+				"wasm_bytes": 766406
+			}
+		}
+	]
+}
