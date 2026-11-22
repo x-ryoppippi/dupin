@@ -16,16 +16,21 @@ use crate::ui::Ui;
 /// the settings window (which replaces it).
 pub struct Binding {
     panel: AppHandle<Ui>,
-    id: Mutex<Option<ShortcutId>>,
+    registration: Mutex<Option<Registration>>,
     /// Whether the launch registration failed, so recording the same chord again retries it.
     failed: Mutex<bool>,
+}
+
+struct Registration {
+    id: ShortcutId,
+    shortcut: Shortcut,
 }
 
 impl Binding {
     pub fn new(panel: AppHandle<Ui>) -> Binding {
         Binding {
             panel,
-            id: Mutex::new(None),
+            registration: Mutex::new(None),
             failed: Mutex::new(false),
         }
     }
@@ -53,7 +58,8 @@ impl Binding {
             .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
         {
             Ok(id) => {
-                *self.id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+                *self.registration.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Registration { id, shortcut });
                 crate::trace::registered(accelerator);
             }
             Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
@@ -77,18 +83,30 @@ impl Binding {
                     .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
             })
             .transpose()?;
-        let mut id = self.id.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = *id
-            && let Err(error) = self.panel.unregister_shortcut(old)
+        let mut registration = self.registration.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = registration.as_ref()
+            && let Err(error) = self.panel.unregister_shortcut(old.id)
         {
             if let Some(new) = new {
                 let _ = self.panel.unregister_shortcut(new);
             }
             return Err(error);
         }
-        *id = new;
+        *registration = new.zip(next).map(|(id, shortcut)| Registration {
+            id,
+            shortcut: shortcut.clone(),
+        });
         *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = false;
         Ok(())
+    }
+
+    pub fn is_installed(&self, shortcut: Option<&Shortcut>) -> bool {
+        self.registration
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|registration| &registration.shortcut)
+            == shortcut
     }
 
     /// Who holds `shortcut`, for a refusal message.

@@ -11,6 +11,7 @@ pub struct PathWatcher {
     queue: *mut std::ffi::c_void,
     context: *mut WatchContext,
     debounce: Option<std::thread::JoinHandle<()>>,
+    started: bool,
 }
 
 // SAFETY: the stream delivers only on its serial queue, and Drop drains that queue.
@@ -21,12 +22,14 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, true, changed)
+        Self::start_with_scope(roots, true, move |_| changed())
     }
 
+    /// Watches directory entries without forwarding descendant events. The callback receives
+    /// `true` when a watched root moved and the stream must be rebuilt.
     pub fn start_shallow(
         roots: Vec<PathBuf>,
-        changed: impl Fn() + Send + Sync + 'static,
+        changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         Self::start_with_scope(roots, false, changed)
     }
@@ -34,7 +37,7 @@ impl PathWatcher {
     fn start_with_scope(
         roots: Vec<PathBuf>,
         recursive: bool,
-        changed: impl Fn() + Send + Sync + 'static,
+        changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         let (events, received) = mpsc::channel();
         let debounce = std::thread::Builder::new()
@@ -60,7 +63,9 @@ impl Drop for PathWatcher {
     fn drop(&mut self) {
         // Stop delivery and drain already queued callbacks before freeing their context.
         unsafe {
-            FSEventStreamStop(self.stream);
+            if self.started {
+                FSEventStreamStop(self.stream);
+            }
             FSEventStreamInvalidate(self.stream);
             dispatch_sync_f(self.queue, std::ptr::null_mut(), drained);
             FSEventStreamRelease(self.stream);
@@ -73,14 +78,14 @@ impl Drop for PathWatcher {
     }
 }
 
-fn debounce_events(events: mpsc::Receiver<()>, changed: impl Fn()) {
+fn debounce_events(events: mpsc::Receiver<bool>, changed: impl Fn(bool)) {
     const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
-    while events.recv().is_ok() {
+    while let Ok(mut root_changed) = events.recv() {
         loop {
             match events.recv_timeout(QUIET) {
-                Ok(()) => continue,
+                Ok(root) => root_changed |= root,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    changed();
+                    changed(root_changed);
                     break;
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
@@ -94,6 +99,9 @@ type FSEventStreamRef = *mut std::ffi::c_void;
 type FSEventId = u64;
 type FSEventFlags = u32;
 type CFTimeInterval = f64;
+const USE_CF_TYPES: u32 = 1;
+const WATCH_ROOT: u32 = 4;
+const ROOT_CHANGED: u32 = 0x20;
 
 #[repr(C)]
 struct FSEventStreamContext {
@@ -105,7 +113,7 @@ struct FSEventStreamContext {
 }
 
 struct WatchContext {
-    events: mpsc::Sender<()>,
+    events: mpsc::Sender<bool>,
     roots: Vec<PathBuf>,
     recursive: bool,
 }
@@ -153,7 +161,7 @@ unsafe extern "C" {
 fn watch_roots(
     roots: Vec<PathBuf>,
     recursive: bool,
-    events: mpsc::Sender<()>,
+    events: mpsc::Sender<bool>,
 ) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
     use objc2_foundation::{NSArray, NSString};
@@ -201,7 +209,7 @@ fn watch_roots(
             Retained::as_ptr(&paths).cast(),
             u64::MAX,
             0.5,
-            1,
+            USE_CF_TYPES | if recursive { 0 } else { WATCH_ROOT },
         )
     };
     if stream.is_null() {
@@ -218,42 +226,52 @@ fn watch_roots(
         return Err("could not create the path watcher queue");
     }
     unsafe { FSEventStreamSetDispatchQueue(stream, queue) };
-    let watcher = PathWatcher {
+    let mut watcher = PathWatcher {
         stream,
         queue,
         context: context_info.cast(),
         debounce: None,
+        started: false,
     };
     if unsafe { FSEventStreamStart(stream) } == 0 {
         return Err("could not start the FSEvents stream");
     }
+    watcher.started = true;
     Ok(watcher)
 }
 
 unsafe extern "C" fn paths_changed(
     _stream: FSEventStreamRef,
     info: *mut std::ffi::c_void,
-    _count: usize,
+    count: usize,
     paths: *mut std::ffi::c_void,
-    _flags: *const FSEventFlags,
+    flags: *const FSEventFlags,
     _ids: *const FSEventId,
 ) {
+    if count == 0 {
+        return;
+    }
     // SAFETY: the callback context lives until the stream is stopped and released.
     let context = unsafe { &*info.cast::<WatchContext>() };
     // SAFETY: UseCFTypes supplies an array of strings for the event paths.
     let paths = unsafe { &*paths.cast::<objc2_foundation::NSArray>() };
-    if paths.iter().any(|path| {
-        path.downcast_ref::<objc2_foundation::NSString>()
-            .is_some_and(|path| {
-                let value = path.to_string();
-                let path = Path::new(&value);
-                context
-                    .roots
-                    .iter()
-                    .any(|root| matches_event_path(path, root, context.recursive))
-            })
-    }) {
-        let _ = context.events.send(());
+    // SAFETY: FSEvents supplies one flag for each entry in the event paths array.
+    let flags = unsafe { std::slice::from_raw_parts(flags, count) };
+    let root_changed = flags.iter().any(|flag| flag & ROOT_CHANGED != 0);
+    if root_changed
+        || paths.iter().any(|path| {
+            path.downcast_ref::<objc2_foundation::NSString>()
+                .is_some_and(|path| {
+                    let value = path.to_string();
+                    let path = Path::new(&value);
+                    context
+                        .roots
+                        .iter()
+                        .any(|root| matches_event_path(path, root, context.recursive))
+                })
+        })
+    {
+        let _ = context.events.send(root_changed);
     }
 }
 
@@ -281,6 +299,21 @@ pub fn canonical_root(root: &Path) -> PathBuf {
 mod tests {
     use super::matches_event_path;
     use std::path::Path;
+
+    #[test]
+    fn debouncing_keeps_a_root_change_between_ordinary_events() {
+        let (events, receiver) = std::sync::mpsc::channel();
+        let (fired, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            super::debounce_events(receiver, move |root| fired.send(root).unwrap());
+        });
+        for root in [false, true, false] {
+            events.send(root).unwrap();
+        }
+        assert!(received.recv_timeout(std::time::Duration::from_secs(2)).unwrap());
+        drop(events);
+        worker.join().unwrap();
+    }
 
     #[test]
     fn shallow_scope_matches_the_root_and_its_missing_ancestors_only() {

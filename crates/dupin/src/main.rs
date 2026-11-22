@@ -75,7 +75,7 @@ fn main() {
     let prefs_handle = prefs.handle();
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
-        move |update| panel.update(move |s, _| s.reload_config(update))
+        move |update| panel.update(move |s, tx| s.reload_config(update, tx))
     }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));

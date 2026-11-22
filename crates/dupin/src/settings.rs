@@ -53,25 +53,35 @@ fn resolve(path: &Path) -> std::io::Result<PathBuf> {
 
 fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
     let mut path = path.to_owned();
-    for _ in 0..40 {
+    'links: for _ in 0..40 {
         visit(&path);
-        match std::fs::read_link(&path) {
-            Ok(target) => {
-                path = match path.parent() {
-                    Some(dir) => dir.join(target),
-                    None => target,
-                };
+        let mut prefix = PathBuf::new();
+        let mut components = path.components();
+        while let Some(component) = components.next() {
+            prefix.push(component.as_os_str());
+            match std::fs::read_link(&prefix) {
+                Ok(target) => {
+                    visit(&prefix);
+                    let target = match prefix.parent() {
+                        Some(dir) => dir.join(target),
+                        None => target,
+                    };
+                    path = if components.as_path().as_os_str().is_empty() {
+                        target
+                    } else {
+                        target.join(components.as_path())
+                    };
+                    continue 'links;
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput
+                    ) => {}
+                Err(error) => return Err(error),
             }
-            Err(e)
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidInput
-                ) =>
-            {
-                return Ok(path);
-            }
-            Err(e) => return Err(e),
         }
+        return Ok(path);
     }
     Err(std::io::Error::other(format!(
         "{} has too many links",

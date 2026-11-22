@@ -151,13 +151,18 @@ impl Ui {
         }
     }
 
-    pub fn apply_config(&mut self, config: &Config) {
+    pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        let previous_limit = self.session.command().result_limit;
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        if self.session.command().result_limit != previous_limit {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
         self.position = config.position;
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -167,7 +172,7 @@ impl Ui {
         }
     }
 
-    pub fn reload_config(&mut self, update: crate::settings::Update) {
+    pub fn reload_config(&mut self, update: crate::settings::Update, tx: &mut Tx) {
         if update.revision != self.configuration.files.revision() {
             return;
         }
@@ -175,8 +180,7 @@ impl Ui {
             let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
                 "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
             })?;
-            let previous = crate::hotkey::parse(&self.configuration.values.borrow().hotkey);
-            if previous.as_ref().ok() != Some(&shortcut) {
+            if !self.configuration.hotkey.is_installed(shortcut.as_ref()) {
                 self.configuration.hotkey.replace(shortcut.as_ref()).map_err(|error| {
                     format!("Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration.")
                 })?;
@@ -187,7 +191,7 @@ impl Ui {
             Ok(config) => {
                 if *self.configuration.values.borrow() != config {
                     *self.configuration.values.borrow_mut() = config.clone();
-                    self.apply_config(&config);
+                    self.apply_config(&config, tx);
                 }
                 update.watch_problem
             }

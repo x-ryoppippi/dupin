@@ -213,9 +213,14 @@ impl Prefs {
         if revision != self.settings.revision() {
             return;
         }
+        self.adopt(config);
+        self.read_only = read_only;
+        self.config_problem = problem;
+    }
+
+    fn adopt(&mut self, config: Config) {
         let shortcut = crate::hotkey::parse(&config.hotkey).ok().flatten();
-        let previous = crate::hotkey::parse(&self.config.hotkey);
-        if previous.as_ref().ok() != Some(&shortcut) {
+        if self.recorder.shortcut() != shortcut.as_ref() {
             self.recorder = ShortcutRecorderState::new(shortcut);
             self.owner = None;
         }
@@ -223,8 +228,6 @@ impl Prefs {
             self.recorder.mark_unregistered();
         }
         self.config = config;
-        self.read_only = read_only;
-        self.config_problem = problem;
     }
 
     fn set_problem(&mut self, problem: Option<String>) {
@@ -244,16 +247,18 @@ impl Prefs {
             _ => None,
         };
         result?;
-        self.config = self.current.borrow().clone();
+        let base = self.current.borrow().clone();
+        self.config = base.clone();
         self.config.hotkey = next.map(ToString::to_string).unwrap_or_default();
-        self.save();
+        self.save(&base);
         Ok(())
     }
 
     fn set(&mut self, change: impl FnOnce(&mut Config)) {
-        self.config = self.current.borrow().clone();
+        let base = self.current.borrow().clone();
+        self.adopt(base.clone());
         change(&mut self.config);
-        self.save();
+        self.save(&base);
     }
 
     /// The backdrop menu: the built-in shader, none, an example (copied beside config.toml to
@@ -394,18 +399,18 @@ impl Prefs {
     }
 
     /// Persist the settings and hand them to the panel.
-    fn save(&mut self) {
+    fn save(&mut self, base: &Config) {
         *self.current.borrow_mut() = self.config.clone();
         // The panel must see this edit before the worker can echo its saved file back.
         self.publish();
-        if let Err(error) = self.settings.save(&self.config) {
+        if let Err(error) = self.settings.save(base, &self.config) {
             self.set_problem(Some(error));
         }
     }
 
     fn publish(&self) {
         let config = self.config.clone();
-        self.panel.update(move |ui, _| ui.apply_config(&config));
+        self.panel.update(move |ui, tx| ui.apply_config(&config, tx));
     }
 }
 
@@ -857,6 +862,7 @@ mod tests {
             dictionary_keywords: vec!["lookup".into()],
             ..Config::default()
         };
+        std::fs::write(&path, toml::to_string(&external).unwrap()).unwrap();
         *current.borrow_mut() = external.clone();
         state.set(|config| config.file_limit = 123);
         let expected = Config {
@@ -864,8 +870,17 @@ mod tests {
             ..external
         };
         assert_eq!(*current.borrow(), expected);
+        assert_eq!(
+            state.recorder.shortcut(),
+            crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
+        );
         let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert_eq!(saved.result.unwrap(), expected);
+        assert_eq!(saved.result.as_ref().unwrap(), &expected);
+        state.reflect_config(saved.revision, expected.clone(), false, None);
+        assert_eq!(
+            state.recorder.shortcut(),
+            crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
+        );
         assert_eq!(saved.revision, settings.revision());
         let persisted = std::fs::read_to_string(&path).unwrap();
         assert_eq!(toml::from_str::<Config>(&persisted).unwrap(), expected);
