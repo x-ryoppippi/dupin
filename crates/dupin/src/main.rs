@@ -71,7 +71,8 @@ fn main() {
     })
     .windowless()
     // Work around Rune's first-open activation issue until its open() lifecycle is fixed.
-    .on_ready(|window| window.focus());
+    .on_ready(|window| window.focus())
+    .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let prefs = prefs.init({
