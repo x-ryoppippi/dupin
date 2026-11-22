@@ -148,7 +148,8 @@ impl Session {
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
-    pub fn with_clock(
+    #[cfg(test)]
+    fn with_clock(
         history: History,
         commands: CommandRegistry,
         clock: fn() -> u64,
@@ -210,26 +211,6 @@ impl Session {
         }
     }
 
-    pub fn run_action(&mut self, generation: u64, item_id: &str, action_id: &str) -> Vec<Effect> {
-        if generation != self.generation {
-            return Vec::new();
-        }
-        let Some(item) = self
-            .actionable_items()
-            .iter()
-            .enumerate()
-            .find(|(i, item)| item.id == item_id && self.origins[*i] == self.command)
-            .map(|(_, item)| item)
-            .cloned()
-        else {
-            return Vec::new();
-        };
-        let Some(action) = item.action(action_id).cloned() else {
-            return Vec::new();
-        };
-        self.activate(&item, action)
-    }
-
     fn activate(&mut self, item: &Item, action: Action) -> Vec<Effect> {
         let mut effects = vec![Effect::Run(action)];
         if item.record_usage {
@@ -243,21 +224,6 @@ impl Session {
 
     pub fn results(&self) -> Results {
         self.results
-    }
-
-    /// Select the result with this id, as a click on its row does. False when it's gone.
-    pub fn select_id(&mut self, id: &str) -> bool {
-        let Some(i) = self
-            .items
-            .iter()
-            .enumerate()
-            .position(|(i, item)| item.id == id && self.origins[i] == self.command)
-        else {
-            return false;
-        };
-        self.selected = i;
-        self.refresh_selection = None;
-        true
     }
 
     /// The text field's contents changed.
@@ -390,7 +356,7 @@ impl Session {
     pub fn provider_spec(&self, id: &CommandId) -> Option<&crate::CommandSpec> {
         self.commands.command(id)
     }
-    pub fn provider_ids(&self) -> Vec<CommandId> {
+    pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
         if self.explicit {
             vec![self.command.clone()]
         } else {
@@ -442,7 +408,8 @@ impl Session {
         };
         self.activate(&item, action)
     }
-    pub fn deliver(&mut self, delivery: Delivery) -> bool {
+    #[cfg(test)]
+    pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.command.clone(), delivery)
     }
     pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {

@@ -18,7 +18,7 @@ pub enum Action {
 pub struct ItemAction {
     pub id: String,
     pub title: String,
-    pub action: Action,
+    pub(crate) action: Action,
 }
 
 impl ItemAction {

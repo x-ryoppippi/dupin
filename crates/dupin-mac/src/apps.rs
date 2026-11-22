@@ -15,17 +15,17 @@ use dupin_core::{Item, Provider, ProviderError, Request, View};
 const MAX_DEPTH: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct App {
+struct App {
     /// The name Finder shows: localized, without `.app`.
-    pub name: String,
+    name: String,
     /// Other names that should find the app: the file name when it differs from `name`, and
     /// Spotlight's alternate names and keywords (ChatGPT.app answers to "Codex", its former
     /// name; System Settings to "System Preferences").
-    pub aliases: Vec<String>,
-    pub path: PathBuf,
+    aliases: Vec<String>,
+    path: PathBuf,
     /// The bundle behind a symlink (Safari lives in a Cryptex and /Applications links to
     /// it): Finder draws an alias badge on the link's icon but not on the bundle's.
-    pub icon: PathBuf,
+    icon: PathBuf,
 }
 
 pub struct AppsProvider {
@@ -54,7 +54,7 @@ impl AppsProvider {
         Self::with_roots(roots)
     }
 
-    pub fn with_roots(roots: Vec<PathBuf>) -> Self {
+    fn with_roots(roots: Vec<PathBuf>) -> Self {
         AppsProvider {
             roots,
             index: Mutex::new(None),
@@ -377,7 +377,7 @@ impl App {
     /// Take the displayed name and the extra names the system reports, keeping the file name
     /// as an alias when it differs. Names lose a trailing `.app`, and duplicates (ignoring
     /// case) and empty names are dropped.
-    pub fn with_names(self, display: &str, extra: Vec<String>) -> App {
+    fn with_names(self, display: &str, extra: Vec<String>) -> App {
         let clean = |n: &str| n.trim().trim_end_matches(".app").trim().to_owned();
         let display = clean(display);
         let name = if display.is_empty() {
@@ -405,7 +405,7 @@ const ALIAS_PENALTY: i32 = 8;
 
 /// Best matches first; equal scores keep the shorter, then alphabetical, name. An app matched
 /// through an alias shows the alias in its subtitle, since its title doesn't contain the query.
-pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
+fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     let mut hits: Vec<(i32, Option<&str>, Vec<usize>, &App)> = apps
         .iter()
         .filter_map(|app| {
@@ -449,7 +449,7 @@ pub fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
 
 /// Every `.app` under `roots`, one entry per name: the first root wins, so an app in
 /// `/Applications` hides a same-named copy further down the list.
-pub fn scan(roots: &[PathBuf]) -> Vec<App> {
+fn scan(roots: &[PathBuf]) -> Vec<App> {
     let mut apps = Vec::new();
     for root in roots {
         walk(root, 0, &mut apps);

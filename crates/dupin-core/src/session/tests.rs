@@ -96,6 +96,7 @@ fn actions_run_the_named_result_even_after_selection_moves() {
         generation,
         items: vec![item("notes.md"), item("other.md")],
     });
+    let key = s.result_key(0);
     assert_eq!(
         s.intent(Intent::Actions).unwrap(),
         vec![Effect::ShowActions {
@@ -104,7 +105,7 @@ fn actions_run_the_named_result_even_after_selection_moves() {
         }]
     );
     s.intent(Intent::Down);
-    let effects = s.run_action(generation, "/x/notes.md", "copy-path");
+    let effects = s.run_key_action(&key, "copy-path");
     assert_eq!(effects[0], Effect::Run(Action::Copy("/x/notes.md".into())));
     assert!(effects.contains(&Effect::Hide));
     assert!(s.items().is_empty());
@@ -119,6 +120,7 @@ fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
             generation,
             items: vec![item("notes.md")],
         });
+        let key = s.result_key(0);
         match boundary {
             0 => {
                 s.set_query("other");
@@ -130,7 +132,7 @@ fn menu_callbacks_cannot_run_after_edit_refresh_or_dismissal() {
                 s.reset();
             }
         }
-        assert!(s.run_action(generation, "/x/notes.md", "open").is_empty());
+        assert!(s.run_key_action(&key, "open").is_empty());
     }
 }
 
@@ -143,8 +145,9 @@ fn unknown_actions_and_missing_results_do_nothing() {
         generation,
         items: vec![item("notes.md")],
     });
-    assert!(s.run_action(generation, "/x/notes.md", "unknown").is_empty());
-    assert!(s.run_action(generation, "/x/missing.md", "open").is_empty());
+    let key = s.result_key(0);
+    assert!(s.run_key_action(&key, "unknown").is_empty());
+    assert!(s.run_key_action("missing-result", "open").is_empty());
     assert_eq!(s.query(), "note");
 }
 
@@ -157,10 +160,13 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
             generation: old_generation,
             items: vec![item("old.md")],
         });
+        let old_key = s.result_key(0);
         let generation = searched(&s.set_query("new")).1;
         assert_eq!(s.items()[0].id, "/x/old.md");
         assert!(s.intent(intent).unwrap().is_empty());
-        assert!(s.run_action(generation, "/x/old.md", "open").is_empty());
+        assert!(s.run_key_action(&old_key, "open").is_empty());
+        let retained_key = s.result_key(0);
+        assert!(s.run_key_action(&retained_key, "open").is_empty());
         assert_eq!(s.history(), &History::default());
         s.deliver(Delivery::Batch {
             generation,
@@ -199,7 +205,8 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
         s.intent(Intent::Open).unwrap().as_slice(),
         [Effect::ShowActions { .. }]
     ));
-    let effects = s.run_action(generation, "/x/serendipity", "dictionary");
+    let key = s.result_key(0);
+    let effects = s.run_key_action(&key, "dictionary");
     assert!(effects.contains(&Effect::Run(action)));
     assert!(!effects.contains(&Effect::SaveHistory));
     assert_eq!(s.history(), &history);
@@ -409,8 +416,9 @@ fn enter_offers_dictionary_actions_before_launching() {
             generation
         }]
     );
+    let key = s.result_key(0);
     assert_eq!(
-        s.run_action(generation, "dictionary:serendipity", "dictionary")[0],
+        s.run_key_action(&key, "dictionary")[0],
         Effect::Run(Action::OpenUrl("dict://serendipity".into()))
     );
 }
@@ -599,9 +607,10 @@ fn a_click_selects_by_id_even_after_rows_move() {
     let g = searched(&s.set_query("a")).1;
     let items = ["A", "B", "C"].map(item).to_vec();
     s.deliver(Delivery::Batch { generation: g, items });
-    assert!(s.select_id("/x/C"));
+    let key = s.result_key(2);
+    assert!(s.select_key(&key));
     assert_eq!(s.selected_item().unwrap().display_title(), "C");
-    assert!(!s.select_id("/x/gone"));
+    assert!(!s.select_key("missing-result"));
     assert_eq!(s.selected(), 2);
 }
 
@@ -1029,7 +1038,8 @@ fn history_policy_is_independent_of_view() {
             generation,
             items: vec![result],
         });
-        let effects = s.run_action(generation, &id, "open");
+        let key = s.result_key(0);
+        let effects = s.run_key_action(&key, "open");
         assert!(effects.iter().any(|effect| matches!(effect, Effect::Run(_))));
         assert_eq!(effects.contains(&Effect::SaveHistory), record_usage);
         assert_eq!(s.history().boost(&id, "query", 1_800_000_000) > 0, record_usage);
@@ -1052,21 +1062,22 @@ fn non_text_actions_obey_generation_and_selection() {
         let generation = searched(&s.set_query("first")).1;
         let mut result = item("result");
         result.view = view;
-        let id = result.id.clone();
         s.deliver(Delivery::Batch {
             generation,
             items: vec![item("text"), result.clone()],
         });
-        assert!(s.select_id(&id));
+        let key = s.result_key(1);
+        assert!(s.select_key(&key));
         assert_eq!(s.selected_item(), Some(&result));
-        assert!(s.run_action(generation.wrapping_sub(1), &id, "open").is_empty());
         let next = searched(&s.set_query("second")).1;
+        assert!(s.run_key_action(&key, "open").is_empty());
         s.deliver(Delivery::Batch {
             generation: next,
             items: vec![result],
         });
-        assert!(s.run_action(generation, &id, "open").is_empty());
-        let effects = s.run_action(next, &id, "open");
+        let next_key = s.result_key(0);
+        assert!(s.run_key_action(&key, "open").is_empty());
+        let effects = s.run_key_action(&next_key, "open");
         assert!(effects.contains(&Effect::Run(Action::Open(PathBuf::from("/x/result")))));
     }
 }
