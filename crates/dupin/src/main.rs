@@ -69,10 +69,6 @@ fn main() {
     let prefs = App::new(AppSpec {
         fonts,
         families: FAMILIES,
-        on_key: Some(|_, event, _| {
-            trace::settings_key(event);
-            false
-        }),
         ..AppSpec::new("Dupin Settings", prefs::SIZE, || unreachable!(), prefs::view)
     })
     .windowless()

@@ -23,12 +23,6 @@ pub fn settings(event: &str) {
     }
 }
 
-pub fn settings_key(event: &rune::KeyEvent) {
-    if on() {
-        eprintln!("dupin-trace: settings key {:?} wall={:.3}", event.key, wall_ms());
-    }
-}
-
 thread_local! {
     static SUMMONED: Cell<Option<Instant>> = const { Cell::new(None) };
 }
