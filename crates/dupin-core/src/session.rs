@@ -286,10 +286,12 @@ impl Session {
 
     /// Search the current query again after a provider's underlying data changes.
     pub fn refresh(&mut self) -> Vec<Effect> {
+        let held = self.selection_held;
         let selected = self
             .selected_item()
             .map(|item| (self.origins[self.selected].clone(), item.id.clone()));
         let effects = self.search();
+        self.selection_held = held;
         self.refresh_selection = selected;
         effects
     }
@@ -480,7 +482,7 @@ impl Session {
         }
         let selection = self.refresh_selection.clone().or(selected);
         // A chosen result must remain actionable when newer candidates fill the visible slots.
-        if (self.selection_held || self.refresh_selection.is_some())
+        if self.selection_held
             && let Some((origin, id)) = &selection
             && !self
                 .items

@@ -525,3 +525,23 @@ fn retaining_a_pinned_selection_never_uses_a_second_slot() {
     session.deliver_from(pin, scored_batch(generation, &[("better-pin", 100)]));
     assert_eq!(visible_ids(&session), ["chosen-pin", "main-row"]);
 }
+
+#[test]
+fn a_refresh_does_not_pin_its_automatic_first_row_below_the_cut() {
+    let mut session = ranked_session(History::default(), 1, 3);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("first", 30)]));
+    let next = session
+        .refresh()
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(*generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(next, &[("first", 30), ("better", 100)]),
+    );
+    assert_eq!(visible_ids(&session), ["better"]);
+}
