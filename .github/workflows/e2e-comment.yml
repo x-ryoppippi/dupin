@@ -1,6 +1,5 @@
 # A separate workflow because CI's token is read-only on pull requests from forks, so CI
-# itself cannot comment. This one runs in the base repository and never checks out the
-# pull request's code.
+# itself cannot comment. This one executes only the base repository's default-branch code.
 name: E2E comment
 
 on:
@@ -13,16 +12,43 @@ permissions: {}
 jobs:
   comment:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       actions: read
       # Commit comments.
       contents: write
       pull-requests: write
+    env:
+      ATTACHMENTS_ENABLED: ${{ secrets.E2E_ASSET_TOKEN != '' && github.event.workflow_run.head_repository.full_name == github.repository }}
     steps:
-      - shell: bash
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        if: env.ATTACHMENTS_ENABLED == 'true'
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          save: 'false'
+
+      - name: Install the optional media uploader runtime
+        if: env.ATTACHMENTS_ENABLED == 'true'
+        timeout-minutes: 3
+        continue-on-error: true
+        run: |
+          profile=$RUNNER_TEMP/e2e-nu-profile
+          nix profile install --profile "$profile" --inputs-from . nixpkgs#nushell
+          printf '%s/bin\n' "$profile" >>"$GITHUB_PATH"
+
+      - name: Report E2E evidence
+        if: always()
+        timeout-minutes: 8
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          ASSET_TOKEN: ${{ github.event.workflow_run.head_repository.full_name == github.repository && secrets.E2E_ASSET_TOKEN || '' }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -30,6 +56,7 @@ jobs:
           SHA: ${{ github.event.workflow_run.head_sha }}
           HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          SOURCE_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           set -euo pipefail
           marker='<!-- dupin-e2e -->'
@@ -38,9 +65,18 @@ jobs:
             gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
               --jq ".artifacts[] | select(.name == \"$1\") | \"https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/\(.id)\""
           }
-          screenshots=$(artifact_url e2e-screenshots)
+          current_pr() {
+            gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
+              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1
+          }
+          media_name=e2e-media
+          media=$(artifact_url "$media_name")
+          if [[ -z $media ]]; then
+            media_name=e2e-screenshots
+            media=$(artifact_url "$media_name")
+          fi
           everything=$(artifact_url e2e)
-          if [[ -z $screenshots && -z $everything ]]; then
+          if [[ -z $media && -z $everything ]]; then
             echo 'E2E uploaded nothing; not commenting.'
             exit 0
           fi
@@ -52,17 +88,8 @@ jobs:
             *) heading="E2E ${conclusion:-did not finish}" ;;
           esac
 
-          body=$RUNNER_TEMP/body.md
-          {
-            printf '%s\n### %s on %s\n\n' "$marker" "$heading" "${SHA:0:7}"
-            [[ -n $screenshots ]] && printf -- '- [Screenshots](%s)\n' "$screenshots"
-            [[ -n $everything ]] && printf -- '- [Everything agent-desktop saw, with Dupin'"'"'s log](%s)\n' "$everything"
-            printf -- '- [Run](%s)\n' "$RUN_URL"
-          } >"$body"
-
           if [[ $EVENT == pull_request ]]; then
-            number=$(gh api "repos/$REPO/pulls?state=open&head=$HEAD_OWNER:$HEAD_BRANCH" \
-              --jq ".[] | select(.head.sha == \"$SHA\") | .number" | head -n1)
+            number=$(current_pr)
             if [[ -z $number ]]; then
               echo 'The pull request has moved past this commit; not commenting.'
               exit 0
@@ -72,6 +99,36 @@ jobs:
           else
             list=repos/$REPO/commits/$SHA/comments
             edit=repos/$REPO/comments
+          fi
+
+          manifest=$RUNNER_TEMP/e2e-assets.json
+          inline=false
+          if [[ $SOURCE_REPO == "$REPO" && -n $media && -n $ASSET_TOKEN ]] && command -v nu >/dev/null && [[ -f scripts/e2e-assets.nu ]]; then
+            directory=$RUNNER_TEMP/e2e-media
+            mkdir -p "$directory"
+            if timeout --kill-after=5s 60s gh run download "$RUN_ID" --repo "$REPO" --name "$media_name" --dir "$directory" &&
+              GH_TOKEN="$ASSET_TOKEN" timeout --kill-after=5s 180s nu --no-config-file scripts/e2e-assets.nu "$REPO" "$directory" --upload >"$manifest"; then
+              if jq -e '.uploaded and (.assets | length > 0)' "$manifest" >/dev/null; then
+                inline=true
+              fi
+            fi
+          fi
+
+          body=$RUNNER_TEMP/body.md
+          {
+            printf '%s\n### %s on %s\n\n' "$marker" "$heading" "${SHA:0:7}"
+            if [[ $inline == true ]]; then
+              jq -r '.assets[] | if .kind == "image" then "\n![E2E \(.name)](\(.url))\n" else "\n\(.url)\n" end' "$manifest"
+            elif [[ -n $media ]]; then
+              printf 'Inline media is unavailable for this run.\n\n[Download media](%s)\n\n' "$media"
+            fi
+            [[ -n $everything ]] && printf -- '- [Log and detailed evidence](%s)\n' "$everything"
+            printf -- '- [Run](%s)\n' "$RUN_URL"
+          } >"$body"
+
+          if [[ $EVENT == pull_request && $(current_pr) != "$number" ]]; then
+            echo 'The pull request changed during media processing; not commenting.'
+            exit 0
           fi
 
           existing=$(gh api --paginate "$list" \

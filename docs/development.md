@@ -91,6 +91,52 @@ nu scripts/snap.nu
 
 The renders show real results from the machine, file paths included, so they stay out of the repository. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
+## Native E2E evidence
+
+CI collects screenshots and any MP4, MOV or WebM recordings in `e2e-media`, with
+logs and detailed replies in `e2e`. The reporting workflow uses the same body
+for PR comments and commit comments: images render inline and recordings use
+GitHub's video player. Existing `e2e-screenshots` runs remain readable.
+
+Automatic attachment uploads need the optional repository secret
+`E2E_ASSET_TOKEN`, containing an accepted GitHub OAuth or personal access token
+with write access to the repository. The ordinary `GITHUB_TOKEN` can post the
+comment but currently cannot upload user attachments. No upload credential is
+created automatically. Without it, or if the upload fails, the comment retains
+the media download and logs. Inline uploads are limited to runs whose source
+repository is this repository; fork PRs keep the download link rather than
+publishing contributor-controlled files under the upload account.
+
+The privileged reporting job checks out only the default branch and never runs
+PR code. Its uploader accepts top-level regular media files with safe names and
+matching signatures, up to 50 files, 10 MB per image or 100 MB per video; GitHub
+may impose a lower account limit. Uploaded URLs must belong to GitHub's
+attachment service. Optional setup, download and upload operations have bounded
+timeouts so they leave time to post the result and fallback links. The raw
+upload protocol follows GitHub CLI 2.104.0 and is
+not a documented REST contract, so compatibility failures use the same fallback.
+
+For local inspection, the uploader defaults to a JSON manifest without network
+access. Explicit upload reads `GH_TOKEN` from the caller's environment:
+
+```sh
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e
+nu scripts/e2e-assets.nu x-ryoppippi/dupin target/e2e --upload
+nu scripts/tests/e2e-assets.nu
+```
+
+The native CI suite also records the first 45 seconds of its real interaction:
+summoning the panel, typing the search term character by character, showing the
+results and opening Calculator. `--record` uses the runner's existing Screen
+Recording grant; it does not request or change permissions. It waits for the
+FFmpeg AVFoundation capture to encode its first frame before sending keys. It
+captures the screen without audio, writes a bounded 45-second H.264 MP4, and
+checks its duration and frame count before attaching it. A process deadline
+bounds capture failures; logs and rejected footage remain in the full artifact,
+including after a scenario failure. Local runs record only when explicitly
+given `--record`; use a disposable machine. Native capture and encoding must be
+verified by CI.
+
 ## Peak memory
 
 Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
