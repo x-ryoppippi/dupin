@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use dupin_core::{
     Backdrop, Config, Delivery, Effect, History, InputSource, Intent, Mode, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
+use dupin_mac::{AppsProvider, AppsWatcher, DictionaryProvider, SpotlightProvider, Target};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -40,6 +40,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     apps: Searcher,
+    _apps_watcher: Option<AppsWatcher>,
     files: Searcher,
     contents: Searcher,
     dictionary: Searcher,
@@ -68,7 +69,18 @@ impl Ui {
         notice: Option<String>,
     ) -> Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
-        // Scan before the first keystroke so it doesn't wait for the disk.
+        let apps_watcher = apps_provider.watch({
+            let me = me.clone();
+            move || me.update(|s, tx| s.refresh_apps(tx))
+        });
+        let apps_watcher = match apps_watcher {
+            Ok(watcher) => Some(watcher),
+            Err(error) => {
+                crate::log::warn(&format!("couldn't watch installed apps: {error}"));
+                None
+            }
+        };
+        // Start watching before the initial scan, so an install during startup can't be missed.
         let warm = apps_provider.clone();
         std::thread::spawn(move || warm.warm());
         let deliver = |me: AppHandle<Ui>| move |d: Delivery| me.update(move |s, _| s.deliver(d));
@@ -89,6 +101,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             apps: Searcher::spawn("apps", apps_provider, deliver(me.clone())),
+            _apps_watcher: apps_watcher,
             files: Searcher::spawn(
                 "files",
                 Arc::new(SpotlightProvider::new(Target::Names)),
@@ -312,6 +325,13 @@ impl Ui {
     fn deliver(&mut self, delivery: Delivery) {
         if self.session.deliver(delivery) {
             self.fetch_icons();
+        }
+    }
+
+    fn refresh_apps(&mut self, tx: &mut Tx) {
+        if self.session.mode() == Mode::Apps {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
         }
     }
 
