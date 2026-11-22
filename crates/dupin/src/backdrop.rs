@@ -100,9 +100,13 @@ impl Gpu {
         {
             return;
         }
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("backdrop"),
-            source: wgpu::ShaderSource::Wgsl(source.as_ref().into()),
+        // Rune parses the module here and translates it when the pipeline is made: on the main
+        // thread, naga's recursion overflows on deep expressions `shader::compile` passes.
+        let module = crate::shader::deep(|| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("backdrop"),
+                source: wgpu::ShaderSource::Wgsl(source.as_ref().into()),
+            })
         });
         self.program = Some(Program {
             source: source.clone(),
@@ -117,33 +121,36 @@ impl Gpu {
             Some(at) => at,
             None => {
                 let module = &program.module;
-                let pipe = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("backdrop"),
-                    layout: Some(&self.layout),
-                    vertex: wgpu::VertexState {
-                        module,
-                        entry_point: Some("dupin_vs"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleStrip,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: Default::default(),
-                    fragment: Some(wgpu::FragmentState {
-                        module,
-                        entry_point: Some("dupin_fs"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    multiview_mask: None,
-                    cache: None,
+                let layout = &self.layout;
+                let pipe = crate::shader::deep(|| {
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("backdrop"),
+                        layout: Some(layout),
+                        vertex: wgpu::VertexState {
+                            module,
+                            entry_point: Some("dupin_vs"),
+                            compilation_options: Default::default(),
+                            buffers: &[],
+                        },
+                        primitive: wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleStrip,
+                            ..Default::default()
+                        },
+                        depth_stencil: None,
+                        multisample: Default::default(),
+                        fragment: Some(wgpu::FragmentState {
+                            module,
+                            entry_point: Some("dupin_fs"),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format,
+                                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        multiview_mask: None,
+                        cache: None,
+                    })
                 });
                 program.pipes.push((format, pipe));
                 program.pipes.len() - 1

@@ -4,7 +4,7 @@
 //! headers reserve, nesting past its compiler's limits, a fragment function whose locals pass the
 //! GPU's stack. Running them here turns each into a message.
 
-use std::cell::OnceCell;
+use std::sync::OnceLock;
 
 use naga::back::msl;
 use naga::proc::{BoundsCheckPolicies, BoundsCheckPolicy};
@@ -18,14 +18,25 @@ use objc2_metal::{
 
 type Device = Retained<ProtocolObject<dyn MTLDevice>>;
 
-thread_local! {
-    static DEVICE: OnceCell<Option<Device>> = const { OnceCell::new() };
+/// The Mac's Metal device, made once: each check runs on a thread of its own.
+struct Shared(Device);
+// SAFETY: Metal devices are thread-safe; Apple documents creating resources from any thread.
+unsafe impl Send for Shared {}
+unsafe impl Sync for Shared {}
+
+static DEVICE: OnceLock<Option<Shared>> = OnceLock::new();
+
+fn device() -> Option<&'static Device> {
+    DEVICE
+        .get_or_init(|| MTLCreateSystemDefaultDevice().map(Shared))
+        .as_ref()
+        .map(|d| &d.0)
 }
 
 /// Whether this Mac has a Metal device to check with.
 #[cfg(test)]
 pub fn available() -> bool {
-    DEVICE.with(|device| device.get_or_init(|| MTLCreateSystemDefaultDevice()).is_some())
+    device().is_some()
 }
 
 /// Check that Rune's Metal backend can draw `module`, with `dupin_u` in buffer 0. A Mac without a
@@ -34,12 +45,10 @@ pub fn check(module: &naga::Module, info: &naga::valid::ModuleInfo) -> Result<()
     let (lang, version) = msl_version();
     let vertex = translate(module, info, naga::ShaderStage::Vertex, "dupin_vs", lang)?;
     let fragment = translate(module, info, naga::ShaderStage::Fragment, "dupin_fs", lang)?;
-    DEVICE.with(
-        |device| match device.get_or_init(|| MTLCreateSystemDefaultDevice()) {
-            Some(device) => pipeline(device, version, &vertex, &fragment),
-            None => Ok(()),
-        },
-    )
+    match device() {
+        Some(device) => pipeline(device, version, &vertex, &fragment),
+        None => Ok(()),
+    }
 }
 
 /// MSL for one entry point, written as Rune's `translate` writes it, and the function's name.

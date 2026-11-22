@@ -128,7 +128,7 @@ impl Source {
     /// text changed. Returns the problem when it is new or different, for the caller to log.
     pub fn refresh(&mut self) -> Option<&str> {
         let path = self.file.as_ref()?;
-        let result = match std::fs::read_to_string(path) {
+        let result = match read_at_most(path) {
             Ok(user) if self.read.as_ref() == Some(&user) => return None,
             Ok(user) => {
                 let compiled = compile(&user).map_err(|e| format!("{}:{e}", path.display()));
@@ -161,6 +161,17 @@ impl Source {
 
 /// Flow, wrapped but not run through Metal: the tests check it compiles, and Dupin draws it from
 /// launch, where a Metal compile would add to the time before the panel can show.
+/// The file's text, read only as far as one byte past `MAX_LEN`: `compile` refuses anything longer,
+/// and a backdrop pointed at a huge file shouldn't load it all first.
+fn read_at_most(path: &Path) -> std::io::Result<String> {
+    let mut text = String::new();
+    std::io::Read::read_to_string(
+        &mut std::io::Read::take(std::fs::File::open(path)?, MAX_LEN as u64 + 1),
+        &mut text,
+    )?;
+    Ok(text)
+}
+
 fn builtin() -> Arc<str> {
     wrap(FLOW).0.into()
 }
@@ -189,9 +200,24 @@ pub fn resolve(path: &str) -> PathBuf {
 /// The longest backdrop shader Dupin checks. Real ones are a few KB; the limit bounds how deeply
 /// a file can nest, which naga's parser and writer recurse on.
 const MAX_LEN: usize = 32 * 1024;
-/// The checking thread's stack: deep enough for anything within `MAX_LEN`, which on the main
-/// thread overflows naga's recursion and aborts. Only touched pages are committed.
-const CHECK_STACK: usize = 1 << 30;
+/// The stack for naga's work on a backdrop: deep enough for anything within `MAX_LEN`, which on
+/// the main thread overflows naga's recursion and aborts. Only touched pages are committed.
+const DEEP_STACK: usize = 1 << 30;
+
+/// Run `f` on a thread with `DEEP_STACK`: anything that has naga parse, validate or translate a
+/// user's shader, whether Dupin's check or Rune making the module and pipeline from it.
+pub fn deep<T: Send>(f: impl FnOnce() -> T + Send) -> T {
+    std::thread::scope(|scope| {
+        let worker = std::thread::Builder::new()
+            .name("backdrop shader".into())
+            .stack_size(DEEP_STACK)
+            .spawn_scoped(scope, f)
+            .expect("a thread for the backdrop shader");
+        worker
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
+}
 
 /// `user` (which defines `fn backdrop(p: vec2f, b: Backdrop) -> vec4f`) wrapped into a module
 /// with Dupin's uniforms and entry points, validated. An error reads `line:column: message`,
@@ -200,18 +226,11 @@ pub fn compile(user: &str) -> Result<Arc<str>, String> {
     if user.len() > MAX_LEN {
         return Err(format!(
             " is {} KB; a backdrop shader can be at most {} KB",
-            user.len() / 1024,
+            user.len().div_ceil(1024),
             MAX_LEN / 1024
         ));
     }
-    let user = user.to_owned();
-    std::thread::Builder::new()
-        .name("backdrop check".into())
-        .stack_size(CHECK_STACK)
-        .spawn(move || check(&user))
-        .map_err(|e| format!(" couldn't be checked: {e}"))?
-        .join()
-        .map_err(|_| " couldn't be checked".to_owned())?
+    deep(|| check(user))
 }
 
 fn check(user: &str) -> Result<Arc<str>, String> {
