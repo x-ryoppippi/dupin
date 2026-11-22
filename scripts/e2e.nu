@@ -70,8 +70,8 @@ def scenario [out: path] {
     # panel never activates, so it is key but not main. Press keys as a person would, from one
     # process: one `agent-desktop press` per key lost keys before they reached Dupin.
     ^osascript -e 'tell application "System Events"
-        repeat with character in characters of "calculator"
-            keystroke (character as text)
+        repeat with typedKey in characters of "calculator"
+            keystroke (typedKey as text)
             delay 0.12
         end repeat
     end tell'

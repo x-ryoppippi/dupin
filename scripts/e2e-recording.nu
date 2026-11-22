@@ -5,7 +5,11 @@ export def record [out: path, scenario: closure] {
     let movie = $out | path join launcher-flow.mp4
     # Let macOS finish the movie; killing capture can leave it unreadable.
     job spawn {
-        let result = ^screencapture -x -v -V 45 -T 0 -D 1 -k $source | complete
+        let result = try {
+            ^screencapture -x -v -V 45 -T 0 -D 1 -k $source | complete
+        } catch {|error|
+            {exit_code: 1, stdout: '', stderr: $error.msg}
+        }
         $result.stdout | save --force ($raw | path join capture.stdout)
         $result.stderr | save --force ($raw | path join capture.stderr)
         $result.exit_code | job send 0 --tag 45
@@ -31,6 +35,9 @@ export def record [out: path, scenario: closure] {
         }
         null
     } catch {|error| $error }
-    if $scenario_error != null { error make $scenario_error }
+    if $scenario_error != null {
+        if $recording_error != null { print --stderr $recording_error.msg }
+        error make $scenario_error
+    }
     if $recording_error != null { error make $recording_error }
 }
