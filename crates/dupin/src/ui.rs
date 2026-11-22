@@ -371,6 +371,7 @@ impl Ui {
                 }
                 Effect::CancelSearch => self.searchers().iter().for_each(|(_, s)| s.cancel()),
                 Effect::ClearQuery => self.query.clear(),
+                Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => {
                     // Launch Services can take a moment to answer; don't hold the frame for it.

@@ -55,6 +55,8 @@ pub enum Effect {
     RevealSelection,
     /// Empty the text field: a mode keyword was consumed. The session's query is already empty.
     ClearQuery,
+    /// Replace the input after consuming a keyword or recalling a query.
+    ReplaceQuery(String),
     /// The history learned a pick; persist `Session::history`.
     SaveHistory,
 }
@@ -174,8 +176,29 @@ impl Session {
         if text == self.query {
             return Vec::new();
         }
+        if self.mode == Mode::Apps
+            && let Some((keyword, term)) = text.split_once(char::is_whitespace)
+            && let Some(mode) = self.keyword_mode(keyword)
+        {
+            self.clear_results();
+            self.mode = mode;
+            self.query = term.trim_start().to_owned();
+            let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+            effects.extend(self.search());
+            return effects;
+        }
         self.query = text.to_owned();
         self.search()
+    }
+
+    fn keyword_mode(&self, keyword: &str) -> Option<Mode> {
+        if keyword == CONTENTS_KEYWORD {
+            Some(Mode::Contents)
+        } else if self.dictionary_keywords.iter().any(|alias| alias == keyword) {
+            Some(Mode::Dictionary)
+        } else {
+            None
+        }
     }
 
     /// Search the current query again after a provider's underlying data changes.
@@ -196,22 +219,11 @@ impl Session {
                 // A leading space finds nothing in a file search; swallow it.
                 Mode::Files | Mode::Contents | Mode::Dictionary => Vec::new(),
             },
-            Intent::Space if self.mode == Mode::Apps && self.query == CONTENTS_KEYWORD => {
+            Intent::Space if self.mode == Mode::Apps => {
+                let mode = self.keyword_mode(&self.query)?;
                 self.query.clear();
                 let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(Mode::Contents));
-                effects
-            }
-            Intent::Space
-                if self.mode == Mode::Apps
-                    && self
-                        .dictionary_keywords
-                        .iter()
-                        .any(|keyword| keyword == &self.query) =>
-            {
-                self.query.clear();
-                let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(Mode::Dictionary));
+                effects.extend(self.switch(mode));
                 effects
             }
             Intent::Backspace if empty => match self.mode {
