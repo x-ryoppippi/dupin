@@ -213,20 +213,6 @@ code {
 	white-space: nowrap;
 }
 
-.field:not(:last-child) {
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.field:last-child {
-	padding-bottom: 10px;
-}
-
-.rows {
-	list-style: none;
-	margin: 8px 0 0;
-	padding: 0;
-}
-
 .copy-button {
 	display: inline-flex;
 	align-items: center;
@@ -279,116 +265,6 @@ code {
 			transparent 70%
 		),
 		radial-gradient(ellipse 50% 60% at 80% 90%, oklch(0.32 0.1 200 / 0.8), transparent 70%), #07070a;
-}
-
-.panel {
-	max-width: 640px;
-	margin: 0 auto;
-	text-align: left;
-	border-radius: 22px;
-	background: rgba(30, 30, 34, 0.42);
-	backdrop-filter: blur(30px) saturate(1.6);
-	-webkit-backdrop-filter: blur(30px) saturate(1.6);
-	box-shadow:
-		inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-		inset 0 1px 0 rgba(255, 255, 255, 0.18),
-		0 30px 80px -20px rgba(0, 0, 0, 0.7);
-	padding: 10px;
-}
-
-.panel.is-closed {
-	visibility: hidden;
-}
-
-.field {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	padding: 10px 12px 14px;
-	font-size: 24px;
-	letter-spacing: -0.01em;
-}
-
-.field-icon {
-	flex: none;
-	width: 20px;
-	height: 20px;
-	color: var(--fg-dim);
-}
-
-.chip {
-	flex: none;
-	padding: 3px 9px;
-	border-radius: 999px;
-	font-size: 12px;
-	font-weight: 500;
-	letter-spacing: 0;
-	color: var(--fg);
-	background: rgba(255, 255, 255, 0.12);
-}
-
-.query {
-	display: inline-block;
-	height: 1.25em;
-	line-height: 1.25;
-}
-
-.caret {
-	width: 2px;
-	height: 26px;
-	margin-left: -10px;
-	background: var(--accent);
-	animation: blink 1s steps(2) infinite;
-}
-
-.row {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	padding: 8px 10px;
-	border-radius: 12px;
-}
-
-.row.is-selected {
-	background: rgba(255, 255, 255, 0.1);
-}
-
-.row .kbd {
-	margin-left: auto;
-}
-
-.row-text {
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-}
-
-.row-title {
-	font-size: 15px;
-	font-weight: 500;
-}
-
-.row-title mark {
-	background: none;
-	color: var(--accent);
-}
-
-.row-sub {
-	font-size: 12px;
-	color: var(--fg-dim);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.alias {
-	color: var(--fg-muted);
-	margin-right: 6px;
-}
-
-.alias::after {
-	content: ' ·';
-	color: var(--fg-faint);
 }
 
 .app-icon {
@@ -536,12 +412,6 @@ code {
 	.footer-inner {
 		flex-direction: column;
 		align-items: flex-start;
-	}
-}
-
-@media (max-width: 560px) {
-	.field {
-		font-size: 20px;
 	}
 }
 

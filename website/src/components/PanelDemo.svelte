@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { backdrops, createRenderer, srgb, type Renderer } from './backdrop.ts';
+	import { repo } from '../site.ts';
 	import { scenarios, type Row, type Scenario } from './scenarios.ts';
 
 	const [first] = scenarios;
@@ -27,6 +28,11 @@
 	let shownAt = 0;
 	let typedAt = -Infinity;
 	const modes: Record<string, number> = { Files: 1, 'In files': 2 };
+	const placeholders: Record<string, string> = { '': 'Search apps', Files: 'Search files', 'In files': 'Search inside files' };
+	const hints: Record<string, string> = {
+		Files: 'Type to search files with Spotlight  ·  ⌫ back to apps',
+		'In files': 'Type to search inside files with Spotlight  ·  ⌫ back to apps',
+	};
 
 	const setQuery = (next: string) => {
 		query = next;
@@ -75,7 +81,7 @@
 		observer.observe(desk);
 		const resized = new ResizeObserver(() => still && draw());
 		resized.observe(panel);
-		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--accent'))).then((r) => {
+		void createRenderer(canvas, srgb(getComputedStyle(desk).getPropertyValue('--dupin-accent'))).then((r) => {
 			if (!alive) return r?.destroy();
 			webgpu = r !== undefined;
 			renderer = r;
@@ -187,12 +193,16 @@
 	<div class={['panel', !open && 'is-closed']} bind:this={panel}>
 		<canvas class={['backdrop', drawing && 'is-drawing']} bind:this={canvas}></canvas>
 		<div class="field" bind:this={field}>
-			<span class="field-icon icon-[ph--magnifying-glass]"></span>
-			{#if mode}<span class="chip">{mode}</span>{/if}
-			<span class="query">{query}</span>
-			<span class="caret"></span>
+			{#if mode}<span class="chip">{mode}</span>{:else}<span class="glyph">⌕</span>{/if}
+			<span class="text">
+				{#if query}{query}<span class="caret"></span>{:else}<span class="caret"></span><span class="placeholder"
+						>{placeholders[mode ?? ''] ?? placeholders['']}</span
+					>{/if}
+			</span>
 		</div>
-		{#if rows.length > 0}
+		{#if rows.length === 0 && mode && !query}
+			<div class="hint">{hints[mode]}</div>
+		{:else if rows.length > 0}
 			<ul class="rows">
 				{#each rows as row, i (row.title)}
 					<li class={['row', i === 0 && 'is-selected']}>
@@ -205,7 +215,6 @@
 								{#if row.alias}<span class="alias">{row.alias}</span>{/if}{row.sub}
 							</span>
 						</span>
-						{#if i === 0}<kbd class="kbd">↩</kbd>{/if}
 					</li>
 				{/each}
 			</ul>
@@ -226,9 +235,162 @@
 			onclick={() => pick(b.id)}>{b.title}</button
 		>
 	{/each}
+	<a class="more" href={`${repo}/tree/main/examples/shaders`}>More shaders ↗</a>
 </div>
 
 <style>
+	/* The panel in Dupin's own measures and colors (crates/dupin/src/view.rs and Rune's dark
+	   theme), so the demo looks like the app: Rune's blue accent, which the shaders get too. */
+	.desk {
+		--dupin-accent: oklch(0.66 0.17 256);
+		--dupin-text: oklch(0.955 0.003 265);
+		--dupin-text-secondary: oklch(0.72 0.008 265);
+		--dupin-separator: oklch(1 0 0 / 0.055);
+	}
+
+	.panel {
+		max-width: 680px;
+		margin: 0 auto;
+		overflow: hidden;
+		text-align: left;
+		border-radius: 14px;
+		color: var(--dupin-text);
+		background: oklch(0.232 0.005 265 / 0.45);
+		backdrop-filter: blur(30px) saturate(1.6);
+		-webkit-backdrop-filter: blur(30px) saturate(1.6);
+		box-shadow:
+			inset 0 0 0 1px rgb(255 255 255 / 0.08),
+			0 30px 80px -20px rgb(0 0 0 / 0.7);
+	}
+
+	.panel.is-closed {
+		visibility: hidden;
+	}
+
+	.field {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		height: 64px;
+		padding: 0 18px;
+		font-size: 22px;
+		line-height: 30px;
+	}
+
+	.field:not(:last-child) {
+		border-bottom: 1px solid var(--dupin-separator);
+	}
+
+	.glyph {
+		flex: none;
+		font-size: 24px;
+		line-height: 30px;
+		color: var(--dupin-text-secondary);
+	}
+
+	.placeholder {
+		color: var(--dupin-text-secondary);
+	}
+
+	.text {
+		white-space: pre;
+	}
+
+	.caret {
+		display: inline-block;
+		width: 2px;
+		height: 26px;
+		margin: 0 -1px;
+		vertical-align: -6px;
+		background: var(--dupin-accent);
+		animation: blink 1s steps(2) infinite;
+	}
+
+	.chip {
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		height: 28px;
+		padding: 0 10px;
+		border-radius: 7px;
+		font-size: 13px;
+		font-weight: 600;
+		line-height: 1;
+		color: var(--dupin-accent);
+		background: oklch(from var(--dupin-accent) l c h / 0.16);
+	}
+
+	.hint {
+		white-space: pre;
+		display: flex;
+		align-items: center;
+		height: 44px;
+		padding: 0 20px;
+		font-size: 13px;
+		color: var(--dupin-text-secondary);
+	}
+
+	.rows {
+		list-style: none;
+		margin: 0;
+		padding: 6px 0;
+	}
+
+	.row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		height: 52px;
+		margin: 0 6px;
+		padding: 0 10px;
+		border-radius: 8px;
+	}
+
+	.row-text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		min-width: 0;
+	}
+
+	.row-title {
+		font-size: 15px;
+		font-weight: 500;
+		line-height: 20px;
+	}
+
+	.row-title mark {
+		background: none;
+		font-weight: 700;
+		color: var(--dupin-accent);
+	}
+
+	.row-sub {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--dupin-text-secondary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.alias::after {
+		content: ' · ';
+	}
+
+	.row.is-selected {
+		color: #fff;
+		background: var(--dupin-accent);
+	}
+
+	.row.is-selected .row-sub {
+		color: rgb(255 255 255 / 0.78);
+	}
+
+	.row.is-selected .row-title mark {
+		color: #fff;
+	}
+
 	/* The backdrop draws under the panel's content and inside its glass. */
 	.panel {
 		position: relative;
@@ -282,6 +444,17 @@
 		color: var(--fg);
 		background: var(--bg-card);
 		border-color: var(--accent);
+	}
+
+	.backdrop-picker .more {
+		align-self: center;
+		margin-left: 6px;
+		font-size: 13px;
+		color: var(--fg-muted);
+	}
+
+	.backdrop-picker .more:hover {
+		color: var(--fg);
 	}
 
 	.backdrop-picker button:disabled {
