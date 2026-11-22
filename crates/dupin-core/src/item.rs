@@ -12,6 +12,8 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    /// Open the host application's preferences.
+    OpenPreferences,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

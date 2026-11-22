@@ -8,6 +8,7 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
@@ -127,6 +128,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     }
 
     registry.register(CommandSpec::new(
+        id(SETTINGS),
+        10,
+        presentation("Search settings", None, None, None, false, 0.0),
+    ))?;
+    registry.register(CommandSpec::new(
         id(WEB_KEYWORDS),
         1,
         presentation("Web search", None, None, None, false, 0.0),
@@ -140,7 +146,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         .with_fallback(),
     )?;
     registry.set_default_providers(
-        vec![apps_id, id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
+        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
         Some(id(WEB_KEYWORDS)),
     )?;
 
@@ -183,6 +189,10 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
+        (
+            id(SETTINGS),
+            Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
+        ),
         (
             files_id,
             Arc::new(SpotlightProvider::with_demotions(

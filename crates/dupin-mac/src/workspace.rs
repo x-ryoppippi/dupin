@@ -1,8 +1,13 @@
 //! Running actions through NSWorkspace.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use dupin_core::Action;
+#[derive(Debug)]
+pub enum Action {
+    Open(PathBuf),
+    Reveal(PathBuf),
+    OpenUrl(String),
+}
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{NSArray, NSString, NSURL};
 
@@ -11,7 +16,6 @@ pub fn run(action: &Action) -> bool {
     match action {
         Action::Open(path) => open(path),
         Action::OpenUrl(url) => open_url(url),
-        Action::Copy(_) => false,
         Action::Reveal(path) => {
             reveal(path);
             true
