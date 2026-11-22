@@ -333,7 +333,7 @@
 
 	.action-menu {
 		position: absolute;
-		top: 64px;
+		top: calc(var(--desk-pad) + 64px);
 		left: max(20px, calc((100% - 680px) / 2 + 20px));
 		z-index: 2;
 		min-width: 200px;
