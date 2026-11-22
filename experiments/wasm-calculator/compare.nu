@@ -34,7 +34,18 @@ def main [guest: path, --prepare-only]: nothing -> record {
     cp ($guest | path expand) $module
     let script = $work | path join compare.nu
     cp ($env.FILE_PWD | path join compare.nu) $script
+    let root = $env.FILE_PWD | path dirname | path dirname
+    let lock = open --raw ($root | path join flake.lock) | from json
+    let root_node = $lock.nodes | get $lock.root
     let metadata = {
+        git_commit: (checked git -C $root rev-parse HEAD | get stdout | str trim)
+        clean_tree: (
+            checked git -C $root status --porcelain --untracked-files=normal
+            | get stdout
+            | str trim
+            | is-empty
+        )
+        nixpkgs: ($lock.nodes | get $root_node.inputs.nixpkgs | get locked)
         system: $nu.os-info
         toolchain: (checked rustc --version --verbose | get stdout | str trim)
         macos: (checked /usr/bin/sw_vers | get stdout | str trim)
@@ -53,6 +64,7 @@ def main [guest: path, --prepare-only]: nothing -> record {
         script_sha256: (open --raw $script | hash sha256)
         sources: $sources
         release_profile: 'fat LTO; one codegen unit; stripped; separate experimental workspace'
+        compiled_module: 'single-threaded Cranelift compilation; no precompiled module'
         fuel: '20M per query in each runtime; fuel units are runtime-specific'
         memory: '16 MiB guest linear memory; host/runtime memory is not capped'
         signing: 'unsigned benchmark executables; no app signing or entitlement changes'
@@ -61,15 +73,15 @@ def main [guest: path, --prepare-only]: nothing -> record {
         return {work: $work, metadata: $metadata, prepared: true}
     }
     let target = $env.FILE_PWD | path join target
-    let build = checked cargo build --locked --release --manifest-path (
-        $source | path join Cargo.toml
-    ) --target-dir $target -p dupin-wasm-calculator-bench -p dupin-compiled-calculator-bench
-    $build.stderr | save ($work | path join build.log)
     let runtimes = [
         {label: wasmi, binary: dupin-wasm-calculator-bench}
         {label: wasmtime, binary: dupin-compiled-calculator-bench}
     ]
     $runtimes | each {|runtime|
+        let build = checked cargo build --locked --release --manifest-path (
+            $source | path join Cargo.toml
+        ) --target-dir $target -p $runtime.binary
+        $build.stderr | save ($work | path join $"($runtime.label)-build.log")
         cp ($target | path join release $runtime.binary) ($work | path join $runtime.binary)
     } | ignore
     let runs = $runtimes | each {|runtime|

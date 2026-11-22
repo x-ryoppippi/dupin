@@ -57,13 +57,17 @@ nu experiments/wasm-calculator/compare.nu \
 The script copies the manifests, lockfile, Rust sources and guest into a temporary
 snapshot before building either host. It records their hashes, compiler and OS,
 executable bytes, each runner's JSON, and macOS `time -l` process statistics.
+Each host is built separately to avoid merging dependency features across the
+two runners. Git state and the root nixpkgs pin are recorded with the toolchain.
 `--prepare-only` checks snapshot preparation without building or executing.
 The final `results.json` stays in the reported run directory. Both runners must
 produce the same query/result pairs and pass fuel and memory-limit assertions.
 
 Module loading includes native compilation in Wasmtime; Wasmi's lazy translation
 instead contributes to first-use latency. Fuel counts have different meanings in
-the two runtimes and must not be compared as equivalent work units. Process peak
+the two runtimes and must not be compared as equivalent work units. Cranelift
+compilation is single-threaded here; parallel compilation and precompiled module
+loading are not enabled or measured. Process peak
 memory covers compilation, queries and the limit checks; it is not idle memory
 or a bound on host allocations. Standalone executable sizes include the native
 evaluator and are not application bundle deltas.
