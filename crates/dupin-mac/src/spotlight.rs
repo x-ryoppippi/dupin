@@ -67,6 +67,10 @@ impl Provider for SpotlightProvider {
             Ok(folder) => folder,
             Err(()) => return Ok(()),
         };
+        let folder = match folder.as_deref().map(canonical_folder).transpose() {
+            Ok(folder) => folder,
+            Err(()) => return Ok(()),
+        };
         let demotions = if self.target == Target::Names {
             snapshot_demotions(&self.demotions, home.as_deref())
         } else {
@@ -142,7 +146,8 @@ fn run_query(
                         break;
                     }
                     let result = query.resultAtIndex(i);
-                    let Some(path) = result_path(&result) else {
+                    let Some(path) = result_path(&result).filter(|path| within_scope(path, job.folder))
+                    else {
                         continue;
                     };
                     if !seen_paths.insert(path.clone()) {
@@ -163,7 +168,8 @@ fn run_query(
                         break;
                     }
                     let result = query.resultAtIndex(i);
-                    let Some(path) = result_path(&result) else {
+                    let Some(path) = result_path(&result).filter(|path| within_scope(path, job.folder))
+                    else {
                         continue;
                     };
                     if let Some(item) =
@@ -402,9 +408,22 @@ fn search_scopes(folder: Option<&Path>) -> Result<Retained<NSArray>, ()> {
     Ok(scopes)
 }
 
+fn canonical_folder(folder: &Path) -> Result<PathBuf, ()> {
+    let folder = folder.canonicalize().map_err(|_| ())?;
+    folder.is_dir().then_some(folder).ok_or(())
+}
+
+fn within_scope(path: &Path, folder: Option<&Path>) -> bool {
+    // Spotlight can ignore an unavailable scope instead of returning no results.
+    folder.is_none_or(|folder| path.starts_with(folder))
+}
+
 fn folder_url(folder: &Path) -> Result<Retained<NSURL>, ()> {
     let path = folder.to_str().ok_or(())?;
-    Ok(NSURL::fileURLWithPath(&NSString::from_str(path)))
+    Ok(NSURL::fileURLWithPath_isDirectory(
+        &NSString::from_str(path),
+        true,
+    ))
 }
 
 fn free_terms(query: &FileQuery) -> String {
@@ -550,6 +569,37 @@ mod tests {
         let scopes = search_scopes(Some(Path::new("/Users/test/Work Docs"))).unwrap();
         let url: Retained<NSURL> = scopes.objectAtIndex(0).downcast().unwrap();
         assert_eq!(url.path().unwrap().to_string(), "/Users/test/Work Docs");
+        assert!(url.hasDirectoryPath());
+    }
+
+    #[test]
+    fn scope_validation_resolves_links_and_rejects_missing_folders_files_and_outside_rows() {
+        let root = std::env::temp_dir().join(format!(
+            "dupin-scope-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let folder = root.join("Work Docs");
+        std::fs::create_dir(&folder).unwrap();
+        let link = root.join("linked");
+        std::os::unix::fs::symlink(&folder, &link).unwrap();
+        let file = root.join("fixture.txt");
+        std::fs::write(&file, "fixture").unwrap();
+        let canonical = canonical_folder(&folder).unwrap();
+        assert_eq!(canonical_folder(&link).unwrap(), canonical);
+        assert!(canonical_folder(&root.join("missing")).is_err());
+        assert!(canonical_folder(&file).is_err());
+        assert!(within_scope(&canonical.join("inside.pdf"), Some(&canonical)));
+        assert!(!within_scope(
+            &canonical.with_file_name("Work Docs-other").join("outside.pdf"),
+            Some(&canonical)
+        ));
+        assert!(!within_scope(
+            Path::new("/System/Applications/Calculator.app"),
+            Some(&canonical)
+        ));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
