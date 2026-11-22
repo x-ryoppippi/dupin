@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn an_infinite_loop_exhausts_fuel() {
-        assert_eq!(trap("(loop (br 0))", 10_000), TrapCode::OutOfFuel);
+        assert_eq!(trap("(loop (br 0))", QUERY_FUEL), TrapCode::OutOfFuel);
     }
 
     #[test]
