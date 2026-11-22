@@ -138,6 +138,7 @@ struct Worker<F> {
     watcher: Option<PathWatcher>,
     watcher_roots: Option<Vec<PathBuf>>,
     watch_problem: Option<String>,
+    save_problem: Option<String>,
     last_processed_revision: u64,
     last_emitted: Option<Emitted>,
     activated: bool,
@@ -156,6 +157,7 @@ where
             watcher: None,
             watcher_roots: None,
             watch_problem: None,
+            save_problem: None,
             last_processed_revision: 0,
             last_emitted: None,
             activated: false,
@@ -175,7 +177,7 @@ where
             if !batch.saves.is_empty() {
                 self.process_saves(batch.saves);
             } else if !batch.stop && (batch.activate || batch.changed) {
-                self.emit_snapshot(self.last_processed_revision, None);
+                self.emit_snapshot(self.last_processed_revision);
             }
 
             if batch.stop {
@@ -211,18 +213,16 @@ where
                 super::write(path, &source).map_err(|error| format!("could not save config.toml: {error}"))
             });
 
-        match saved {
-            Ok(()) => self.emit_snapshot(latest_revision, None),
-            Err(error) => self.emit_snapshot(latest_revision, Some(error)),
-        }
+        self.save_problem = saved.err();
+        self.emit_snapshot(latest_revision);
     }
 
-    fn emit_snapshot(&mut self, revision: u64, save_problem: Option<String>) {
+    fn emit_snapshot(&mut self, revision: u64) {
         let (source, result, read_only) = match &self.path {
             Some(path) => read(path),
             None => (None, Ok(Config::default()), false),
         };
-        self.emit(source, result, read_only, revision, save_problem);
+        self.emit(source, result, read_only, revision);
     }
 
     fn emit(
@@ -231,14 +231,13 @@ where
         result: Result<Config, String>,
         read_only: bool,
         revision: u64,
-        save_problem: Option<String>,
     ) {
         let update = Update {
             revision,
             read_only,
             result,
             watch_problem: self.watch_problem.clone(),
-            save_problem,
+            save_problem: self.save_problem.clone(),
         };
         let emitted = Emitted {
             source,
@@ -621,6 +620,49 @@ mod tests {
         assert!(error.contains("conflicting setting"));
         assert!(!error.contains("meaning"));
         assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+
+    #[test]
+    fn save_problems_survive_file_events_until_a_successful_save() {
+        let temp = TempDir::new();
+        let path = temp.path().join("config.toml");
+        let base = Config::default();
+        let disk = Config {
+            file_limit: 30,
+            ..base.clone()
+        };
+        fs::write(&path, toml::to_string(&disk).unwrap()).unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let (updates, received) = mpsc::channel();
+        let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+            updates.send(update).unwrap();
+        });
+        worker.process_saves(vec![Save {
+            revision: 1,
+            base,
+            desired: Config {
+                file_limit: 50,
+                ..Config::default()
+            },
+        }]);
+        let failed = received.try_recv().unwrap();
+        assert!(failed.save_problem.is_some());
+        assert_eq!(failed.result.unwrap(), disk);
+        fs::write(&path, format!("{}\n", toml::to_string(&disk).unwrap())).unwrap();
+        worker.emit_snapshot(1);
+        assert_eq!(received.try_recv().unwrap().save_problem, failed.save_problem);
+        let desired = Config {
+            position: dupin_core::Position::Top,
+            ..disk.clone()
+        };
+        worker.process_saves(vec![Save {
+            revision: 2,
+            base: disk,
+            desired: desired.clone(),
+        }]);
+        let saved = received.try_recv().unwrap();
+        assert!(saved.save_problem.is_none());
+        assert_eq!(saved.result.unwrap(), desired);
     }
 
     #[test]
