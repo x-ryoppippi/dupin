@@ -13,6 +13,7 @@
             nushell
             nodejs
             config.packages.pnpm
+            config.packages.blacksmith
             just
             config.packages.cargo-hawk
             nufmt
