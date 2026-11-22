@@ -20,6 +20,46 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
+## Remote development with Testbox
+
+The development shell includes Blacksmith CLI 0.5.3. The manually dispatched
+`testbox-dev.yml` workflow warms the app and test builds on a disposable Apple
+silicon runner, then keeps it available for commands. It follows ccusage's
+Testbox setup and uses the same macOS runner and Nix setup as CI.
+
+After this workflow is available on the repository's default branch, start a box
+from the root of the worktree you want to test:
+
+```sh
+blacksmith auth status
+blacksmith --org <account> testbox warmup .github/workflows/testbox-dev.yml \
+  --ref <pushed-branch> --job dev --idle-timeout 15
+blacksmith --org <account> testbox run --id <id> \
+  'nix build --no-link .#checks.aarch64-darwin.lint-and-test .#checks.aarch64-darwin.dupin'
+blacksmith --org <account> testbox stop --id <id>
+```
+
+Use the Blacksmith account connected to this repository. Each agent or worktree
+gets its own box and ID. Run commands from the worktree root: the CLI mirrors
+that directory with `rsync --delete`, including tracked and untracked files
+that Git does not ignore. Ignored build directories stay on the runner. Check
+which files will be exported before the first run; a Git-ignored file is not
+evidence that every other local file is safe to send.
+
+The box holds its own application, configuration and build outputs. Do not use a
+shared box to drive the user's local app. Native E2E still needs agent-desktop
+and the disposable runner's existing accessibility, automation and screen
+recording grants, as described in the E2E action. Download generated evidence
+before stopping the box:
+
+```sh
+blacksmith --org <account> testbox download --id <id> target/e2e/ /tmp/dupin-e2e/
+```
+
+Stop a box when finished; the idle timeout is a fallback and the workflow has a
+four-hour limit. CLI builds and workflow checks do not prove that remote
+authentication, warmup or native E2E succeeded.
+
 ## Nix layout
 
 | File                   | Holds                                                                                                                       |
