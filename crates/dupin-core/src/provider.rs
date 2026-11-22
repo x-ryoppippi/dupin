@@ -9,11 +9,7 @@ use crate::Item;
 /// time, so a provider may keep thread-affine state (a run loop) on it. It hands results over
 /// in batches as they arrive and should return soon after `request.is_cancelled()` turns true.
 pub trait Provider: Send + Sync + 'static {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>));
-    fn search_result(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        self.search(request, emit);
-        Ok(())
-    }
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError>;
 }
 
 pub struct Request {

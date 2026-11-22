@@ -75,9 +75,21 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .px(18.0)
                 .py(8.0)
                 .child(
-                    text(format!("{origin}: {failure}"))
-                        .font(type_::BODY)
-                        .color(t.text_secondary),
+                    text(format!(
+                        "{}: {failure}",
+                        s.session
+                            .provider_spec(origin)
+                            .map(|spec| spec
+                                .presentation
+                                .chip
+                                .as_deref()
+                                .unwrap_or(&spec.presentation.placeholder))
+                            .unwrap_or("Search")
+                    ))
+                    .font(type_::BODY)
+                    .color(t.text_secondary)
+                    .wrap()
+                    .w_full(),
                 ),
         );
     }
@@ -253,30 +265,42 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
     }
     let body = match &item.view {
         View::Detail { body, .. } => col()
-            .key(format!("{}-body", row_key(&s.session.result_key(index))))
+            .key(format!("{}-body", row_key(&s.session.layout_key(index))))
             .w_full()
             .shrink()
             .min_h(20.0)
             .max_h(340.0)
             .scroll(ScrollSpec { stick_bottom: false })
-            .child(detail_body(&item.id, body, t)),
+            .child(detail_body(&s.session.layout_key(index), body, t)),
         View::Pair { source, result } => row()
-            .key(format!("{}-pair", row_key(&s.session.result_key(index))))
+            .key(format!("{}-pair", row_key(&s.session.layout_key(index))))
             .w_full()
             .gap(16.0)
             .center_y()
             .selection_group(true)
-            .child(pair_value(&item.id, "source", source, "Source", t))
+            .child(pair_value(
+                &s.session.layout_key(index),
+                "source",
+                source,
+                "Source",
+                t,
+            ))
             .child(
                 text("→")
                     .font(TextStyle::new(28.0, 400.0))
                     .color(t.text_secondary),
             )
-            .child(pair_value(&item.id, "result", result, "Result", t)),
+            .child(pair_value(
+                &s.session.layout_key(index),
+                "result",
+                result,
+                "Result",
+                t,
+            )),
         View::Text { .. } => unreachable!("text row"),
     };
     col()
-        .key(row_key(&s.session.result_key(index)))
+        .key(row_key(&s.session.layout_key(index)))
         .w_full()
         .px(LIST_PAD)
         .py(LIST_PAD)
@@ -341,14 +365,14 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accen
     } else {
         (t.text, t.text_secondary)
     };
-    let icon = match s.icons.get(&s.session.icon_key(index)) {
+    let icon = match s.icons.get(&s.session.layout_key(index)) {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
         None => el().size(ICON_SIZE, ICON_SIZE),
     };
     let id = s.session.result_key(index);
     // Rows of a virtual list keep their padding inside, not in gaps between them.
     row()
-        .key(row_key(&s.session.result_key(index)))
+        .key(row_key(&s.session.layout_key(index)))
         .w_full()
         .h(ROW_H)
         .px(LIST_PAD)

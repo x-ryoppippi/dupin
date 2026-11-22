@@ -458,7 +458,7 @@ impl Ui {
                 Effect::RevealSelection => {
                     if self.session.selected_item().is_some() {
                         tx.scroll_into_view(crate::view::row_key(
-                            &self.session.result_key(self.session.selected()),
+                            &self.session.layout_key(self.session.selected()),
                         ));
                     }
                 }
@@ -498,16 +498,16 @@ impl Ui {
                 .items()
                 .iter()
                 .enumerate()
-                .map(|(i, _)| self.session.icon_key(i))
+                .map(|(i, _)| self.session.layout_key(i))
                 .collect();
             self.icons.retain(|id, _| current.contains(id.as_str()));
         }
         for (index, item) in self.session.items().iter().enumerate() {
             if let Some(path) = &item.icon
-                && !self.icons.contains_key(&self.session.icon_key(index))
+                && !self.icons.contains_key(&self.session.layout_key(index))
             {
                 self.icons
-                    .insert(self.session.icon_key(index), cache.app_icon(path, ICON_SIZE));
+                    .insert(self.session.layout_key(index), cache.app_icon(path, ICON_SIZE));
             }
         }
     }

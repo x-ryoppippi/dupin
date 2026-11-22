@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use dupin_core::fuzzy;
-use dupin_core::{Item, Provider, Request, View};
+use dupin_core::{Item, Provider, ProviderError, Request, View};
 
 /// How deep to look for bundles below a root: `/Applications/Utilities/X.app` is depth 2.
 const MAX_DEPTH: usize = 2;
@@ -367,8 +367,9 @@ impl AppsProvider {
 }
 
 impl Provider for AppsProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         emit(rank(&self.apps(), &request.query, request.limit));
+        Ok(())
     }
 }
 

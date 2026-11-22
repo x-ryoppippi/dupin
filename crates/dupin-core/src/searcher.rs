@@ -117,7 +117,7 @@ fn run(
         let request = Request::new(job.query, job.limit, job.generation, current.clone());
         let generation = job.generation;
         let mut remaining = job.limit;
-        let outcome = provider.search_result(&request, &mut |mut items| {
+        let outcome = provider.search(&request, &mut |mut items| {
             items.truncate(remaining);
             remaining -= items.len();
             if !items.is_empty() && is_current(generation) {
@@ -148,7 +148,11 @@ mod tests {
     }
 
     impl Provider for Echo {
-        fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+        fn search(
+            &self,
+            request: &Request,
+            emit: &mut dyn FnMut(Vec<Item>),
+        ) -> Result<(), crate::ProviderError> {
             if request.query == "slow"
                 && let Some(gate) = self.gate.lock().unwrap().take()
             {
@@ -156,6 +160,7 @@ mod tests {
             }
             let path = PathBuf::from(format!("/{}", request.query));
             emit(vec![Item::path(path, request.query.clone(), vec![])]);
+            Ok(())
         }
     }
 

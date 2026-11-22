@@ -399,8 +399,8 @@ impl Session {
     }
     pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
         self.providers.iter().filter_map(|(id, state)| match state.phase {
-            ProviderPhase::Failed => Some((id, "Provider failed")),
-            ProviderPhase::Expired => Some((id, "Provider deadline exceeded")),
+            ProviderPhase::Failed => Some((id, "Search unavailable")),
+            ProviderPhase::Expired => Some((id, "Search took too long")),
             _ => None,
         })
     }
@@ -411,7 +411,7 @@ impl Session {
                 .get(origin)
                 .is_some_and(|s| s.phase == ProviderPhase::Pending)
     }
-    pub fn icon_key(&self, index: usize) -> String {
+    pub fn layout_key(&self, index: usize) -> String {
         format!("{}:{}", self.origins[index], self.items[index].id)
     }
     pub fn result_key(&self, index: usize) -> String {

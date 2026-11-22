@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dupin_core::fuzzy;
-use dupin_core::{Item, Provider, Request};
+use dupin_core::{Item, Provider, ProviderError, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
@@ -39,14 +39,18 @@ impl SpotlightProvider {
 }
 
 impl Provider for SpotlightProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
-        autoreleasepool(|_| run_query(self.target, request, emit));
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        autoreleasepool(|_| run_query(self.target, request, emit))
     }
 }
 
-fn run_query(target: Target, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+fn run_query(
+    target: Target,
+    request: &Request,
+    emit: &mut dyn FnMut(Vec<Item>),
+) -> Result<(), ProviderError> {
     let Some(predicate) = predicate(target, &request.query) else {
-        return;
+        return Ok(());
     };
     let query = NSMetadataQuery::new();
     query.setPredicate(Some(&predicate));
@@ -59,7 +63,7 @@ fn run_query(target: Target, request: &Request, emit: &mut dyn FnMut(Vec<Item>))
     }
     query.setNotificationBatchingInterval(SLICE.as_secs_f64());
     if !query.startQuery() {
-        return;
+        return Err(ProviderError);
     }
 
     let run_loop = NSRunLoop::currentRunLoop();
@@ -91,6 +95,7 @@ fn run_query(target: Target, request: &Request, emit: &mut dyn FnMut(Vec<Item>))
         }
     }
     query.stopQuery();
+    Ok(())
 }
 
 fn item(result: &AnyObject, query: &str) -> Option<Item> {

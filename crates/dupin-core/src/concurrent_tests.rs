@@ -36,6 +36,22 @@ fn start(s: &mut Session, query: &str) -> u64 {
 }
 
 #[test]
+fn layout_identity_is_stable_but_callbacks_expire_with_the_query() {
+    let mut s = Session::new(History::default(), registry(false)).unwrap();
+    let g = start(&mut s, "first");
+    s.deliver_from(id("apps.search"), batch(g, &["same"]));
+    s.deliver_from(id("slow.search"), batch(g, &["same"]));
+    let layout = s.layout_key(0);
+    let callback = s.result_key(0);
+    assert_ne!(layout, s.layout_key(1));
+    let g = start(&mut s, "second");
+    s.deliver_from(id("apps.search"), batch(g, &["same"]));
+    assert_eq!(s.layout_key(0), layout);
+    assert_ne!(s.result_key(0), callback);
+    assert!(s.run_key_action(&callback, "open").is_empty());
+}
+
+#[test]
 fn independent_completion_limits_pinning_and_identity() {
     let mut s = Session::new(History::default(), registry(true)).unwrap();
     let g = start(&mut s, "query");
@@ -103,16 +119,18 @@ struct Gated {
     entered: mpsc::Sender<()>,
 }
 impl Provider for Gated {
-    fn search(&self, _: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+    fn search(&self, _: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         self.entered.send(()).unwrap();
         self.gate.lock().unwrap().recv().unwrap();
         emit(vec![item("slow")]);
+        Ok(())
     }
 }
 struct Fast;
 impl Provider for Fast {
-    fn search(&self, _: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+    fn search(&self, _: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         emit(vec![item("app")]);
+        Ok(())
     }
 }
 
@@ -138,10 +156,10 @@ fn app_is_visible_while_other_worker_is_blocked() {
     let mut s = Session::new(History::default(), registry(false)).unwrap();
     let g = start(&mut s, "query");
     slow.search(g, "query".into(), 3);
-    waiting.recv().unwrap();
+    waiting.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     fast.search(g, "query".into(), 3);
     for _ in 0..2 {
-        let (origin, d) = rx.recv().unwrap();
+        let (origin, d) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert_eq!(origin, id("apps.search"));
         s.deliver_from(origin, d);
     }
@@ -149,7 +167,7 @@ fn app_is_visible_while_other_worker_is_blocked() {
     assert!(s.pending(&id("slow.search"), g));
     release.send(()).unwrap();
     for _ in 0..2 {
-        let (origin, d) = rx.recv().unwrap();
+        let (origin, d) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         s.deliver_from(origin, d);
     }
     assert_eq!(s.results(), Results::Done);
@@ -217,10 +235,7 @@ fn duplicate_local_actions_run_only_the_selected_origin_and_keep_history_keys() 
 fn provider_error_is_terminal_and_worker_closes_when_dropped() {
     struct Broken;
     impl Provider for Broken {
-        fn search(&self, _: &Request, _: &mut dyn FnMut(Vec<Item>)) {
-            unreachable!()
-        }
-        fn search_result(&self, _: &Request, _: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        fn search(&self, _: &Request, _: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
             Err(ProviderError)
         }
     }
@@ -229,7 +244,13 @@ fn provider_error_is_terminal_and_worker_closes_when_dropped() {
         tx.send(d).unwrap();
     });
     worker.search(1, "query".into(), 2);
-    assert_eq!(rx.recv().unwrap(), Delivery::Failed { generation: 1 });
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+        Delivery::Failed { generation: 1 }
+    );
     drop(worker);
-    assert!(rx.recv().is_err());
+    assert_eq!(
+        rx.recv_timeout(std::time::Duration::from_secs(5)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    );
 }

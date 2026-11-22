@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, Provider, Request, View};
+use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -30,17 +30,18 @@ impl Default for DictionaryProvider {
 }
 
 impl Provider for DictionaryProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         let term = request.query.trim();
         if request.limit == 0 || term.is_empty() || request.is_cancelled() {
-            return;
+            return Ok(());
         }
         let Some(definition) = (self.lookup)(term) else {
-            return;
+            return Ok(());
         };
         if !request.is_cancelled() {
             emit(vec![item(term, definition)]);
         }
+        Ok(())
     }
 }
 
@@ -119,7 +120,9 @@ mod tests {
         };
         let request = Request::detached("serendipity", 1);
         let mut batches = Vec::new();
-        provider.search(&request, &mut |items| batches.push(items));
+        provider
+            .search(&request, &mut |items| batches.push(items))
+            .unwrap();
 
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0][0].display_title(), "serendipity");
@@ -131,9 +134,11 @@ mod tests {
         let provider = DictionaryProvider {
             lookup: |_| panic!("zero limit must skip lookup"),
         };
-        provider.search(&Request::detached("serendipity", 0), &mut |_| {
-            panic!("zero limit must not emit")
-        });
+        provider
+            .search(&Request::detached("serendipity", 0), &mut |_| {
+                panic!("zero limit must not emit")
+            })
+            .unwrap();
     }
 
     #[test]
