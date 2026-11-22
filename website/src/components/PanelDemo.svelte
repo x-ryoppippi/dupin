@@ -287,10 +287,10 @@
 		color: var(--dupin-text);
 		background: oklch(0.232 0.005 265 / 0.45);
 		backdrop-filter: blur(30px) saturate(1.6);
-		-webkit-backdrop-filter: blur(30px) saturate(1.6);
 		box-shadow:
 			inset 0 0 0 1px rgb(255 255 255 / 0.08),
-			0 30px 80px -20px rgb(0 0 0 / 0.7);
+			0 0 0 1px rgb(0 0 0 / 0.6),
+			0 8px 24px -8px rgb(0 0 0 / 0.5);
 	}
 
 	.panel.is-closed {
@@ -329,10 +329,10 @@
 	.caret {
 		display: inline-block;
 		width: 2px;
-		height: 26px;
+		height: 24px;
 		margin: 0 -1px;
-		vertical-align: -6px;
-		background: var(--dupin-text);
+		vertical-align: -5px;
+		background: #fff;
 	}
 
 	.chip {
