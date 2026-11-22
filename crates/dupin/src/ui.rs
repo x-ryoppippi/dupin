@@ -508,6 +508,9 @@ impl Ui {
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         crate::trace::key(ev);
+        if let Some(preview) = self.quick_look.borrow().as_ref() {
+            preview.trace_picker_input();
+        }
         match &ev.key {
             // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.
             Key::Command('q') => {

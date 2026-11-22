@@ -292,6 +292,23 @@ impl Previewer {
         current_controller_is(&panel, &self.controller) && panel.isKeyWindow()
     }
 
+    pub fn trace_picker_input(&self) {
+        if std::env::var_os("DUPIN_TRACE").is_none() {
+            return;
+        }
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(panel) = shared_panel_if_created(mtm) else {
+            return;
+        };
+        trace_preview(&format!(
+            "picker input visible={} key={}",
+            panel.isVisible(),
+            panel.isKeyWindow()
+        ));
+    }
+
     pub fn owner_is_key(&self) -> bool {
         MainThreadMarker::new().is_some()
             && self
