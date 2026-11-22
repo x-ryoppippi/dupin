@@ -53,3 +53,27 @@ not controlled. This measures Nix source-edit reuse, rather than a fresh-store
 download or a CI cache restore. It does not measure application startup or
 interact with the running launcher. The roots prevent local GC from removing
 the measured dependency cache. CI cache reuse remains to be measured.
+
+## Recorded source-edit run
+
+[Results](results/2026-11-22-aarch64-darwin.json) compare native builder
+`21612d4e38153b006ded83dfb9d5a2d2c33f39c3` with cache candidate
+`999932b8d7eb0f0d16c32147751f62415f142c6d`. Both snapshots contain the same
+Rust, packaging, lockfile and version inputs. The unused source edit forces new
+application/check outputs while retaining both dependency-cache output paths.
+
+| Source-edit build | Native builder | Cached builder |
+| ----------------- | -------------: | -------------: |
+| Release app       |        148.2 s |         76.0 s |
+| Clippy and tests  |         77.9 s |         18.4 s |
+
+The initial release and debug dependency builds took 93.3 s and 73.8 s. The
+table measures subsequent edits with those outputs already available. This is
+one sequential run on a shared machine, with uncontrolled load; it does not
+establish repeatable timing improvements or CI cache performance.
+
+Both edited executables contain exactly the same bytes: 18,537,328 bytes, with
+SHA-256 `273262b710c29b5a500f406072ef9a59546b4933066d2ac3abede1f72c4623f2`.
+Decoded dependency audits and runtime references match. The resource-only
+Info.plist probe changes the app bundle output while preserving the binary and
+both dependency outputs. Full provenance and output paths are in the record.
