@@ -545,3 +545,49 @@ fn a_refresh_does_not_pin_its_automatic_first_row_below_the_cut() {
     );
     assert_eq!(visible_ids(&session), ["better"]);
 }
+
+#[test]
+fn a_refresh_does_not_restore_an_automatic_selection_still_inside_the_cut() {
+    let mut session = ranked_session(History::default(), 2, 3);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("first", 30)]));
+    let generation = session
+        .refresh()
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(
+        id("rank.search"),
+        scored_batch(generation, &[("first", 30), ("better", 100)]),
+    );
+    assert_eq!(visible_ids(&session), ["better", "first"]);
+    assert_eq!(session.selected_item().unwrap().id, "better");
+}
+
+#[test]
+fn a_new_menu_target_replaces_the_identity_held_before_refresh() {
+    let mut session = ranked_session(History::default(), 1, 3);
+    let generation = start(&mut session, "term");
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("old", 30)]));
+    assert!(session.select_key(&session.result_key(0)));
+    let generation = session
+        .refresh()
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("new", 100)]));
+    let target = session.result_key(0);
+    assert!(matches!(
+        &session.intent(Intent::Actions).unwrap()[..],
+        [Effect::ShowActions { id, .. }] if *id == target
+    ));
+    session.deliver_from(id("rank.search"), scored_batch(generation, &[("old", 200)]));
+    assert_eq!(visible_ids(&session), ["new"]);
+    assert!(!session.run_key_action(&target, "open").is_empty());
+}

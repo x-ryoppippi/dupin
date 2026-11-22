@@ -206,7 +206,10 @@ impl Session {
                 }]
             })
             .unwrap_or_default();
-        self.selection_held |= !effects.is_empty();
+        if !effects.is_empty() {
+            self.selection_held = true;
+            self.refresh_selection = None;
+        }
         effects
     }
 
@@ -289,6 +292,7 @@ impl Session {
         let held = self.selection_held;
         let selected = self
             .selected_item()
+            .filter(|_| held)
             .map(|item| (self.origins[self.selected].clone(), item.id.clone()));
         let effects = self.search();
         self.selection_held = held;
