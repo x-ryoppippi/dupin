@@ -419,7 +419,9 @@ mod tests {
         let provider = Arc::new(AppsProvider::with_roots(vec![missing.clone()]));
         assert!(provider.apps().is_empty());
         let (changed, event) = std::sync::mpsc::channel();
-        let watcher = provider.watch(move || changed.send(()).unwrap());
+        let watcher = provider
+            .watch(move || changed.send(()).unwrap())
+            .expect("start app folder watcher");
 
         fs::create_dir_all(missing.join("Watched App.app")).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

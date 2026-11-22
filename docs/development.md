@@ -66,20 +66,7 @@ Stop a box when finished; the idle timeout is a fallback and the workflow has a
 four-hour limit. CLI builds and workflow checks do not prove that remote
 authentication, warmup or native E2E succeeded.
 
-## Nix layout
-
-| File                      | Holds                                                                                                                       |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `flake.nix`               | Inputs and the flake-parts modules below                                                                                    |
-| `package.nix`             | The Dupin package (`callPackage` style), with `Dupin.app` around the binary and its icon drawn from `assets/logo/dupin.svg` |
-| `default.nix`             | `package.nix` for non-flake use                                                                                             |
-| `nix/packages.nix`        | `packages.dupin`, `packages.default` and `packages.blacksmith`                                                              |
-| `nix/cargo-artifacts.nix` | Compiled release/debug dependency caches and the flake's app and Clippy/test builds                                         |
-| `nix/blacksmith.nix`      | The pinned Testbox CLI and its SSH/rsync tools                                                                              |
-| `nix/home-manager.nix`    | `homeManagerModules.default`: `programs.dupin`, see [Configuration](./configuration.md#nix)                                 |
-| `nix/checks.nix`          | Clippy and the tests in one debug build                                                                                     |
-| `nix/treefmt.nix`         | The formatters and linters behind `nix fmt` and `checks.treefmt`                                                            |
-| `nix/dev-shell.nix`       | The development shell                                                                                                       |
+## Dependency builds
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
@@ -153,7 +140,7 @@ just website::install # dependencies from the lockfile
 just website::dev     # local server, rendering the real pages
 just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # cf build, then upload the result as Cloudflare static assets
+just website::deploy  # build and deploy the Worker and its static assets
 ```
 
 Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
