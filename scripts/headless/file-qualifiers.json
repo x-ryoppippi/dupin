@@ -1,0 +1,7 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": " " },
+		{ "t": 0.3, "type": "type", "text": "kind:folder dupin-core" },
+		{ "t": 4.0, "type": "mark", "name": "end" }
+	]
+}

@@ -131,6 +131,7 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
         .single_line()
         .grow(1.0)
         .color(t.text)
+        .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
         .on_edit(|s: &mut Ui| &mut s.query)
         .on_input_key(|s: &mut Ui, ev, tx| s.key(ev, tx))
@@ -168,6 +169,9 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
 }
 
 fn hint(s: &Ui) -> Option<&str> {
+    if let Some(problem) = crate::commands::query_problem(s.session.command_id(), s.session.query()) {
+        return Some(problem);
+    }
     let presentation = &s.session.command().presentation;
     if s.session.query().trim().is_empty() {
         presentation.empty_hint.as_deref()

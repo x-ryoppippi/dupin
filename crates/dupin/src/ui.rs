@@ -24,6 +24,14 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
+    let marks = crate::commands::query_qualifier_ranges(command, &edit.text)
+        .into_iter()
+        .map(|range| rune::MarkRange::new(range, rune::Mark::Pill("file-qualifier".into())))
+        .collect();
+    edit.set_marks(marks);
+}
+
 pub struct Configuration {
     pub values: Rc<RefCell<Config>>,
     pub hotkey: Arc<crate::hotkey::Binding>,
@@ -577,6 +585,7 @@ impl Ui {
                 }
             }
         }
+        mark_query_qualifiers(&mut self.query, self.session.command_id());
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
@@ -739,5 +748,54 @@ mod config_tests {
             ..previous.clone()
         };
         assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod qualifier_tests {
+    use super::*;
+
+    fn files() -> CommandId {
+        CommandId::new(crate::commands::FILES).unwrap()
+    }
+
+    #[test]
+    fn qualifier_pills_keep_raw_unicode_text_and_delete_as_whole_tokens() {
+        let raw = "日本語 kind:pdf";
+        let mut edit = TextEdit::new(raw);
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, raw);
+        let (range, _) = edit.pills().next().unwrap();
+        assert_eq!(&edit.text[range], "kind:pdf");
+        edit.set_caret(edit.text.len());
+        edit.key(
+            &KeyEvent {
+                key: Key::Backspace,
+                mods: Default::default(),
+            },
+            None,
+        );
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, "日本語 ");
+        assert_eq!(edit.pills().count(), 0);
+        edit.undo();
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.text, raw);
+        assert_eq!(edit.pills().count(), 1);
+    }
+
+    #[test]
+    fn query_replacement_and_mode_changes_recompute_marks_without_changing_text() {
+        let mut edit = TextEdit::new("kind:pdf");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        edit.replace_text("report ext:rs");
+        mark_query_qualifiers(&mut edit, &files());
+        assert_eq!(edit.pills().count(), 1);
+        let (range, _) = edit.pills().next().unwrap();
+        assert_eq!(&edit.text[range], "ext:rs");
+        mark_query_qualifiers(&mut edit, &CommandId::new(crate::commands::APPS).unwrap());
+        assert_eq!(edit.text, "report ext:rs");
+        assert_eq!(edit.pills().count(), 0);
     }
 }
