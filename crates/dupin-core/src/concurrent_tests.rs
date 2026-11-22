@@ -131,7 +131,7 @@ fn independent_completion_limits_pinning_and_identity() {
         s.items().iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
         ["same", "same", "app2"]
     );
-    assert_eq!(s.selected(), 1);
+    assert_eq!(s.selected(), 0);
     assert_ne!(s.result_key(0), app_key);
     assert!(s.select_key(&app_key));
     let slow_key = s.result_key(0);
@@ -218,6 +218,82 @@ fn fallback_results_are_shown_when_they_arrive_after_empty_searches_finish() {
     session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
     assert_eq!(visible_ids(&session), ["fallback"]);
     assert!(session.result_key(0).starts_with(&format!("{generation}:")));
+}
+
+#[test]
+fn automatic_keyword_completion_is_independent_of_provider_arrival() {
+    for keyword_first in [true, false] {
+        let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+        let generation = start(&mut session, "g");
+        let mut keyword = item("keyword");
+        keyword.completion = Some("g ".into());
+        let providers = if keyword_first {
+            ["web.keywords", "apps.search"]
+        } else {
+            ["apps.search", "web.keywords"]
+        };
+        for provider in providers {
+            let row = if provider == "web.keywords" {
+                keyword.clone()
+            } else {
+                item("app")
+            };
+            session.deliver_from(
+                id(provider),
+                Delivery::Batch {
+                    generation,
+                    items: vec![row],
+                },
+            );
+        }
+        assert_eq!(session.selected_item().unwrap().id, "keyword");
+        assert!(
+            session
+                .intent(Intent::Complete)
+                .unwrap()
+                .contains(&Effect::ReplaceQuery("g ".into()))
+        );
+    }
+}
+
+#[test]
+fn a_deliberate_app_selection_is_not_replaced_by_a_late_keyword() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "g");
+    session.deliver_from(id("apps.search"), batch(generation, &["app"]));
+    assert!(session.select_key(&session.result_key(0)));
+    let mut keyword = item("keyword");
+    keyword.completion = Some("g ".into());
+    session.deliver_from(
+        id("web.keywords"),
+        Delivery::Batch {
+            generation,
+            items: vec![keyword],
+        },
+    );
+    assert_eq!(session.selected_item().unwrap().id, "app");
+    assert_eq!(session.intent(Intent::Complete), None);
+}
+
+#[test]
+fn a_held_fallback_cannot_displace_an_ordinary_match_after_refresh() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown");
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    assert!(session.select_key(&session.result_key(0)));
+    let generation = session
+        .refresh()
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    session.deliver_from(id("apps.search"), batch(generation, &["app"]));
+    assert_eq!(visible_ids(&session), ["app"]);
 }
 
 #[test]

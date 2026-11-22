@@ -447,7 +447,8 @@ impl Session {
         if !self.pending(&origin, delivery.generation()) {
             return false;
         }
-        let selected = if matches!(self.results, Results::Searching { replaced: true }) {
+        let selected = if self.selection_held && matches!(self.results, Results::Searching { replaced: true })
+        {
             self.items
                 .get(self.selected)
                 .map(|item| (self.origins[self.selected].clone(), item.id.clone()))
@@ -518,6 +519,7 @@ impl Session {
                 .enumerate()
                 .any(|(i, item)| item.id == *id && self.origins[i] == *origin)
             && let Some(state) = self.providers.get(origin)
+            && (!state.fallback || show_fallback)
             && let Some(item) = state.items.iter().find(|item| item.id == *id).cloned()
         {
             let provider_limit = if self.active_pin.as_ref() == Some(origin) {
