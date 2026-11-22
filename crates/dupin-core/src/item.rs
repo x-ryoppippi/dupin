@@ -63,6 +63,8 @@ pub struct Item {
     pub icon: Option<PathBuf>,
     /// Character indices in `display_title()` that matched the query, for highlighting.
     pub matched: Vec<usize>,
+    /// Text to put in the query field when the user completes this result.
+    pub completion: Option<String>,
     /// How well the item matched, for providers that rank their results; the history adds
     /// to it. None for results that keep a provider's own order.
     pub score: Option<i32>,
@@ -86,6 +88,7 @@ impl Item {
             record_usage: true,
             icon: Some(path.clone()),
             matched,
+            completion: None,
             score: None,
             primary: Some("open".into()),
             alternate: Some("reveal".into()),

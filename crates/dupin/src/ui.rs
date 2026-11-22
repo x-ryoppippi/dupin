@@ -72,6 +72,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
@@ -170,6 +171,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            web: registration.web,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
@@ -199,11 +201,18 @@ impl Ui {
         };
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
+        let web_changed = {
+            let mut web = self.web.write().unwrap();
+            let changed = *web != registration.web;
+            *web = registration.web;
+            changed
+        };
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
         if self.session.command().result_limit != previous_limit
+            || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
         {
             let effects = self.session.refresh();
@@ -469,6 +478,14 @@ impl Ui {
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
         let intent = match &ev.key {
+            Key::Tab
+                if plain
+                    && !m.shift
+                    && self.query.anchor == self.query.focus
+                    && self.query.focus == self.query.text.len() =>
+            {
+                Intent::Complete
+            }
             Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,

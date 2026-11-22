@@ -67,6 +67,12 @@ fn item(name: &str) -> Item {
     Item::path(PathBuf::from(format!("/x/{name}")), name.to_owned(), vec![])
 }
 
+fn completion_item(name: &str, completion: &str) -> Item {
+    let mut item = item(name);
+    item.completion = Some(completion.to_owned());
+    item
+}
+
 fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
     match effects {
         [
@@ -474,6 +480,68 @@ fn backspace_from_an_empty_dictionary_query_returns_to_apps() {
 }
 
 #[test]
+fn completing_a_result_keeps_the_raw_query_and_searches_it() {
+    let mut s = session();
+    let generation = searched(&s.set_query("g")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![completion_item("Google", "g rust lifetimes")],
+    });
+
+    let effects = s.intent(Intent::Complete).unwrap();
+    assert_eq!(s.query(), "g rust lifetimes");
+    assert_eq!(
+        effects.first(),
+        Some(&Effect::ReplaceQuery("g rust lifetimes".into()))
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Search { command, query, .. }
+            if command == &app_command() && query == "g rust lifetimes"
+    )));
+}
+
+#[test]
+fn completing_a_keyword_prefix_uses_existing_keyword_routing() {
+    let mut s = session();
+    let generation = searched(&s.set_query("d")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![completion_item("Dictionary", "define serendipity")],
+    });
+
+    let effects = s.intent(Intent::Complete).unwrap();
+    assert_eq!(s.command_id(), &dictionary_command());
+    assert_eq!(s.query(), "serendipity");
+    assert_eq!(effects.first(), Some(&Effect::ReplaceQuery("serendipity".into())));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Search { command, query, .. }
+            if command == &dictionary_command() && query == "serendipity"
+    )));
+}
+
+#[test]
+fn completion_passes_through_without_completion_or_while_rows_are_stale() {
+    let mut s = session();
+    let generation = searched(&s.set_query("old")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![completion_item("suggestion", "new query")],
+    });
+    searched(&s.set_query("new"));
+    assert_eq!(s.intent(Intent::Complete), None);
+    assert_eq!(s.query(), "new");
+
+    let generation = searched(&s.set_query("current")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("ordinary result")],
+    });
+    assert_eq!(s.intent(Intent::Complete), None);
+}
+
+#[test]
 fn enter_offers_dictionary_actions_before_launching() {
     let mut s = session();
     s.set_query("define");
@@ -490,6 +558,7 @@ fn enter_offers_dictionary_actions_before_launching() {
             record_usage: false,
             icon: None,
             matched: Vec::new(),
+            completion: None,
             score: None,
             primary: None,
             alternate: None,

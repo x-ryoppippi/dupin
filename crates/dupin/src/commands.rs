@@ -8,18 +8,22 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const WEB_KEYWORDS: &str = "web.keywords";
+const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub struct Registration {
     pub registry: CommandRegistry,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
+    pub web: Arc<RwLock<crate::web::WebCatalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
 }
 
 pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
+    pub web: crate::web::WebCatalog,
 }
 
 fn parsed_file_query(
@@ -122,6 +126,24 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         registry.register(command)?;
     }
 
+    registry.register(CommandSpec::new(
+        id(WEB_KEYWORDS),
+        1,
+        presentation("Web search", None, None, None, false, 0.0),
+    ))?;
+    registry.register(
+        CommandSpec::new(
+            id(WEB_FALLBACKS),
+            20,
+            presentation("Web search", None, None, None, false, 0.0),
+        )
+        .with_fallback(),
+    )?;
+    registry.set_default_providers(
+        vec![apps_id, id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
+        Some(id(WEB_KEYWORDS)),
+    )?;
+
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
     for keyword in &config.dictionary_keywords {
@@ -129,18 +151,31 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
             rejected.push(error.to_string());
         }
     }
-    let notice = (!rejected.is_empty()).then(|| {
+    let dictionary_notice = (!rejected.is_empty()).then(|| {
         format!(
             "Some dictionary keywords were not registered. Review dictionary_keywords in config.toml: {}",
             rejected.join("; "),
         )
     });
 
-    Ok(ConfiguredCommands { registry, notice })
+    let (web, web_notice) =
+        crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
+    let notices: Vec<_> = [dictionary_notice, web_notice].into_iter().flatten().collect();
+    let notice = (!notices.is_empty()).then(|| notices.join("\n"));
+    Ok(ConfiguredCommands {
+        registry,
+        notice,
+        web,
+    })
 }
 
 pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
-    let ConfiguredCommands { registry, notice } = configured(config)?;
+    let ConfiguredCommands {
+        registry,
+        notice,
+        web,
+    } = configured(config)?;
+    let web = Arc::new(RwLock::new(web));
     let apps_id = id(APPS);
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
@@ -163,6 +198,14 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
             dictionary_id,
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
         ),
+        (
+            id(WEB_KEYWORDS),
+            Arc::new(crate::web::WebProvider::new(web.clone(), false)) as Arc<dyn Provider>,
+        ),
+        (
+            id(WEB_FALLBACKS),
+            Arc::new(crate::web::WebProvider::new(web.clone(), true)) as Arc<dyn Provider>,
+        ),
     ]
     .into();
 
@@ -170,6 +213,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         registry,
         providers,
         notice,
+        web,
         file_demotions,
     })
 }
@@ -177,6 +221,79 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_results_use_the_registered_session_action_and_completion_paths() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
+
+        let configured = configured(&Config::default()).unwrap();
+        let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        let effects = session.set_query("g");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search { generation, .. } => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        let mut rows = Vec::new();
+        web.search(&Request::detached("g", 1), &mut |batch| rows.extend(batch))
+            .unwrap();
+        session.deliver_from(
+            id(WEB_KEYWORDS),
+            Delivery::Batch {
+                generation,
+                items: rows,
+            },
+        );
+        let completion = session.intent(Intent::Complete).unwrap();
+        assert!(completion.contains(&Effect::ReplaceQuery("g ".into())));
+        assert_eq!(session.query(), "g ");
+
+        let effects = session.set_query("gh dupin & Rust");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search { generation, .. } => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        let mut rows = Vec::new();
+        web.search(&Request::detached("gh dupin & Rust", 1), &mut |batch| {
+            rows.extend(batch)
+        })
+        .unwrap();
+        session.deliver_from(
+            id(WEB_KEYWORDS),
+            Delivery::Batch {
+                generation,
+                items: rows,
+            },
+        );
+        let activation = session.intent(Intent::Open).unwrap();
+        assert!(activation.contains(&Effect::Run(Action::OpenUrl(
+            "https://github.com/search?q=dupin%20%26%20Rust".into(),
+        ))));
+        assert!(!activation.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn invalid_dictionary_keywords_are_skipped_with_a_notice() {
+        let config = Config {
+            dictionary_keywords: vec!["in".into(), "".into(), "look up".into()],
+            ..Config::default()
+        };
+
+        let configured = configured(&config).unwrap();
+        let dictionary = id(DICTIONARY);
+        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
+        let notice = configured.notice.unwrap();
+        assert!(notice.contains("dictionary_keywords"));
+        assert!(notice.contains("in"));
+        assert!(notice.contains("must not be empty"));
+    }
 
     #[test]
     fn qualifier_feedback_matches_only_the_file_commands() {
@@ -221,22 +338,5 @@ mod tests {
             let apps = session.provider_spec(&id(APPS)).unwrap();
             assert_eq!(apps.candidate_limit(), apps.result_limit);
         }
-    }
-
-    #[test]
-    fn invalid_dictionary_keywords_are_skipped_with_a_notice() {
-        let config = Config {
-            dictionary_keywords: vec!["in".into(), "".into(), "look up".into()],
-            ..Config::default()
-        };
-
-        let configured = configured(&config).unwrap();
-        let dictionary = id(DICTIONARY);
-        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
-        assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
-        let notice = configured.notice.unwrap();
-        assert!(notice.contains("dictionary_keywords"));
-        assert!(notice.contains("in"));
-        assert!(notice.contains("must not be empty"));
     }
 }

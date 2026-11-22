@@ -19,6 +19,33 @@ fn registry(pin: bool) -> CommandRegistry {
     .unwrap();
     r
 }
+fn fallback_registry() -> CommandRegistry {
+    let apps = id("apps.search");
+    let keywords = id("web.keywords");
+    let fallbacks = id("web.fallbacks");
+    let mut commands = CommandRegistry::new(apps.clone(), None);
+    commands
+        .register(CommandSpec::new(
+            apps.clone(),
+            2,
+            QueryPresentation::new("Search"),
+        ))
+        .unwrap();
+    commands
+        .register(CommandSpec::new(
+            keywords.clone(),
+            5,
+            QueryPresentation::new("Keywords"),
+        ))
+        .unwrap();
+    commands
+        .register(CommandSpec::new(fallbacks.clone(), 5, QueryPresentation::new("Fallbacks")).with_fallback())
+        .unwrap();
+    commands
+        .set_default_providers(vec![apps, keywords.clone(), fallbacks], Some(keywords))
+        .unwrap();
+    commands
+}
 fn item(name: &str) -> Item {
     Item::path(name.into(), name.into(), vec![])
 }
@@ -27,6 +54,9 @@ fn batch(generation: u64, names: &[&str]) -> Delivery {
         generation,
         items: names.iter().map(|s| item(s)).collect(),
     }
+}
+fn visible_ids(session: &Session) -> Vec<&str> {
+    session.items().iter().map(|item| item.id.as_str()).collect()
 }
 fn start(s: &mut Session, query: &str) -> u64 {
     s.set_query(query)
@@ -101,7 +131,7 @@ fn independent_completion_limits_pinning_and_identity() {
         s.items().iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
         ["same", "same", "app2"]
     );
-    assert_eq!(s.selected(), 1);
+    assert_eq!(s.selected(), 0);
     assert_ne!(s.result_key(0), app_key);
     assert!(s.select_key(&app_key));
     let slow_key = s.result_key(0);
@@ -148,6 +178,213 @@ fn explicit_routes_do_not_fan_out() {
         1
     );
     assert_eq!(s.provider_ids(), [id("slow.search")]);
+}
+
+#[test]
+fn fallback_results_wait_for_every_ordinary_provider_and_obey_the_default_limit() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown query");
+    session.deliver_from(
+        id("web.fallbacks"),
+        batch(generation, &["fallback-1", "fallback-2", "fallback-3"]),
+    );
+    session.deliver_from(id("web.fallbacks"), Delivery::Done { generation });
+    assert!(session.items().is_empty());
+    assert_eq!(session.intent(Intent::Open), Some(Vec::new()));
+    assert!(session.pending(&id("apps.search"), generation));
+
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    assert!(session.items().is_empty());
+    assert!(session.pending(&id("web.keywords"), generation));
+
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    assert_eq!(session.results(), Results::Done);
+    assert_eq!(visible_ids(&session), ["fallback-1", "fallback-2"]);
+    let key = session.result_key(0);
+    assert!(matches!(
+        session.run_key_action(&key, "open").first(),
+        Some(Effect::Run(_))
+    ));
+}
+
+#[test]
+fn fallback_results_are_shown_when_they_arrive_after_empty_searches_finish() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown query");
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    assert!(session.items().is_empty());
+
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    assert_eq!(visible_ids(&session), ["fallback"]);
+    assert!(session.result_key(0).starts_with(&format!("{generation}:")));
+}
+
+#[test]
+fn automatic_keyword_completion_is_independent_of_provider_arrival() {
+    for keyword_first in [true, false] {
+        let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+        let generation = start(&mut session, "g");
+        let mut keyword = item("keyword");
+        keyword.completion = Some("g ".into());
+        let providers = if keyword_first {
+            ["web.keywords", "apps.search"]
+        } else {
+            ["apps.search", "web.keywords"]
+        };
+        for provider in providers {
+            let row = if provider == "web.keywords" {
+                keyword.clone()
+            } else {
+                item("app")
+            };
+            session.deliver_from(
+                id(provider),
+                Delivery::Batch {
+                    generation,
+                    items: vec![row],
+                },
+            );
+        }
+        assert_eq!(session.selected_item().unwrap().id, "keyword");
+        assert!(
+            session
+                .intent(Intent::Complete)
+                .unwrap()
+                .contains(&Effect::ReplaceQuery("g ".into()))
+        );
+    }
+}
+
+#[test]
+fn a_deliberate_app_selection_is_not_replaced_by_a_late_keyword() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "g");
+    session.deliver_from(id("apps.search"), batch(generation, &["app"]));
+    assert!(session.select_key(&session.result_key(0)));
+    let mut keyword = item("keyword");
+    keyword.completion = Some("g ".into());
+    session.deliver_from(
+        id("web.keywords"),
+        Delivery::Batch {
+            generation,
+            items: vec![keyword],
+        },
+    );
+    assert_eq!(session.selected_item().unwrap().id, "app");
+    assert_eq!(session.intent(Intent::Complete), None);
+}
+
+#[test]
+fn a_held_fallback_cannot_displace_an_ordinary_match_after_refresh() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown");
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    assert!(session.select_key(&session.result_key(0)));
+    let generation = session
+        .refresh()
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::Search { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    session.deliver_from(id("apps.search"), batch(generation, &["app"]));
+    assert_eq!(visible_ids(&session), ["app"]);
+}
+
+#[test]
+fn fallback_rows_retained_from_an_old_query_cannot_be_opened_or_completed() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown query");
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    let mut suggestion = item("fallback");
+    suggestion.completion = Some("completed query".into());
+    session.deliver_from(
+        id("web.fallbacks"),
+        Delivery::Batch {
+            generation,
+            items: vec![suggestion],
+        },
+    );
+    assert_eq!(visible_ids(&session), ["fallback"]);
+
+    let next = start(&mut session, "next query");
+    assert_eq!(visible_ids(&session), ["fallback"]);
+    assert_eq!(session.intent(Intent::Complete), None);
+    assert_eq!(session.intent(Intent::Open), Some(Vec::new()));
+    session.deliver_from(id("web.fallbacks"), batch(next, &["stale fallback"]));
+    assert_eq!(visible_ids(&session), ["fallback"]);
+    assert_eq!(session.intent(Intent::Complete), None);
+    assert_eq!(session.intent(Intent::Open), Some(Vec::new()));
+}
+
+#[test]
+fn empty_auxiliary_answers_preserve_only_pending_providers_old_rows() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "first");
+    let mut app = item("old app");
+    app.completion = Some("old completion".into());
+    session.deliver_from(
+        id("apps.search"),
+        Delivery::Batch {
+            generation,
+            items: vec![app],
+        },
+    );
+    session.deliver_from(id("web.keywords"), batch(generation, &["old keyword"]));
+    let generation = start(&mut session, "second");
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    session.deliver_from(id("web.fallbacks"), Delivery::Done { generation });
+    assert_eq!(visible_ids(&session), ["old app"]);
+    assert_eq!(session.results(), Results::Searching { replaced: false });
+    let key = session.result_key(0);
+    assert!(session.run_key_action(&key, "open").is_empty());
+    assert_eq!(session.intent(Intent::Complete), None);
+    session.deliver_from(id("apps.search"), Delivery::Done { generation });
+    assert!(session.items().is_empty());
+    assert_eq!(session.results(), Results::Done);
+}
+
+#[test]
+fn ordinary_failures_can_release_fallback_but_expired_partial_rows_suppress_it() {
+    let mut session = Session::new(History::default(), fallback_registry()).unwrap();
+    let generation = start(&mut session, "unknown query");
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    session.deliver_from(id("apps.search"), Delivery::Failed { generation });
+    assert!(session.items().is_empty());
+    session.deliver_from(id("web.keywords"), Delivery::Expired { generation });
+    assert_eq!(visible_ids(&session), ["fallback"]);
+
+    let generation = start(&mut session, "another query");
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["fallback"]));
+    session.deliver_from(id("apps.search"), batch(generation, &["ordinary"]));
+    session.deliver_from(id("apps.search"), Delivery::Expired { generation });
+    session.deliver_from(id("web.keywords"), Delivery::Done { generation });
+    assert_eq!(visible_ids(&session), ["ordinary"]);
+}
+
+#[test]
+fn a_default_fallback_provider_is_an_ordinary_provider_on_an_explicit_route() {
+    let mut commands = fallback_registry();
+    commands.add_keyword(&id("web.fallbacks"), "lookup").unwrap();
+    let mut session = Session::new(History::default(), commands).unwrap();
+    let effects = session.set_query("lookup result");
+    let generation = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Search {
+                generation, command, ..
+            } if command == &id("web.fallbacks") => Some(*generation),
+            _ => None,
+        })
+        .unwrap();
+    session.deliver_from(id("web.fallbacks"), batch(generation, &["direct"]));
+    assert_eq!(visible_ids(&session), ["direct"]);
 }
 
 struct Gated {
@@ -315,10 +552,6 @@ fn scored_batch(generation: u64, entries: &[(&str, i32)]) -> Delivery {
             })
             .collect(),
     }
-}
-
-fn visible_ids(session: &Session) -> Vec<&str> {
-    session.items().iter().map(|item| item.id.as_str()).collect()
 }
 
 #[test]

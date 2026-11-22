@@ -64,6 +64,7 @@ pub struct CommandSpec {
     id: CommandId,
     pub result_limit: usize,
     candidate_limit: Option<usize>,
+    fallback: bool,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
 }
@@ -74,6 +75,7 @@ impl CommandSpec {
             id,
             result_limit,
             candidate_limit: None,
+            fallback: false,
             presentation,
             deadline: std::time::Duration::from_secs(30),
         }
@@ -82,6 +84,16 @@ impl CommandSpec {
     pub fn with_candidate_limit(mut self, limit: usize) -> Self {
         self.candidate_limit = Some(limit);
         self
+    }
+
+    /// Mark this provider's results as fallback results for the default search.
+    pub fn with_fallback(mut self) -> Self {
+        self.fallback = true;
+        self
+    }
+
+    pub(crate) fn is_fallback(&self) -> bool {
+        self.fallback
     }
 
     /// The total candidate budget, before ranking and the visible result limit.

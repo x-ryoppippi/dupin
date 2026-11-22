@@ -4,23 +4,24 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 
 ## Keys
 
-| Key                              | In the panel                                          |
-| -------------------------------- | ----------------------------------------------------- |
-| Hotkey                           | Show or hide the panel                                |
-| Type                             | Fuzzy-search installed apps                           |
-| Space on an empty query          | Search files with Spotlight, by file and display name |
-| `in` then Space                  | Search inside files with Spotlight, as Alfred's `in`  |
-| `define` or `d`, then Space      | Look up a word in macOS dictionaries                  |
-| ⌫ on an empty query              | Leave file, content or dictionary search              |
-| ↑ ↓                              | Move the selection                                    |
-| ↑ on an empty query, then ↑ ↓    | Recall searches in the current mode                   |
-| ↩                                | Open the app or file                                  |
-| ⌘↩                               | Reveal the file in Finder                             |
-| ⌘Y                               | Preview the selected app or file with Quick Look      |
-| → at the end of the input, or ⌘K | Show actions for the selected result                  |
-| Esc, or clicking elsewhere       | Hide the panel                                        |
-| ⌘Q                               | Quit Dupin                                            |
-| ⌘,                               | Open Settings                                         |
+| Key                                   | In the panel                                          |
+| ------------------------------------- | ----------------------------------------------------- |
+| Hotkey                                | Show or hide the panel                                |
+| Type                                  | Fuzzy-search installed apps                           |
+| Space on an empty query               | Search files with Spotlight, by file and display name |
+| `in` then Space                       | Search inside files with Spotlight, as Alfred's `in`  |
+| `define` or `d`, then Space           | Look up a word in macOS dictionaries                  |
+| ⌫ on an empty query                   | Leave file, content or dictionary search              |
+| ↑ ↓                                   | Move the selection                                    |
+| Tab at the end of an unselected input | Complete the selected search keyword                  |
+| ↑ on an empty query, then ↑ ↓         | Recall searches in the current mode                   |
+| ↩                                     | Open the app or file                                  |
+| ⌘↩                                    | Reveal the file in Finder                             |
+| ⌘Y                                    | Preview the selected app or file with Quick Look      |
+| → at the end of the input, or ⌘K      | Show actions for the selected result                  |
+| Esc, or clicking elsewhere            | Hide the panel                                        |
+| ⌘Q                                    | Quit Dupin                                            |
+| ⌘,                                    | Open Settings                                         |
 
 Completed searches are remembered for the current Dupin process when you clear
 the input, hide the panel or activate a result. With an empty input, ↑ recalls the
@@ -37,6 +38,14 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 - Spotlight's alternate names and keywords: ChatGPT answers to "Codex", its former name, System Settings to "System Preferences", Safari to "browser".
 
 When an app matches through one of those other names, the name shows before its folder in the result.
+
+## Web searches
+
+Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too. Select it and press Tab to add a space before typing the query.
+
+Web searches are local URL templates: typing never sends a request to the engine. The query is encoded into the URL only when the result is built, and the browser opens only after activation. Web results are not saved in usage-ranking history; query recall behaves as it does for other app-mode searches.
+
+Set `web_searches` and optional `web_fallbacks` in [configuration](./configuration.md). Fallback searches appear only after ordinary providers finish without results. They are disabled by default. File and Dictionary modes keep their own providers.
 
 ## Files
 
