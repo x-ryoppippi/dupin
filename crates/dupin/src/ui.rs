@@ -242,7 +242,7 @@ pub struct Ui {
     pub scripts_notice: Option<String>,
     scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     runner: crate::scripts::runner::Runner,
-    _scripts_watcher: Option<dupin_mac::watcher::PathWatcher>,
+    _scripts_watcher: Option<crate::scripts::CatalogWatch>,
     pub action_screen: Option<ActionScreen>,
     next_lookup: u64,
     notice_until: Option<f64>,
