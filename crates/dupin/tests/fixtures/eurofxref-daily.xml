@@ -8,6 +8,9 @@
       <Cube currency="JPY" rate="164.45"/>
       <Cube currency="GBP" rate="0.85"/>
       <Cube currency="CAD" rate="1.45"/>
+      <Cube currency="ISK" rate="150.125"/>
+      <Cube currency="KRW" rate="1500.125"/>
+      <Cube currency="HUF" rate="400.5"/>
     </Cube>
   </Cube>
 </gesmes:Envelope>

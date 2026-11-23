@@ -135,12 +135,29 @@ fn calculate(
             .split_whitespace()
             .any(|word| matches!(word, "to" | "in" | "as"));
         let target = if explicit { code.as_str() } else { "EUR" };
-        let precision = if target == "JPY" { 0 } else { 2 };
-        let (_, number) = evaluate(
+        let precision = match target {
+            "ISK" | "JPY" | "KRW" => 0,
+            _ => 2,
+        };
+        let (_, mut number) = evaluate(
             &format!("({input}) to {target} to {precision}dp"),
             &mut context,
             budget,
         )?;
+        let (whole, fraction) = number.split_once('.').unwrap_or((&number, ""));
+        if precision > fraction.len()
+            && whole
+                .trim_start_matches('-')
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+            && fraction.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            let missing_digits = precision - fraction.len();
+            if fraction.is_empty() {
+                number.push('.');
+            }
+            number.extend(std::iter::repeat_n('0', missing_digits));
+        }
         let grouped = group_digits(&number);
         let amount = match target {
             "EUR" => format!("≈ €{grouped}"),
@@ -344,7 +361,11 @@ mod tests {
         let snapshot = currency::fixture();
         for (query, amount, number) in [
             ("100 usd to jpy", "≈ ¥14,950", "14950"),
-            ("€50 in gbp", "≈ £42.5", "42.5"),
+            ("€50 in gbp", "≈ £42.50", "42.50"),
+            ("€100 in GBP", "≈ £85.00", "85.00"),
+            ("€1 to ISK", "≈ 150 ISK", "150"),
+            ("€1 to KRW", "≈ 1,500 KRW", "1500"),
+            ("€1 to HUF", "≈ 400.50 HUF", "400.50"),
             ("¥5000 in gbp", "≈ £25.84", "25.84"),
             ("30*(60+1) usd in jpy", "≈ ¥273,585", "273585"),
             ("10 GBP", "≈ €11.76", "11.76"),
@@ -436,6 +457,12 @@ mod tests {
                 Some("37.7777777778"),
             ),
             (&local, "5 miles to feet", "26400 feet", Some("26400")),
+            (
+                &currency,
+                "€50 in gbp",
+                "≈ £42.50\nECB rate 2026-11-20",
+                Some("42.50"),
+            ),
             (
                 &currency,
                 "100 usd to jpy",
