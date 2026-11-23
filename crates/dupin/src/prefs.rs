@@ -174,7 +174,7 @@ pub struct Prefs {
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
     login: Option<LoginPreference>,
-    /// Each permission's status, in `permissions::ENTRIES` order.
+    /// Each permission's status, in `permissions::ENTRIES` order, read while the page shows.
     permissions: Vec<Access>,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
@@ -239,7 +239,7 @@ impl Prefs {
                     item,
                     error: None,
                 }),
-            permissions: permissions::read(),
+            permissions: Vec::new(),
             welcome: welcome.then_some(welcome::Step::Hotkey),
         }
     }
@@ -251,8 +251,18 @@ impl Prefs {
         }
     }
 
+    /// Settings' state is made at launch, so reading only for the page keeps EventKit
+    /// unloaded until someone looks.
     pub fn refresh_permissions(&mut self) {
-        self.permissions = permissions::read();
+        if self.welcome.is_none() && self.page == Page::Permissions {
+            self.permissions = permissions::read();
+        }
+    }
+
+    fn show(&mut self, page: Page) {
+        self.welcome = None;
+        self.page = page;
+        self.refresh_permissions();
     }
 
     fn change_login_item(&mut self, action: LoginAction) {
@@ -602,10 +612,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             .radius(k.radius.sm)
             .hover(c.hover)
             .press(c.pressed)
-            .on_press(move |s: &mut Prefs| {
-                s.welcome = None;
-                s.page = page;
-            })
+            .on_press(move |s: &mut Prefs| s.show(page))
             .child(icon(page.icon(), 16.0).color(if on { c.icon_base } else { c.icon_muted }))
             .child(
                 text(page.title())

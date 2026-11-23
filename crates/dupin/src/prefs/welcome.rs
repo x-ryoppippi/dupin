@@ -72,11 +72,8 @@ fn intro(k: &Kit, words: &str) -> El {
 }
 
 fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let review =
-        value_button(k, "welcome-permissions", "Review", &icons::SHIELD).on_press(|s: &mut Prefs| {
-            s.welcome = None;
-            s.page = Page::Permissions;
-        });
+    let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
+        .on_press(|s: &mut Prefs| s.show(Page::Permissions));
     vec![
         intro(
             k,
@@ -172,10 +169,7 @@ fn or_list(words: &[String]) -> String {
 
 /// Skip, the step count, Back and Continue (Done on the last step).
 pub(super) fn footer(k: &Kit, step: Step) -> El {
-    let finish = |s: &mut Prefs| {
-        s.welcome = None;
-        s.page = Page::General;
-    };
+    let finish = |s: &mut Prefs| s.show(Page::General);
     let skip = Button::new("Skip")
         .variant(ButtonVariant::Ghost)
         .on_press(finish)

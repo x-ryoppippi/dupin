@@ -27,8 +27,8 @@ pub(super) const ENTRIES: &[Entry] = &[
     },
 ];
 
-/// Status reads are cheap and never prompt, so Settings rereads them whenever it gains focus,
-/// such as on returning from System Settings.
+/// Status reads are cheap and never prompt, so the page rereads them whenever Settings gains
+/// focus, such as on returning from System Settings.
 pub(super) fn read() -> Vec<Access> {
     ENTRIES.iter().map(|entry| entry.permission.status()).collect()
 }
