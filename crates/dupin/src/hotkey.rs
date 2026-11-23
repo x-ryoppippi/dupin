@@ -9,6 +9,7 @@
 
 use std::sync::Mutex;
 
+use dupin_mac::system_hotkey;
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
@@ -17,9 +18,24 @@ use crate::ui::Ui;
 /// the settings window (which replaces it).
 pub struct Binding {
     panel: AppHandle<Ui>,
-    registration: Mutex<Option<Registration>>,
-    /// Whether the launch registration failed, so recording the same chord again retries it.
-    failed: Mutex<bool>,
+    state: Mutex<State>,
+}
+
+#[derive(Default)]
+struct State {
+    registration: Option<Registration>,
+    launch_failure: Option<LaunchFailure>,
+}
+
+struct LaunchFailure {
+    shortcut: Option<Shortcut>,
+    problem: LaunchProblem,
+}
+
+#[derive(Clone)]
+pub enum LaunchProblem {
+    Occupied(String),
+    Registration(ShortcutError),
 }
 
 struct Registration {
@@ -31,13 +47,24 @@ impl Binding {
     pub fn new(panel: AppHandle<Ui>) -> Binding {
         Binding {
             panel,
-            registration: Mutex::new(None),
-            failed: Mutex::new(false),
+            state: Mutex::default(),
         }
     }
 
-    pub fn failed_at_launch(&self) -> bool {
-        *self.failed.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn launch_problem(&self, shortcut: Option<&Shortcut>) -> Option<LaunchProblem> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let failure = state.launch_failure.as_ref()?;
+        (failure.shortcut.as_ref() == shortcut).then(|| failure.problem.clone())
+    }
+
+    pub fn refresh_launch_conflict(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let installed = state.shortcut().cloned();
+        refresh_system_conflict(
+            &mut state.launch_failure,
+            installed.as_ref(),
+            system_hotkey::owner,
+        )
     }
 
     /// Register the configured hotkey at launch, reporting any failure. Without `announce`,
@@ -47,38 +74,57 @@ impl Binding {
         let shortcut = match parse(accelerator) {
             Ok(Some(shortcut)) => shortcut,
             Ok(None) => return,
-            Err(e) => return self.report(accelerator, &e.to_string(), announce),
+            Err(e) => return self.report(accelerator, None, LaunchProblem::Registration(e), announce),
         };
         // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
         // (Spotlight's ⌘Space) take the key first without making registration fail, so ask who
         // holds it beforehand. Register anyway: freeing the chord later then works without a
         // restart.
-        if let Some(owner) = self.panel.shortcut_owner(&shortcut) {
-            self.report(accelerator, &format!("{owner} already uses it"), announce);
-        }
+        let owner = self.panel.shortcut_owner(&shortcut);
         match self
             .panel
             .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
         {
             Ok(id) => {
-                *self.registration.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(Registration { id, shortcut });
+                self.state.lock().unwrap_or_else(|e| e.into_inner()).registration = Some(Registration {
+                    id,
+                    shortcut: shortcut.clone(),
+                });
                 crate::trace::registered(accelerator);
+                if let Some(owner) = owner {
+                    self.report(
+                        accelerator,
+                        Some(shortcut),
+                        LaunchProblem::Occupied(owner),
+                        announce,
+                    );
+                }
             }
-            Err(e) => self.report(accelerator, &self.why(&shortcut, &e), announce),
+            Err(e) => {
+                let problem = if e == ShortcutError::Conflict {
+                    owner
+                        .or_else(|| self.panel.shortcut_owner(&shortcut))
+                        .map_or(LaunchProblem::Registration(e), LaunchProblem::Occupied)
+                } else {
+                    LaunchProblem::Registration(e)
+                };
+                self.report(accelerator, Some(shortcut), problem, announce);
+            }
         }
     }
 
     /// Swap the hotkey for `next` (none: no hotkey), as the settings window records it. A
     /// chord macOS or another app holds is refused and the old binding stays.
     pub fn replace(&self, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(next) = next
-            && self
-                .panel
-                .shortcut_owner(next)
-                .is_some_and(|owner| owner != "Dupin")
+            && self.external_owner(&state, next).is_some()
         {
             return Err(ShortcutError::Conflict);
+        }
+        if state.shortcut() == next {
+            state.launch_failure = None;
+            return Ok(());
         }
         let new = next
             .map(|shortcut| {
@@ -86,8 +132,7 @@ impl Binding {
                     .register_shortcut(shortcut.clone(), |s: &mut Ui, tx| s.toggle(tx))
             })
             .transpose()?;
-        let mut registration = self.registration.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = registration.as_ref()
+        if let Some(old) = &state.registration
             && let Err(error) = self.panel.unregister_shortcut(old.id)
         {
             if let Some(new) = new {
@@ -95,30 +140,42 @@ impl Binding {
             }
             return Err(error);
         }
-        *registration = new.zip(next).map(|(id, shortcut)| Registration {
+        state.registration = new.zip(next).map(|(id, shortcut)| Registration {
             id,
             shortcut: shortcut.clone(),
         });
-        *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        state.launch_failure = None;
         Ok(())
     }
 
     pub fn is_installed(&self, shortcut: Option<&Shortcut>) -> bool {
-        self.registration
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|registration| &registration.shortcut)
-            == shortcut
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).shortcut() == shortcut
     }
 
     /// Who holds `shortcut`, for a refusal message.
     pub fn owner(&self, shortcut: &Shortcut) -> Option<String> {
-        self.panel.shortcut_owner(shortcut)
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        self.external_owner(&state, shortcut)
     }
 
-    fn report(&self, accelerator: &str, reason: &str, announce: bool) {
-        *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    fn external_owner(&self, state: &State, shortcut: &Shortcut) -> Option<String> {
+        if state.shortcut() == Some(shortcut) {
+            system_hotkey::owner(shortcut).map(str::to_owned)
+        } else {
+            self.panel.shortcut_owner(shortcut)
+        }
+    }
+
+    fn report(&self, accelerator: &str, shortcut: Option<Shortcut>, problem: LaunchProblem, announce: bool) {
+        let reason = match &problem {
+            LaunchProblem::Occupied(owner) => format!("{owner} already uses it"),
+            LaunchProblem::Registration(ShortcutError::Conflict) => "another app already uses it".into(),
+            LaunchProblem::Registration(error) => error.to_string(),
+        };
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .launch_failure = Some(LaunchFailure { shortcut, problem });
         let message = format!(
             "Couldn't register the {} hotkey: {reason}. Free it in the app that holds it, or pick another in Settings (⌘,).",
             keycaps(accelerator)
@@ -130,13 +187,37 @@ impl Binding {
         notify(&message);
         self.panel.update(move |s, tx| s.show_notice(message, tx));
     }
+}
 
-    fn why(&self, shortcut: &Shortcut, error: &ShortcutError) -> String {
-        match (error, self.panel.shortcut_owner(shortcut)) {
-            (ShortcutError::Conflict, Some(owner)) => format!("{owner} already uses it"),
-            (ShortcutError::Conflict, None) => "another app already uses it".to_owned(),
-            (e, _) => e.to_string(),
-        }
+impl State {
+    fn shortcut(&self) -> Option<&Shortcut> {
+        self.registration
+            .as_ref()
+            .map(|registration| &registration.shortcut)
+    }
+}
+
+fn refresh_system_conflict(
+    failure: &mut Option<LaunchFailure>,
+    installed: Option<&Shortcut>,
+    owner_at: impl FnOnce(&Shortcut) -> Option<&'static str>,
+) -> bool {
+    let Some(LaunchFailure {
+        shortcut: Some(shortcut),
+        problem: LaunchProblem::Occupied(owner),
+    }) = failure
+    else {
+        return false;
+    };
+    if Some(&*shortcut) != installed {
+        return false;
+    }
+    if let Some(current_owner) = owner_at(shortcut) {
+        *owner = current_owner.to_owned();
+        false
+    } else {
+        *failure = None;
+        true
     }
 }
 
@@ -177,6 +258,34 @@ pub fn keycaps(accelerator: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn releasing_a_system_reservation_clears_the_warning_for_an_installed_chord() {
+        use super::{LaunchFailure, LaunchProblem, refresh_system_conflict};
+
+        let shortcut: rune::Shortcut = "cmd+space".parse().unwrap();
+        let mut failure = Some(LaunchFailure {
+            shortcut: Some(shortcut.clone()),
+            problem: LaunchProblem::Occupied("Spotlight".into()),
+        });
+
+        assert!(!refresh_system_conflict(&mut failure, None, |_| panic!(
+            "no registration"
+        )));
+        assert!(!refresh_system_conflict(
+            &mut failure,
+            Some(&shortcut),
+            |installed| {
+                assert_eq!(installed, &shortcut);
+                Some("macOS")
+            }
+        ));
+        assert!(
+            matches!(&failure, Some(LaunchFailure { problem: LaunchProblem::Occupied(owner), .. }) if owner == "macOS")
+        );
+        assert!(refresh_system_conflict(&mut failure, Some(&shortcut), |_| None));
+        assert!(failure.is_none());
+    }
+
     #[test]
     fn an_empty_hotkey_disables_registration() {
         assert_eq!(super::parse(""), Ok(None));

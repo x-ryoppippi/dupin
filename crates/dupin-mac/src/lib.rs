@@ -14,6 +14,7 @@ pub mod privacy;
 pub mod quick_look;
 mod settings_search;
 pub mod spotlight;
+pub mod system_hotkey;
 pub mod watcher;
 pub mod window;
 pub mod workspace;

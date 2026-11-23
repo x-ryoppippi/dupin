@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+rune = { workspace = true }
 objc2 = { workspace = true }
 block2 = "0.6"
 objc2-foundation = { workspace = true, features = [
@@ -55,8 +56,10 @@ objc2-service-management = { workspace = true, features = [
 
 objc2-core-foundation = { workspace = true, features = [
 	"std",
+	"CFArray",
 	"CFDictionary",
 	"CFNumber",
+	"CFPreferences",
 	"CFString",
 	"CFURL",
 ] }

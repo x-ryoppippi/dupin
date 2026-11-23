@@ -214,7 +214,7 @@ impl Prefs {
     ) -> Prefs {
         let config = current.borrow().clone();
         let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
-        if binding.failed_at_launch() {
+        if binding.launch_problem(recorder.shortcut()).is_some() {
             recorder.mark_unregistered();
         }
         let active_radius = config.theme.corner_radius;
@@ -304,19 +304,28 @@ impl Prefs {
             self.recorder = ShortcutRecorderState::new(shortcut);
             self.owner = None;
         }
-        if self.binding.failed_at_launch() {
-            self.recorder.mark_unregistered();
-        }
+        self.reflect_launch_hotkey();
         self.config = config;
     }
 
     /// The panel registers the hotkey after this state is made, so it reports a failure here.
-    pub fn hotkey_failed_at_launch(&mut self) {
-        self.recorder.mark_unregistered();
-        self.owner = self
-            .recorder
-            .shortcut()
-            .and_then(|shortcut| self.binding.owner(shortcut));
+    pub fn reflect_launch_hotkey(&mut self) {
+        if self.binding.launch_problem(self.recorder.shortcut()).is_some() {
+            self.recorder.mark_unregistered();
+        }
+    }
+
+    pub fn refresh_hotkey(&mut self) {
+        let restored = self.binding.refresh_launch_conflict();
+        if let Some(refused) = self.recorder.refused()
+            && Some(refused) == self.recorder.shortcut()
+            && self.recorder.error() == Some(&ShortcutError::Conflict)
+        {
+            self.owner = self.binding.owner(refused);
+            if restored {
+                self.recorder.cancel();
+            }
+        }
     }
 
     fn set_problem(&mut self, problem: Option<String>) {
@@ -745,8 +754,10 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
 /// The hotkey's row, on General and in the welcome.
 fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
     let owner = s.owner.clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| match (chord, &owner) {
-        (Some(chord), Some(owner)) => format!("{} is used by {owner}.", chord.keycaps().join("")),
+    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| match (error, chord, &owner) {
+        (ShortcutError::Conflict, Some(chord), Some(owner)) => {
+            format!("{} is used by {owner}.", chord.keycaps().join(""))
+        }
         _ => shortcut_error_message(error, chord),
     };
     let hotkey = ShortcutRecorder::new("hotkey", &s.recorder, |s: &mut Prefs| &mut s.recorder)
@@ -756,12 +767,13 @@ fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
         .error_message(refusal)
         .disabled(s.read_only)
         .build(k);
-    let detail = match (s.binding.failed_at_launch(), s.recorder.shortcut(), &s.owner) {
-        (true, Some(chord), Some(owner)) => format!(
+    let shortcut = s.recorder.shortcut();
+    let detail = match (s.binding.launch_problem(shortcut), shortcut) {
+        (Some(crate::hotkey::LaunchProblem::Occupied(owner)), Some(chord)) => format!(
             "{owner} already uses {}, so choose another or free it there",
             chord.keycaps().join("")
         ),
-        (true, Some(chord), None) => format!(
+        (Some(crate::hotkey::LaunchProblem::Registration(_)), Some(chord)) => format!(
             "Dupin couldn't register {}, so choose another",
             chord.keycaps().join("")
         ),

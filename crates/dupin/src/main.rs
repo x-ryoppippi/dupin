@@ -95,6 +95,7 @@ fn main() {
         if focused {
             s.refresh_login_item();
             s.refresh_permissions();
+            s.refresh_hotkey();
         }
         trace::settings(if focused { "focused" } else { "unfocused" });
     })
@@ -178,9 +179,7 @@ fn main() {
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
                 binding.register_at_launch(&hotkey, !welcome);
-                if binding.failed_at_launch() {
-                    settings_window.update(|s, _| s.hotkey_failed_at_launch());
-                }
+                settings_window.update(|s, _| s.reflect_launch_hotkey());
                 settings.activate();
             }
         })
