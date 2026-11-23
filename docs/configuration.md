@@ -27,7 +27,7 @@ Choose **Relaunch** in Settings → General to restart Dupin. File edits reload 
 
 ## Launch at login
 
-In Settings → General, choose **Enable** or **Disable** under **Launch at login**. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
+In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
 
 ## Web searches
 
