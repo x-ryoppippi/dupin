@@ -1,4 +1,5 @@
 use dupin_core::Config;
+use dupin_core::script::OutputMode;
 use rune::Tx;
 
 use super::Ui;
@@ -54,8 +55,6 @@ impl Ui {
     }
 
     fn run_hotkey_script(&mut self, name: &str, args: Vec<String>, tx: &mut Tx) {
-        use dupin_core::script::OutputMode;
-
         let command = self
             .scripts
             .read()
@@ -73,6 +72,7 @@ impl Ui {
         let start = self.runner.start(command);
         let visible = self.me.is_visible();
         let picker = self.restore_picker();
+        let picker_original_shown = picker.as_ref().map(|_| self.shown);
         if mode == OutputMode::Inline {
             self.action_screen = None;
             self.script_entry = None;
@@ -81,8 +81,10 @@ impl Ui {
             }
         }
         self.present_script(mode, start, tx);
-        if mode != OutputMode::Inline && visible {
-            self.dismiss(tx);
+        match panel_close_after_script(mode, visible, picker_original_shown) {
+            Some(PanelClose::Hide) => self.hide(tx),
+            Some(PanelClose::Dismiss) => self.dismiss(tx),
+            None => {}
         }
         if let Some(picker) = picker {
             picker.finish(Err("Cancelled".into()));
@@ -117,4 +119,47 @@ impl Ui {
             }
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PanelClose {
+    Hide,
+    Dismiss,
+}
+
+fn panel_close_after_script(
+    mode: OutputMode,
+    visible: bool,
+    picker_original_shown: Option<bool>,
+) -> Option<PanelClose> {
+    if mode == OutputMode::Inline || !visible {
+        return None;
+    }
+    Some(match picker_original_shown {
+        Some(false) => PanelClose::Hide,
+        _ => PanelClose::Dismiss,
+    })
+}
+
+#[test]
+fn non_inline_script_closes_a_picker_opened_over_a_hidden_panel() {
+    for mode in [OutputMode::Full, OutputMode::Silent] {
+        assert_eq!(
+            panel_close_after_script(mode, true, Some(false)),
+            Some(PanelClose::Hide)
+        );
+        assert_eq!(
+            panel_close_after_script(mode, true, Some(true)),
+            Some(PanelClose::Dismiss)
+        );
+        assert_eq!(
+            panel_close_after_script(mode, true, None),
+            Some(PanelClose::Dismiss)
+        );
+        assert_eq!(panel_close_after_script(mode, false, None), None);
+    }
+    assert_eq!(
+        panel_close_after_script(OutputMode::Inline, true, Some(false)),
+        None
+    );
 }
