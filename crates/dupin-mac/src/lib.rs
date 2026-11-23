@@ -4,6 +4,7 @@
 pub mod apps;
 pub mod bundle;
 mod bundle_names;
+mod calendar;
 pub mod dictionary;
 mod file_actions;
 pub mod font;
@@ -17,6 +18,7 @@ pub mod window;
 pub mod workspace;
 
 pub use apps::{AppsProvider, AppsWatcher};
+pub use calendar::CalendarProvider;
 pub use dictionary::DictionaryProvider;
 pub use recent::RecentProvider;
 pub use settings_search::SettingsProvider;

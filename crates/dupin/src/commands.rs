@@ -4,12 +4,15 @@ use std::sync::{Arc, RwLock};
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
 };
-use dupin_mac::{AppsProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target};
+use dupin_mac::{
+    AppsProvider, CalendarProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target,
+};
 
 pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+pub const CALENDAR: &str = "calendar.events";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -79,7 +82,10 @@ fn presentation(
     }
 }
 
-pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::CommandError> {
+pub fn configured(
+    config: &Config,
+    calendar_fixtures: bool,
+) -> Result<ConfiguredCommands, dupin_core::CommandError> {
     let file_limit = config.file_limit.min(MAX_FILE_CANDIDATES);
     let apps_id = id(APPS);
     let files_id = id(FILES);
@@ -167,6 +173,25 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.add_keyword(&contents_id, "in")?;
+    if config.calendar_enabled || calendar_fixtures {
+        let calendar = id(CALENDAR);
+        let mut spec = CommandSpec::new(
+            calendar.clone(),
+            30,
+            presentation(
+                "Search calendar events",
+                Some("Calendar"),
+                Some("No upcoming events"),
+                Some("No matching events"),
+                true,
+                0.0,
+            ),
+        )
+        .with_query_eligibility(QueryEligibility::Any);
+        spec.private_results = true;
+        registry.register(spec)?;
+        registry.add_keyword(&calendar, "cal")?;
+    }
     let mut rejected = Vec::new();
     for keyword in &config.dictionary_keywords {
         if let Err(error) = registry.add_keyword(&dictionary_id, keyword) {
@@ -195,12 +220,14 @@ pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
     history: Arc<RwLock<History>>,
+    calendar_fixtures: bool,
+    calendar: CalendarProvider,
 ) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
         web,
-    } = configured(config)?;
+    } = configured(config, calendar_fixtures)?;
     let web = Arc::new(RwLock::new(web));
     let apps_id = id(APPS);
     let files_id = id(FILES);
@@ -213,6 +240,7 @@ pub fn register(
             recent_id(),
             Arc::new(RecentProvider::new(apps, history)) as Arc<dyn Provider>,
         ),
+        (id(CALENDAR), Arc::new(calendar) as Arc<dyn Provider>),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -261,7 +289,8 @@ mod tests {
         use dupin_core::{Effect, Session};
 
         let mut config = Config::default();
-        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
+        let mut session =
+            Session::new(History::default(), configured(&config, false).unwrap().registry).unwrap();
         assert!(matches!(
             session.refresh().as_slice(),
             [Effect::Search { command, query, .. }] if *command == recent_id() && query.is_empty()
@@ -269,17 +298,73 @@ mod tests {
 
         config.show_recent = false;
         session
-            .set_commands(configured(&config).unwrap().registry)
+            .set_commands(configured(&config, false).unwrap().registry)
             .unwrap();
         assert_eq!(session.refresh(), [Effect::CancelSearch]);
         assert!(session.items().is_empty());
     }
 
     #[test]
+    fn calendar_queries_use_an_opt_in_explicit_route_with_upcoming_results() {
+        use dupin_core::{Action, Delivery, Effect, Intent, Request, Session};
+
+        let base = configured(&Config::default(), false).unwrap();
+        assert!(base.registry.keyword("cal").is_none());
+        let enabled = Config::parse("calendar_enabled = true").unwrap();
+        let mut session =
+            Session::new(History::default(), configured(&enabled, false).unwrap().registry).unwrap();
+        let calendar = id(CALENDAR);
+        let ordinary = session.set_query("cal");
+        assert!(
+            !ordinary
+                .iter()
+                .any(|effect| matches!(effect, Effect::Search { command, .. } if command == &calendar))
+        );
+
+        let effects = session.intent(Intent::Space).unwrap();
+        let [
+            Effect::ClearQuery,
+            Effect::Search {
+                command,
+                generation,
+                query,
+            },
+        ] = effects.as_slice()
+        else {
+            panic!("calendar mode should search immediately");
+        };
+        assert_eq!(command, &calendar);
+        assert!(query.is_empty());
+        let generation = *generation;
+        let mut rows = Vec::new();
+        CalendarProvider::fixtures()
+            .search(&Request::detached(query, 30), &mut |batch| rows.extend(batch))
+            .unwrap();
+        session.deliver_from(
+            calendar.clone(),
+            Delivery::Batch {
+                generation,
+                items: rows,
+            },
+        );
+        session.deliver_from(calendar.clone(), Delivery::Done { generation });
+        assert_eq!(session.items().len(), 3);
+        assert!(session.capture().is_err());
+        session.intent(Intent::Up).unwrap();
+        assert_eq!(session.selected_item().unwrap().display_title(), "Out of office");
+        let effects = session.intent(Intent::Open).unwrap();
+        assert!(effects.iter().any(
+            |effect| matches!(effect, Effect::Run(Action::OpenUrl(url)) if url.starts_with("ical://ekevent/"))
+        ));
+        assert!(!effects.contains(&Effect::SaveHistory));
+        assert!(!session.deliver_from(calendar, Delivery::Done { generation }));
+    }
+
+    #[test]
     fn web_results_use_the_registered_session_action_and_completion_paths() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
 
-        let configured = configured(&Config::default()).unwrap();
+        let configured = configured(&Config::default(), false).unwrap();
         let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         let effects = session.set_query("g");
@@ -338,7 +423,7 @@ mod tests {
             ..Config::default()
         };
 
-        let configured = configured(&config).unwrap();
+        let configured = configured(&config, false).unwrap();
         let dictionary = id(DICTIONARY);
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
         assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
@@ -375,7 +460,7 @@ mod tests {
                 file_limit: requested,
                 ..Config::default()
             };
-            let configured = configured(&config).unwrap();
+            let configured = configured(&config, false).unwrap();
             let session =
                 dupin_core::Session::new(dupin_core::History::default(), configured.registry).unwrap();
             let names = session.provider_spec(&id(FILES)).unwrap();

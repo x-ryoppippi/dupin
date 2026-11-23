@@ -391,8 +391,28 @@ impl Ui {
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let recent_history = Arc::new(RwLock::new(history.clone()));
-        let registration = crate::commands::register(&config, apps_provider.clone(), recent_history.clone())
-            .expect("built-in command registration is valid");
+        let headless = rune::tooling::is_headless();
+        let calendar = if headless {
+            dupin_mac::CalendarProvider::fixtures()
+        } else {
+            let panel = me.clone();
+            dupin_mac::CalendarProvider::new(move || {
+                panel.update(|ui, tx| {
+                    if ui.session.command_id().as_str() == crate::commands::CALENDAR {
+                        let effects = ui.session.refresh();
+                        ui.apply(effects, tx);
+                    }
+                });
+            })
+        };
+        let registration = crate::commands::register(
+            &config,
+            apps_provider.clone(),
+            recent_history.clone(),
+            headless,
+            calendar,
+        )
+        .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_apps(tx))
@@ -491,8 +511,8 @@ impl Ui {
             }
             changed
         };
-        let registration =
-            crate::commands::configured(config).expect("built-in command registration is valid");
+        let registration = crate::commands::configured(config, rune::tooling::is_headless())
+            .expect("built-in command registration is valid");
         let web_changed = {
             let mut web = self.web.write().unwrap();
             let changed = *web != registration.web;
@@ -500,6 +520,16 @@ impl Ui {
             changed
         };
         let sources = registration.registry.ids();
+        if !sources.iter().any(|id| id == self.session.command_id().as_str()) {
+            let effects = self.session.reset();
+            self.apply(effects, tx);
+            self.action_screen = None;
+            if let Some(picker) = &mut self.picker {
+                picker.original.clear();
+            } else {
+                self.query.clear();
+            }
+        }
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let recent_changed = config.show_recent
             != self
@@ -782,9 +812,11 @@ impl Ui {
             return;
         }
         self.action_screen = None;
-        crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
         let effects = self.session.set_query(&self.query.text);
+        if !self.session.command().private_results {
+            crate::trace::edited(&self.query.text);
+        }
         self.apply(effects, tx);
     }
 
@@ -886,7 +918,9 @@ impl Ui {
             self.dismiss(tx);
             return true;
         }
-        crate::trace::key(ev);
+        if !self.session.command().private_results {
+            crate::trace::key(ev);
+        }
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
         }
@@ -1165,7 +1199,9 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
-            if self.session.results() == dupin_core::session::Results::Done {
+            if self.session.results() == dupin_core::session::Results::Done
+                && !self.session.command().private_results
+            {
                 crate::trace::results_done(&self.query.text, self.session.items().len());
             }
             if self
@@ -1389,7 +1425,10 @@ impl Ui {
                 }
                 let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
                 changed |= delivered;
-                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                if delivered
+                    && self.session.results() == dupin_core::session::Results::Done
+                    && !self.session.command().private_results
+                {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
             }
@@ -1519,7 +1558,7 @@ mod config_tests {
         let base = Config::default();
         let mut session = Session::new(
             History::default(),
-            crate::commands::configured(&base).unwrap().registry,
+            crate::commands::configured(&base, false).unwrap().registry,
         )
         .unwrap();
         let effects = session.set_query("example");
@@ -1541,7 +1580,7 @@ mod config_tests {
         themed.theme.row_height = 100;
         themed.theme.light.accent = Some("#123456".into());
         session
-            .set_commands(crate::commands::configured(&themed).unwrap().registry)
+            .set_commands(crate::commands::configured(&themed, false).unwrap().registry)
             .unwrap();
         assert_eq!(
             (

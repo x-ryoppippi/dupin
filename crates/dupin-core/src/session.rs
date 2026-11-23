@@ -173,6 +173,9 @@ impl Session {
 
     /// Capture only settled content belonging to the current search generation.
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
+        if self.command().private_results {
+            return Err("This search cannot be saved as a snapshot.".into());
+        }
         if self.results != Results::Done || self.items.is_empty() {
             return Err("Wait for the current search to finish before saving.".into());
         }
@@ -199,7 +202,11 @@ impl Session {
     pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
         saved.validate()?;
         let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
-        if !self.commands.contains(&command) {
+        if self
+            .commands
+            .command(&command)
+            .is_none_or(|spec| spec.private_results)
+        {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
         self.clear_results();
@@ -326,8 +333,6 @@ impl Session {
         {
             self.deleting = false;
             self.before_deletion = None;
-            self.items.clear();
-            self.selected = 0;
             self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
             effects.extend(self.switch(command, true));
@@ -745,6 +750,9 @@ impl Session {
     }
 
     fn record_query(&mut self, query: String) {
+        if self.command().private_results {
+            return;
+        }
         let previous = self
             .queries
             .iter()

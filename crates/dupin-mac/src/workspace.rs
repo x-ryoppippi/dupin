@@ -113,6 +113,20 @@ pub fn applications_for(path: &Path) -> Result<Vec<Application>, String> {
 }
 
 /// Open a URL with its registered handler.
+pub(crate) fn encode_url_component(value: &str) -> String {
+    use std::fmt::Write;
+
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            write!(encoded, "%{byte:02X}").expect("writing to a String cannot fail");
+        }
+    }
+    encoded
+}
+
 fn open_url(value: &str) -> bool {
     let Some(url) = NSURL::URLWithString(&NSString::from_str(value)) else {
         return false;
