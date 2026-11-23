@@ -2,15 +2,21 @@
 //! press Space first to search files with Spotlight.
 
 mod backdrop;
+mod calculator;
 mod catalog_watch;
 mod cli;
+mod clipboard;
 mod commands;
 mod control;
 mod extensions;
 mod hotkey;
+mod http;
 mod icons;
 mod log;
+mod mcp;
 mod prefs;
+mod receivers;
+mod scripts;
 mod settings;
 mod shader;
 mod snapshots;
@@ -19,7 +25,9 @@ mod trace;
 mod ui;
 mod update;
 mod view;
+mod wall_clock;
 mod web;
+mod window_management;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,7 +44,15 @@ fn main() {
     if cli::run() {
         return;
     }
-    rune::prewarm_gpu();
+    let headless = rune::tooling::is_headless();
+    if !headless {
+        std::thread::spawn(|| {
+            if let Err(error) = dupin_mac::file_ops::FileTransfers::default().recover_abandoned_copies() {
+                log::warn(&format!("couldn't clean up abandoned copies: {error}"));
+            }
+        });
+        rune::prewarm_gpu();
+    }
     let (config, config_problem) = settings::load();
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
@@ -70,7 +86,7 @@ fn main() {
         .srgb_blend(true)
         .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
-    let _control = if rune::tooling::is_headless() {
+    let _control = if headless {
         None
     } else {
         let panel = handle.clone();
@@ -93,7 +109,12 @@ fn main() {
     .windowless()
     .on_window(|_| trace::settings("created"))
     .on_ready(|_| trace::settings("ready"))
-    .on_focus(|_, focused, _| {
+    .on_focus(|s, focused, _| {
+        if focused {
+            s.refresh_login_item();
+            s.refresh_permissions();
+            s.refresh_hotkey();
+        }
         trace::settings(if focused { "focused" } else { "unfocused" });
     })
     .on_close(prefs::Prefs::closed);
@@ -119,12 +140,32 @@ fn main() {
         let running = running.clone();
         move || snapshots::Snapshots::new(panel, me, running)
     });
+    let scripts = App::new(AppSpec {
+        fonts,
+        families: FAMILIES,
+        on_key: Some(scripts::output::Output::key),
+        ..AppSpec::new(
+            "Dupin Script Output",
+            (900.0, 600.0),
+            || unreachable!(),
+            scripts::output::view,
+        )
+    })
+    .windowless()
+    .srgb_blend(true)
+    .on_close(scripts::output::Output::closed);
+    let scripts_handle = scripts.handle();
+    let scripts = scripts.init({
+        let panel = handle.clone();
+        move || scripts::output::Output::new(panel)
+    });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
     }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));
+    let welcome = prefs::welcome::first_run();
     let prefs = prefs.init({
         let (config, binding, panel, updater, settings) = (
             current_config.clone(),
@@ -133,10 +174,13 @@ fn main() {
             updater.clone(),
             settings.clone(),
         );
-        move || prefs::Prefs::new(config, binding, panel, updater, settings)
+        move || prefs::Prefs::new(config, binding, panel, updater, settings, welcome)
     });
+    if welcome {
+        prefs_handle.open();
+    }
 
-    let hotkey = config.hotkey.clone();
+    let settings_window = prefs_handle.clone();
     let radius = config.theme.corner_radius as f32;
     let mut registered = false;
     let quick_look = Rc::new(RefCell::new(None));
@@ -155,6 +199,7 @@ fn main() {
                         panel: handle,
                         prefs: prefs_handle,
                         snapshots: snapshots_handle,
+                        scripts: scripts_handle,
                     },
                     updater,
                     configuration,
@@ -167,20 +212,20 @@ fn main() {
         })
         .on_ready(move |window| {
             appear_instantly(window);
+            let panel = window.clone();
+            handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
-                binding.register_at_launch(&hotkey);
+                binding.register_at_launch(&config, !welcome);
+                settings_window.update(|s, _| s.reflect_launch_hotkey());
                 settings.activate();
             }
         })
         .on_frame_encoded(trace::frame)
+        .on_quit(ui::Ui::stop_child_processes)
         .on_close(ui::Ui::closed)
-        .on_focus(|s, focused, tx| {
-            if !focused && !s.preview_focus_is_active() {
-                s.dismiss(tx);
-            }
-        });
+        .on_focus(ui::Ui::focus_changed);
 
     rune::run_windows(move |_| {
         // AppKit rounds the panel and its shadow; the view also clips, for headless renders.
@@ -200,7 +245,13 @@ fn main() {
                 ..Default::default()
             })
             .into();
-        [panel, prefs, snapshots]
+        let scripts: rune::AnyWindowSpec = WindowSpec::from_app("scripts", scripts)
+            .options(WindowOptions {
+                min_size: Some((720.0, 420.0)),
+                ..Default::default()
+            })
+            .into();
+        [panel, prefs, snapshots, scripts]
     });
 }
 

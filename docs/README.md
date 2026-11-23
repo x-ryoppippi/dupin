@@ -1,6 +1,7 @@
 # Documentation
 
 - [Using Dupin](./usage.md): keys, app search, file and content search
+- [MCP server](./mcp.md): `dupin mcp`, for agents such as Claude Code
 - [Configuration](./configuration.md): `config.toml`, the home-manager module, the hotkey and what happens when it's taken
 - [Development](./development.md): building, dependency builds, formatting, headless renders, peak memory
 - [Extensions](./extensions.md): writing and installing Wasm extensions, and their limits

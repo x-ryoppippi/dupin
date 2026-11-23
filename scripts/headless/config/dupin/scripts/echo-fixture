@@ -1,0 +1,6 @@
+#!/bin/sh
+# @dupin.title Dupin fixture echo
+# @dupin.argument message
+# @dupin.argument notes...
+# @dupin.output inline
+printf '%s\n' "$@"

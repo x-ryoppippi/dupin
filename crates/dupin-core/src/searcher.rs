@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use std::path::PathBuf;
 use std::thread;
 
 use crate::{Item, Page, Provider, Request};
@@ -27,6 +28,7 @@ impl Delivery {
 
 struct Job {
     query: String,
+    folder: Option<PathBuf>,
     page: Option<Page>,
     limit: usize,
     generation: u64,
@@ -69,11 +71,19 @@ impl Searcher {
     }
 
     /// Start a search for `generation` (above 0), superseding any other.
-    pub fn search(&self, generation: u64, query: String, page: Option<Page>, limit: usize) {
+    pub fn search(
+        &self,
+        generation: u64,
+        query: String,
+        folder: Option<PathBuf>,
+        page: Option<Page>,
+        limit: usize,
+    ) {
         debug_assert_ne!(generation, NONE);
         self.current.store(generation, Ordering::Release);
         self.jobs.0.lock().unwrap().job = Some(Job {
             query,
+            folder,
             page,
             limit,
             generation,
@@ -116,7 +126,14 @@ fn run(
         if !is_current(job.generation) {
             continue;
         }
-        let request = Request::new(job.query, job.page, job.limit, job.generation, current.clone());
+        let request = Request::new(
+            job.query,
+            job.folder,
+            job.page,
+            job.limit,
+            job.generation,
+            current.clone(),
+        );
         let generation = job.generation;
         let mut remaining = job.limit;
         let outcome = provider.search(&request, &mut |mut items| {
@@ -174,8 +191,8 @@ mod tests {
             gate: Mutex::new(Some(gate)),
         });
         let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
-        searcher.search(1, "slow".into(), None, 10);
-        searcher.search(2, "fast".into(), None, 10);
+        searcher.search(1, "slow".into(), None, None, 10);
+        searcher.search(2, "fast".into(), None, None, 10);
         open_gate.send(()).unwrap();
         let mut got = Vec::new();
         loop {
@@ -203,7 +220,7 @@ mod tests {
             gate: Mutex::new(Some(gate)),
         });
         let searcher = Searcher::spawn("test", provider, move |d| tx.send(d).unwrap());
-        searcher.search(1, "slow".into(), None, 10);
+        searcher.search(1, "slow".into(), None, None, 10);
         searcher.cancel();
         open_gate.send(()).unwrap();
         assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());

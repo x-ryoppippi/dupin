@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Duration;
 
 /// Watches filesystem roots and calls `changed` after their events settle.
 ///
@@ -14,53 +17,89 @@ pub struct PathWatcher {
     started: bool,
 }
 
+#[derive(Clone, Copy)]
+enum Scope {
+    Recursive,
+    Tree,
+    Directory,
+    Entries,
+}
+
 // SAFETY: the stream delivers only on its serial queue, and Drop drains that queue.
 unsafe impl Send for PathWatcher {}
 
 impl PathWatcher {
     pub(crate) fn start(
         roots: Vec<PathBuf>,
+        extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(Vec::new(), roots, false, move |_| changed())
-    }
-
-    /// Watches directory entries without forwarding descendant events. The callback receives
-    /// `true` when a watched root moved and the stream must be rebuilt.
-    pub fn start_shallow(
-        roots: Vec<PathBuf>,
-        changed: impl Fn(bool) + Send + Sync + 'static,
-    ) -> Result<Self, &'static str> {
-        Self::start_scoped(roots, Vec::new(), changed)
+        let roots = roots.into_iter().map(|path| (path, Scope::Recursive)).collect();
+        Self::start_with_scope(roots, extra_paths, move |_| changed())
     }
 
     /// Watches shallow directory entries and recursive trees in one stream. The callback
-    /// receives `true` when a watched root moved and the stream must be rebuilt.
+    /// receives `true` when a watched root changes identity.
     pub fn start_scoped(
         shallow: Vec<PathBuf>,
         recursive: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(shallow, recursive, true, changed)
+        let roots = shallow
+            .into_iter()
+            .map(|path| (path, Scope::Directory))
+            .chain(recursive.into_iter().map(|path| (path, Scope::Tree)))
+            .collect();
+        Self::start_with_scope(roots, |_| Vec::new(), changed)
+    }
+
+    /// Watches direct entries, including in-place edits to their files.
+    pub fn start_entries(
+        roots: Vec<PathBuf>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        let roots = roots.into_iter().map(|path| (path, Scope::Entries)).collect();
+        Self::start_with_scope(
+            roots,
+            |roots| {
+                roots
+                    .iter()
+                    .filter_map(|root| fs::read_dir(root).ok())
+                    .flatten()
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .collect()
+            },
+            changed,
+        )
+    }
+
+    /// Watches directory entries without forwarding descendant events.
+    /// Reconciles the file's metadata to detect in-place writes when FSEvents is silent.
+    /// The callback receives `true` when a watched root changes identity.
+    pub fn start_shallow_with_file(
+        roots: Vec<PathBuf>,
+        file: PathBuf,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        let roots = roots.into_iter().map(|path| (path, Scope::Directory)).collect();
+        Self::start_with_scope(roots, move |_| vec![file.clone()], changed)
     }
 
     fn start_with_scope(
-        shallow: Vec<PathBuf>,
-        recursive: Vec<PathBuf>,
-        watch_moves: bool,
+        roots: Vec<(PathBuf, Scope)>,
+        extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
+        let watched_roots: Vec<_> = roots.iter().map(|(path, _)| path.clone()).collect();
+        let snapshot = move || Snapshot::read(&watched_roots, extra_paths(&watched_roots));
+        let initial = snapshot();
         let (events, received) = mpsc::channel();
         let debounce = std::thread::Builder::new()
             .name("dupin-path-watch-debounce".into())
-            .spawn(move || debounce_events(received, changed))
+            .spawn(move || debounce_events(received, snapshot, initial, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
-        let roots = shallow
-            .into_iter()
-            .map(|root| (canonical_root(&root), false))
-            .chain(recursive.into_iter().map(|root| (canonical_root(&root), true)))
-            .collect();
-        match watch_roots(roots, watch_moves, events) {
+        match watch_roots(roots, events) {
             Ok(mut watcher) => {
                 watcher.debounce = Some(debounce);
                 Ok(watcher)
@@ -94,13 +133,73 @@ impl Drop for PathWatcher {
     }
 }
 
-fn debounce_events(events: mpsc::Receiver<bool>, changed: impl Fn(bool)) {
-    const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
-    while let Ok(mut root_changed) = events.recv() {
+#[derive(PartialEq, Eq)]
+struct Stamp {
+    identity: (u64, u64),
+    changed: (i64, i64),
+}
+
+impl Stamp {
+    fn read(path: &Path) -> Option<Self> {
+        fs::metadata(path).ok().map(|metadata| Self {
+            identity: (metadata.dev(), metadata.ino()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct Snapshot {
+    roots: Vec<Option<Stamp>>,
+    extra: BTreeMap<PathBuf, Option<Stamp>>,
+}
+
+impl Snapshot {
+    fn read(roots: &[PathBuf], extra: Vec<PathBuf>) -> Self {
+        Self {
+            roots: roots.iter().map(|path| Stamp::read(path)).collect(),
+            extra: extra
+                .into_iter()
+                .map(|path| {
+                    let stamp = Stamp::read(&path);
+                    (path, stamp)
+                })
+                .collect(),
+        }
+    }
+
+    fn roots_changed(&self, other: &Self) -> bool {
+        let identity = |stamp: &Option<Stamp>| stamp.as_ref().map(|stamp| stamp.identity);
+        self.roots
+            .iter()
+            .map(identity)
+            .ne(other.roots.iter().map(identity))
+    }
+}
+
+fn debounce_events(
+    events: mpsc::Receiver<bool>,
+    snapshot: impl Fn() -> Snapshot,
+    mut last: Snapshot,
+    changed: impl Fn(bool),
+) {
+    const QUIET: Duration = Duration::from_millis(300);
+    const RECONCILE: Duration = Duration::from_secs(2);
+    loop {
+        let mut root_changed = match events.recv_timeout(RECONCILE) {
+            Ok(root_changed) => root_changed,
+            // A busy FSEvents daemon can miss a notification without delivering a drop flag.
+            Err(mpsc::RecvTimeoutError::Timeout) if snapshot() == last => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
         loop {
             match events.recv_timeout(QUIET) {
                 Ok(root) => root_changed |= root,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let current = snapshot();
+                    root_changed |= last.roots_changed(&current);
+                    last = current;
                     changed(root_changed);
                     break;
                 }
@@ -117,6 +216,7 @@ type FSEventFlags = u32;
 type CFTimeInterval = f64;
 const USE_CF_TYPES: u32 = 1;
 const WATCH_ROOT: u32 = 4;
+const FILE_EVENTS: u32 = 16;
 const ROOT_CHANGED: u32 = 0x20;
 
 #[repr(C)]
@@ -130,7 +230,7 @@ struct FSEventStreamContext {
 
 struct WatchContext {
     events: mpsc::Sender<bool>,
-    roots: Vec<(PathBuf, bool)>,
+    roots: Vec<(PathBuf, Scope)>,
 }
 
 type FSEventCallback = unsafe extern "C" fn(
@@ -174,13 +274,24 @@ unsafe extern "C" {
 }
 
 fn watch_roots(
-    roots: Vec<(PathBuf, bool)>,
-    watch_moves: bool,
+    roots: Vec<(PathBuf, Scope)>,
     events: mpsc::Sender<bool>,
 ) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
     use objc2_foundation::{NSArray, NSString};
 
+    let roots: Vec<_> = roots
+        .into_iter()
+        .map(|(root, scope)| (canonical_root(&root), scope))
+        .collect();
+    let flags = roots.iter().fold(USE_CF_TYPES, |flags, (_, scope)| {
+        flags
+            | match scope {
+                Scope::Recursive => 0,
+                Scope::Directory | Scope::Tree => WATCH_ROOT,
+                Scope::Entries => WATCH_ROOT | FILE_EVENTS,
+            }
+    });
     let mut watched: Vec<_> = roots
         .iter()
         .map(|(root, _)| {
@@ -220,7 +331,7 @@ fn watch_roots(
             Retained::as_ptr(&paths).cast(),
             u64::MAX,
             0.5,
-            USE_CF_TYPES | if watch_moves { WATCH_ROOT } else { 0 },
+            flags,
         )
     };
     if stream.is_null() {
@@ -278,7 +389,7 @@ unsafe extern "C" fn paths_changed(
                     context
                         .roots
                         .iter()
-                        .any(|(root, recursive)| matches_event_path(path, root, *recursive))
+                        .any(|(root, scope)| matches_event_path(path, root, *scope))
                 })
         })
     {
@@ -286,8 +397,13 @@ unsafe extern "C" fn paths_changed(
     }
 }
 
-fn matches_event_path(path: &Path, root: &Path, recursive: bool) -> bool {
-    path == root || root.starts_with(path) || (recursive && path.starts_with(root))
+fn matches_event_path(path: &Path, root: &Path, scope: Scope) -> bool {
+    root.starts_with(path)
+        || match scope {
+            Scope::Recursive | Scope::Tree => path.starts_with(root),
+            Scope::Directory => false,
+            Scope::Entries => path.parent() == Some(root),
+        }
 }
 
 pub fn canonical_root(root: &Path) -> PathBuf {
@@ -308,15 +424,58 @@ pub fn canonical_root(root: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::matches_event_path;
+    use super::{Scope, matches_event_path};
     use std::path::Path;
+
+    #[test]
+    fn replacing_a_tracked_file_changes_the_snapshot_without_changing_root_identity() {
+        let root = std::env::temp_dir().join(format!("dupin-reconcile-file-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("config.toml");
+        let replacement = root.join("replacement");
+        std::fs::write(&file, "original").unwrap();
+        std::fs::write(&replacement, "updated").unwrap();
+        let read = || super::Snapshot::read(std::slice::from_ref(&root), vec![file.clone()]);
+        let before = read();
+        std::fs::rename(replacement, &file).unwrap();
+        let after = read();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(before.extra != after.extra);
+        assert!(!before.roots_changed(&after));
+    }
+
+    #[test]
+    fn reconciliation_reports_a_change_without_an_fsevent() {
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dupin-reconcile-{}-{id}", std::process::id()));
+        let tracked = [path.clone()];
+        let snapshot = move || super::Snapshot::read(&tracked, Vec::new());
+        let initial = snapshot();
+        std::fs::create_dir(&path).unwrap();
+        let (events, receiver) = std::sync::mpsc::channel();
+        let (fired, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            super::debounce_events(receiver, snapshot, initial, move |root| fired.send(root).unwrap());
+        });
+        let change = received.recv_timeout(std::time::Duration::from_secs(5));
+        drop(events);
+        worker.join().unwrap();
+        std::fs::remove_dir(path).unwrap();
+        assert!(change.expect("report the new directory even without an FSEvent"));
+    }
 
     #[test]
     fn debouncing_keeps_a_root_change_between_ordinary_events() {
         let (events, receiver) = std::sync::mpsc::channel();
         let (fired, received) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            super::debounce_events(receiver, move |root| fired.send(root).unwrap());
+            let snapshot = || super::Snapshot::read(&[], Vec::new());
+            super::debounce_events(receiver, snapshot, snapshot(), move |root| {
+                fired.send(root).unwrap()
+            });
         });
         for root in [false, true, false] {
             events.send(root).unwrap();
@@ -330,18 +489,26 @@ mod tests {
     fn shallow_scope_matches_the_root_and_its_missing_ancestors_only() {
         let root = Path::new("/home/user/.config/dupin");
 
-        assert!(matches_event_path(root, root, false));
-        assert!(matches_event_path(Path::new("/home/user/.config"), root, false));
-        assert!(matches_event_path(Path::new("/home/user"), root, false));
+        assert!(matches_event_path(root, root, Scope::Directory));
+        assert!(matches_event_path(
+            Path::new("/home/user/.config"),
+            root,
+            Scope::Directory
+        ));
+        assert!(matches_event_path(
+            Path::new("/home/user"),
+            root,
+            Scope::Directory
+        ));
         assert!(!matches_event_path(
             Path::new("/home/user/.config/other"),
             root,
-            false
+            Scope::Directory
         ));
         assert!(!matches_event_path(
             Path::new("/home/user/.config/dupin/extra"),
             root,
-            false
+            Scope::Directory
         ));
     }
 
@@ -352,12 +519,23 @@ mod tests {
         assert!(matches_event_path(
             Path::new("/Applications/Utilities"),
             root,
-            true
+            Scope::Recursive
         ));
         assert!(!matches_event_path(
             Path::new("/ApplicationsElsewhere"),
             root,
-            true
+            Scope::Recursive
+        ));
+    }
+
+    #[test]
+    fn entry_scope_matches_direct_children() {
+        let root = Path::new("/home/user/.config/dupin/scripts");
+        assert!(matches_event_path(&root.join("script.sh"), root, Scope::Entries));
+        assert!(!matches_event_path(
+            &root.join("nested/script.sh"),
+            root,
+            Scope::Entries
         ));
     }
 }

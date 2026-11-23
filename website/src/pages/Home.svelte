@@ -4,7 +4,6 @@
 	import Nav from '../components/Nav.svelte';
 	import PanelDemo from '../components/PanelDemo.svelte';
 	import { channels, downloadChannel, repo, setupPrompt, stableReleased } from '../site.ts';
-
 </script>
 
 <Nav />
@@ -69,3 +68,178 @@
 	</section>
 </main>
 <Footer />
+
+<style>
+	.hero {
+		position: relative;
+		padding: 72px 0 80px;
+		text-align: center;
+		isolation: isolate;
+	}
+
+	.hero-grid {
+		position: absolute;
+		inset: 0;
+		z-index: -1;
+		background-image:
+			linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+			linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+		background-size: 48px 48px;
+		mask-image: radial-gradient(ellipse 80% 60% at 50% 35%, black 40%, transparent 100%);
+	}
+
+	.hero-inner {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+	}
+
+	.hero-title {
+		font-size: clamp(40px, 6.4vw, 84px);
+		max-width: 20ch;
+		margin: 32px auto 22px;
+		text-wrap: balance;
+	}
+
+	.hero-sub {
+		font-size: clamp(16px, 1.4vw, 19px);
+		color: var(--fg-muted);
+		max-width: 640px;
+		line-height: 1.55;
+		letter-spacing: -0.005em;
+		margin: 0;
+		text-wrap: balance;
+	}
+
+	.rise {
+		animation: rise 0.7s var(--ease-out) both;
+		animation-delay: var(--d, 0ms);
+	}
+
+	@keyframes rise {
+		from {
+			opacity: 0;
+			transform: translateY(16px);
+		}
+	}
+
+	.cta {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 16px;
+		margin-top: 36px;
+	}
+
+	.cta-buttons {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 12px;
+	}
+
+	.cta-buttons > :global(*) {
+		justify-content: center;
+	}
+
+	.btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+		padding: 14px 22px;
+		border: 0;
+		border-radius: 10px;
+		background: var(--accent-btn);
+		color: #fff;
+		font: inherit;
+		font-size: 15px;
+		font-weight: 600;
+		cursor: pointer;
+		transition:
+			background 0.18s ease,
+			transform 0.18s ease;
+	}
+
+	.btn-primary:hover {
+		background: var(--accent-btn-hover);
+		transform: translateY(-1px);
+	}
+
+	.btn-primary .btn-icon {
+		width: 16px;
+		height: 16px;
+	}
+
+	.link-arrow {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-size: 14px;
+		color: var(--fg-muted);
+		transition: color 0.18s ease;
+	}
+
+	.link-arrow:hover {
+		color: var(--fg);
+	}
+
+	.gh {
+		width: 14px;
+		height: 14px;
+	}
+
+	.cta-more {
+		margin: 0;
+		font-size: 13px;
+		color: var(--fg-dim);
+	}
+
+	.cta-more a {
+		color: var(--fg-muted);
+		text-decoration: underline;
+		text-decoration-color: rgba(163, 163, 163, 0.4);
+		text-underline-offset: 3px;
+	}
+
+	.cta-more a:hover {
+		color: var(--fg);
+	}
+
+	.traits {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 32px;
+		max-width: 1080px;
+		margin: 40px auto 0;
+		padding: 0;
+		list-style: none;
+		text-align: left;
+	}
+
+	.traits li {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.traits strong {
+		font-size: 20px;
+		font-weight: 600;
+		letter-spacing: -0.02em;
+		color: var(--fg);
+	}
+
+	.traits span {
+		font-size: 14px;
+		line-height: 1.5;
+		color: var(--fg-muted);
+	}
+
+	@media (max-width: 820px) {
+		.traits {
+			grid-template-columns: 1fr;
+			gap: 20px;
+		}
+	}
+</style>

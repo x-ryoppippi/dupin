@@ -14,6 +14,8 @@ Registered routes and shared internal views advance the plugin migration. Native
 
 ## Searching off the main thread
 
+Trusted [script commands](./scripts.md) use a separate native execution path. Discovery only reads bounded headers; activation runs the executable directly on a worker with bounded output and an owned process group. The lifecycle lock serializes spawning and group registration with synchronous quit cleanup. Script operations are absent from the guest protocol.
+
 Each provider runs on its own long-lived thread behind a `Searcher`. The newest request wins: queued requests never start, a running one sees `Request::is_cancelled`, and its late batches are dropped before they reach the UI. A dedicated thread, rather than a pool, lets the Spotlight provider turn that thread's run loop, which `NSMetadataQuery` delivers through.
 
 Candidate budgets and display limits are separate. The worker enforces each request's cumulative output budget; the session stores at most that many unique candidates, applies usage ranking, then cuts each provider and the merged list to their display limits. A chosen row or open action menu keeps its target in a visible slot while ranking changes, except when the only available slot belongs to the pinned provider. Automatic first-row selection does not pin a weak result indefinitely.
@@ -22,7 +24,7 @@ Candidate budgets and display limits are separate. The worker enforces each requ
 
 `Session` is the launcher's state machine. The host registers commands and their routes. The UI hands the active session query edits and key intents. The session answers with effects such as starting or cancelling a search, running an action, clearing the field, hiding the panel or keeping the selection on screen. It applies registered keyword and empty-query routes and drops answers from earlier searches by generation.
 
-`Action::Push` opens a view of the selected item's command with a fresh query. The session owns the navigation stack and saves the previous query and selection. Esc pops a view and restores that saved state. Backspace (⌫) does the same when the query is empty. At the base of the stack, Backspace on an empty query returns to the registered default command.
+`Action::Push` opens a view of the selected item's command with a fresh query. Browsing a folder uses the same navigation stack and searches the browser command. Esc closes an extension view and restores its parent query and selection. Backspace (⌫) returns to the previous view or folder when the query is empty. At the base of the stack, Backspace on an empty query returns to the registered default command.
 
 Switching commands clears the previous rows. Generation checks reject late answers from the old command.
 

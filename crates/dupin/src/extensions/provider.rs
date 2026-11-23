@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use dupin_core::{Action, Item, ItemAction, Page, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{HostError, QueryControl};
 
@@ -28,6 +28,7 @@ impl ExtensionProvider {
     fn problem(&self, message: String) -> Item {
         Item {
             id: "extension-error".into(),
+            payload: Payload::default(),
             view: View::Text {
                 title: format!("{} failed", self.extension.name),
                 subtitle: message,
@@ -44,8 +45,15 @@ impl ExtensionProvider {
     }
 }
 
-fn actions(actions: Vec<protocol::PluginAction>) -> Vec<ItemAction> {
-    actions
+fn item(id: String, view: View, offered: Vec<protocol::PluginAction>) -> Item {
+    let payload = offered
+        .iter()
+        .find_map(|action| match &action.effect {
+            protocol::Effect::Copy { text } => Some(Payload::text(text.clone())),
+            _ => None,
+        })
+        .unwrap_or_default();
+    let actions: Vec<_> = offered
         .into_iter()
         .map(|action| {
             let run = match action.effect {
@@ -57,13 +65,11 @@ fn actions(actions: Vec<protocol::PluginAction>) -> Vec<ItemAction> {
             };
             ItemAction::new(&action.id, &action.title, run)
         })
-        .collect()
-}
-
-fn item(id: String, view: View, actions: Vec<ItemAction>) -> Item {
+        .collect();
     Item {
         id,
         view,
+        payload,
         record_usage: false,
         icon: None,
         matched: Vec::new(),
@@ -107,17 +113,13 @@ impl Provider for ExtensionProvider {
             Ok(response) => match response.outcome {
                 protocol::Outcome::Results { items, .. } => items
                     .into_iter()
-                    .map(|row| item(row.id, row.view, actions(row.actions)))
+                    .map(|row| item(row.id, row.view, row.actions))
                     .collect(),
                 protocol::Outcome::Detail {
                     title,
                     body,
                     actions: offered,
-                } => vec![item(
-                    "detail".into(),
-                    View::Detail { title, body },
-                    actions(offered),
-                )],
+                } => vec![item("detail".into(), View::Detail { title, body }, offered)],
                 protocol::Outcome::Error { message, .. } => vec![self.problem(message)],
             },
             Err(HostError::Cancelled) => return Ok(()),
@@ -181,6 +183,7 @@ mod tests {
         );
         assert_eq!(rows[0].primary.as_deref(), Some("copy"));
         assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
+        assert_eq!(rows[0].payload, Payload::text("2"));
         assert_eq!(
             rows[0].action("web"),
             Some(&Action::OpenUrl("https://example.com/?q=2".into()))

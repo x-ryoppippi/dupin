@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -15,6 +16,8 @@ pub trait Provider: Send + Sync + 'static {
 pub struct Request {
     /// Raw field text after keyword routing: whitespace may be part of the provider's syntax.
     pub query: String,
+    /// The folder being browsed, for a command that lists one.
+    pub folder: Option<PathBuf>,
     /// The view of the command being searched, if one was pushed.
     pub page: Option<Page>,
     /// The most candidates the provider should emit in total, before the display limit.
@@ -26,6 +29,7 @@ pub struct Request {
 impl Request {
     pub(crate) fn new(
         query: String,
+        folder: Option<PathBuf>,
         page: Option<Page>,
         limit: usize,
         generation: u64,
@@ -33,6 +37,7 @@ impl Request {
     ) -> Self {
         Request {
             query,
+            folder,
             page,
             limit,
             generation,
@@ -42,12 +47,19 @@ impl Request {
 
     /// A request for tests and direct calls, never cancelled.
     pub fn detached(query: impl Into<String>, limit: usize) -> Self {
-        Request::new(query.into(), None, limit, 1, Arc::new(AtomicU64::new(1)))
+        Request::new(query.into(), None, None, limit, 1, Arc::new(AtomicU64::new(1)))
     }
 
     /// A request for a pushed view, never cancelled.
     pub fn detached_page(query: impl Into<String>, page: Page, limit: usize) -> Self {
-        Request::new(query.into(), Some(page), limit, 1, Arc::new(AtomicU64::new(1)))
+        Request::new(
+            query.into(),
+            None,
+            Some(page),
+            limit,
+            1,
+            Arc::new(AtomicU64::new(1)),
+        )
     }
 
     /// A newer search or a cancel has superseded this one.

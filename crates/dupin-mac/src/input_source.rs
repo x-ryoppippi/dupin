@@ -2,7 +2,7 @@
 //! does: typing a query through a Japanese input method leaves it in composition, which a
 //! launcher never sees until it is committed.
 
-use std::ffi::c_void;
+use std::ffi::{c_ulong, c_void};
 
 use objc2::MainThreadMarker;
 use objc2::rc::Retained;
@@ -23,12 +23,27 @@ type CFTypeRef = *const c_void;
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
     fn TISCopyCurrentKeyboardInputSource() -> CFTypeRef;
+    fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
     fn TISCopyCurrentASCIICapableKeyboardInputSource() -> CFTypeRef;
     fn TISCreateInputSourceList(properties: CFTypeRef, include_all_installed: u8) -> CFTypeRef;
     fn TISSelectInputSource(source: CFTypeRef) -> i32;
     fn TISGetInputSourceProperty(source: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
     static kTISPropertyInputSourceID: CFTypeRef;
     static kTISPropertyInputSourceIsASCIICapable: CFTypeRef;
+    static kTISPropertyUnicodeKeyLayoutData: CFTypeRef;
+    fn LMGetKbdType() -> u8;
+    fn UCKeyTranslate(
+        layout: *const c_void,
+        key: u16,
+        action: u16,
+        modifiers: u32,
+        keyboard_type: u32,
+        options: u32,
+        dead_key_state: *mut u32,
+        max_length: c_ulong,
+        length: *mut c_ulong,
+        characters: *mut u16,
+    ) -> i32;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -39,7 +54,13 @@ unsafe extern "C" {
     fn CFArrayGetCount(array: CFTypeRef) -> isize;
     fn CFArrayGetValueAtIndex(array: CFTypeRef, index: isize) -> CFTypeRef;
     fn CFBooleanGetValue(boolean: CFTypeRef) -> u8;
+    fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
 }
+
+const ANSI_V: u16 = 9;
+const KEY_ACTION_DOWN: u16 = 0;
+const COMMAND_MODIFIER_STATE: u32 = 1;
+const NO_DEAD_KEYS_MASK: u32 = 1;
 
 /// An input source this module holds a reference to. Main thread only, like the TIS calls.
 struct Source(CFTypeRef);
@@ -107,6 +128,50 @@ pub fn select(target: &Target) -> Option<Previous> {
     }
 }
 
+pub(crate) fn command_v_key() -> u16 {
+    if MainThreadMarker::new().is_none() {
+        return ANSI_V;
+    }
+    // SAFETY: TIS runs on the main thread, and the retained source owns the layout data.
+    unsafe {
+        let Some(source) = Source::owned(TISCopyCurrentKeyboardLayoutInputSource()) else {
+            return ANSI_V;
+        };
+        let data = TISGetInputSourceProperty(source.0, kTISPropertyUnicodeKeyLayoutData);
+        if data.is_null() {
+            return ANSI_V;
+        }
+        let layout = CFDataGetBytePtr(data).cast::<c_void>();
+        if layout.is_null() {
+            return ANSI_V;
+        }
+        let keyboard_type = u32::from(LMGetKbdType());
+        key_for_v(|key| {
+            let (mut dead_key_state, mut length, mut character) = (0, 0, 0);
+            // Dvorak–QWERTY ⌘ uses a separate layer when Command is held.
+            let status = UCKeyTranslate(
+                layout,
+                key,
+                KEY_ACTION_DOWN,
+                COMMAND_MODIFIER_STATE,
+                keyboard_type,
+                NO_DEAD_KEYS_MASK,
+                &mut dead_key_state,
+                1,
+                &mut length,
+                &mut character,
+            );
+            (status == 0 && length == 1).then_some(character)
+        })
+    }
+}
+
+fn key_for_v(mut translate: impl FnMut(u16) -> Option<u16>) -> u16 {
+    (0..128)
+        .find(|&key| translate(key) == Some(u16::from(b'v')))
+        .unwrap_or(ANSI_V)
+}
+
 /// The installed, enabled input source with this identifier.
 ///
 /// # Safety
@@ -127,5 +192,21 @@ unsafe fn find(id: &str) -> Option<Source> {
             return None;
         }
         Source::owned(CFRetain(CFArrayGetValueAtIndex(list.0, 0)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paste_uses_the_key_that_translates_to_v() {
+        let dvorak = |key| match key {
+            9 => Some(u16::from(b'k')),
+            47 => Some(u16::from(b'v')),
+            _ => None,
+        };
+        assert_eq!(key_for_v(dvorak), 47);
+        assert_eq!(key_for_v(|_| None), 9);
     }
 }

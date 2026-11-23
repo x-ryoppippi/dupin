@@ -21,7 +21,7 @@ fn main() {
     let (tx, rx) = mpsc::channel();
     let searcher = Searcher::spawn(&kind, provider, move |d| drop(tx.send(d)));
     let start = Instant::now();
-    searcher.search(1, query, None, 50);
+    searcher.search(1, query, None, None, 50);
     for delivery in rx {
         match delivery {
             Delivery::Batch { items, .. } => {
