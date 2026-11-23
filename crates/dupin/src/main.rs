@@ -34,6 +34,14 @@ fn main() {
     if cli::run() {
         return;
     }
+    let headless = rune::tooling::is_headless();
+    if !headless {
+        std::thread::spawn(|| {
+            if let Err(error) = dupin_mac::file_ops::FileTransfers::default().recover_abandoned_copies() {
+                log::warn(&format!("couldn't clean up abandoned copies: {error}"));
+            }
+        });
+    }
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
@@ -68,7 +76,7 @@ fn main() {
         .srgb_blend(true)
         .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
-    let _control = if rune::tooling::is_headless() {
+    let _control = if headless {
         None
     } else {
         let panel = handle.clone();

@@ -284,6 +284,7 @@ pub struct Ui {
     snapshots_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    file_transfers: dupin_mac::file_ops::FileTransfers,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -479,6 +480,7 @@ impl Ui {
             settings_after_close: false,
             snapshots_after_close: false,
             running,
+            file_transfers: dupin_mac::file_ops::FileTransfers::default(),
             updater,
             quick_look,
             me,
@@ -1291,11 +1293,12 @@ impl Ui {
                 } => {
                     let name = file_name(&path);
                     let destination = file_name(&folder);
+                    let files = self.file_transfers.clone();
                     self.on_worker(
                         move || {
                             let result = match transfer {
-                                Transfer::Move => dupin_mac::file_ops::move_to(&path, &folder),
-                                Transfer::Copy => dupin_mac::file_ops::copy_to(&path, &folder),
+                                Transfer::Move => files.move_to(&path, &folder),
+                                Transfer::Copy => files.copy_to(&path, &folder),
                             };
                             (path, result)
                         },
@@ -1348,8 +1351,9 @@ impl Ui {
                     | dupin_core::Action::ChooseDestination { .. } => {}
                     dupin_core::Action::Duplicate(path) => {
                         let name = file_name(&path);
+                        let files = self.file_transfers.clone();
                         self.on_worker(
-                            move || dupin_mac::file_ops::duplicate(&path),
+                            move || files.duplicate(&path),
                             move |ui, result, tx| match result {
                                 Ok(copy) => {
                                     ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)
