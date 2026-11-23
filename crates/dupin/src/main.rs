@@ -10,6 +10,7 @@ mod clipboard;
 mod commands;
 mod control;
 mod extensions;
+mod features;
 mod hotkey;
 mod http;
 mod icons;

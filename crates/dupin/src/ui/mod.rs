@@ -102,7 +102,7 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     currency: crate::calculator::Currency,
-    web: Arc<RwLock<crate::web::WebCatalog>>,
+    pub(crate) web: Arc<RwLock<crate::web::WebCatalog>>,
     snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
     /// A snippet to paste once the panel has closed and the front app has its keys back.
     paste_after_close: Option<SnippetRun>,
@@ -112,7 +112,7 @@ pub struct Ui {
     paste_access_asked: bool,
     sharing: dupin_mac::sharing::Picker,
     panel_window: Option<rune::WindowHandle>,
-    file_demotions: Arc<RwLock<Vec<String>>>,
+    pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     extensions: Extensions,
