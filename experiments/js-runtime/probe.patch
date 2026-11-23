@@ -1,0 +1,241 @@
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -756,6 +756,7 @@
+  "objc2-metal 0.3.2",
+  "pico-args",
+  "roxmltree 0.21.2",
++ "rquickjs",
+  "rune",
+  "rune-kit",
+  "rune-notify",
+@@ -1186,6 +1187,8 @@
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+ dependencies = [
++ "allocator-api2",
++ "equivalent",
+  "foldhash 0.2.0",
+ ]
+ 
+@@ -2612,6 +2615,15 @@
+ ]
+ 
+ [[package]]
++name = "relative-path"
++version = "2.0.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "38540a682c6e9bca04a8bca9e5ec5a6ba168dfbb04c9998fe517a9befb92eb68"
++dependencies = [
++ "serde_core",
++]
++
++[[package]]
+ name = "renderdoc-sys"
+ version = "1.1.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -2653,6 +2665,35 @@
+ checksum = "9da7f59328b09405b181fee1018925fad50f157afb43c0c0f5c522c256dd5907"
+ dependencies = [
+  "memchr",
++]
++
++[[package]]
++name = "rquickjs"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a0a22bf72f515cc4189dd7c63d016f6de92a11eee98ddf7dd64794198f6eb34e"
++dependencies = [
++ "rquickjs-core",
++]
++
++[[package]]
++name = "rquickjs-core"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6657979a24d543e5fc66f32cef2f47ca82ce8eb55cec5f7d59a12b7b570bbf24"
++dependencies = [
++ "hashbrown 0.17.1",
++ "relative-path",
++ "rquickjs-sys",
++]
++
++[[package]]
++name = "rquickjs-sys"
++version = "0.14.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cee271d0eeba64f0915b846cb7ae02e16faf3dfdffdca91731101d9d30fe3423"
++dependencies = [
++ "cc",
+ ]
+ 
+ [[package]]
+--- a/crates/dupin/Cargo.toml
++++ b/crates/dupin/Cargo.toml
+@@ -26,6 +26,7 @@
+ toml = { workspace = true, features = ["display"] }
+ wgpu = { workspace = true }
+ naga = { workspace = true }
++rquickjs = { version = "=0.14.0", optional = true, default-features = false, features = ["std"] }
+ # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
+ # Rune's backend will draw it.
+ objc2 = { workspace = true }
+@@ -43,6 +44,9 @@
+ 	"MTLPixelFormat",
+ 	"MTLRenderPipeline",
+ ] }
++
++[features]
++js-runtime = ["dep:rquickjs"]
+ 
+ [dev-dependencies]
+ tempfile = "3"
+--- /dev/null
++++ b/crates/dupin/src/js_probe.rs
+@@ -0,0 +1,108 @@
++use std::{
++    cell::Cell,
++    error::Error,
++    rc::Rc,
++    time::{Duration, Instant},
++};
++
++use rquickjs::{CatchResultExt, Context, Function, Module, Object, Runtime, Value, WriteOptions};
++
++const HEAP_LIMIT: usize = 16 * 1024 * 1024;
++const STACK_LIMIT: usize = 512 * 1024;
++const BUDGET: Duration = Duration::from_millis(100);
++const WORD_COUNT: &str = r#"
++export function search(query) {
++    const input = query.trim();
++    if (!input) return [];
++    const count = input.split(/\s+/u).length;
++    return [{ title: `${count} words`, text: String(count) }];
++}
++"#;
++const BUSY_LOOP: &str = "export function search() { for (;;) {} }";
++
++pub(super) fn dispatch() -> bool {
++    let mut args = std::env::args().skip(1);
++    match args.next().as_deref() {
++        Some("--dupin-js-runtime-probe") => {
++            let query = args.next().unwrap_or_else(|| "two words".to_owned());
++            if let Err(error) = probe(&query) {
++                eprintln!("JS runtime probe failed: {error}");
++                std::process::exit(1);
++            }
++            true
++        }
++        _ => false,
++    }
++}
++
++type Limited = (Runtime, Context, Rc<Cell<bool>>);
++
++fn limited() -> Result<Limited, Box<dyn Error>> {
++    let runtime = Runtime::new()?;
++    runtime.set_memory_limit(HEAP_LIMIT);
++    runtime.set_max_stack_size(STACK_LIMIT);
++    let deadline = Instant::now() + BUDGET;
++    let interrupted = Rc::new(Cell::new(false));
++    let flag = Rc::clone(&interrupted);
++    runtime.set_interrupt_handler(Some(Box::new(move || {
++        let expired = Instant::now() >= deadline;
++        if expired {
++            flag.set(true);
++        }
++        expired
++    })));
++    let context = Context::full(&runtime)?;
++    Ok((runtime, context, interrupted))
++}
++
++fn probe(query: &str) -> Result<(), Box<dyn Error>> {
++    let (_runtime, context, _) = limited()?;
++    let bytecode = context.with(|ctx| {
++        Module::declare(ctx.clone(), "main.js", WORD_COUNT)
++            .and_then(|module| module.write(WriteOptions::default()))
++            .catch(&ctx)
++            .map_err(|error| error.to_string())
++    })?;
++    drop(context);
++
++    let (_runtime, context, _) = limited()?;
++    let (title, text) = context.with(|ctx| {
++        // The bytecode was written above from trusted source.
++        let rows = unsafe { Module::load(ctx.clone(), &bytecode) }
++            .and_then(|module| module.eval())
++            .and_then(|(module, promise)| promise.finish::<()>().map(|()| module))
++            .and_then(|module| module.get::<_, Function>("search"))
++            .and_then(|search| search.call::<_, Value>((query,)))
++            .catch(&ctx)
++            .map_err(|error| error.to_string())?;
++        let row: Object = rows
++            .as_array()
++            .ok_or("search must return an array")?
++            .get(0)
++            .map_err(|error| error.to_string())?;
++        let title: String = row.get("title").map_err(|error| error.to_string())?;
++        let text: String = row.get("text").map_err(|error| error.to_string())?;
++        Ok::<_, String>((title, text))
++    })?;
++    drop(context);
++
++    let (_runtime, context, interrupted) = limited()?;
++    let started = Instant::now();
++    let stopped = context.with(|ctx| {
++        Module::declare(ctx.clone(), "busy.js", BUSY_LOOP)
++            .and_then(|module| module.eval())
++            .and_then(|(module, _)| module.get::<_, Function>("search"))
++            .and_then(|search| search.call::<_, Value>(()))
++            .is_err()
++    });
++    let elapsed = started.elapsed();
++    if !(stopped && interrupted.get()) {
++        return Err("the interrupt handler did not stop a busy loop".into());
++    }
++    println!(
++        "js_runtime=ok title={title:?} text={text:?} bytecode_bytes={} interrupted_after_ms={} heap_limit={HEAP_LIMIT} stack_limit={STACK_LIMIT}",
++        bytecode.len(),
++        elapsed.as_millis(),
++    );
++    Ok(())
++}
+--- a/crates/dupin/src/main.rs
++++ b/crates/dupin/src/main.rs
+@@ -31,7 +31,14 @@
+ mod web;
+ mod window_management;
+ 
++#[cfg(feature = "js-runtime")]
++mod js_probe;
++
+ fn main() {
++    #[cfg(feature = "js-runtime")]
++    if js_probe::dispatch() {
++        return;
++    }
+     if cli::run() {
+         return;
+     }
+--- a/nix/cargo-artifacts.nix
++++ b/nix/cargo-artifacts.nix
+@@ -55,7 +55,7 @@
+   };
+   releaseArgs = baseArgs // {
+     CARGO_PROFILE = "release";
+-    cargoExtraArgs = "--offline --locked --package dupin";
++    cargoExtraArgs = "--offline --locked --package dupin --features js-runtime";
+     doCheck = false;
+   };
+   debugArgs = baseArgs // {
+--- a/package.nix
++++ b/package.nix
+@@ -50,7 +50,7 @@
+   cargoDeps = rustPlatform.fetchCargoVendor {
+     inherit src;
+     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
+-    hash = "sha256-mTSe/Kk/87UjfqlPsj173WNZGyxTDomLfNQFLOpKh5s=";
++    hash = "sha256-s9yzvPz2HX9EamvVC+q9K0sIXs6QV2fBjZRP41GKtaE=";
+   };
+ 
+   # What every Rust derivation of the workspace shares (the package here, clippy and the
