@@ -103,13 +103,16 @@ impl Snapshots {
     }
 
     pub fn accept_open(&mut self, call: crate::control::Call) {
+        if let crate::control::Command::SnapshotsOpen { id: Some(id) } = &call.request.command
+            && !self.open(id)
+        {
+            call.finish(Err("NotFound: snapshot".into()));
+            return;
+        }
         self.query = TextEdit::new("");
         self.query.focused = true;
         self.pending_delete = None;
         self.filter();
-        if let crate::control::Command::SnapshotsOpen { id: Some(id) } = &call.request.command {
-            self.open(id);
-        }
         call.finish(Ok(serde_json::Value::Null));
     }
 
@@ -737,6 +740,18 @@ mod tests {
         assert_eq!(s.selected.as_deref(), Some("other"));
         assert_eq!(s.query.text, "query");
         assert_eq!(s.pending_delete.as_deref(), Some("other"));
+
+        let removed = s.entries.pop().unwrap();
+        let search = s.search.pop().unwrap();
+        s.filter();
+        let (call, reply) = open();
+        s.accept_open(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap_err(), "NotFound: snapshot");
+        assert_eq!(s.selected.as_deref(), Some("other"));
+        assert_eq!(s.query.text, "query");
+        assert_eq!(s.pending_delete.as_deref(), Some("other"));
+        s.entries.push(removed);
+        s.search.push(search);
 
         let (call, reply) = open();
         s.accept_open(call);
