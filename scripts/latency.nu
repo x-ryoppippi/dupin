@@ -191,14 +191,14 @@ def measure [
             msg: $"($job.id): ($superseded | length) of ($matched | length) keypresses were typed over before their results showed; raise --gap"
         }
     }
-    let samples = $matched | where superseded? != true
     let provider = $job.setup.provider
-    let missed = unanswered $samples $provider
+    let missed = unanswered $matched $provider $per_pass
     if $missed > 0 {
         error make {
-            msg: $"($job.id) [($job.implementation)]: ($missed) of ($samples | length) measured keypresses showed no rows from ($provider); the scenario does not reach its feature"
+            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without its rows; the scenario does not reach its feature"
         }
     }
+    let samples = $matched | where superseded? != true
     {
         commands: ($samples | get command | uniq)
         samples: ($samples | length)
@@ -212,10 +212,23 @@ def measure [
     }
 }
 
-# How many samples show no rows from `provider`.
-export def unanswered [samples: list<record>, provider: string]: nothing -> int {
+# How many drawn keypresses, `per_pass` to a pass, did not search `provider`, or ended a pass
+# without a row from it. Only the whole of `typed` must show the feature's rows: a shorter
+# query may rightly have none.
+export def unanswered [samples: list<record>, provider: string, per_pass: int]: nothing -> int {
     $samples
-    | where {|sample| ($sample.shown? | default {} | get --optional $provider | default 0) == 0 }
+    | enumerate
+    | where {|it| $it.item.superseded? != true }
+    | where {|it|
+        let searched = $provider in ($it.item.searched? | default [])
+        let shown = $it.item.shown?
+        | default {}
+        | transpose name rows
+        | where name == $provider and rows > 0
+        | is-not-empty
+        let ends_pass = ($it.index + 1) mod $per_pass == 0
+        not $searched or ($ends_pass and not $shown)
+    }
     | length
 }
 

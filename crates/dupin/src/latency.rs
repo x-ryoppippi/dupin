@@ -32,7 +32,8 @@ struct Sample {
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,
     done: Option<Instant>,
-    /// Rows per provider in the finished results, so the driver can tell which feature answered.
+    /// Rows per provider in the finished results; with `pending`'s providers, what lets the
+    /// driver tell which feature answered.
     shown: BTreeMap<String, usize>,
 }
 
@@ -186,6 +187,7 @@ impl Probe {
                     "merge_ms": ms(provided, done),
                     "layout_ms": ms(done, drawn),
                     "providers": sample.providers,
+                    "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
                     "shown": sample.shown,
                 })
             }

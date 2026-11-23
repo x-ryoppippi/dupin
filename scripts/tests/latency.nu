@@ -21,21 +21,32 @@ def main [] {
     assert equal (verdict (result a native 20.0) (result a extension 3.0)) ok
     assert equal (verdict null (result a extension 3.0)) new
 
-    # A keypress counts as answered only when the feature's provider shows rows for it.
-    let samples = [
+    # Every keypress must search the feature's provider; only a pass's last must show its rows.
+    let pass = [
         {
-            shown: {web.keywords: 1, apps.search: 3}
+            searched: [apps.search web.keywords]
+            shown: {apps.search: 3}
         }
         {
-            shown: {apps.search: 4}
+            searched: [apps.search web.keywords]
+            shown: {web.keywords: 1, apps.search: 2}
         }
-        {
-            shown: {}
-        }
-        {}
     ]
-    assert equal (unanswered $samples web.keywords) 3
-    assert equal (unanswered $samples apps.search) 2
+    assert equal (unanswered $pass web.keywords 2) 0
+    assert equal (unanswered $pass apps.search 2) 0
+    assert equal (unanswered ($pass | reverse) web.keywords 2) 1
+    assert equal (unanswered $pass calendar.events 2) 2
+    let typed_over = [
+        {
+            searched: []
+            superseded: true
+        }
+        {
+            searched: [web.keywords]
+            shown: {web.keywords: 1}
+        }
+    ]
+    assert equal (unanswered $typed_over web.keywords 2) 0
 
     let ms = 1..100 | each { into float }
     assert equal ($ms | percentiles) {p50: 50.0, p95: 95.0, p99: 99.0}

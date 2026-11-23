@@ -7,10 +7,11 @@
 # scripts/latency.nu parity` fails when another implementation's p95 exceeds native's beyond
 # the tolerance.
 #
-# Each implementation names the config Dupin starts with, the provider whose rows every
-# measured keypress must show (so a scenario that never reaches its feature fails instead of
-# timing something else) and, optionally, an `extensions` directory copied beside the config. `prefix` is typed in one go and not measured; each character
-# of `typed` is one measured keypress.
+# Each implementation names the config Dupin starts with, the provider that answers it (every
+# measured keypress must search it and the whole of `typed` must show its rows, so a scenario
+# that never reaches its feature fails rather than timing another one) and, optionally, an
+# `extensions` directory copied beside the config. `prefix` is typed in one go and not
+# measured; each character of `typed` is one measured keypress.
 
 [features.search.native]
 config = "scripts/headless/config/dupin/config.toml"
@@ -49,10 +50,10 @@ prefix = ""
 typed = "term"
 
 [[scenarios]]
-id = "calendar.tom"
+id = "calendar.rev"
 feature = "calendar"
 prefix = "cal "
-typed = "tom"
+typed = "rev"
 
 [[scenarios]]
 id = "dictionary.run"
