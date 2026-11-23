@@ -3,7 +3,6 @@
 //! effects for the UI and platform layers to carry out.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use crate::searcher::Delivery;
@@ -56,8 +55,8 @@ pub enum Effect {
     ClearQuery,
     /// Replace the input with the session's query after routing or recall.
     ReplaceQuery(String),
-    /// Select this byte range of the input, focusing it.
-    SelectQuery(Range<usize>),
+    /// Focus the input and select the part of the name the platform treats as its stem.
+    SelectRenameStem(PathBuf),
     /// Rename the entry at `path` to `name` in the same folder. `row` is the layout key of the
     /// row showing it, which outlasts searches started while the rename runs.
     Rename {
@@ -292,21 +291,20 @@ impl Session {
         self.renaming.as_ref()
     }
 
-    fn begin_rename(&mut self, path: PathBuf, extension: bool) -> Vec<Effect> {
+    fn begin_rename(&mut self, path: PathBuf) -> Vec<Effect> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             return Vec::new();
         };
         let name = name.to_owned();
-        let stem = crate::file_name::stem_len(&name, extension);
         self.renaming = Some(Renaming {
             layout_key: self.layout_key(self.selected),
-            path,
+            path: path.clone(),
             name: name.clone(),
             query: self.query.clone(),
         });
         self.selection_held = true;
         self.refresh_selection = None;
-        vec![Effect::ReplaceQuery(name), Effect::SelectQuery(0..stem)]
+        vec![Effect::ReplaceQuery(name), Effect::SelectRenameStem(path)]
     }
 
     fn rename_intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
@@ -369,8 +367,8 @@ impl Session {
         if action.confirmation().is_some() || matches!(action.action, Action::ChooseApplication(_)) {
             return Vec::new();
         }
-        if let Action::Rename { path, extension } = action.action {
-            return self.begin_rename(path, extension);
+        if let Action::Rename(path) = action.action {
+            return self.begin_rename(path);
         }
         if action.disposition == ActionDisposition::Consume {
             return vec![Effect::RunConsuming {

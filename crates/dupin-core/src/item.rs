@@ -14,12 +14,7 @@ pub enum Action {
     },
     Trash(PathBuf),
     /// Ask for a new name in the query field; the session then renames the entry.
-    Rename {
-        path: PathBuf,
-        /// Whether the name ends in an extension that the initial selection leaves out, as
-        /// for files and packages but not folders.
-        extension: bool,
-    },
+    Rename(PathBuf),
     /// Copy beside the original under a name that is not taken.
     Duplicate(PathBuf),
     /// Zip beside the original under a name that is not taken.

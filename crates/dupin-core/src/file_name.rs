@@ -24,7 +24,7 @@ pub fn problem(name: &str) -> Option<&'static str> {
 
 /// The byte length of `name` before its extension: what Finder selects when renaming.
 /// `extension` is false for folders, whose dots belong to the name.
-pub(crate) fn stem_len(name: &str, extension: bool) -> usize {
+pub fn stem_len(name: &str, extension: bool) -> usize {
     split(name, extension).0.len()
 }
 
