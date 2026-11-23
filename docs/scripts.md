@@ -25,7 +25,7 @@ Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and 
 
 ## Hotkeys
 
-Use a [script binding](./configuration.md#hotkeys) to run a script by its filename. Each string in `args` becomes one argument. Omit `args` for a script that can run without arguments. Dupin checks the filename and arguments against the discovered script when loading the configuration.
+Use a [script binding](./configuration.md#hotkeys) to run a script by its filename. Each string in `args` becomes one argument. Omit `args` for a script that can run without arguments. Dupin checks the filename and arguments whenever the scripts or configuration change.
 
 The script's output mode controls what the shortcut opens. `inline` opens the panel with the inline card. `full` opens Script Output. `silent` opens Script Output on failure.
 

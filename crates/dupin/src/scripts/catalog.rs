@@ -3,11 +3,7 @@ use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use dupin_core::{
-    Config,
-    config::HotkeyTarget,
-    script::{Header, ScriptRun},
-};
+use dupin_core::script::{Header, ScriptRun};
 
 const MAX_SCRIPTS: usize = 200;
 
@@ -43,17 +39,6 @@ impl Catalog {
             .ok_or_else(|| format!("Script {name:?} was not found in the scripts directory"))?;
         script.header.bind_args(args)?;
         Ok(script)
-    }
-
-    pub fn validate_bindings(&self, config: &Config) -> Result<(), String> {
-        for (shortcut, target) in &config.bindings {
-            if let HotkeyTarget::Script { script, args } = target {
-                self.bound_script(script, args).map_err(|problem| {
-                    format!("Invalid script binding {shortcut:?} for {script:?}. {problem}.")
-                })?;
-            }
-        }
-        Ok(())
     }
 
     pub fn scan(directory: &Path) -> Self {
@@ -226,6 +211,45 @@ mod tests {
             assert_eq!(rows[0].icon, Some(root.0.join("plain.sh")));
             assert!(!marker.exists());
         }
+    }
+
+    #[test]
+    fn script_bindings_use_catalogue_filenames_and_header_arguments() {
+        use dupin_core::script::OutputMode;
+
+        let root = Fixture::new();
+        let header = "#!/bin/sh\n# @dupin.output full\n# @dupin.argument message\n# @dupin.argument note?\n";
+        root.write("fixture.sh", header, 0o600);
+        let args = vec!["a b".to_owned(), "$HOME * ~".to_owned()];
+        assert!(Catalog::scan(&root.0).bound_script("fixture.sh", &args).is_err());
+        root.write("fixture.sh", header, 0o700);
+
+        let catalog = Catalog::scan(&root.0);
+        let run = catalog
+            .bound_script("fixture.sh", &args)
+            .unwrap()
+            .run(args.clone());
+        assert_eq!(run.path, root.0.join("fixture.sh"));
+        assert_eq!(run.args, args);
+        assert_eq!(run.mode, OutputMode::Full);
+        assert!(catalog.bound_script("../fixture.sh", &args).is_err());
+        assert!(catalog.bound_script("fixture.sh", &["bad\0arg".into()]).is_err());
+        assert!(
+            catalog
+                .bound_script("fixture.sh", &[])
+                .unwrap_err()
+                .contains("Needs message")
+        );
+
+        root.write("fixture.sh", "#!/bin/sh\n# @dupin.output silent\n", 0o700);
+        let catalog = Catalog::scan(&root.0);
+        assert!(catalog.bound_script("fixture.sh", &[]).is_ok());
+        assert!(
+            catalog
+                .bound_script("fixture.sh", &args)
+                .unwrap_err()
+                .contains("Too many arguments")
+        );
     }
 
     #[test]

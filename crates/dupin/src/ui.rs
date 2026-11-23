@@ -18,6 +18,8 @@ use rune::{
     TextEdit, Tx, Waker,
 };
 
+use crate::scripts::catalog::Catalog;
+
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
 /// The panel's top edge below the display's for `position = "top"`: about where Spotlight
@@ -257,7 +259,8 @@ pub struct Ui {
     pub active_radius: f32,
     pub script_entry: Option<crate::scripts::entry::Entry>,
     pub script_card: Option<Arc<crate::scripts::runner::Snapshot>>,
-    scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
+    scripts: Arc<RwLock<Catalog>>,
+    scripts_catalog_ready: bool,
     runner: crate::scripts::runner::Runner,
     _scripts_watcher: Option<crate::scripts::CatalogWatch>,
     pub action_screen: Option<ActionScreen>,
@@ -269,10 +272,12 @@ pub struct Ui {
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
     pub config_problem: Option<String>,
+    pub hotkey_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
+    bindings_applied: bool,
     pub icons: HashMap<PathBuf, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
@@ -357,9 +362,16 @@ impl Ui {
                     return;
                 }
                 let previous = self.configuration.values.borrow();
-                if let Err(error) = self.configuration.hotkey.reserve_for_save(desired, &previous) {
-                    call.finish(Err(error));
-                    return;
+                {
+                    let scripts = self.scripts.read().unwrap();
+                    if let Err(error) = self.configuration.hotkey.reserve_for_save(
+                        desired,
+                        &previous,
+                        self.scripts_catalog_ready.then_some(&*scripts),
+                    ) {
+                        call.finish(Err(error));
+                        return;
+                    }
                 }
                 match self.configuration.files.save(base, desired) {
                     Ok(revision) => self.control_save = Some((revision, call)),
@@ -405,7 +417,7 @@ impl Ui {
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
-        startup: crate::settings::Startup,
+        config_problem: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
         running: Arc<AtomicUsize>,
     ) -> Ui {
@@ -419,7 +431,6 @@ impl Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
-        *registration.scripts.write().unwrap() = startup.scripts;
         let runner = crate::scripts::runner::Runner::new(
             std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
@@ -475,6 +486,7 @@ impl Ui {
             script_entry: None,
             script_card: None,
             scripts: registration.scripts,
+            scripts_catalog_ready: scripts_watcher.is_none(),
             runner,
             _scripts_watcher: scripts_watcher,
             picker: None,
@@ -485,12 +497,14 @@ impl Ui {
             next_lookup: 0,
             notice_until: None,
             acknowledged_config: config.clone(),
+            bindings_applied: false,
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
-            config_problem: startup.notice,
+            config_problem,
+            hotkey_problem: None,
             registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
@@ -564,6 +578,35 @@ impl Ui {
         }
     }
 
+    fn apply_hotkeys(&mut self, config: &Config, previous: &Config) -> Result<(), String> {
+        let problem = {
+            let scripts = self.scripts.read().unwrap();
+            self.configuration.hotkey.apply_config(
+                config,
+                previous,
+                self.scripts_catalog_ready.then_some(&*scripts),
+            )?
+        };
+        self.bindings_applied = true;
+        if self.hotkey_problem != problem {
+            if let Some(problem) = &problem {
+                crate::log::warn(problem);
+            }
+            self.hotkey_problem = problem.clone();
+            self.prefs.update(move |prefs, _| prefs.hotkey_problem = problem);
+        }
+        Ok(())
+    }
+
+    fn refresh_hotkeys(&mut self) {
+        if self.bindings_applied {
+            let config = self.configuration.values.borrow().clone();
+            if let Err(error) = self.apply_hotkeys(&config, &config) {
+                crate::log::warn(&error);
+            }
+        }
+    }
+
     pub fn reload_config(&mut self, update: crate::settings::Update, tx: &mut Tx) {
         if update.revision != self.configuration.files.revision() {
             return;
@@ -575,40 +618,32 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            let hotkey_problem = self
-                .configuration
-                .hotkey
-                .apply_config(&config, &previous)
+            self.apply_hotkeys(&config, &previous)
                 .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
-            Ok((config, hotkey_problem))
+            Ok(config)
         });
-        let (problem, hotkey_problem) = match accepted {
-            Ok((config, hotkey_problem)) => {
+        let problem = match accepted {
+            Ok(config) => {
                 self.acknowledged_config = config.clone();
                 if *self.configuration.values.borrow() != config {
                     *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config, tx);
                 }
-                (None, hotkey_problem)
+                None
             }
             Err(error) => {
                 if self.control_save.is_some() {
                     self.configuration.hotkey.discard_reservations();
+                    self.refresh_hotkeys();
                 }
-                (Some(error), None)
+                Some(error)
             }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
-        let problems: Vec<_> = [
-            problem,
-            hotkey_problem,
-            read_problem,
-            update.save_problem,
-            update.watch_problem,
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
+            .into_iter()
+            .flatten()
+            .collect();
         let problem = (!problems.is_empty()).then(|| problems.join("; "));
         if self.config_problem != problem
             && let Some(problem) = &problem
@@ -1360,7 +1395,7 @@ impl Ui {
         }
     }
 
-    pub(crate) fn scripts_catalog(&mut self, mut catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
+    pub(crate) fn scripts_catalog(&mut self, mut catalog: Catalog, tx: &mut Tx) {
         let notice = catalog.notice.take();
         self.prefs.update(move |prefs, _| prefs.scripts_notice = notice);
         let changed = {
@@ -1371,8 +1406,12 @@ impl Ui {
             }
             changed
         };
+        let first = !std::mem::replace(&mut self.scripts_catalog_ready, true);
+        // The save acknowledgement applies the latest catalogue without releasing reserved chords early.
+        if (first || changed) && self.control_save.is_none() {
+            self.refresh_hotkeys();
+        }
         if changed {
-            self.configuration.files.activate();
             self.refresh_default(tx);
         }
     }

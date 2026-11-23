@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use dupin_core::{Config, config::HotkeyTarget};
-
-use crate::scripts::catalog::Catalog;
+use dupin_core::Config;
 
 mod live;
 pub use live::{Service, Update};
@@ -91,21 +89,16 @@ fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<Pa
     )))
 }
 
-#[derive(Default)]
-pub struct Startup {
-    pub notice: Option<String>,
-    pub scripts: Catalog,
+/// The config, or the defaults with a message saying why the file wasn't used.
+pub fn load() -> (Config, Option<String>) {
+    path().map_or_else(|| (Config::default(), None), |path| load_from(&path))
 }
 
-/// The config, or the defaults with a message saying why the file wasn't used.
-pub fn load() -> (Config, Startup) {
-    let Some(path) = path() else {
-        return (Config::default(), Startup::default());
-    };
-    let src = match read_source(&path) {
+fn load_from(path: &Path) -> (Config, Option<String>) {
+    let src = match read_source(path) {
         Ok(src) => src,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return (Config::default(), Startup::default());
+            return (Config::default(), None);
         }
         Err(e) => {
             return problem(format!(
@@ -114,39 +107,14 @@ pub fn load() -> (Config, Startup) {
             ));
         }
     };
-    let loaded = Config::parse(&src)
-        .map_err(|error| error.message().to_owned())
-        .and_then(|config| {
-            let scripts = scripts_for_bindings(&path, &config)?;
-            Ok((
-                config,
-                Startup {
-                    notice: None,
-                    scripts,
-                },
-            ))
-        });
-    match loaded {
-        Ok(loaded) => loaded,
+    match Config::parse(&src) {
+        Ok(config) => (config, None),
         Err(error) => problem(format!(
             "{} is invalid, using the defaults: {}",
             path.display(),
-            error
+            error.message()
         )),
     }
-}
-
-fn scripts_for_bindings(path: &Path, config: &Config) -> Result<Catalog, String> {
-    let mut catalog = Catalog::default();
-    if config
-        .bindings
-        .values()
-        .any(|target| matches!(target, HotkeyTarget::Script { .. }))
-    {
-        catalog = Catalog::scan(&path.with_file_name("scripts"));
-        catalog.validate_bindings(config)?;
-    }
-    Ok(catalog)
 }
 
 fn read_source(path: &Path) -> std::io::Result<String> {
@@ -168,15 +136,9 @@ fn read_source(path: &Path) -> std::io::Result<String> {
     Ok(source)
 }
 
-fn problem(message: String) -> (Config, Startup) {
+fn problem(message: String) -> (Config, Option<String>) {
     crate::log::warn(&message);
-    (
-        Config::default(),
-        Startup {
-            notice: Some(message),
-            ..Startup::default()
-        },
-    )
+    (Config::default(), Some(message))
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
@@ -206,6 +168,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn loads_config_with_a_missing_script_binding_at_startup() {
+        let dir = scratch("missing-script");
+        let path = dir.join("config.toml");
+        let source = r#"
+file_limit = 37
+[bindings."alt+cmd+t"]
+target = "script"
+script = "missing.sh"
+"#;
+        std::fs::write(&path, source).unwrap();
+
+        assert_eq!(load_from(&path), (Config::parse(source).unwrap(), None));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -128,6 +128,7 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
     });
     let notices = [
         ("config-problem", s.config_problem.as_deref()),
+        ("hotkey-problem", s.hotkey_problem.as_deref()),
         ("notice", s.notice.as_deref()),
         ("registration-notice", s.registration_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),

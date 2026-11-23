@@ -163,6 +163,7 @@ pub struct Prefs {
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
+    pub(crate) hotkey_problem: Option<String>,
     pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
@@ -196,6 +197,7 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            hotkey_problem: None,
             scripts_notice: None,
         }
     }
@@ -465,14 +467,22 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 .scroll(ScrollSpec { stick_bottom: false })
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
-                .children(s.config_problem.as_ref().map(|problem| {
-                    text(problem)
-                        .key("config-problem")
-                        .w_full()
-                        .font(DESCRIPTION)
-                        .color(k.c.text_base)
-                        .wrap()
-                }))
+                .children(
+                    [
+                        ("config-problem", s.config_problem.as_deref()),
+                        ("hotkey-problem", s.hotkey_problem.as_deref()),
+                    ]
+                    .into_iter()
+                    .filter_map(|(key, problem)| Some((key, problem?)))
+                    .map(|(key, problem)| {
+                        text(problem)
+                            .key(key)
+                            .w_full()
+                            .font(DESCRIPTION)
+                            .color(k.c.text_base)
+                            .wrap()
+                    }),
+                )
                 .children(if s.page == Page::Appearance {
                     rows
                 } else {

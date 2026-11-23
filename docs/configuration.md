@@ -59,7 +59,7 @@ script = "echo-message.sh"
 args = ["Hello from Dupin"]
 ```
 
-Each shortcut must be distinct from the panel shortcut and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel, keeping the active shortcuts on reload.
+Each shortcut must be distinct from the panel shortcut and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
 
 ## Web searches
 

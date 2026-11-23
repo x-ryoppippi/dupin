@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use dupin_core::{Config, config::HotkeyTarget};
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
-use crate::ui::Ui;
+use crate::{scripts::catalog::Catalog, ui::Ui};
 
 pub struct Binding {
     panel: AppHandle<Ui>,
@@ -92,12 +92,22 @@ impl Binding {
         Ok(())
     }
 
-    pub fn apply_config(&self, config: &Config, previous: &Config) -> Result<Option<String>, String> {
-        self.configure(config, previous, false)
+    pub fn apply_config(
+        &self,
+        config: &Config,
+        previous: &Config,
+        scripts: Option<&Catalog>,
+    ) -> Result<Option<String>, String> {
+        self.configure(config, previous, scripts, false)
     }
 
-    pub fn reserve_for_save(&self, config: &Config, previous: &Config) -> Result<(), String> {
-        self.configure(config, previous, true).map(|_| ())
+    pub fn reserve_for_save(
+        &self,
+        config: &Config,
+        previous: &Config,
+        scripts: Option<&Catalog>,
+    ) -> Result<(), String> {
+        self.configure(config, previous, scripts, true).map(|_| ())
     }
 
     pub fn discard_reservations(&self) {
@@ -108,8 +118,15 @@ impl Binding {
         }
     }
 
-    fn configure(&self, config: &Config, previous: &Config, reserve: bool) -> Result<Option<String>, String> {
+    fn configure(
+        &self,
+        config: &Config,
+        previous: &Config,
+        scripts: Option<&Catalog>,
+        reserve: bool,
+    ) -> Result<Option<String>, String> {
         let (panel, mut targets) = configured_targets(config)?;
+        let mut problems = filter_script_bindings(&mut targets, scripts);
         let previous_bindings = binding_targets(previous);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let keep_unavailable = state.panel_unavailable && parse(&previous.hotkey).ok() == Some(panel.clone());
@@ -132,7 +149,6 @@ impl Binding {
         if reserve {
             targets.extend(state.targets.clone());
         }
-        let mut problems = Vec::new();
         let register = |shortcut: &Shortcut| self.claim(shortcut);
         let unregister = |id| self.panel.unregister_shortcut(id);
         let skip = |shortcut: &Shortcut, error: &ShortcutError| {
@@ -293,6 +309,29 @@ fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shor
     Ok((panel, targets))
 }
 
+fn filter_script_bindings(targets: &mut HashMap<Shortcut, Target>, scripts: Option<&Catalog>) -> Vec<String> {
+    let mut problems = Vec::new();
+    targets.retain(|shortcut, target| {
+        let Target::Configured(HotkeyTarget::Script { script, args }) = target else {
+            return true;
+        };
+        let Some(scripts) = scripts else {
+            return false;
+        };
+        match scripts.bound_script(script, args) {
+            Ok(_) => true,
+            Err(problem) => {
+                problems.push(format!(
+                    "Couldn't register the {} binding for {script:?}. {problem}.",
+                    shortcut.keycaps().join("")
+                ));
+                false
+            }
+        }
+    });
+    problems
+}
+
 fn sync<Id: Copy>(
     ids: &mut HashMap<Shortcut, Id>,
     targets: &HashMap<Shortcut, Target>,
@@ -433,6 +472,43 @@ mod tests {
                 assert!(matches!(&targets[&shortcut], Target::Configured(actual) if actual == &target));
             }
         }
+    }
+
+    #[test]
+    fn script_binding_is_skipped_until_its_catalogue_entry_is_available() {
+        let mut config = Config::default();
+        config.bindings.insert("ctrl+alt+c".into(), app());
+        config.bindings.insert(
+            "alt+cmd+t".into(),
+            HotkeyTarget::Script {
+                script: "fixture.sh".into(),
+                args: Vec::new(),
+            },
+        );
+        let shortcut: Shortcut = "alt+cmd+t".parse().unwrap();
+        let (_, configured) = configured_targets(&config).unwrap();
+        let mut targets = configured.clone();
+
+        assert!(filter_script_bindings(&mut targets, None).is_empty());
+        assert!(!targets.contains_key(&shortcut));
+
+        let mut catalog = Catalog::default();
+        let mut targets = configured.clone();
+        let problems = filter_script_bindings(&mut targets, Some(&catalog));
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("⌥⌘T") && problems[0].contains("fixture.sh"));
+        assert!(!targets.contains_key(&shortcut));
+        assert_eq!(targets.len(), 2);
+
+        let path = std::path::PathBuf::from("scripts/fixture.sh");
+        let (header, _) = dupin_core::script::Header::parse(b"#!/bin/sh\n", "fixture").unwrap();
+        catalog
+            .scripts
+            .insert(path.clone(), crate::scripts::catalog::Script { path, header });
+        let mut targets = configured;
+        assert!(filter_script_bindings(&mut targets, Some(&catalog)).is_empty());
+        assert!(targets.contains_key(&shortcut));
+        assert_eq!(targets.len(), 3);
     }
 
     #[test]
