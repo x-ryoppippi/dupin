@@ -1,9 +1,13 @@
 use super::catalog::Script;
-use dupin_core::script::{ScriptRun, split_args};
+use dupin_core::{
+    Effect, Session,
+    script::{ScriptRun, split_args},
+    session::FollowupTarget,
+};
 use rune::TextEdit;
 
 pub struct Entry {
-    pub key: String,
+    pub target: FollowupTarget,
     pub script: Script,
     pub query: TextEdit,
 }
@@ -11,9 +15,9 @@ pub struct Entry {
 impl Entry {
     pub fn submit(
         entry: &mut Option<Self>,
-        session: &mut dupin_core::Session,
+        session: &mut Session,
         catalog: &super::catalog::Catalog,
-    ) -> Vec<dupin_core::Effect> {
+    ) -> Vec<Effect> {
         let Some(command) = entry
             .as_ref()
             .filter(|entry| entry.is_current(session, catalog))
@@ -22,11 +26,7 @@ impl Entry {
             return Vec::new();
         };
         let entry = entry.take().unwrap();
-        session.run_key_followup(
-            &entry.key,
-            super::provider::ARGUMENTS,
-            super::provider::run_action(command),
-        )
+        session.run_followup(entry.target, super::provider::run_action(command))
     }
 
     fn command(&self) -> Result<ScriptRun, String> {
@@ -40,13 +40,8 @@ impl Entry {
         })
     }
 
-    pub fn is_current(&self, session: &dupin_core::Session, catalog: &super::catalog::Catalog) -> bool {
-        catalog.scripts.get(&self.script.path) == Some(&self.script)
-            && session.items().iter().enumerate().any(|(i, item)| {
-                session.result_key(i) == self.key
-                    && item.action(super::provider::ARGUMENTS)
-                        == Some(&dupin_core::Action::ScriptArguments(self.script.path.clone()))
-            })
+    pub fn is_current(&self, session: &Session, catalog: &super::catalog::Catalog) -> bool {
+        self.target.is_current(session) && catalog.scripts.get(&self.script.path) == Some(&self.script)
     }
 }
 
@@ -111,7 +106,9 @@ mod tests {
         ));
         assert!(session.deliver_from(id, Delivery::Done { generation }));
         let entry = Entry {
-            key: session.result_key(0),
+            target: session
+                .followup_target(super::super::provider::ARGUMENTS)
+                .unwrap(),
             script,
             query: TextEdit::new("'hello world'"),
         };
@@ -154,7 +151,7 @@ mod tests {
                     catalog.scripts.values_mut().next().unwrap().header.title = "Changed".into();
                 }
                 _ => {
-                    session.refresh();
+                    session.set_query("Another query");
                 }
             }
             assert!(!entry.as_ref().unwrap().is_current(&session, &catalog));
@@ -164,16 +161,23 @@ mod tests {
     }
 
     #[test]
+    fn arguments_survive_refresh_and_submit_before_the_script_result_returns() {
+        let (mut entry, mut session, catalog) = active_entry(dupin_core::script::OutputMode::Inline);
+        let key = session.result_key(0);
+        session.refresh();
+        assert_ne!(session.result_key(0), key);
+        assert!(entry.as_ref().unwrap().is_current(&session, &catalog));
+        assert!(matches!(&Entry::submit(&mut entry, &mut session, &catalog)[0],
+                Effect::Run(dupin_core::Action::RunScript(run)) if run.args == ["hello world"]));
+    }
+
+    #[test]
     fn entry_previews_literal_argv_and_refuses_incomplete_arguments() {
+        let (entry, _, _) = active_entry(dupin_core::script::OutputMode::Inline);
+        let mut entry = entry.unwrap();
         let (header, _) = dupin_core::script::Header::parse(b"# @dupin.argument values+", "Fixture").unwrap();
-        let mut entry = Entry {
-            key: "fixture".into(),
-            script: Script {
-                path: "/fixture/script".into(),
-                header,
-            },
-            query: TextEdit::new(""),
-        };
+        entry.script.header = header;
+        entry.query = TextEdit::new("");
         assert!(entry.command().is_err());
         entry.query = TextEdit::new("'hello world' $HOME ~ *.rs");
         assert_eq!(

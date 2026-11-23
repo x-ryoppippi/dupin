@@ -15,6 +15,11 @@ use std::{
 };
 
 pub type RunId = u64;
+pub struct Start {
+    pub id: RunId,
+    pub refused: bool,
+}
+
 type Notify = Arc<dyn Fn(RunId, bool) + Send + Sync>;
 type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
 const EXIT_DRAIN: Duration = Duration::from_millis(100);
@@ -205,19 +210,7 @@ impl Runner {
         &self.inner.running
     }
 
-    pub fn start(&self, command: ScriptRun) -> Result<RunId, String> {
-        let mut runs = lock(&self.inner.runs);
-        if lock(&self.inner.lifecycle.state).shutting_down {
-            return Err("Dupin is shutting down.".into());
-        }
-        if runs
-            .iter()
-            .filter(|run| lock(&run.snapshot).status == Status::Running)
-            .count()
-            >= 8
-        {
-            return Err("Eight scripts are already running.".into());
-        }
+    fn insert_run(&self, runs: &mut VecDeque<Arc<Run>>, command: ScriptRun, status: Status) -> Arc<Run> {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         let command = Arc::new(command);
         let run = Arc::new(Run {
@@ -228,7 +221,7 @@ impl Runner {
             snapshot: Mutex::new(Arc::new(Snapshot {
                 id,
                 command,
-                status: Status::Running,
+                status,
                 output: OutputBuffer::default(),
                 elapsed: Duration::ZERO,
             })),
@@ -241,6 +234,35 @@ impl Runner {
             runs.remove(index);
         }
         runs.push_front(run.clone());
+        run
+    }
+
+    fn refused(&self, runs: &mut VecDeque<Arc<Run>>, command: ScriptRun, problem: String) -> Start {
+        Start {
+            id: self.insert_run(runs, command, Status::Failed(problem)).id,
+            refused: true,
+        }
+    }
+
+    pub fn refuse(&self, command: ScriptRun, problem: String) -> Start {
+        self.refused(&mut lock(&self.inner.runs), command, problem)
+    }
+
+    pub fn start(&self, command: ScriptRun) -> Start {
+        let mut runs = lock(&self.inner.runs);
+        if lock(&self.inner.lifecycle.state).shutting_down {
+            return self.refused(&mut runs, command, "Dupin is shutting down.".into());
+        }
+        if runs
+            .iter()
+            .filter(|run| lock(&run.snapshot).status == Status::Running)
+            .count()
+            >= 8
+        {
+            return self.refused(&mut runs, command, "Eight scripts are already running.".into());
+        }
+        let run = self.insert_run(&mut runs, command, Status::Running);
+        let id = run.id;
         drop(runs);
         self.inner.running.fetch_add(1, Ordering::AcqRel);
         let inner = self.inner.clone();
@@ -260,7 +282,7 @@ impl Runner {
                 OutputBuffer::default(),
             );
         }
-        Ok(id)
+        Start { id, refused: false }
     }
 
     pub fn snapshots(&self) -> Vec<Arc<Snapshot>> {
@@ -715,7 +737,7 @@ mod tests {
         );
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
-        let id = runner.start(fixture.command(&["$HOME * ~", "a b"])).unwrap();
+        let id = runner.start(fixture.command(&["$HOME * ~", "a b"])).id;
         let result = wait(&runner, id);
         assert_eq!(result.status, Status::Exited(Some(7)));
         let stdout: Vec<_> = result
@@ -737,7 +759,7 @@ mod tests {
         );
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
-        let id = runner.start(fixture.command(&[])).unwrap();
+        let id = runner.start(fixture.command(&[])).id;
         let result = wait(&runner, id);
         fs::write(fixture.0.join("stop"), "").unwrap();
         assert!(!fixture.0.join("timed-out").exists());
@@ -758,7 +780,7 @@ mod tests {
             "trap 'exit 0' TERM\n(sh -c 'trap \"\" TERM; printf \"ready\\n\"; exec sleep 60') &\nwait\n",
         );
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
-        let id = runner.start(fixture.command(&[])).unwrap();
+        let id = runner.start(fixture.command(&[])).id;
         let start = Instant::now();
         while runner.snapshot(id).unwrap().output.last_stdout() != Some("ready") {
             assert!(start.elapsed() < Duration::from_secs(2));
@@ -784,7 +806,7 @@ mod tests {
     fn cancellation_escalates_for_a_term_ignoring_process_group() {
         let fixture = Fixture::new("trap '' TERM\nsleep 60 &\nprintf 'ready\\n'\nwait\n");
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
-        let id = runner.start(fixture.command(&[])).unwrap();
+        let id = runner.start(fixture.command(&[])).id;
         let start = Instant::now();
         while runner.snapshots()[0].output.last_stdout() != Some("ready") {
             assert!(start.elapsed() < Duration::from_secs(2));
@@ -811,9 +833,20 @@ mod tests {
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
         for _ in 0..8 {
-            runner.start(fixture.command(&[])).unwrap();
+            assert!(!runner.start(fixture.command(&[])).refused);
         }
-        assert!(runner.start(fixture.command(&[])).unwrap_err().contains("Eight"));
+        let mut silent = fixture.command(&[]);
+        silent.mode = OutputMode::Silent;
+        let start = runner.start(silent.clone());
+        assert!(start.refused);
+        let failure = runner.snapshot(start.id).unwrap();
+        assert_eq!(*failure.command, silent);
+        assert_eq!(
+            failure.status,
+            Status::Failed("Eight scripts are already running.".into())
+        );
+        assert_eq!(runner.snapshots()[0].id, failure.id);
+        assert_eq!(running.load(Ordering::Acquire), 8);
         let inner = runner.inner.clone();
         drop(runner);
         let start = Instant::now();
@@ -854,7 +887,7 @@ mod tests {
         let marker = fixture.0.join("holder.ready");
         let id = runner
             .start(fixture.command(&[executable.to_str().unwrap(), marker.to_str().unwrap()]))
-            .unwrap();
+            .id;
         let start = Instant::now();
         while !marker.exists() {
             assert!(start.elapsed() < Duration::from_secs(2));

@@ -96,6 +96,19 @@ pub struct Session {
     before_deletion: Option<String>,
 }
 
+/// The result chosen for an action that needs more input.
+pub struct FollowupTarget {
+    item: Item,
+    command: CommandId,
+    query: String,
+}
+
+impl FollowupTarget {
+    pub fn is_current(&self, session: &Session) -> bool {
+        self.command == session.command && self.query == session.query
+    }
+}
+
 #[derive(Debug)]
 struct ProviderState {
     items: Vec<Item>,
@@ -501,15 +514,21 @@ impl Session {
         };
         self.activate(&item, action)
     }
-    pub fn run_key_followup(&mut self, key: &str, parent: &str, action: ItemAction) -> Vec<Effect> {
-        if !self.select_key(key) {
+    pub fn followup_target(&self, parent: &str) -> Option<FollowupTarget> {
+        let item = self.actionable_items().get(self.selected)?;
+        item.item_action(parent)?;
+        Some(FollowupTarget {
+            item: item.clone(),
+            command: self.command.clone(),
+            query: self.query.clone(),
+        })
+    }
+
+    pub fn run_followup(&mut self, target: FollowupTarget, action: ItemAction) -> Vec<Effect> {
+        if !target.is_current(self) {
             return Vec::new();
         }
-        let item = self.items[self.selected].clone();
-        if item.item_action(parent).is_none() {
-            return Vec::new();
-        }
-        self.activate(&item, action)
+        self.activate(&target.item, action)
     }
 
     pub fn run_confirmed_key_action(&mut self, key: &str, action_id: &str) -> Vec<Effect> {

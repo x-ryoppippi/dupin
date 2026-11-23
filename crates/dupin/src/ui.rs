@@ -813,6 +813,7 @@ impl Ui {
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
         self.script_card = None;
+        self.script_entry = None;
         if let Some(picker) = &mut self.picker {
             picker.selected = 0;
             tx.instant();
@@ -1265,8 +1266,17 @@ impl Ui {
     pub(crate) fn scripts_catalog(&mut self, mut catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
         let notice = catalog.notice.take();
         self.prefs.update(move |prefs, _| prefs.scripts_notice = notice);
-        *self.scripts.write().unwrap() = catalog;
-        self.refresh_default(tx);
+        let changed = {
+            let mut current = self.scripts.write().unwrap();
+            let changed = current.scripts != catalog.scripts;
+            if changed {
+                *current = catalog;
+            }
+            changed
+        };
+        if changed {
+            self.refresh_default(tx);
+        }
     }
 
     fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -1327,9 +1337,12 @@ impl Ui {
             self.script_card = Some(snapshot.clone());
             tx.instant();
         }
-        if snapshot.status.failed()
-            && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
-        {
+        let inline_card = self
+            .script_card
+            .as_ref()
+            .filter(|_| self.picker.is_none())
+            .map(|card| card.id);
+        if crate::scripts::output::show_failure(&snapshot, inline_card, self.me.is_visible()) {
             self.show_script_output(id);
         } else {
             self.script_output.update_if(move |s, _| s.replace_run(snapshot));
@@ -1337,8 +1350,7 @@ impl Ui {
         changed
     }
 
-    pub(crate) fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
-        use dupin_core::script::OutputMode;
+    fn launch_script(&self, command: dupin_core::script::ScriptRun) -> crate::scripts::runner::Start {
         let valid = self
             .scripts
             .read()
@@ -1350,28 +1362,35 @@ impl Ui {
                     && s.header.mode == command.mode
                     && s.header.bind_args(&command.args).is_ok()
             });
-        if !valid {
-            self.show_notice("Script changed — search again before running it.".into(), tx);
-            return;
+        if valid {
+            self.runner.start(command)
+        } else {
+            self.runner
+                .refuse(command, "Script changed. Search again before running it.".into())
         }
+    }
+
+    pub(crate) fn repeat_script(&self, command: dupin_core::script::ScriptRun) {
+        let start = self.launch_script(command);
+        self.show_script_output(start.id);
+    }
+
+    fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        use dupin_core::script::OutputMode;
         let mode = command.mode;
-        match self.runner.start(command) {
-            Ok(id) => {
-                match mode {
-                    OutputMode::Inline => self.script_card = self.runner.snapshot(id),
-                    OutputMode::Full if self.me.is_visible() => self.script_output_after_close = Some(id),
-                    OutputMode::Full => {
-                        self.show_script_output(id);
-                        return;
-                    }
-                    OutputMode::Silent => {}
-                }
-                if self.script_output.is_visible() {
-                    let runs = self.runner.snapshots();
-                    self.script_output.update(move |s, _| s.update(runs, None));
-                }
+        let start = self.launch_script(command);
+        match mode {
+            OutputMode::Inline => {
+                self.script_card = self.runner.snapshot(start.id);
+                tx.focus("query", false);
             }
-            Err(problem) => self.show_notice(problem, tx),
+            OutputMode::Full => self.script_output_after_close = Some(start.id),
+            OutputMode::Silent if start.refused => self.script_output_after_close = Some(start.id),
+            OutputMode::Silent => {}
+        }
+        if self.script_output_after_close.is_none() && self.script_output.is_visible() {
+            let runs = self.runner.snapshots();
+            self.script_output.update(move |s, _| s.update(runs, None));
         }
     }
 
@@ -1408,7 +1427,6 @@ impl Ui {
                     query,
                 } => {
                     self.action_screen = None;
-                    self.script_card = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
                     let limit = spec.candidate_limit();
                     let due = tx.clock() + spec.deadline.as_secs_f64();
@@ -1435,8 +1453,16 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
-                Effect::ReplaceQuery(text) => self.query.replace_text(text),
+                Effect::ClearQuery => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.query.clear();
+                }
+                Effect::ReplaceQuery(text) => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.query.replace_text(text);
+                }
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::RunScript(command) => self.start_script(command, tx),
@@ -1448,11 +1474,14 @@ impl Ui {
                                 .selected_item()
                                 .and_then(|item| item.action(crate::scripts::provider::ARGUMENTS))
                                 == Some(&dupin_core::Action::ScriptArguments(path))
+                            && let Some(target) =
+                                self.session.followup_target(crate::scripts::provider::ARGUMENTS)
                         {
                             let mut query = TextEdit::new("");
                             query.focused = true;
+                            self.script_card = None;
                             self.script_entry = Some(crate::scripts::entry::Entry {
-                                key: self.session.result_key(self.session.selected()),
+                                target,
                                 script,
                                 query,
                             });

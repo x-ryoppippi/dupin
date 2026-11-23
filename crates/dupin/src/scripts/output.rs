@@ -1,10 +1,19 @@
 use super::runner::{RunId, Snapshot, Status};
-use dupin_core::script::{OutputBuffer, Stream};
+use dupin_core::script::{OutputBuffer, OutputMode, Stream};
 use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, Tx, col, row, text};
 use std::sync::Arc;
 
 const DISPLAY_LINE_LIMIT: usize = 200;
 const DISPLAY_BYTE_LIMIT: usize = 64 * 1024;
+
+pub fn show_failure(run: &Snapshot, inline_card: Option<RunId>, launcher_visible: bool) -> bool {
+    run.status.failed()
+        && match run.command.mode {
+            OutputMode::Inline => inline_card != Some(run.id),
+            OutputMode::Silent => true,
+            OutputMode::Full => !launcher_visible,
+        }
+}
 
 pub struct Output {
     runs: Vec<Arc<Snapshot>>,
@@ -51,7 +60,7 @@ impl Output {
     fn repeat(&mut self) {
         if let Some(run) = self.selected_run() {
             let command = (*run.command).clone();
-            self.panel.update(move |s, tx| s.start_script(command, tx));
+            self.panel.update(move |s, _| s.repeat_script(command));
         }
     }
     fn copy(&self, tx: &mut Tx) {
@@ -264,6 +273,25 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_failure_opens_output_unless_its_own_card_is_displayed() {
+        let run = Snapshot {
+            id: 2,
+            command: Arc::new(dupin_core::script::ScriptRun {
+                path: "/fixture/inline".into(),
+                title: "Fixture".into(),
+                args: vec![],
+                mode: OutputMode::Inline,
+            }),
+            status: Status::Exited(Some(3)),
+            output: OutputBuffer::default(),
+            elapsed: std::time::Duration::ZERO,
+        };
+        assert!(show_failure(&run, None, true));
+        assert!(show_failure(&run, Some(1), true));
+        assert!(!show_failure(&run, Some(2), true));
+    }
 
     #[test]
     fn display_bounds_leave_earlier_output_retained_for_copying() {

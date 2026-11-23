@@ -307,52 +307,50 @@ fn followup_actions_keep_the_parent_target_and_use_their_own_disposition() {
             s.run_key_action(&key, "inspect"),
             [Effect::Run(Action::Preview("/x/notes.md".into()))]
         );
+        let target = s.followup_target("inspect").unwrap();
+        let generation = searched(&s.refresh()).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("another.md")],
+        });
         let mut followup = ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
         if keep_open {
             followup = followup.keep_open();
         }
-        let effects = s.run_key_followup(&key, "inspect", followup);
+        let effects = s.run_followup(target, followup);
         assert_eq!(effects[0], Effect::Run(Action::Copy("value".into())));
         assert_eq!(effects.contains(&Effect::SaveHistory), !keep_open);
         assert_eq!(effects.contains(&Effect::Hide), !keep_open);
         if keep_open {
             assert_eq!(s.history(), &History::default());
-            assert_eq!(s.result_key(0), key);
+            assert_eq!(s.items()[0].id, item("another.md").id);
             assert_eq!(s.query(), "notes");
         } else {
-            assert_ne!(s.history(), &History::default());
+            assert_eq!(s.history().boost(&item("another.md").id, "notes", 0), 0);
+            assert!(s.history().boost(&item("notes.md").id, "notes", 0) > 0);
         }
     }
 }
 
 #[test]
-fn followup_actions_refuse_missing_parents_and_stale_or_pending_results() {
-    for change in 0..3 {
+fn followup_targets_require_an_actionable_parent_and_the_original_query() {
+    for reset in [false, true] {
         let mut s = session();
         let generation = searched(&s.set_query("notes")).1;
         s.deliver(Delivery::Batch {
             generation,
             items: vec![item("notes.md")],
         });
-        let key = s.result_key(0);
-        let followup = || ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
-        assert!(s.run_key_followup(&key, "missing", followup()).is_empty());
-        match change {
-            0 => {
-                s.refresh();
-            }
-            1 => {
-                s.set_query("other");
-            }
-            _ => {
-                s.reset();
-            }
+        assert!(s.followup_target("missing").is_none());
+        let target = s.followup_target("open").unwrap();
+        if reset {
+            s.reset();
+        } else {
+            s.set_query("other");
         }
-        assert!(s.run_key_followup(&key, "open", followup()).is_empty());
-        if !s.items().is_empty() {
-            let pending = s.result_key(0);
-            assert!(s.run_key_followup(&pending, "open", followup()).is_empty());
-        }
+        assert!(s.followup_target("open").is_none());
+        let followup = ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
+        assert!(s.run_followup(target, followup).is_empty());
         assert_eq!(s.history(), &History::default());
     }
 }

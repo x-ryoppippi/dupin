@@ -360,6 +360,18 @@ def script-query [out: path, title: string] {
         --exact
         --first
     ) | ignore
+    let stale = (ad
+        $out
+        $'($title)-stale-card'
+        find
+        --app
+        Dupin
+        --name
+        '↵ Copy · ⌘O Full output'
+        --exact
+        --first
+    )
+    if $stale.data?.match? != null { error make {msg: 'Launcher reopened with an old script card'} }
     type-script-text $title
     (poll
         $out
@@ -391,6 +403,9 @@ def script-query [out: path, title: string] {
 
 def scripts-stage [out: path] {
     let log = $out | path join dupin.log
+    let scripts = $out | path join config dupin scripts
+    let extra = $scripts | path join refresh-fixture
+    let echo_searched = 'dupin-trace: results done query="E2E script echo"'
     let focused = {|r| $r.ok and (
         $r.data?
         | default []
@@ -424,6 +439,11 @@ def scripts-stage [out: path] {
         ) | ignore
         let arguments = "first '$HOME' '*.rs'"
         type-script-text $arguments
+        wait-for-log $log $echo_searched
+        let before_argument_refresh = log-count $log $echo_searched
+        cp ($scripts | path join failure) $extra
+        ^chmod 700 $extra
+        wait-for-log --after $before_argument_refresh $log $echo_searched
         (poll
             $out
             scripts-arguments-value
@@ -454,6 +474,9 @@ def scripts-stage [out: path] {
         ) | ignore
         let argv = open ($out | path join script-fixtures argv.json)
         if $argv != [first '$HOME' '*.rs'] { error make {msg: 'Script arguments were expanded or changed'} }
+        let before_card_refresh = log-count $log $echo_searched
+        rm $extra
+        wait-for-log --after $before_card_refresh $log $echo_searched
         (poll
             $out
             scripts-inline-finished
@@ -526,6 +549,20 @@ def scripts-stage [out: path] {
         ) | ignore
         wait-condition 'script fixture process group exit' { script-processes-stopped $out }
         snap $out scripts-cancelled
+        let echo = (poll
+            $out
+            scripts-echo-in-history
+            $found
+            find --app Dupin --name 'E2E script echo' --exact --first
+        )
+        ad $out scripts-select-echo click $echo.data.match.ref_id | ignore
+        ad $out scripts-repeat-echo press cmd+r | ignore
+        (poll
+            $out
+            scripts-repeated-echo-selected
+            $found
+            find --app Dupin --name 'Repeated echo' --exact --first
+        ) | ignore
         ad $out scripts-output-close press cmd+w | ignore
         (poll
             $out
