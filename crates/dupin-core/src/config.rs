@@ -447,13 +447,13 @@ pub struct Clipboard {
     pub enabled: bool,
     pub max_entries: usize,
     /// Larger copies are skipped rather than truncated, so a copied-back entry is never partial.
-    pub max_entry_bytes: usize,
+    pub(crate) max_entry_bytes: usize,
     /// Bundle identifiers of apps whose copies are never recorded.
-    pub ignored_apps: Vec<String>,
+    pub(crate) ignored_apps: Vec<String>,
 }
 
-pub const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=1000;
-pub const CLIPBOARD_ENTRY_BYTES: std::ops::RangeInclusive<usize> = 1024..=1024 * 1024;
+const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=1000;
+const CLIPBOARD_ENTRY_BYTES: std::ops::RangeInclusive<usize> = 1024..=1024 * 1024;
 
 impl Default for Clipboard {
     fn default() -> Self {

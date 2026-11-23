@@ -92,11 +92,11 @@ pub enum Access {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry {
-    pub id: u64,
-    pub content: Content,
+struct Entry {
+    id: u64,
+    content: Content,
     /// Unix seconds.
-    pub copied_at: u64,
+    copied_at: u64,
     search_fields: Vec<String>,
 }
 
@@ -116,9 +116,9 @@ impl Entry {
 /// What the history keeps, from `[clipboard]` in config.toml.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Policy {
-    pub max_entries: usize,
+    max_entries: usize,
     pub max_entry_bytes: usize,
-    pub ignored_apps: Vec<String>,
+    ignored_apps: Vec<String>,
 }
 
 impl From<&config::Clipboard> for Policy {
@@ -199,25 +199,19 @@ impl History {
         self.entries.clear();
     }
 
-    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+    #[cfg(test)]
+    fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.entries.iter().map(Arc::as_ref)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     pub fn set_access(&mut self, access: Access) {
         self.access = access;
     }
 
-    pub fn access(&self) -> Access {
-        self.access
-    }
-
     /// Entries containing every word of the query, ignoring case, newest first, with the
     /// title characters that matched. An empty query lists the newest entries.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<(&Entry, String, Vec<usize>)> {
+    #[cfg(test)]
+    fn search(&self, query: &str, limit: usize) -> Vec<(&Entry, String, Vec<usize>)> {
         search_entries(self.entries(), query, limit)
     }
 }
@@ -279,7 +273,7 @@ fn plural(count: usize, one: &str, many: &str) -> String {
     format!("{count} {}", if count == 1 { one } else { many })
 }
 
-pub fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
+fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
     let when = ago(now, entry.copied_at);
     let (subtitle, icon, copy) = match &entry.content {
         Content::Text(text) => {
@@ -353,7 +347,7 @@ impl Provider for ClipboardProvider {
         let now = (self.clock)();
         let (access, entries) = {
             let history = self.history.lock().map_err(|_| ProviderError)?;
-            (history.access(), history.entries.clone())
+            (history.access, history.entries.clone())
         };
         let mut items: Vec<Item> = (self.access_item)(access).into_iter().collect();
         let candidates = entries
@@ -452,7 +446,7 @@ mod tests {
         assert!(!history.remove(drop));
         assert_eq!(texts(&history), ["keep"]);
         history.clear();
-        assert!(history.is_empty());
+        assert!(history.entries.is_empty());
     }
 
     #[test]
