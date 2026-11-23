@@ -157,10 +157,55 @@ fn publish_move(
             ));
         }
     }
-    trash(path).map_err(|error| {
-        format!("The copy was saved in the destination. Couldn't move the source to the Trash: {error}")
-    })?;
+    trash_move_source(path, &original.0[path], trash)
+        .map_err(|error| format!("The copy was saved in the destination. {error}"))?;
     Ok(destination)
+}
+
+fn trash_move_source(
+    path: &Path,
+    original: &EntryStamp,
+    trash: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let trash = || trash(path).map_err(|error| format!("Couldn't move the source to the Trash: {error}"));
+    let prepare_error = |error| format!("Couldn't prepare the source for the Trash: {error}");
+    let changed = || "The source changed during the move.".to_owned();
+    let metadata = path.symlink_metadata().map_err(prepare_error)?;
+    if EntryStamp::from(&metadata) != *original {
+        return Err(changed());
+    }
+    let permissions = metadata.permissions();
+    // SAFETY: geteuid takes no pointers and has no preconditions.
+    let user = unsafe { libc::geteuid() };
+    if !metadata.is_dir() || permissions.mode() & 0o200 != 0 || metadata.uid() != user {
+        return trash();
+    }
+
+    // Moving to the Trash changes the parent. Restore the mode by descriptor
+    // because the original path may no longer name this folder.
+    let entry = open_directory(path).map_err(prepare_error)?;
+    if EntryStamp::from(&entry.metadata().map_err(prepare_error)?) != *original {
+        return Err(changed());
+    }
+    entry
+        .set_permissions(fs::Permissions::from_mode(permissions.mode() | 0o200))
+        .map_err(prepare_error)?;
+    match (trash(), entry.set_permissions(permissions)) {
+        (result, Ok(())) => result,
+        (Ok(()), Err(error)) => Err(format!(
+            "The source was moved to the Trash, but its folder permissions couldn't be restored ({error})."
+        )),
+        (Err(trash_error), Err(error)) => Err(format!(
+            "{trash_error}. Couldn't restore the source folder permissions ({error})."
+        )),
+    }
+}
+
+fn open_directory(path: &Path) -> io::Result<fs::File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
 }
 
 fn publish_staged_entry(
@@ -177,11 +222,7 @@ fn publish_staged_entry(
     // Moving a directory to another parent needs write access to update its `..`.
     // Read access lets us keep a descriptor to restore the mode even if the name changes.
     fs::set_permissions(staged, fs::Permissions::from_mode(original.mode() | 0o600))?;
-    let entry = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(staged);
-    let (result, restoration) = match entry {
+    let (result, restoration) = match open_directory(staged) {
         Ok(entry) => (publish(staged, destination), entry.set_permissions(original)),
         Err(error) => (Err(error), fs::set_permissions(staged, original)),
     };
@@ -210,6 +251,17 @@ struct EntryStamp {
     changed: (i64, i64),
 }
 
+impl From<&fs::Metadata> for EntryStamp {
+    fn from(metadata: &fs::Metadata) -> Self {
+        Self {
+            identity: file_identity(metadata),
+            size: metadata.len(),
+            modified: (metadata.mtime(), metadata.mtime_nsec()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        }
+    }
+}
+
 impl SourceSnapshot {
     fn read(path: &Path) -> io::Result<Self> {
         let mut entries = HashMap::new();
@@ -221,15 +273,7 @@ impl SourceSnapshot {
                     pending.push(child?.path());
                 }
             }
-            entries.insert(
-                path,
-                EntryStamp {
-                    identity: file_identity(&metadata),
-                    size: metadata.len(),
-                    modified: (metadata.mtime(), metadata.mtime_nsec()),
-                    changed: (metadata.ctime(), metadata.ctime_nsec()),
-                },
-            );
+            entries.insert(path, EntryStamp::from(&metadata));
         }
         Ok(Self(entries))
     }
@@ -291,10 +335,7 @@ fn rename_without_exclusive_support(source: &Path, destination: &Path) -> io::Re
     let directory = metadata.is_dir();
     let reservation = if directory {
         DirBuilder::new().mode(0o700).create(destination)?;
-        OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-            .open(destination)?
+        open_directory(destination)?
     } else {
         OpenOptions::new()
             .write(true)
@@ -879,10 +920,13 @@ mod tests {
         let snapshot = SourceSnapshot::read(&source).unwrap();
         let staging = files.stage_copy(&source, &folder).unwrap();
         let trash = dir.0.join("trash");
+        fs::create_dir(&trash).unwrap();
+        let trashed_source = trash.join("source");
         let output = publish_move(&source, &snapshot, &staging.entry(), target.clone(), |path| {
             assert!(target.join("child.txt").exists());
             assert_eq!(target.metadata().unwrap().mode() & 0o7777, 0o555);
-            fs::rename(path, &trash).map_err(|error| error.to_string())
+            assert_eq!(path.metadata().unwrap().mode() & 0o7777, 0o755);
+            fs::rename(path, &trashed_source).map_err(|error| error.to_string())
         })
         .unwrap();
         assert_eq!(
@@ -890,7 +934,40 @@ mod tests {
             "original"
         );
         assert!(!source.exists());
-        assert_eq!(fs::read_to_string(trash.join("child.txt")).unwrap(), "original");
+        assert_eq!(trashed_source.metadata().unwrap().mode() & 0o7777, 0o555);
+        assert_eq!(
+            fs::read_to_string(trashed_source.join("child.txt")).unwrap(),
+            "original"
+        );
+    }
+
+    #[test]
+    fn staged_move_restores_source_permissions_when_trashing_fails() {
+        let dir = Scratch::new("staged-move-trash-failure");
+        let files = dir.transfers();
+        let source = dir.0.join("source");
+        let folder = dir.0.join("destination");
+        let target = folder.join("source");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&folder).unwrap();
+        let child = dir.file("source/child.txt", "original");
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
+        let snapshot = SourceSnapshot::read(&source).unwrap();
+        let staging = files.stage_copy(&source, &folder).unwrap();
+
+        let error = publish_move(&source, &snapshot, &staging.entry(), target.clone(), |path| {
+            assert_eq!(path.metadata().unwrap().mode() & 0o7777, 0o755);
+            Err("Trash unavailable".into())
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "The copy was saved in the destination. Couldn't move the source to the Trash: Trash unavailable"
+        );
+        assert_eq!(source.metadata().unwrap().mode() & 0o7777, 0o555);
+        assert_eq!(fs::read_to_string(child).unwrap(), "original");
+        assert_eq!(fs::read_to_string(target.join("child.txt")).unwrap(), "original");
     }
 
     #[test]
