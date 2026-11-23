@@ -10,7 +10,6 @@ pub mod fuzzy;
 pub mod history;
 pub mod item;
 pub mod provider;
-mod receivers;
 pub mod searcher;
 pub mod session;
 
@@ -20,7 +19,6 @@ pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{Action, Item, ItemAction, Payload, ShareTarget, View};
 pub use provider::{Provider, ProviderError, Request};
-pub use receivers::ReceiverActions;
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Session};
 

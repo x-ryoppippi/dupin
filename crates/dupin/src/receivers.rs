@@ -1,27 +1,27 @@
-use dupin_core::{Action, ItemAction, Payload, ReceiverActions, ShareTarget};
+use dupin_core::{Action, ItemAction, Payload, ShareTarget};
 
 use crate::web::WebCatalog;
 
 pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
-    let mut receivers = ReceiverActions::new(payload);
-    receivers.for_text(|text| [ItemAction::new("copy-text", "Copy", Action::Copy(text.into()))]);
-    receivers.for_paths(|paths| {
-        dupin_mac::sharing::targets()
-            .into_iter()
-            .map(move |(id, title, target)| {
-                let keep_open = target == ShareTarget::Picker;
-                let action = ItemAction::new(
-                    id,
-                    title,
-                    Action::Share {
-                        target,
-                        paths: paths.to_vec(),
-                    },
-                );
-                if keep_open { action.keep_open() } else { action }
-            })
-    });
-    receivers.for_paths(|paths| {
+    let mut receivers = Vec::new();
+    let text = payload.nonblank_text();
+    if let Some(text) = text {
+        receivers.push(ItemAction::new("copy-text", "Copy", Action::Copy(text.into())));
+    }
+    let paths = &payload.paths;
+    if !paths.is_empty() {
+        receivers.extend(dupin_mac::sharing::targets().map(|(id, title, target)| {
+            let keep_open = target == ShareTarget::Picker;
+            let action = ItemAction::new(
+                id,
+                title,
+                Action::Share {
+                    target,
+                    paths: paths.clone(),
+                },
+            );
+            if keep_open { action.keep_open() } else { action }
+        }));
         let text = paths
             .iter()
             .map(|path| path.to_string_lossy())
@@ -32,18 +32,18 @@ pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
         } else {
             "Copy paths"
         };
-        [ItemAction::new("copy-path", title, Action::Copy(text))]
-    });
-    receivers.for_text(|query| {
-        web.search_urls(query).map(|(keyword, name, url)| {
+        receivers.push(ItemAction::new("copy-path", title, Action::Copy(text)));
+    }
+    if let Some(query) = text {
+        receivers.extend(web.search_urls(query).map(|(keyword, name, url)| {
             ItemAction::new(
                 &format!("web:{keyword}"),
                 &format!("Search {name} ({keyword})"),
                 Action::OpenUrl(url),
             )
-        })
-    });
-    receivers.finish()
+        }));
+    }
+    receivers
 }
 
 #[cfg(test)]
