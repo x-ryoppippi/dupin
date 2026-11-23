@@ -2,6 +2,7 @@
 //! access. Checking never asks; asking is a separate, deliberate call.
 
 use std::ffi::c_void;
+use std::sync::Once;
 
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
@@ -32,10 +33,16 @@ pub fn allowed() -> bool {
     unsafe { CGPreflightPostEventAccess() }
 }
 
-/// Ask macOS for access, which shows its prompt when the user hasn't decided yet.
-pub fn request() {
-    // SAFETY: As `allowed`; the answer arrives through System Settings, not the return value.
-    unsafe { CGRequestPostEventAccess() };
+/// Ask macOS for access at most once per launch. Returns whether this call requested it.
+pub fn request_once() -> bool {
+    static REQUEST: Once = Once::new();
+    let mut requested = false;
+    REQUEST.call_once(|| {
+        // SAFETY: As in `allowed`, the API takes no arguments.
+        unsafe { CGRequestPostEventAccess() };
+        requested = true;
+    });
+    requested
 }
 
 /// Resolve the front app's paste shortcut on the main thread, after restoring its input source.

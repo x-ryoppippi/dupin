@@ -6,7 +6,7 @@ Dupin needs macOS Accessibility access for this shortcut. If access is missing, 
 
 ## Configuration
 
-Leave `selection_hotkey` empty to keep selected-text search off. To enable it, record a **Selection hotkey** in Settings → General or set `selection_hotkey`. Dupin requests Accessibility access on the first press that needs it.
+Leave `selection_hotkey` empty to keep selected-text search off. Recording the first **Selection hotkey** in Settings → General requests Accessibility access when needed. If you set `selection_hotkey` in `config.toml`, Dupin requests access on the first press that needs it.
 
 ```toml
 selection_hotkey = "" # optional shortcut for searching selected text

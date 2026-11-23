@@ -11,8 +11,7 @@ pub(super) struct SnippetRun {
 }
 
 impl Ui {
-    /// Copy the snippet now, or, to paste it, once the panel closes. Pasting needs
-    /// Accessibility access: the first attempt without it asks macOS, and later ones explain.
+    /// Copy the snippet now, or paste it once the panel closes if access is granted.
     pub(super) fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
         let snippet = SnippetRun {
             text,
@@ -29,10 +28,8 @@ impl Ui {
         if dupin_mac::paste::allowed() {
             return true;
         }
-        if std::mem::replace(&mut self.paste_access_asked, true) {
+        if !dupin_mac::paste::request_once() {
             self.notice_after_close = Some(PASTE_ACCESS_NOTICE.into());
-        } else {
-            dupin_mac::paste::request();
         }
         false
     }

@@ -80,7 +80,7 @@ fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             k,
             &icons::SHIELD,
             "Permissions",
-            Some("A feature that needs a permission asks when you first use it"),
+            Some("Review access or request it before using a feature that needs it"),
             review,
         ));
     }

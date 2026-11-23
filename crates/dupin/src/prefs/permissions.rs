@@ -1,6 +1,7 @@
 //! Settings → Permissions: each macOS permission a Dupin feature can use, what uses it, and
 //! whether macOS grants it, with controls to request or manage access.
 
+use dupin_core::Config;
 use dupin_mac::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 use rune::{El, Icon, row};
 use rune_kit::{Badge, BadgeVariant, Button, Kit};
@@ -89,6 +90,52 @@ fn used_by(features: &[&str]) -> Option<String> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Request {
+    Permission(Permission),
+    PostEvent,
+}
+
+fn request_access(calendar: &CalendarAccess, request: Request) {
+    if cfg!(test) || rune::tooling::is_headless() {
+        return;
+    }
+    match request {
+        Request::Permission(Permission::Calendars) => calendar.request(),
+        Request::Permission(permission @ Permission::Accessibility) => {
+            if permission.status() == Access::NotDetermined {
+                dupin_mac::accessibility::request_once();
+            }
+        }
+        Request::PostEvent => {
+            if !dupin_mac::paste::allowed() {
+                dupin_mac::paste::request_once();
+            }
+        }
+    }
+}
+
+fn request_enabled(before: &Config, after: &Config, mut request: impl FnMut(Request)) {
+    if !before.calendar.enabled && after.calendar.enabled {
+        request(Request::Permission(Permission::Calendars));
+    }
+    if (!before.window_management && after.window_management)
+        || (before.selection_hotkey.trim().is_empty() && !after.selection_hotkey.trim().is_empty())
+    {
+        request(Request::Permission(Permission::Accessibility));
+    }
+    if !before.snippet_paste && after.snippet_paste {
+        request(Request::PostEvent);
+    }
+}
+
+pub(super) fn settings_changed(s: &mut Prefs, before: &Config) {
+    request_enabled(before, &s.config, |request| {
+        request_access(&s.calendar_access, request);
+    });
+    s.refresh_permissions();
+}
+
 fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: PermissionStatus) -> El {
     let permission = entry.permission;
     let badge = Badge::new(status_title(status))
@@ -103,17 +150,8 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: Permission
         PermissionStatus::Access(Access::NotDetermined) | PermissionStatus::RequestIncomplete => {
             Button::new("Request Access")
                 .on_press(move |s: &mut Prefs| {
-                    if !rune::tooling::is_headless() {
-                        match permission {
-                            Permission::Accessibility => {
-                                if permission.status() == Access::NotDetermined {
-                                    dupin_mac::accessibility::request_once();
-                                }
-                            }
-                            Permission::Calendars => s.calendar_access.request(),
-                        }
-                        s.refresh_permissions();
-                    }
+                    request_access(&s.calendar_access, Request::Permission(permission));
+                    s.refresh_permissions();
                 })
                 .build(k)
                 .key(format!("permission-{index}-request"))
@@ -137,7 +175,7 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: Permission
     }
     if permission == Permission::Accessibility
         && s.config.display != dupin_core::config::DisplaySelection::Active
-        && s.config.selection_hotkey.is_empty()
+        && s.config.selection_hotkey.trim().is_empty()
         && !s.config.snippet_paste
         && !s.config.window_management
     {
@@ -165,8 +203,8 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         card(k, hair, rows),
         note(
             k,
-            "Dupin only asks for access when you request it here or use a feature that needs it. \
-             File search reads the Spotlight index and needs no permission.",
+            "Dupin can ask for access when you enable or first use a feature that needs it, \
+             or when you choose Request Access here. File search needs no permission.",
         ),
     ]
 }
@@ -174,6 +212,55 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enabling_each_permission_dependent_setting_requests_its_grant() {
+        let off = Config::default();
+        let mut on = off.clone();
+        let mut requests = Vec::new();
+        on.calendar.enabled = true;
+        request_enabled(&off, &on, |request| requests.push(request));
+        assert_eq!(requests.as_slice(), &[Request::Permission(Permission::Calendars)]);
+
+        on = off.clone();
+        on.window_management = true;
+        request_enabled(&off, &on, |request| requests.push(request));
+        on = off.clone();
+        on.selection_hotkey = "alt+shift+space".into();
+        let blank = Config {
+            selection_hotkey: "  ".into(),
+            ..off.clone()
+        };
+        request_enabled(&blank, &on, |request| requests.push(request));
+        on = off.clone();
+        on.snippet_paste = true;
+        request_enabled(&off, &on, |request| requests.push(request));
+        assert_eq!(
+            &requests[1..],
+            [
+                Request::Permission(Permission::Accessibility),
+                Request::Permission(Permission::Accessibility),
+                Request::PostEvent,
+            ]
+        );
+    }
+
+    #[test]
+    fn retaining_disabling_or_rebinding_features_does_not_request_access() {
+        let off = Config::default();
+        let mut on = off.clone();
+        on.calendar.enabled = true;
+        on.window_management = true;
+        on.snippet_paste = true;
+        on.selection_hotkey = "alt+shift+space".into();
+        let unexpected = |_| panic!("asked for access without enabling a feature");
+        request_enabled(&off, &off, unexpected);
+        request_enabled(&on, &on, unexpected);
+        request_enabled(&on, &off, unexpected);
+        let mut changed = on.clone();
+        changed.selection_hotkey = "ctrl+shift+space".into();
+        request_enabled(&on, &changed, unexpected);
+    }
 
     #[test]
     fn features_read_as_a_list() {

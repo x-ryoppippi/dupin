@@ -125,7 +125,7 @@ fn calendar_setting(s: &Prefs, k: &Kit) -> El {
         k,
         &icons::SEARCH,
         "Calendar search",
-        Some("Type cal then Space to search events"),
+        Some("Type cal then Space to search events. Requires Calendar access."),
         calendar,
     )
 }
@@ -159,7 +159,7 @@ fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
         k,
         &icons::KEYBOARD,
         "Paste snippets",
-        Some("Enter pastes a snippet into the front app instead of only copying it"),
+        Some("Enter pastes a snippet into the front app. Requires Accessibility access."),
         paste,
     )
 }
@@ -176,7 +176,7 @@ fn window_management_setting(s: &Prefs, k: &Kit) -> El {
         k,
         &icons::PANEL,
         "Window Management",
-        Some("Show commands to move and resize windows. Requires Accessibility on first use."),
+        Some("Show commands to move and resize windows. Requires Accessibility access."),
         window_management,
     )
 }
@@ -226,7 +226,6 @@ fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {
 }
 
 fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {
-    // Checking doesn't ask macOS for access; only pasting a snippet does.
     if !s.config.snippet_paste || dupin_mac::paste::allowed() {
         return None;
     }

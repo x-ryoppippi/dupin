@@ -108,8 +108,6 @@ pub struct Ui {
     paste_after_close: Option<SnippetRun>,
     /// Why a snippet wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
-    /// Pasting has asked macOS for access once since launch; later attempts explain instead.
-    paste_access_asked: bool,
     sharing: dupin_mac::sharing::Picker,
     panel_window: Option<rune::WindowHandle>,
     file_demotions: Arc<RwLock<Vec<String>>>,
@@ -266,7 +264,6 @@ impl Ui {
             snippets: registration.snippets,
             paste_after_close: None,
             notice_after_close: None,
-            paste_access_asked: false,
             sharing: dupin_mac::sharing::Picker::default(),
             panel_window: None,
             file_demotions: registration.file_demotions,

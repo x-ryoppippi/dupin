@@ -6,6 +6,8 @@ Saving from Settings merges the changed fields into the latest valid file, prese
 
 Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. File changes apply automatically while Dupin runs, including atomic replacements and changes to a linked file. The panel and Settings use the same configuration.
 
+Enabling Calendar search, Window Management or Paste snippets, or setting a Selection hotkey for the first time in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
+
 ```toml
 display = "mouse" # "mouse", "main", or "active"
 position = "center" # "center" puts the field at the middle of the display; "top" near its top

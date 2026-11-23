@@ -276,6 +276,7 @@ impl Prefs {
         if let Err(error) = self.settings.save(base, &self.config) {
             self.set_problem(Some(error));
         }
+        permissions::settings_changed(self, base);
     }
 
     fn publish(&self) {
