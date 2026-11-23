@@ -46,7 +46,7 @@ impl FileTransfers {
             return Err("The item is already in this folder.".into());
         }
         let destination = folder.join(name);
-        match rename_exclusive(path, &destination) {
+        match rename_across_parents(path, &destination, rename_exclusive) {
             Ok(()) => Ok(destination),
             Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
                 self.move_across_volumes(path, &folder, destination)
@@ -102,7 +102,7 @@ impl FileTransfers {
         let staging = self.stage_copy(path, folder)?;
         let entry = staging.entry();
         claim(folder, names, |destination| {
-            publish_staged_entry(&entry, destination, rename_exclusive).map_err(Attempt::from)
+            rename_across_parents(&entry, destination, rename_exclusive).map_err(Attempt::from)
         })
     }
 
@@ -144,7 +144,7 @@ fn publish_move(
     destination: PathBuf,
     trash: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
-    publish_staged_entry(staged, &destination, rename_exclusive)
+    rename_across_parents(staged, &destination, rename_exclusive)
         .map_err(|error| move_problem(error, &destination))?;
     match SourceSnapshot::read(path) {
         Ok(current) if current == *original => {}
@@ -208,32 +208,34 @@ fn open_directory(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
-fn publish_staged_entry(
-    staged: &Path,
+fn rename_across_parents(
+    source: &Path,
     destination: &Path,
-    publish: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    rename: impl FnOnce(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
-    let metadata = staged.symlink_metadata()?;
+    let metadata = source.symlink_metadata()?;
     let original = metadata.permissions();
-    if !metadata.is_dir() || original.mode() & 0o200 != 0 {
-        return publish(staged, destination);
+    // SAFETY: geteuid takes no pointers and has no preconditions.
+    let user = unsafe { libc::geteuid() };
+    if !metadata.is_dir() || original.mode() & 0o200 != 0 || metadata.uid() != user {
+        return rename(source, destination);
     }
 
     // Moving a directory to another parent needs write access to update its `..`.
     // Read access lets us keep a descriptor to restore the mode even if the name changes.
-    fs::set_permissions(staged, fs::Permissions::from_mode(original.mode() | 0o600))?;
-    let (result, restoration) = match open_directory(staged) {
-        Ok(entry) => (publish(staged, destination), entry.set_permissions(original)),
-        Err(error) => (Err(error), fs::set_permissions(staged, original)),
+    fs::set_permissions(source, fs::Permissions::from_mode(original.mode() | 0o600))?;
+    let (result, restoration) = match open_directory(source) {
+        Ok(entry) => (rename(source, destination), entry.set_permissions(original)),
+        Err(error) => (Err(error), fs::set_permissions(source, original)),
     };
     if let Err(error) = restoration {
         return Err(io::Error::other(match result {
             Ok(()) => format!(
-                "The copy was saved at “{}”, but its folder permissions couldn't be restored ({error}).",
+                "The folder is at “{}”, but its permissions couldn't be restored ({error}).",
                 destination.display()
             ),
-            Err(publish_error) => {
-                format!("{publish_error}. Couldn't restore the staged folder permissions ({error}).")
+            Err(rename_error) => {
+                format!("{rename_error}. Couldn't restore the folder permissions ({error}).")
             }
         }));
     }
@@ -647,12 +649,12 @@ mod tests {
             })
         };
         let invalid = staged.join("destination");
-        assert!(publish_staged_entry(&staged, &invalid, publish_without_exclusive).is_err());
+        assert!(rename_across_parents(&staged, &invalid, publish_without_exclusive).is_err());
         assert!(!invalid.exists());
         assert_eq!(staged.metadata().unwrap().mode() & 0o7777, 0o555);
 
         let destination = dir.0.join("destination");
-        publish_staged_entry(&staged, &destination, publish_without_exclusive).unwrap();
+        rename_across_parents(&staged, &destination, publish_without_exclusive).unwrap();
         assert!(!staged.exists());
         assert_eq!(destination.metadata().unwrap().mode() & 0o7777, 0o555);
         assert_eq!(fs::read_to_string(destination.join("child")).unwrap(), "original");
@@ -807,6 +809,24 @@ mod tests {
         assert_eq!(output, occupied.canonicalize().unwrap());
         assert!(!source.exists());
         assert_eq!(std::fs::read_to_string(output).unwrap(), "original");
+    }
+
+    #[test]
+    fn move_preserves_read_only_folders() {
+        let dir = Scratch::new("read-only-move");
+        let source = dir.0.join("source");
+        let folder = dir.0.join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&folder).unwrap();
+        dir.file("source/child.txt", "original");
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let moved = dir.transfers().move_to(&source, &folder).unwrap();
+
+        assert_eq!(moved, folder.canonicalize().unwrap().join("source"));
+        assert!(!source.exists());
+        assert_eq!(moved.metadata().unwrap().mode() & 0o7777, 0o555);
+        assert_eq!(fs::read_to_string(moved.join("child.txt")).unwrap(), "original");
     }
 
     #[test]
