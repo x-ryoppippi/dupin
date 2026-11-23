@@ -76,12 +76,16 @@ impl Content {
         }
     }
 
-    fn contains(&self, lowered_word: &str) -> bool {
+    fn search_fields(&self) -> Vec<String> {
         match self {
-            Content::Text(text) => text.to_lowercase().contains(lowered_word),
+            Content::Text(text) => {
+                let lower = text.to_lowercase();
+                if lower == *text { Vec::new() } else { vec![lower] }
+            }
             Content::Files(paths) => paths
                 .iter()
-                .any(|path| path.to_string_lossy().to_lowercase().contains(lowered_word)),
+                .map(|path| path.to_string_lossy().to_lowercase())
+                .collect(),
         }
     }
 }
@@ -104,6 +108,20 @@ pub struct Entry {
     pub content: Content,
     /// Unix seconds.
     pub copied_at: u64,
+    search_fields: Vec<String>,
+}
+
+impl Entry {
+    fn matches(&self, words: &[String]) -> bool {
+        if let Content::Text(text) = &self.content
+            && self.search_fields.is_empty()
+        {
+            return words.iter().all(|word| text.contains(word));
+        }
+        words
+            .iter()
+            .all(|word| self.search_fields.iter().any(|field| field.contains(word)))
+    }
 }
 
 /// What the history keeps, from `[clipboard]` in config.toml.
@@ -133,7 +151,7 @@ impl Default for Policy {
 #[derive(Debug, Default)]
 pub struct History {
     /// Newest first.
-    entries: VecDeque<Entry>,
+    entries: VecDeque<Arc<Entry>>,
     next_id: u64,
     policy: Policy,
     access: Access,
@@ -175,11 +193,12 @@ impl History {
         }
         self.entries.retain(|entry| entry.content != content);
         self.next_id += 1;
-        self.entries.push_front(Entry {
+        self.entries.push_front(Arc::new(Entry {
             id: self.next_id,
+            search_fields: content.search_fields(),
             content,
             copied_at: now,
-        });
+        }));
         self.entries.truncate(self.policy.max_entries);
         true
     }
@@ -195,7 +214,7 @@ impl History {
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
-        self.entries.iter()
+        self.entries.iter().map(Arc::as_ref)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -213,18 +232,25 @@ impl History {
     /// Entries containing every word of the query, ignoring case, newest first, with the
     /// title characters that matched. An empty query lists the newest entries.
     pub fn search(&self, query: &str, limit: usize) -> Vec<(&Entry, String, Vec<usize>)> {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        self.entries
-            .iter()
-            .filter(|entry| words.iter().all(|word| entry.content.contains(word)))
-            .take(limit)
-            .map(|entry| {
-                let title = entry.content.title();
-                let matched = highlights(&title, &words);
-                (entry, title, matched)
-            })
-            .collect()
+        search_entries(self.entries(), query, limit)
     }
+}
+
+fn search_entries<'a>(
+    entries: impl Iterator<Item = &'a Entry>,
+    query: &str,
+    limit: usize,
+) -> Vec<(&'a Entry, String, Vec<usize>)> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    entries
+        .filter(|entry| entry.matches(&words))
+        .take(limit)
+        .map(|entry| {
+            let title = entry.content.title();
+            let matched = highlights(&title, &words);
+            (entry, title, matched)
+        })
+        .collect()
 }
 
 /// Character indices of each word's first occurrence in `title`, ignoring case.
@@ -373,15 +399,21 @@ impl ClipboardProvider {
 impl Provider for ClipboardProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         let now = (self.clock)();
-        let history = self.history.lock().map_err(|_| ProviderError)?;
-        let mut items: Vec<Item> = access_item(history.access()).into_iter().collect();
+        let (access, entries) = {
+            let history = self.history.lock().map_err(|_| ProviderError)?;
+            (history.access(), history.entries.clone())
+        };
+        let mut items: Vec<Item> = access_item(access).into_iter().collect();
+        let candidates = entries
+            .iter()
+            .take_while(|_| !request.is_cancelled())
+            .map(Arc::as_ref);
+        let limit = request.limit.saturating_sub(items.len());
         items.extend(
-            history
-                .search(&request.query, request.limit.saturating_sub(items.len()))
+            search_entries(candidates, &request.query, limit)
                 .into_iter()
                 .map(|(entry, title, matched)| item(entry, title, matched, now)),
         );
-        drop(history);
         emit(items);
         Ok(())
     }
@@ -500,6 +532,17 @@ mod tests {
 
         assert_eq!(history.search("", 2).len(), 2);
         assert!(history.search("absent", 10).is_empty());
+    }
+
+    #[test]
+    fn search_matches_full_unicode_text_beyond_the_title() {
+        let mut history = History::default();
+        let original = format!("{} TÜRKİYE Café", "x".repeat(TITLE_CHARS + 50));
+        assert!(history.push(text(&original), 1));
+        let hits = history.search("CAFÉ türki\u{307}ye", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0.content, text(&original));
+        assert!(hits[0].2.is_empty());
     }
 
     #[test]
