@@ -39,6 +39,8 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 
 When an app matches through one of those other names, the name shows before its folder in the result.
 
+Use a global shortcut to launch an app or bring it to the front. Set `hide_if_frontmost = true` to hide the app if it is already frontmost. See [app hotkey configuration](./configuration.md#app-hotkeys).
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.

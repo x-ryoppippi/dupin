@@ -330,20 +330,17 @@ impl Ui {
                     call.finish(Err("settings are read-only".into()));
                     return;
                 }
-                let checked = accept_config(
-                    (**desired).clone(),
-                    &self.configuration.values.borrow(),
-                    |shortcut| {
-                        if self.configuration.hotkey.is_installed(shortcut) {
-                            Ok(())
-                        } else {
-                            self.configuration.hotkey.replace(shortcut)
-                        }
-                    },
-                );
-                match checked.and_then(|desired| self.configuration.files.save(base, &desired)) {
+                let previous = self.configuration.values.borrow();
+                if let Err(error) = self.configuration.hotkey.reserve_for_save(desired, &previous) {
+                    call.finish(Err(error));
+                    return;
+                }
+                match self.configuration.files.save(base, desired) {
                     Ok(revision) => self.control_save = Some((revision, call)),
-                    Err(error) => call.finish(Err(error)),
+                    Err(error) => {
+                        self.configuration.hotkey.discard_reservations();
+                        call.finish(Err(error));
+                    }
                 }
             }
         }
@@ -528,13 +525,11 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            accept_config(config, &previous, |shortcut| {
-                if self.configuration.hotkey.is_installed(shortcut) {
-                    Ok(())
-                } else {
-                    self.configuration.hotkey.replace(shortcut)
-                }
-            })
+            self.configuration
+                .hotkey
+                .apply_config(&config, &previous)
+                .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
+            Ok(config)
         });
         let problem = match accepted {
             Ok(config) => {
@@ -545,7 +540,12 @@ impl Ui {
                 }
                 None
             }
-            Err(error) => Some(error),
+            Err(error) => {
+                if self.control_save.is_some() {
+                    self.configuration.hotkey.discard_reservations();
+                }
+                Some(error)
+            }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
         let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
@@ -635,6 +635,25 @@ impl Ui {
 
     pub fn setup(s: &mut Ui, waker: Waker) {
         s.icon_cache = Some(ImageCache::new(waker));
+    }
+
+    pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
+        match self.configuration.hotkey.target(shortcut) {
+            Some(crate::hotkey::Target::Panel) => self.toggle(tx),
+            Some(crate::hotkey::Target::Configured(dupin_core::config::HotkeyTarget::App {
+                bundle_id,
+                hide_if_frontmost,
+            })) => {
+                if self.shown {
+                    self.dismiss(tx);
+                }
+                self.run_workspace_action(dupin_mac::workspace::Action::OpenApp {
+                    bundle_id,
+                    hide_if_frontmost,
+                });
+            }
+            None => (),
+        }
     }
 
     /// The hotkey: show the panel, or hide it when it already shows.
@@ -1422,24 +1441,6 @@ fn reconcile_snapshot(
     }
 }
 
-fn accept_config(
-    config: Config,
-    previous: &Config,
-    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
-) -> Result<Config, String> {
-    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
-        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
-    })?;
-    if let Err(error) = install(shortcut.as_ref())
-        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
-    {
-        return Err(format!(
-            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
-        ));
-    }
-    Ok(config)
-}
-
 fn is_quick_look_shortcut(key: &Key) -> bool {
     matches!(key, Key::Command('y'))
 }
@@ -1549,28 +1550,6 @@ mod config_tests {
                 .0
                 .is_err()
         );
-    }
-
-    #[test]
-    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
-        let previous = Config::default();
-        let changed = Config {
-            file_limit: 50,
-            ..previous.clone()
-        };
-        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
-        assert_eq!(accepted, Ok(changed));
-    }
-
-    #[test]
-    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
-        let previous = Config::default();
-        let changed = Config {
-            hotkey: "ctrl+alt+k".into(),
-            file_limit: 50,
-            ..previous.clone()
-        };
-        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
     }
 }
 

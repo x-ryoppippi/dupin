@@ -1217,7 +1217,10 @@ mod tests {
         let external = Config {
             hotkey: "ctrl+alt+k".into(),
             dictionary_keywords: vec!["lookup".into()],
-            ..Config::default()
+            ..Config::parse(
+                "[bindings.\"ctrl+alt+c\"]\ntarget = \"app\"\nbundle_id = \"com.apple.calculator\"",
+            )
+            .unwrap()
         };
         std::fs::write(&path, toml::to_string(&external).unwrap()).unwrap();
         *current.borrow_mut() = external.clone();

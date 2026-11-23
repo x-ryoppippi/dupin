@@ -17,13 +17,26 @@ auto_update = true # whether a release build checks for and installs its channel
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
-At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
+At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the panel shortcut.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+## App hotkeys
+
+Add a table to `config.toml` for each shortcut, using the app's macOS bundle identifier.
+
+```toml
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+hide_if_frontmost = true # optional, defaults to false
+```
+
+Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 
 ## Web searches
 

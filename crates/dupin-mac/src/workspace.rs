@@ -9,9 +9,16 @@ use objc2_foundation::{NSArray, NSFileManager, NSString, NSURL};
 #[derive(Debug)]
 pub enum Action {
     Open(PathBuf),
+    OpenApp {
+        bundle_id: String,
+        hide_if_frontmost: bool,
+    },
     Reveal(PathBuf),
     OpenUrl(String),
-    OpenWith { path: PathBuf, application: PathBuf },
+    OpenWith {
+        path: PathBuf,
+        application: PathBuf,
+    },
     Trash(PathBuf),
 }
 
@@ -20,6 +27,10 @@ pub fn run(action: &Action) -> Result<(), String> {
         Action::Open(path) => open(path)
             .then_some(())
             .ok_or_else(|| format!("Couldn't open “{}”.", path.display())),
+        Action::OpenApp {
+            bundle_id,
+            hide_if_frontmost,
+        } => open_app(bundle_id, *hide_if_frontmost),
         Action::OpenUrl(url) => open_url(url)
             .then_some(())
             .ok_or_else(|| "Couldn't open this link.".into()),
@@ -68,6 +79,27 @@ pub fn run(action: &Action) -> Result<(), String> {
             .trashItemAtURL_resultingItemURL_error(&file_url(path), None)
             .map_err(|error| error.localizedDescription().to_string()),
     })
+}
+
+fn open_app(bundle_id: &str, hide_if_frontmost: bool) -> Result<(), String> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let identifier = NSString::from_str(bundle_id);
+    if hide_if_frontmost
+        && let Some(app) = workspace.frontmostApplication()
+        && app.bundleIdentifier().as_deref() == Some(&*identifier)
+    {
+        return app
+            .hide()
+            .then_some(())
+            .ok_or_else(|| format!("Couldn't hide “{bundle_id}”."));
+    }
+    let url = workspace
+        .URLForApplicationWithBundleIdentifier(&identifier)
+        .ok_or_else(|| format!("Couldn't find the app “{bundle_id}”."))?;
+    workspace
+        .openURL(&url)
+        .then_some(())
+        .ok_or_else(|| format!("Couldn't open “{bundle_id}”."))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

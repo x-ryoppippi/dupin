@@ -10,6 +10,7 @@ pub struct Config {
     /// The global shortcut that shows and hides the panel, as Rune parses accelerators:
     /// modifiers (`cmd`, `alt`, `ctrl`, `shift`) and a key joined by `+`.
     pub hotkey: String,
+    pub bindings: BTreeMap<String, HotkeyTarget>,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
     /// Directories to rank lower in file search. Relative names match directory components;
@@ -31,6 +32,16 @@ pub struct Config {
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     pub theme: Theme,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "target", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HotkeyTarget {
+    App {
+        bundle_id: String,
+        #[serde(default)]
+        hide_if_frontmost: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -125,6 +136,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             hotkey: "cmd+space".into(),
+            bindings: BTreeMap::new(),
             file_limit: 200,
             file_demotions: [
                 "~/Library",
@@ -194,6 +206,27 @@ mod tests {
             Config::parse("hotkey = \"alt+space\"").unwrap().hotkey,
             "alt+space"
         );
+    }
+
+    #[test]
+    fn app_bindings_round_trip_with_hiding_opt_in() {
+        let config = Config::parse(
+            r#"
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+"#,
+        )
+        .unwrap();
+        assert!(Config::default().bindings.is_empty());
+        assert_eq!(
+            config.bindings["ctrl+alt+c"],
+            HotkeyTarget::App {
+                bundle_id: "com.apple.calculator".into(),
+                hide_if_frontmost: false,
+            }
+        );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
     }
 
     #[test]

@@ -35,7 +35,9 @@ fn main() {
         return;
     }
     rune::prewarm_gpu();
-    let (config, config_problem) = settings::load();
+    let (mut config, config_problem) = settings::load();
+    // The first watched snapshot installs the app shortcuts before accepting them.
+    config.bindings.clear();
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
     let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
