@@ -78,6 +78,29 @@ pub struct ActionScreen {
     pub item: dupin_core::Item,
     pub layout_key: String,
     pub selected: usize,
+    pub stage: ActionStage,
+}
+
+#[derive(Clone, Debug)]
+pub enum ApplicationState {
+    Loading,
+    Ready(Vec<dupin_mac::workspace::Application>),
+    Failed(String),
+}
+
+#[derive(Clone, Debug)]
+pub enum ActionStage {
+    List,
+    Applications {
+        parent: String,
+        token: u64,
+        state: ApplicationState,
+        selected: usize,
+    },
+    Confirm {
+        action_id: String,
+        selected: usize,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -85,10 +108,84 @@ enum ActionKey {
     Stay,
     Back,
     Run(String, String),
+    Confirm,
+    Choice(usize),
 }
 
 impl ActionScreen {
-    fn key(&mut self, key: &Key) -> ActionKey {
+    fn accept_applications(
+        &mut self,
+        key: &str,
+        token: u64,
+        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+    ) -> bool {
+        if self.key != key {
+            return false;
+        }
+        let ActionStage::Applications {
+            token: current,
+            state,
+            ..
+        } = &mut self.stage
+        else {
+            return false;
+        };
+        if *current != token {
+            return false;
+        }
+        *state = match result {
+            Ok(apps) => ApplicationState::Ready(apps),
+            Err(error) => ApplicationState::Failed(error),
+        };
+        true
+    }
+
+    fn selected_index(&self) -> usize {
+        match &self.stage {
+            ActionStage::Applications { selected, .. } | ActionStage::Confirm { selected, .. } => *selected,
+            ActionStage::List => self.selected,
+        }
+    }
+
+    fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
+        if matches!(key, Key::Enter) && repeat {
+            return ActionKey::Stay;
+        }
+        if matches!(key, Key::Left | Key::Escape) {
+            if matches!(self.stage, ActionStage::List) {
+                return ActionKey::Back;
+            }
+            self.stage = ActionStage::List;
+            crate::trace::action_screen("list");
+            return ActionKey::Stay;
+        }
+        match &mut self.stage {
+            ActionStage::Confirm { selected, .. } => {
+                match key {
+                    Key::Up => *selected = 0,
+                    Key::Down => *selected = 1,
+                    Key::Enter if *selected == 1 => return ActionKey::Confirm,
+                    Key::Enter => {
+                        self.stage = ActionStage::List;
+                        crate::trace::action_screen("list");
+                    }
+                    _ => {}
+                }
+                return ActionKey::Stay;
+            }
+            ActionStage::Applications { state, selected, .. } => {
+                if let ApplicationState::Ready(apps) = state {
+                    match key {
+                        Key::Up => *selected = selected.saturating_sub(1),
+                        Key::Down => *selected = (*selected + 1).min(apps.len().saturating_sub(1)),
+                        Key::Enter if !apps.is_empty() => return ActionKey::Choice(*selected),
+                        _ => {}
+                    }
+                }
+                return ActionKey::Stay;
+            }
+            ActionStage::List => {}
+        }
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
             Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
@@ -147,12 +244,13 @@ pub struct Ui {
     runner: crate::scripts::runner::Runner,
     _scripts_watcher: Option<dupin_mac::watcher::PathWatcher>,
     pub action_screen: Option<ActionScreen>,
+    next_lookup: u64,
+    notice_until: Option<f64>,
     pub session: Session,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
-    snapshot_notice_until: Option<f64>,
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
@@ -366,13 +464,14 @@ impl Ui {
             theme: config.theme.clone(),
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
+            next_lookup: 0,
+            notice_until: None,
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
-            snapshot_notice_until: None,
             config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
@@ -674,7 +773,7 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
-        self.snapshot_notice_until = None;
+        self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
@@ -686,7 +785,7 @@ impl Ui {
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
-        self.snapshot_notice_until = None;
+        self.notice_until = None;
         self.notice = Some(message);
         tx.instant();
         self.show(tx);
@@ -736,10 +835,7 @@ impl Ui {
     }
 
     pub fn snapshot_notice(&mut self, message: String, tx: &mut Tx) {
-        self.notice = Some(message);
-        let due = tx.clock() + 5.0;
-        self.snapshot_notice_until = Some(due);
-        tx.wake_at(due);
+        self.timed_notice(message, tx);
     }
 
     pub fn open_snapshots(&mut self) {
@@ -849,14 +945,16 @@ impl Ui {
             _ => {}
         }
         if let Some(screen) = &mut self.action_screen {
-            match screen.key(&ev.key) {
+            match screen.key(&ev.key, tx.key_repeat()) {
                 ActionKey::Back => {
                     self.action_screen = None;
                     tx.focus("query", false);
                 }
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
+                ActionKey::Confirm => self.confirm_action(tx),
+                ActionKey::Choice(index) => self.pick_application(index, tx),
                 ActionKey::Stay => {
-                    tx.scroll_into_view(format!("action-{}", screen.selected));
+                    tx.scroll_into_view(format!("action-{}", screen.selected_index()));
                 }
             }
             return true;
@@ -955,16 +1053,170 @@ impl Ui {
         }
     }
 
+    pub fn action_back(&mut self, tx: &mut Tx) {
+        if let Some(screen) = &mut self.action_screen {
+            if matches!(screen.stage, ActionStage::List) {
+                self.action_screen = None;
+                tx.focus("query", false);
+            } else {
+                screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
+            }
+        }
+    }
+
     pub fn pick_action(&mut self, key: &str, action: &str, tx: &mut Tx) {
-        if !self
+        let Some(screen) = self
             .action_screen
             .as_ref()
-            .is_some_and(|screen| screen.key == key)
-        {
+            .filter(|screen| screen.key == key && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        let Some(item_action) = screen.item.item_action(action) else {
+            return;
+        };
+        if !matches!(screen.stage, ActionStage::List) {
             return;
         }
+        let selected = screen
+            .item
+            .actions
+            .iter()
+            .position(|candidate| candidate.id == action)
+            .unwrap();
+        if let Some(dupin_core::Action::ChooseApplication(path)) = screen.item.action(action) {
+            let path = path.clone();
+            self.next_lookup += 1;
+            let token = self.next_lookup;
+            self.action_screen.as_mut().unwrap().stage = ActionStage::Applications {
+                parent: action.into(),
+                token,
+                state: ApplicationState::Loading,
+                selected: 0,
+            };
+            self.action_screen.as_mut().unwrap().selected = selected;
+            crate::trace::action_screen("applications loading");
+            let me = self.me.clone();
+            let key = key.to_owned();
+            let running = self.running.clone();
+            running.fetch_add(1, Ordering::AcqRel);
+            std::thread::spawn(move || {
+                let result = dupin_mac::workspace::applications_for(&path);
+                me.update(move |ui, _| ui.applications_found(&key, token, result));
+                running.fetch_sub(1, Ordering::AcqRel);
+            });
+        } else if item_action.confirmation().is_some() {
+            self.action_screen.as_mut().unwrap().stage = ActionStage::Confirm {
+                action_id: action.into(),
+                selected: 0,
+            };
+            self.action_screen.as_mut().unwrap().selected = selected;
+            crate::trace::action_screen("confirm");
+        } else {
+            self.action_screen = None;
+            let effects = self.session.run_key_action(key, action);
+            self.apply(effects, tx);
+        }
+    }
+
+    fn applications_found(
+        &mut self,
+        key: &str,
+        token: u64,
+        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+    ) {
+        let Some(screen) = self
+            .action_screen
+            .as_mut()
+            .filter(|screen| screen.key == key && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        if !screen.accept_applications(key, token, result) {
+            return;
+        }
+        if let (
+            ActionStage::Applications {
+                state: ApplicationState::Ready(apps),
+                ..
+            },
+            Some(cache),
+        ) = (&screen.stage, &self.icon_cache)
+        {
+            for app in apps {
+                self.icons.insert(
+                    format!("choice-{}", app.path.display()),
+                    cache.app_icon(&app.path, ICON_SIZE),
+                );
+            }
+        }
+        crate::trace::action_screen(
+            if matches!(
+                screen.stage,
+                ActionStage::Applications {
+                    state: ApplicationState::Ready(_),
+                    ..
+                }
+            ) {
+                "applications ready"
+            } else {
+                "applications failed"
+            },
+        );
+    }
+
+    pub fn confirm_action(&mut self, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Confirm {
+            action_id,
+            selected: 1,
+        } = &screen.stage
+        else {
+            return;
+        };
+        let effects = self.session.run_confirmed_key_action(&screen.key, action_id);
         self.action_screen = None;
-        let effects = self.session.run_key_action(key, action);
+        self.apply(effects, tx);
+    }
+
+    pub fn select_confirmation(&mut self, selected: usize, tx: &mut Tx) {
+        if let Some(screen) = &mut self.action_screen
+            && let ActionStage::Confirm { selected: index, .. } = &mut screen.stage
+        {
+            *index = selected.min(1);
+            if selected == 0 {
+                screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
+            } else {
+                self.confirm_action(tx);
+            }
+        }
+    }
+
+    pub fn pick_application(&mut self, index: usize, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Applications {
+            parent,
+            state: ApplicationState::Ready(apps),
+            ..
+        } = &screen.stage
+        else {
+            return;
+        };
+        let Some(app) = apps.get(index) else { return };
+        let Some(dupin_core::Action::ChooseApplication(path)) = screen.item.action(parent) else {
+            return;
+        };
+        let effects = self.session.run_key_choice(
+            &screen.key,
+            parent,
+            dupin_core::Action::OpenWith {
+                path: path.clone(),
+                application: app.path.clone(),
+            },
+        );
+        self.action_screen = None;
         self.apply(effects, tx);
     }
 
@@ -1133,6 +1385,7 @@ impl Ui {
                         item: item.clone(),
                         layout_key: self.session.layout_key(self.session.selected()),
                         selected: 0,
+                        stage: ActionStage::List,
                     });
                 }
                 Effect::Search {
@@ -1204,6 +1457,9 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
+                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::OpenWith { path, application } => self
+                        .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {
                         self.run_workspace_action(dupin_mac::workspace::Action::Open(path))
                     }
@@ -1214,6 +1470,34 @@ impl Ui {
                         self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url))
                     }
                 },
+                Effect::RunConsuming {
+                    id,
+                    action: dupin_core::Action::Trash(path),
+                } => {
+                    self.action_screen = None;
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    let me = self.me.clone();
+                    let running = self.running.clone();
+                    running.fetch_add(1, Ordering::AcqRel);
+                    std::thread::spawn(move || {
+                        let result = dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path));
+                        me.update(move |ui, tx| match result {
+                            Ok(()) => {
+                                ui.session.forget(&id);
+                                ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
+                            }
+                            Err(error) => {
+                                ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
+                            }
+                        });
+                        running.fetch_sub(1, Ordering::AcqRel);
+                    });
+                }
+                Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {
                     if self.session.selected_item().is_some() {
@@ -1228,13 +1512,23 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
+        let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
-            if !dupin_mac::workspace::run(&action) {
-                crate::log::warn(&format!("the system couldn't carry out {action:?}"));
+            if let Err(error) = dupin_mac::workspace::run(&action) {
+                me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);
         });
+    }
+
+    fn timed_notice(&mut self, notice: String, tx: &mut Tx) {
+        if self.notice.is_some() && self.notice_until.is_none() {
+            return;
+        }
+        self.notice = Some(notice);
+        self.notice_until = Some(tx.clock() + 5.0);
+        tx.wake_at(tx.clock() + 5.0);
     }
 
     pub fn preview_focus_is_active(&self) -> bool {
@@ -1271,8 +1565,8 @@ impl Ui {
         }
         let due = take_due(&mut self.deadlines, clock);
         let mut changed = false;
-        if self.snapshot_notice_until.is_some_and(|due| clock >= due) {
-            self.snapshot_notice_until = None;
+        if self.notice_until.is_some_and(|due| clock >= due) {
+            self.notice_until = None;
             self.notice = None;
             changed = true;
         }
@@ -1583,6 +1877,72 @@ mod action_screen_tests {
     use dupin_core::{Action, CommandRegistry, CommandSpec, Item, QueryPresentation};
     use std::path::PathBuf;
 
+    #[test]
+    fn enter_never_bypasses_cancel_and_repeats_never_confirm() {
+        let (_, mut screen) = fixture();
+        screen.item.actions.push(
+            dupin_core::ItemAction::new("trash", "Trash", Action::Trash("/fixture".into()))
+                .confirm("Trash?", "Trash")
+                .consumes(),
+        );
+        screen.selected = screen.item.actions.len() - 1;
+        for _ in 0..50 {
+            let action = screen.key(&Key::Enter, false);
+            assert_ne!(action, ActionKey::Confirm);
+            if matches!(action, ActionKey::Run(_, _)) {
+                screen.stage = ActionStage::Confirm {
+                    action_id: "trash".into(),
+                    selected: 0,
+                };
+            }
+        }
+        screen.stage = ActionStage::Confirm {
+            action_id: "trash".into(),
+            selected: 0,
+        };
+        screen.key(&Key::Down, false);
+        assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Confirm);
+    }
+
+    #[test]
+    fn substage_back_and_late_application_replies_keep_the_original_action() {
+        let (_, mut screen) = fixture();
+        screen.selected = 1;
+        for stage in [
+            ActionStage::Confirm {
+                action_id: "trash".into(),
+                selected: 0,
+            },
+            ActionStage::Applications {
+                parent: "choose".into(),
+                token: 8,
+                state: ApplicationState::Loading,
+                selected: 0,
+            },
+        ] {
+            screen.stage = stage;
+            assert_eq!(screen.key(&Key::Left, false), ActionKey::Stay);
+            assert!(matches!(screen.stage, ActionStage::List));
+            assert_eq!(screen.selected, 1);
+        }
+        screen.stage = ActionStage::Applications {
+            parent: "choose".into(),
+            token: 8,
+            state: ApplicationState::Loading,
+            selected: 0,
+        };
+        assert!(!screen.accept_applications("old-key", 8, Ok(vec![])));
+        let key = screen.key.clone();
+        assert!(!screen.accept_applications(&key, 7, Err("old failure".into())));
+        assert!(screen.accept_applications(&key, 8, Ok(vec![])));
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Stay);
+        assert!(screen.accept_applications(&key, 8, Err("Lookup failed".into())));
+        assert!(
+            matches!(&screen.stage, ActionStage::Applications { state: ApplicationState::Failed(error), .. } if error == "Lookup failed")
+        );
+    }
+
     fn fixture() -> (Session, ActionScreen) {
         let origin = CommandId::new("sample.search").unwrap();
         let mut registry = CommandRegistry::new(origin.clone(), None);
@@ -1626,6 +1986,7 @@ mod action_screen_tests {
             layout_key: session.layout_key(0),
             item: session.items()[0].clone(),
             selected: 0,
+            stage: ActionStage::List,
         };
         (session, screen)
     }
@@ -1633,18 +1994,18 @@ mod action_screen_tests {
     #[test]
     fn keyboard_navigation_is_bounded_and_runs_the_captured_key() {
         let (_, mut screen) = fixture();
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(screen.selected, 0);
         for _ in 0..10 {
-            screen.key(&Key::Down);
+            screen.key(&Key::Down, false);
         }
         assert_eq!(screen.selected, 2);
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(
-            screen.key(&Key::Enter),
+            screen.key(&Key::Enter, false),
             ActionKey::Run(screen.key.clone(), "reveal".into())
         );
-        assert_eq!(screen.key(&Key::Text("x".into())), ActionKey::Stay);
+        assert_eq!(screen.key(&Key::Text("x".into()), false), ActionKey::Stay);
     }
 
     #[test]
@@ -1656,7 +2017,7 @@ mod action_screen_tests {
             session.result_key(0),
         );
         for key in [Key::Left, Key::Escape] {
-            assert_eq!(screen.key(&key), ActionKey::Back);
+            assert_eq!(screen.key(&key, false), ActionKey::Back);
             assert_eq!(
                 (
                     session.query().to_owned(),
@@ -1687,7 +2048,7 @@ mod action_screen_tests {
     fn enter_uses_the_selected_action_without_running_external_effects() {
         let (mut session, mut screen) = fixture();
         screen.selected = 2;
-        let ActionKey::Run(key, action) = screen.key(&Key::Enter) else {
+        let ActionKey::Run(key, action) = screen.key(&Key::Enter, false) else {
             panic!("expected action")
         };
         let effects = session.run_key_action(&key, &action);

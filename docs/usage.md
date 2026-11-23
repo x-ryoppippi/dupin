@@ -101,8 +101,10 @@ Valid qualifiers appear as inline chips without changing the query text. Backspa
 
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
-result's action screen: Open, Reveal in Finder, Quick Look and Copy path. Escape cancels the
-screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. The same screen is available for app results.
+result's action screen: Open, Open with…, Reveal in Finder, Quick Look, Copy path and Move to Trash. Escape cancels the
+screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. App results have the same screen with Open, Reveal, Quick Look and Copy path; file-only actions are omitted.
+
+Open with… lists the applications registered for the selected file or folder, with its default handler first. Choose an application to open the item. Left or Escape returns to Actions without changing the query. Move to Trash opens a confirmation with Cancel selected; choose Move to Trash explicitly to continue. Held Enter cannot confirm. After success the file leaves the current result list. Failures appear in the launcher. Folder browsing inside the picker is not supported.
 
 Quick Look opens the native preview; Escape returns to the picker with its search and selection intact.
 
