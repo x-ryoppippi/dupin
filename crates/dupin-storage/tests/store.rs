@@ -425,6 +425,25 @@ fn a_damaged_key_check_is_rewritten_when_the_records_open() {
 }
 
 #[test]
+fn an_intact_key_check_refuses_another_key_even_with_no_records_left() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let record = store.put(text("secret")).unwrap();
+    store.delete(&record.id).unwrap();
+    drop(store);
+    let check = fixture.namespace().join("key.check");
+    let bytes = fs::read(&check).unwrap();
+
+    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    assert!(matches!(
+        other.open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(fs::read(&check).unwrap(), bytes);
+    assert!(texts(&fixture.open(Limits::default())).is_empty());
+}
+
+#[test]
 fn records_keep_their_real_time_after_the_clock_ran_ahead() {
     let fixture = Fixture::new();
     let limits = Limits {

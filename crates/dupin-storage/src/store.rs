@@ -340,7 +340,8 @@ impl Storage {
         verify_key(
             &keys,
             &dir.join(CHECK),
-            records.is_empty() && !unreadable.is_empty(),
+            !records.is_empty(),
+            !unreadable.is_empty(),
         )?;
 
         report.corrupt_records += unreadable.len();
@@ -466,9 +467,14 @@ fn clear_dir(dir: &Path) -> io::Result<usize> {
 }
 
 /// Confirms the namespace was sealed with this key before anything is deleted as corrupt.
-/// When the check file is missing or damaged, the key passes if at least one record opens,
-/// and the check file is written again.
-fn verify_key(keys: &NamespaceKeys, path: &Path, nothing_opened: bool) -> Result<(), Error> {
+/// A damaged check file is rewritten only when a record proves the key; a missing one is also
+/// written for a fresh namespace, where no record exists to contradict the key.
+fn verify_key(
+    keys: &NamespaceKeys,
+    path: &Path,
+    any_opened: bool,
+    any_unreadable: bool,
+) -> Result<(), Error> {
     let aad = keys.aad("check", &[]);
     match fs::read(path) {
         Ok(bytes) => {
@@ -477,12 +483,16 @@ fn verify_key(keys: &NamespaceKeys, path: &Path, nothing_opened: bool) -> Result
             if opened.is_some_and(|plaintext| plaintext.as_slice() == CHECK_PLAINTEXT) {
                 return Ok(());
             }
+            if !any_opened {
+                return Err(Error::WrongKey);
+            }
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if !any_opened && any_unreadable {
+                return Err(Error::WrongKey);
+            }
+        }
         Err(error) => return Err(error.into()),
-    }
-    if nothing_opened {
-        return Err(Error::WrongKey);
     }
     let (nonce, ciphertext) = keys.seal(&aad, CHECK_PLAINTEXT)?;
     let file = framed(CHECK_MAGIC, &[&nonce, &ciphertext]);
