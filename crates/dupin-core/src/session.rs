@@ -606,7 +606,7 @@ impl Session {
         true
     }
     #[cfg(test)]
-    pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
+    fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.command.clone(), delivery)
     }
     pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {
