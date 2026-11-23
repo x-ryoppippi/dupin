@@ -26,7 +26,7 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 
-In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window requests Accessibility access when first needed. If access or the focused window is unavailable, the panel opens on the mouse pointer’s display. When access is missing, the panel links to Accessibility Settings.
+In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
 
 ## Web searches
 

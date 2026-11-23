@@ -12,7 +12,7 @@ use dupin_core::{
     Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
     Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer};
+use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, window::DisplayNotice};
 use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -279,7 +279,7 @@ pub struct Ui {
     saver: crate::store::Saver,
     position: Position,
     display: DisplaySelection,
-    pub display_accessibility_required: bool,
+    pub display_notice: Option<DisplayNotice>,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -287,6 +287,7 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
+    accessibility_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -474,13 +475,14 @@ impl Ui {
             _apps_watcher: apps_watcher,
             position: config.position,
             display: config.display,
-            display_accessibility_required: false,
+            display_notice: None,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
+            accessibility_after_close: false,
             running,
             updater,
             quick_look,
@@ -528,7 +530,7 @@ impl Ui {
         self.position = config.position;
         self.display = config.display;
         if self.display != DisplaySelection::Active {
-            self.display_accessibility_required = false;
+            self.display_notice = None;
         }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
@@ -689,11 +691,11 @@ impl Ui {
     }
 
     fn place_panel(&mut self) {
-        self.display_accessibility_required = false;
+        self.display_notice = None;
         let (display, align, inset, margin) = if !rune::tooling::is_headless()
             && let Some(screen) = dupin_mac::window::display_geometry(self.display)
         {
-            self.display_accessibility_required = screen.accessibility_required;
+            self.display_notice = screen.notice;
             let (inset, margin) = panel_offsets(
                 screen.frame,
                 screen.visible_frame,
@@ -708,8 +710,8 @@ impl Ui {
             )
         } else {
             let display = match self.display {
-                DisplaySelection::Mouse | DisplaySelection::Active => DisplayTarget::UnderPointer,
-                DisplaySelection::Main => DisplayTarget::Primary,
+                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
+                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
             (display, Align::Center, 0.0, TOP_MARGIN)
         };
@@ -724,13 +726,11 @@ impl Ui {
         );
     }
 
-    pub fn open_display_accessibility_settings(&mut self, tx: &mut Tx) {
-        if !self.display_accessibility_required || rune::tooling::is_headless() {
+    pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
+        if self.display_notice != Some(DisplayNotice::AccessibilityRequired) || rune::tooling::is_headless() {
             return;
         }
-        self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(
-            accessibility::SETTINGS_URL.into(),
-        ));
+        self.accessibility_after_close = true;
         self.dismiss(tx);
     }
 
@@ -765,6 +765,18 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if std::mem::take(&mut self.accessibility_after_close) {
+            let me = self.me.clone();
+            std::thread::spawn(move || {
+                if !accessibility::is_trusted() && accessibility::request_once() {
+                    return;
+                }
+                let settings = dupin_mac::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&settings) {
+                    me.update(move |ui, tx| ui.show_notice(error, tx));
+                }
+            });
+        }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
         }

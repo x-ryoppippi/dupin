@@ -119,31 +119,40 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             ),
         );
     }
-    if s.display_accessibility_required {
+    use dupin_mac::window::DisplayNotice;
+    if let Some(notice) = s.display_notice {
+        let message = match notice {
+            DisplayNotice::AccessibilityRequired => {
+                "Dupin needs Accessibility access to find the focused window. Using the main display."
+            }
+            DisplayNotice::FocusedWindowUnavailable => {
+                "Couldn't find the focused window's display. Using the main display."
+            }
+        };
         panel = panel.child(divider(&t)).child(
             col()
-                .key("display-permission")
+                .key("display-notice")
                 .w_full()
                 .px(18.0)
                 .py(12.0)
                 .gap(8.0)
                 .fill(WARNING)
                 .child(
-                    text("Dupin needs Accessibility access to find the focused window. Using the mouse pointer’s display.")
+                    text(message)
                         .font(t.font(type_::BODY.lh(18.0)))
                         .color(t.text)
                         .wrap()
                         .w_full(),
                 )
-                .child(
-                    text("Open Accessibility Settings")
+                .children((notice == DisplayNotice::AccessibilityRequired).then(|| {
+                    text("Set Up Accessibility")
                         .font(t.font(type_::BODY))
                         .color(accent)
-                        .key("open-display-accessibility-settings")
+                        .key("open-accessibility-settings")
                         .role("button")
                         .focusable(true)
-                        .on_press_tx(Ui::open_display_accessibility_settings),
-                ),
+                        .on_press_tx(Ui::open_accessibility_settings)
+                })),
         );
     }
     for (origin, failure) in s.session.failures() {

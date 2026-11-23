@@ -5,10 +5,11 @@ use std::ptr::NonNull;
 
 use dupin_core::DisplaySelection;
 use objc2::MainThreadMarker;
+use objc2::rc::Retained;
 use objc2_app_kit::{
     NSApplication, NSEvent, NSScreen, NSView, NSWindow, NSWindowAnimationBehavior, NSWorkspace,
 };
-use objc2_foundation::{NSIntersectionRect, NSMouseInRect, NSNumber, NSRect, NSString};
+use objc2_foundation::{NSArray, NSIntersectionRect, NSMouseInRect, NSNumber, NSRect, NSString};
 
 use crate::{accessibility, accessibility_window};
 
@@ -38,7 +39,13 @@ pub struct DisplayGeometry {
     pub native_id: u32,
     pub frame: NSRect,
     pub visible_frame: NSRect,
-    pub accessibility_required: bool,
+    pub notice: Option<DisplayNotice>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DisplayNotice {
+    AccessibilityRequired,
+    FocusedWindowUnavailable,
 }
 
 /// Resolve the display when the panel opens, falling back to the primary screen.
@@ -52,34 +59,13 @@ pub fn display_geometry(selection: DisplaySelection) -> Option<DisplayGeometry> 
             .iter()
             .find(|screen| NSMouseInRect(pointer, screen.frame(), false))
     };
-    let mut accessibility_required = false;
-    let selected = match selection {
-        DisplaySelection::Mouse => mouse_screen(),
-        DisplaySelection::Main => None,
-        DisplaySelection::Active => {
-            let focused = NSWorkspace::sharedWorkspace()
-                .frontmostApplication()
-                .and_then(|app| {
-                    let pid = app.processIdentifier();
-                    if pid as u32 == std::process::id() {
-                        return NSApplication::sharedApplication(main).keyWindow()?.screen();
-                    }
-                    if pid <= 0 {
-                        return None;
-                    }
-                    let trusted = accessibility::is_trusted();
-                    let frame = trusted.then(|| accessibility_window::frame(pid)).flatten();
-                    accessibility_required = !trusted || (frame.is_none() && !accessibility::is_trusted());
-                    if accessibility_required {
-                        accessibility::request_once();
-                    }
-                    let frame = appkit_frame(frame?, primary.frame().size.height)?;
-                    let index =
-                        screen_with_largest_overlap(screens.iter().map(|screen| screen.frame()), frame)?;
-                    Some(screens.objectAtIndex(index))
-                });
-            focused.or_else(mouse_screen)
-        }
+    let (selected, notice) = match selection {
+        DisplaySelection::Mouse => (mouse_screen(), None),
+        DisplaySelection::Main => (None, None),
+        DisplaySelection::Active => match focused_screen(main, &screens, primary.frame().max().y) {
+            Ok(screen) => (Some(screen), None),
+            Err(notice) => (None, Some(notice)),
+        },
     };
     let screen = selected.unwrap_or(primary);
     let key = NSString::from_str("NSScreenNumber");
@@ -88,8 +74,43 @@ pub fn display_geometry(selection: DisplaySelection) -> Option<DisplayGeometry> 
         native_id: number.downcast::<NSNumber>().ok()?.as_u32(),
         frame: screen.frame(),
         visible_frame: screen.visibleFrame(),
-        accessibility_required,
+        notice,
     })
+}
+
+fn focused_screen(
+    main: MainThreadMarker,
+    screens: &NSArray<NSScreen>,
+    primary_top: f64,
+) -> Result<Retained<NSScreen>, DisplayNotice> {
+    use DisplayNotice::{AccessibilityRequired, FocusedWindowUnavailable};
+
+    let pid = NSWorkspace::sharedWorkspace()
+        .frontmostApplication()
+        .map(|app| app.processIdentifier())
+        .filter(|pid| *pid > 0)
+        .ok_or(FocusedWindowUnavailable)?;
+    if pid as u32 == std::process::id() {
+        return NSApplication::sharedApplication(main)
+            .keyWindow()
+            .and_then(|window| window.screen())
+            .ok_or(FocusedWindowUnavailable);
+    }
+    if !accessibility::is_trusted() {
+        return Err(AccessibilityRequired);
+    }
+    let frame = accessibility_window::frame(pid)
+        .and_then(|frame| appkit_frame(frame, primary_top))
+        .ok_or_else(|| {
+            if accessibility::is_trusted() {
+                FocusedWindowUnavailable
+            } else {
+                AccessibilityRequired
+            }
+        })?;
+    let index = screen_with_largest_overlap(screens.iter().map(|screen| screen.frame()), frame)
+        .ok_or(FocusedWindowUnavailable)?;
+    Ok(screens.objectAtIndex(index))
 }
 
 fn screen_with_largest_overlap(screens: impl Iterator<Item = NSRect>, window: NSRect) -> Option<usize> {
@@ -104,7 +125,7 @@ fn screen_with_largest_overlap(screens: impl Iterator<Item = NSRect>, window: NS
         .map(|(index, _)| index)
 }
 
-fn appkit_frame(mut frame: NSRect, primary_height: f64) -> Option<NSRect> {
+fn appkit_frame(mut frame: NSRect, primary_top: f64) -> Option<NSRect> {
     if frame.is_empty()
         || ![
             frame.origin.x,
@@ -118,7 +139,7 @@ fn appkit_frame(mut frame: NSRect, primary_height: f64) -> Option<NSRect> {
         return None;
     }
     // Accessibility measures from the primary display's top edge.
-    frame.origin.y = primary_height - frame.max().y;
+    frame.origin.y = primary_top - frame.max().y;
     Some(frame)
 }
 
