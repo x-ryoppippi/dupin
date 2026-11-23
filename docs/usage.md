@@ -70,7 +70,7 @@ Type `dupin settings` to open Dupin's own preferences. This uses the same window
 
 Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too. Select it and press Tab to add a space before typing the query.
 
-Type `maps baker street` and press Enter on the Apple Maps result to search for an address or place in Maps.
+Type `maps baker street` and press Enter on the Apple Maps result to search for an address or place in Maps. The Apple Maps keyword needs a search term, so typing just `maps` still finds the Maps app.
 
 Typing a query sends no network request. Dupin encodes the query into the URL when it builds the result and opens the browser or Maps only on activation. Web results do not count towards usage ranking. Query recall behaves as it does for other app-mode searches.
 

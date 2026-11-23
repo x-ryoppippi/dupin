@@ -21,6 +21,28 @@ pub struct WebCatalog {
 struct ValidatedSearch {
     name: String,
     url: String,
+    target: SearchTarget,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SearchTarget {
+    action_title: &'static str,
+    accepts_empty_query: bool,
+}
+
+impl SearchTarget {
+    fn from_template(template: &str) -> Option<Self> {
+        if template == MAPS_SEARCH_TEMPLATE {
+            return Some(Self {
+                action_title: "Open in Maps",
+                accepts_empty_query: false,
+            });
+        }
+        valid_browser_template(template).then_some(Self {
+            action_title: "Open in Browser",
+            accepts_empty_query: true,
+        })
+    }
 }
 
 impl WebCatalog {
@@ -29,21 +51,22 @@ impl WebCatalog {
         let mut problems = Vec::new();
 
         for (keyword, search) in &config.web_searches {
-            if !valid_keyword(keyword)
-                || is_reserved(keyword)
-                || !valid_name(&search.name)
-                || !valid_template(&search.url)
+            if valid_keyword(keyword)
+                && !is_reserved(keyword)
+                && valid_name(&search.name)
+                && let Some(target) = SearchTarget::from_template(&search.url)
             {
+                catalog.searches.insert(
+                    keyword.clone(),
+                    ValidatedSearch {
+                        name: search.name.clone(),
+                        url: search.url.clone(),
+                        target,
+                    },
+                );
+            } else {
                 problems.push("Some web searches were ignored because a keyword, name, or URL template is invalid or conflicts with another command.");
-                continue;
             }
-            catalog.searches.insert(
-                keyword.clone(),
-                ValidatedSearch {
-                    name: search.name.clone(),
-                    url: search.url.clone(),
-                },
-            );
         }
 
         let mut seen = HashSet::new();
@@ -123,10 +146,7 @@ fn valid_name(name: &str) -> bool {
     !name.trim().is_empty() && name.chars().count() <= MAX_NAME_CHARS && !name.chars().any(char::is_control)
 }
 
-fn valid_template(template: &str) -> bool {
-    if template == MAPS_SEARCH_TEMPLATE {
-        return true;
-    }
+fn valid_browser_template(template: &str) -> bool {
     if template.len() > MAX_TEMPLATE_BYTES
         || template.matches("{query}").count() != 1
         || template.chars().any(char::is_whitespace)
@@ -167,18 +187,7 @@ fn keyword_item(catalog: &WebCatalog, raw: &str) -> Option<Item> {
     let keyword = &raw[..boundary];
     let search = catalog.searches.get(keyword)?;
     let query = raw[boundary..].trim();
-    let title = if query.is_empty() {
-        format!("Search {}", search.name)
-    } else {
-        format!("Search {} for {query}", search.name)
-    };
-    let url = fill_template(&search.url, query)?;
-    Some(search_item(
-        keyword,
-        title,
-        url,
-        query.is_empty().then(|| format!("{keyword} ")),
-    ))
+    search.item(keyword, query)
 }
 
 fn fallback_items(
@@ -199,13 +208,8 @@ fn fallback_items(
         let Some(search) = catalog.searches.get(keyword) else {
             continue;
         };
-        if let Some(url) = fill_template(&search.url, query) {
-            items.push(search_item(
-                keyword,
-                format!("Search {} for {query}", search.name),
-                url,
-                None,
-            ));
+        if let Some(item) = search.item(keyword, query) {
+            items.push(item);
         }
     }
     items
@@ -247,26 +251,36 @@ fn percent_encode(value: &str) -> String {
     encoded
 }
 
-fn search_item(keyword: &str, title: String, url: String, completion: Option<String>) -> Item {
-    let action_title = if url.starts_with("maps://") {
-        "Open in Maps"
-    } else {
-        "Open in Browser"
-    };
-    Item {
-        id: format!("web:{keyword}"),
-        view: View::Text {
-            title,
-            subtitle: keyword.to_owned(),
-        },
-        record_usage: false,
-        icon: None,
-        matched: Vec::new(),
-        completion,
-        score: None,
-        primary: Some("open".into()),
-        alternate: None,
-        actions: vec![ItemAction::new("open", action_title, Action::OpenUrl(url))],
+impl ValidatedSearch {
+    fn item(&self, keyword: &str, query: &str) -> Option<Item> {
+        if query.is_empty() && !self.target.accepts_empty_query {
+            return None;
+        }
+        let title = if query.is_empty() {
+            format!("Search {}", self.name)
+        } else {
+            format!("Search {} for {query}", self.name)
+        };
+        let url = fill_template(&self.url, query)?;
+        Some(Item {
+            id: format!("web:{keyword}"),
+            view: View::Text {
+                title,
+                subtitle: keyword.to_owned(),
+            },
+            record_usage: false,
+            icon: None,
+            matched: Vec::new(),
+            completion: query.is_empty().then(|| format!("{keyword} ")),
+            score: None,
+            primary: Some("open".into()),
+            alternate: None,
+            actions: vec![ItemAction::new(
+                "open",
+                self.target.action_title,
+                Action::OpenUrl(url),
+            )],
+        })
     }
 }
 
@@ -348,6 +362,8 @@ mod tests {
         let (catalog, notice) = compiled(&Config::default());
         assert!(notice.is_none());
         let provider = WebProvider::new(catalog, false);
+        assert!(collect(&provider, "maps", 5).is_empty());
+        assert!(collect(&provider, "maps  ", 5).is_empty());
         let item = collect(&provider, "maps Baker Street & 東京", 5).pop().unwrap();
 
         assert_eq!(item.display_title(), "Search Apple Maps for Baker Street & 東京");
