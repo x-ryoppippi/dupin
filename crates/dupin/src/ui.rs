@@ -74,6 +74,24 @@ enum Restart {
     Requested,
 }
 
+impl Restart {
+    fn waiting_for_work(self, actions: &AtomicUsize, scripts: &AtomicUsize) -> bool {
+        actions.load(Ordering::Acquire) > 0 || (self == Self::Update && scripts.load(Ordering::Acquire) > 0)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn only_automatic_restart_waits_for_scripts() {
+    let actions = AtomicUsize::new(0);
+    let scripts = AtomicUsize::new(1);
+    assert!(Restart::Update.waiting_for_work(&actions, &scripts));
+    assert!(!Restart::Requested.waiting_for_work(&actions, &scripts));
+
+    actions.store(1, Ordering::Release);
+    assert!(Restart::Requested.waiting_for_work(&actions, &scripts));
+}
+
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
@@ -404,7 +422,6 @@ impl Ui {
             std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
                 .unwrap_or_default(),
-            running.clone(),
             Arc::new({
                 let me = me.clone();
                 move |id| me.update(move |s, tx| s.script_changed(id, tx))
@@ -632,12 +649,15 @@ impl Ui {
                 || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
-        } else if self.running.load(Ordering::Acquire) > 0 {
+        } else if request.waiting_for_work(&self.running, self.runner.activity()) {
             self.relaunch_when_idle(request);
         } else {
             match self.updater.install_staged() {
                 Ok(installed) => {
                     if installed || request == Restart::Requested {
+                        if request == Restart::Requested {
+                            self.kill_scripts();
+                        }
                         tx.relaunch();
                     }
                 }
@@ -656,9 +676,10 @@ impl Ui {
     /// summoned meanwhile, so automatic updates check visibility again.
     fn relaunch_when_idle(&self, request: Restart) {
         let running = self.running.clone();
+        let scripts = self.runner.activity().clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
-            while running.load(Ordering::Acquire) > 0 {
+            while request.waiting_for_work(&running, &scripts) {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             me.update(move |s, tx| s.restart(request, tx));

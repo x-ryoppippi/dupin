@@ -35,7 +35,7 @@ Command-Period cancels a running script. Script Output offers Cancel, Run again 
 
 At most eight scripts run concurrently, with no execution timeout. When the script process exits, Dupin collects remaining output for up to 100 milliseconds, closes its end of the output pipes and releases the run slot. Background processes can continue on their own. Redirect their output within the script if they need to write after it exits.
 
-Cancellation sends TERM to the owned process group, then KILL after two seconds. Quitting Dupin immediately kills its owned groups; an update relaunch waits for active work instead. Dupin owns a group until it reaps the script process. Processes that leave their group, outlive a normally completed script or survive a crash of Dupin are outside that cleanup boundary.
+Cancellation sends TERM to the owned process group, then KILL after two seconds. Dupin immediately kills its owned groups when quitting or restarting via Relaunch or Restart to Update. Automatic updates wait for active work before restarting. Dupin owns a group until it reaps the script process. Processes that leave their group, outlive a normally completed script or survive a crash of Dupin are outside that cleanup boundary.
 
 ## Interpreters and environment
 

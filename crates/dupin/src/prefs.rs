@@ -687,7 +687,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::REFRESH,
             "Relaunch Dupin",
-            Some("Restart and reload configuration"),
+            Some("Restart, reload configuration and cancel running scripts"),
             relaunch,
         ),
     ]
@@ -1057,7 +1057,10 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
             .on_press(|s: &mut Prefs| s.updater.check_now()),
     }
     .build(k);
-    let line = status.text(s.config.auto_update, s.updater.download_only());
+    let mut line = status.text(s.config.auto_update, s.updater.download_only());
+    if matches!(status, Status::Ready(_)) {
+        line.push_str(". Restarting cancels running scripts.");
+    }
     vec![
         setting(
             k,

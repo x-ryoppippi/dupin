@@ -181,7 +181,7 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new(home: PathBuf, running: Arc<AtomicUsize>, notify: Notify) -> Self {
+    pub fn new(home: PathBuf, notify: Notify) -> Self {
         Self {
             inner: Arc::new(Inner {
                 lifecycle: Lifecycle {
@@ -190,11 +190,15 @@ impl Runner {
                 },
                 runs: Mutex::default(),
                 next: AtomicU64::new(1),
-                running,
+                running: Arc::default(),
                 notify,
                 home,
             }),
         }
+    }
+
+    pub fn activity(&self) -> &Arc<AtomicUsize> {
+        &self.inner.running
     }
 
     pub fn start(&self, command: ScriptRun) -> Result<RunId, String> {
@@ -649,8 +653,8 @@ mod tests {
         let fixture = Fixture::new(
             "read value && exit 99\nprintf '%s\\n' \"$PWD\" \"$1\" \"$2\"\nprintf 'fixture error' >&2\nexit 7\n",
         );
-        let running = Arc::new(AtomicUsize::new(0));
-        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let running = runner.activity().clone();
         let id = runner.start(fixture.command(&["$HOME * ~", "a b"])).unwrap();
         let result = wait(&runner, id);
         assert_eq!(result.status, Status::Exited(Some(7)));
@@ -671,8 +675,8 @@ mod tests {
         let fixture = Fixture::new(
             "(for _ in 1 2 3 4 5 6 7 8; do [ ! -f stop ] || exit; sleep 0.25; done; touch timed-out) &\nprintf 'last stdout'\nprintf 'last stderr' >&2\nexit 7\n",
         );
-        let running = Arc::new(AtomicUsize::new(0));
-        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let running = runner.activity().clone();
         let id = runner.start(fixture.command(&[])).unwrap();
         let result = wait(&runner, id);
         fs::write(fixture.0.join("stop"), "").unwrap();
@@ -686,7 +690,7 @@ mod tests {
     #[test]
     fn cancellation_escalates_for_a_term_ignoring_process_group() {
         let fixture = Fixture::new("trap '' TERM\nsleep 60 &\nprintf 'ready\\n'\nwait\n");
-        let runner = Runner::new(fixture.0.clone(), Arc::new(AtomicUsize::new(0)), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
         let id = runner.start(fixture.command(&[])).unwrap();
         let start = Instant::now();
         while runner.snapshots()[0].output.last_stdout() != Some("ready") {
@@ -711,8 +715,8 @@ mod tests {
     #[test]
     fn active_limit_and_drop_cleanup_include_queued_runs() {
         let fixture = Fixture::new("sleep 60\n");
-        let running = Arc::new(AtomicUsize::new(0));
-        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let running = runner.activity().clone();
         for _ in 0..8 {
             runner.start(fixture.command(&[])).unwrap();
         }
@@ -751,8 +755,8 @@ mod tests {
         let fixture = Fixture::new(
             "DUPIN_RUNNER_ESCAPE_MARKER=\"$2\" \"$1\" --exact scripts::runner::tests::escaped_pipe_holder --ignored --nocapture &\nwait\n",
         );
-        let running = Arc::new(AtomicUsize::new(0));
-        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let running = runner.activity().clone();
         let executable = std::env::current_exe().unwrap();
         let marker = fixture.0.join("holder.ready");
         let id = runner
