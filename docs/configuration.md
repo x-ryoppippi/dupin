@@ -46,7 +46,7 @@ name = "Rust documentation"
 url = "https://doc.rust-lang.org/std/?search={query}"
 ```
 
-Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in`, `clip` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases take precedence. `cal` and `clip` take precedence when Calendar search and clipboard history are enabled, respectively. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
 
 ## File ranking
 

@@ -172,31 +172,26 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     }
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
-    let clipboard_id = id(CLIPBOARD);
-    let off = "Clipboard history is off  ·  turn it on in Settings › Search";
-    let (empty, no_results) = if config.clipboard.enabled {
-        ("Nothing copied yet  ·  ⌫ back to apps", "No matches")
-    } else {
-        (off, off)
-    };
-    let mut spec = CommandSpec::new(
-        clipboard_id.clone(),
-        config.clipboard.max_entries,
-        presentation(
-            "Search clipboard history",
-            Some("Clipboard"),
-            Some(empty),
-            Some(no_results),
-            false,
-            4.0,
-        ),
-    )
-    .with_query_eligibility(QueryEligibility::Any);
-    spec.private_results = true;
-    registry.register(spec)?;
-
     registry.add_keyword(&contents_id, "in")?;
-    registry.add_keyword(&clipboard_id, "clip")?;
+    if config.clipboard.enabled {
+        let clipboard = id(CLIPBOARD);
+        let mut spec = CommandSpec::new(
+            clipboard.clone(),
+            config.clipboard.max_entries,
+            presentation(
+                "Search clipboard history",
+                Some("Clipboard"),
+                Some("Nothing copied yet  ·  ⌫ back to apps"),
+                Some("No matches"),
+                false,
+                4.0,
+            ),
+        )
+        .with_query_eligibility(QueryEligibility::Any);
+        spec.private_results = true;
+        registry.register(spec)?;
+        registry.add_keyword(&clipboard, "clip")?;
+    }
     if config.calendar.enabled {
         let calendar = id(CALENDAR);
         let mut spec = CommandSpec::new(
@@ -444,8 +439,8 @@ mod tests {
     }
 
     #[test]
-    fn clip_enters_private_clipboard_history_that_explains_when_off() {
-        use dupin_core::{Effect, Session};
+    fn clip_is_reserved_only_while_clipboard_history_is_enabled() {
+        use dupin_core::{Delivery, Effect, Session};
 
         for enabled in [false, true] {
             let mut config = Config::default();
@@ -457,26 +452,49 @@ mod tests {
                     url: "https://clips.example/?q={query}".into(),
                 },
             );
-            let configured = configured(&config).unwrap();
-            assert_eq!(configured.registry.keyword("clip"), Some(&id(CLIPBOARD)));
-            assert!(configured.notice.unwrap().contains("web searches were ignored"));
+            let commands = configured(&config).unwrap();
+            let clipboard = id(CLIPBOARD);
+            assert_eq!(commands.registry.keyword("clip"), enabled.then_some(&clipboard));
+            assert_eq!(commands.notice.is_some(), enabled);
 
-            let mut session = Session::new(History::default(), configured.registry).unwrap();
-            let spec = session.provider_spec(&id(CLIPBOARD)).unwrap();
-            assert!(spec.private_results);
-            assert_eq!(
-                spec.presentation
-                    .empty_hint
-                    .as_deref()
-                    .unwrap()
-                    .contains("is off"),
-                !enabled
-            );
-            let effects = session.set_query("clip ");
-            assert!(effects.iter().any(|effect| matches!(
-                effect,
-                Effect::Search { command, query, .. } if command.as_str() == CLIPBOARD && query.is_empty()
-            )));
+            let mut session = Session::new(History::default(), commands.registry).unwrap();
+            let effects = session.set_query("clip term");
+            if enabled {
+                assert!(session.command().private_results);
+                let [
+                    Effect::ReplaceQuery(_),
+                    Effect::Search {
+                        command,
+                        generation,
+                        query,
+                    },
+                ] = effects.as_slice()
+                else {
+                    panic!("clip should enter clipboard history: {effects:?}");
+                };
+                assert_eq!(command, &clipboard);
+                assert_eq!(query, "term");
+
+                config.clipboard.enabled = false;
+                let effects = session
+                    .set_commands(configured(&config).unwrap().registry)
+                    .unwrap();
+                assert!(effects.contains(&Effect::ClearQuery));
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(!session.deliver_from(
+                    clipboard,
+                    Delivery::Done {
+                        generation: *generation
+                    }
+                ));
+            } else {
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(session.provider_spec(&clipboard).is_none());
+                assert!(effects.iter().any(|effect| matches!(
+                    effect,
+                    Effect::Search { command, query, .. } if *command == id(WEB_KEYWORDS) && query == "clip term"
+                )));
+            }
         }
     }
 

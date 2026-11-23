@@ -9,8 +9,7 @@ use dupin_core::config;
 pub struct Clipboard {
     history: Arc<Mutex<History>>,
     monitor: Option<dupin_mac::clipboard::Monitor>,
-    /// A headless render's synthetic entries; the system clipboard is never read then.
-    fixture: bool,
+    enabled: bool,
 }
 
 impl Clipboard {
@@ -18,11 +17,8 @@ impl Clipboard {
         let mut clipboard = Self {
             history: Arc::new(Mutex::new(History::new(config.into()))),
             monitor: None,
-            fixture: false,
+            enabled: false,
         };
-        if rune::tooling::is_headless() {
-            clipboard.fixture = seed_fixture(&clipboard.history);
-        }
         clipboard.apply(config);
         clipboard
     }
@@ -35,22 +31,23 @@ impl Clipboard {
     pub fn apply(&mut self, config: &config::Clipboard) -> bool {
         let mut history = self.history.lock().unwrap();
         let policy = Policy::from(config);
-        let mut changed = *history.policy() != policy;
+        let mut changed = self.enabled != config.enabled || *history.policy() != policy;
         history.set_policy(policy);
-        if config.enabled && !rune::tooling::is_headless() {
-            if self.monitor.is_none() {
-                changed = true;
-                self.monitor = dupin_mac::clipboard::Monitor::start(self.history.clone())
-                    .map_err(|error| crate::log::warn(&format!("couldn't watch the clipboard: {error}")))
-                    .ok();
+        if !config.enabled {
+            self.monitor.take();
+            history.clear();
+            history.set_access(Access::default());
+        } else if rune::tooling::is_headless() {
+            if !self.enabled {
+                seed_fixture(&mut history);
             }
-        } else {
-            changed |= self.monitor.take().is_some();
-            if !self.fixture {
-                history.clear();
-                history.set_access(Access::default());
-            }
+        } else if self.monitor.is_none() {
+            changed = true;
+            self.monitor = dupin_mac::clipboard::Monitor::start(self.history.clone())
+                .map_err(|error| crate::log::warn(&format!("couldn't watch the clipboard: {error}")))
+                .ok();
         }
+        self.enabled = config.enabled;
         changed
     }
 
@@ -75,9 +72,9 @@ struct FixtureEntry {
 }
 
 /// Seed the history from `DUPIN_HEADLESS_CLIPBOARD`, a JSON list of entries, oldest first.
-fn seed_fixture(history: &Mutex<History>) -> bool {
+fn seed_fixture(history: &mut History) {
     let Some(path) = std::env::var_os("DUPIN_HEADLESS_CLIPBOARD") else {
-        return false;
+        return;
     };
     let entries: Vec<FixtureEntry> = match std::fs::read_to_string(&path)
         .map_err(|error| error.to_string())
@@ -86,11 +83,10 @@ fn seed_fixture(history: &Mutex<History>) -> bool {
         Ok(entries) => entries,
         Err(error) => {
             crate::log::warn(&format!("couldn't read the clipboard fixture: {error}"));
-            return false;
+            return;
         }
     };
     let now = dupin_core::session::unix_now();
-    let mut history = history.lock().unwrap();
     for entry in entries {
         let content = match entry.text {
             Some(text) => Content::Text(text),
@@ -98,5 +94,4 @@ fn seed_fixture(history: &Mutex<History>) -> bool {
         };
         history.push(content, now.saturating_sub(entry.age));
     }
-    true
 }
