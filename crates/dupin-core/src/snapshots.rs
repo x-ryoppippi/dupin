@@ -13,6 +13,7 @@ pub const MAX_ENTRY_BYTES: usize = 512 * 1024;
 pub struct Snapshot {
     pub version: u32,
     pub id: String,
+    pub saved_at: u64,
     pub mode: String,
     pub explicit: bool,
     pub query: String,
@@ -57,10 +58,17 @@ impl Snapshot {
             .join("\n\n")
     }
 
-    pub fn matches(&self, query: &str) -> bool {
-        let normal = |s: &str| s.nfkc().flat_map(char::to_lowercase).collect::<String>();
-        normal(&format!("{}\n{}\n{}", self.title, self.query, self.content())).contains(&normal(query))
+    pub fn search_text(&self) -> String {
+        normalize(&format!("{}\n{}\n{}", self.title, self.query, self.content()))
     }
+
+    pub fn matches(&self, query: &str) -> bool {
+        self.search_text().contains(&normalize(query))
+    }
+}
+
+pub fn normalize(s: &str) -> String {
+    s.nfkc().flat_map(char::to_lowercase).collect()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -78,6 +86,33 @@ pub struct Store {
 }
 
 impl Store {
+    pub fn from_base(base: PathBuf, owned: &Path) -> Self {
+        let resolved = (|| {
+            if !base.is_absolute() {
+                return Err("Snapshot base directory must be absolute.".to_owned());
+            }
+            if owned
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            {
+                return Err("Snapshot owned directory must be a relative leaf path.".to_owned());
+            }
+            std::fs::create_dir_all(&base).map_err(|_| "Cannot create snapshot base directory.")?;
+            let base = base
+                .canonicalize()
+                .map_err(|_| "Cannot resolve snapshot base directory.")?;
+            Ok(base.join(owned))
+        })();
+        match resolved {
+            Ok(directory) => Self::load(directory),
+            Err(problem) => Self {
+                directory: PathBuf::new(),
+                entries: Vec::new(),
+                problem: Some(problem),
+            },
+        }
+    }
+
     pub fn load(directory: PathBuf) -> Self {
         let mut store = Self {
             directory,
@@ -145,6 +180,10 @@ impl Store {
     }
 
     pub fn save(&mut self, mut snapshot: Snapshot) -> Result<String, String> {
+        snapshot.saved_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "Clock unavailable.")?
+            .as_secs();
         snapshot.validate()?;
         snapshot.id = format!(
             "{:x}",
@@ -164,6 +203,12 @@ impl Store {
     }
 
     pub fn delete(&mut self, id: &str) -> Result<(), String> {
+        if let Some(problem) = &self.problem {
+            return Err(problem.clone());
+        }
+        if self.open(id).is_none() {
+            return Ok(());
+        }
         let entries = self.entries.iter().filter(|s| s.id != id).cloned().collect();
         self.commit(entries)
     }
@@ -208,7 +253,16 @@ fn write_private(directory: &Path, bytes: &[u8]) -> std::io::Result<()> {
     {
         return Err(std::io::Error::other("unsafe archive"));
     }
-    let temp = directory.join(format!(".archive-{}.tmp", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let temp = directory.join(format!(
+        ".archive-{}-{}-{}.tmp",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -255,6 +309,7 @@ mod tests {
         Snapshot {
             version: 1,
             id: String::new(),
+            saved_at: 0,
             mode: "sample.search".into(),
             explicit: false,
             query: "query".into(),
@@ -278,6 +333,31 @@ mod tests {
                 data: serde_json::json!({"page": 2}),
             }),
         }
+    }
+
+    #[test]
+    fn canonical_base_accepts_links_but_owned_paths_reject_them() {
+        let temp = Temp::new();
+        let linked = temp.0.join("base-link");
+        std::os::unix::fs::symlink(&temp.0, &linked).unwrap();
+        let mut store = Store::from_base(linked.clone(), Path::new("dupin/snapshots"));
+        store.save(fixture()).unwrap();
+        assert!(store.list()[0].saved_at > 0);
+        assert_eq!(
+            Store::from_base(linked, Path::new("dupin/snapshots")).list(),
+            store.list()
+        );
+        std::os::unix::fs::symlink(temp.0.join("dupin"), temp.0.join("owned-link")).unwrap();
+        assert!(
+            Store::from_base(temp.0.clone(), Path::new("owned-link/snapshots"))
+                .problem()
+                .is_some()
+        );
+        assert!(
+            Store::from_base(PathBuf::new(), Path::new("dupin/snapshots"))
+                .problem()
+                .is_some()
+        );
     }
     #[test]
     fn persistence_search_and_explicit_delete() {

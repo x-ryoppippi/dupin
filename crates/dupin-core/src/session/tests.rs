@@ -1314,5 +1314,6 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     let effects = changed.restore(&saved).unwrap();
     assert_eq!(changed.command_id(), &app_command());
     assert!(changed.explicit);
-    assert_eq!(searched(&effects).0, app_command());
+    assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
+    assert_eq!(searched(&effects[1..]).0, app_command());
 }

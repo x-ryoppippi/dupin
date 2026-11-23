@@ -97,7 +97,8 @@ fn main() {
     let snapshots_handle = snapshots.handle();
     let snapshots = snapshots.init({
         let panel = handle.clone();
-        move || snapshots::Snapshots::new(panel)
+        let me = snapshots_handle.clone();
+        move || snapshots::Snapshots::new(panel, me)
     });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
@@ -170,7 +171,12 @@ fn main() {
                 ..Default::default()
             })
             .into();
-        let snapshots: rune::AnyWindowSpec = WindowSpec::from_app("snapshots", snapshots).into();
+        let snapshots: rune::AnyWindowSpec = WindowSpec::from_app("snapshots", snapshots)
+            .options(WindowOptions {
+                min_size: Some((720.0, 420.0)),
+                ..Default::default()
+            })
+            .into();
         [panel, prefs, snapshots]
     });
 }

@@ -97,6 +97,7 @@ pub struct Ui {
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    snapshot_notice_until: Option<f64>,
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
@@ -195,6 +196,8 @@ impl Ui {
                 )
             })
             .collect();
+        let sources = registration.registry.ids();
+        snapshots.update(move |s, _| s.set_sources(sources));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -205,6 +208,7 @@ impl Ui {
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
+            snapshot_notice_until: None,
             config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
@@ -253,6 +257,8 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        let sources = registration.registry.ids();
+        self.snapshots.update(move |s, _| s.set_sources(sources));
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
@@ -471,6 +477,7 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.snapshot_notice_until = None;
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
@@ -481,6 +488,7 @@ impl Ui {
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
+        self.snapshot_notice_until = None;
         self.notice = Some(message);
         tx.instant();
         self.show(tx);
@@ -520,6 +528,13 @@ impl Ui {
         self.key(ev, tx)
     }
 
+    pub fn snapshot_notice(&mut self, message: String, tx: &mut Tx) {
+        self.notice = Some(message);
+        let due = tx.clock() + 5.0;
+        self.snapshot_notice_until = Some(due);
+        tx.wake_at(due);
+    }
+
     pub fn open_snapshots(&mut self) {
         self.snapshots.open();
     }
@@ -531,7 +546,7 @@ impl Ui {
                 self.apply(effects, tx);
                 self.show(tx);
             }
-            Err(problem) => self.show_notice(problem, tx),
+            Err(problem) => self.snapshots.update(move |s, _| s.report(problem)),
         }
     }
 
@@ -541,9 +556,9 @@ impl Ui {
             match self.session.capture() {
                 Ok(saved) => {
                     self.snapshots.update(move |s, _| s.save(saved));
-                    self.notice = Some("Saving snapshot…".into());
+                    self.snapshot_notice("Saving snapshot…".into(), tx);
                 }
-                Err(problem) => self.notice = Some(problem),
+                Err(problem) => self.snapshot_notice(problem, tx),
             }
             return true;
         }
@@ -820,6 +835,11 @@ impl Ui {
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
         let due = take_due(&mut self.deadlines, clock);
         let mut changed = false;
+        if self.snapshot_notice_until.is_some_and(|due| clock >= due) {
+            self.snapshot_notice_until = None;
+            self.notice = None;
+            changed = true;
+        }
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
                 if let Some(worker) = self.searchers.get(&id) {

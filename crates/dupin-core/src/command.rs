@@ -260,6 +260,10 @@ impl CommandRegistry {
         self.commands.get(id)
     }
 
+    pub fn ids(&self) -> Vec<String> {
+        self.commands.keys().map(|id| id.as_str().to_owned()).collect()
+    }
+
     pub fn keyword(&self, keyword: &str) -> Option<&CommandId> {
         self.keywords.get(keyword)
     }

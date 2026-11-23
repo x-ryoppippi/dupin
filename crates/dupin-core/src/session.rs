@@ -173,6 +173,7 @@ impl Session {
             return Err("Wait for the current search to finish before saving.".into());
         }
         let snapshot = crate::snapshots::Snapshot {
+            saved_at: 0,
             version: 1,
             id: String::new(),
             mode: self.command.as_str().into(),
