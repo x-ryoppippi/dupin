@@ -167,6 +167,49 @@ impl Session {
         })
     }
 
+    /// Capture only settled content belonging to the current search generation.
+    pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
+        if self.results != Results::Done || self.items.is_empty() {
+            return Err("Wait for the current search to finish before saving.".into());
+        }
+        let snapshot = crate::snapshots::Snapshot {
+            saved_at: 0,
+            version: 1,
+            id: String::new(),
+            mode: self.command.as_str().into(),
+            explicit: self.explicit,
+            query: self.query.clone(),
+            title: self
+                .selected_item()
+                .map(|i| i.display_title())
+                .unwrap_or(&self.query)
+                .into(),
+            views: self.items.iter().map(|i| i.view.clone()).collect(),
+            state: None,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    /// Explicitly rerun a saved search without activating a result or recording a pick.
+    pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
+        saved.validate()?;
+        let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
+        if !self.commands.contains(&command) {
+            return Err("The source command is unavailable. Saved content remains readable.".into());
+        }
+        self.clear_results();
+        self.command = command;
+        self.explicit = saved.explicit || self.command != *self.commands.default();
+        self.query = saved.query.clone();
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
+        let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+        effects.extend(self.search());
+        Ok(effects)
+    }
+
     pub fn history(&self) -> &History {
         &self.history
     }

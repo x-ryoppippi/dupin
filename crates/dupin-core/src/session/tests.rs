@@ -1310,3 +1310,77 @@ fn non_text_actions_obey_generation_and_selection() {
         assert!(effects.contains(&Effect::Run(Action::Open(PathBuf::from("/x/result")))));
     }
 }
+
+#[test]
+fn snapshot_capture_rejects_inert_and_stale_results_and_restore_has_no_activation() {
+    let mut s = session();
+    assert!(s.capture().is_err());
+    let g1 = searched(&s.set_query("first")).1;
+    s.deliver(Delivery::Batch {
+        generation: g1,
+        items: vec![item("Historical content")],
+    });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    let saved = s.capture().unwrap();
+    assert_eq!(saved.query, "first");
+    assert_eq!(saved.title, "Historical content");
+    let history = s.history().to_json();
+    let g2 = searched(&s.set_query("second")).1;
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Batch {
+        generation: g2,
+        items: vec![item("Current content")],
+    });
+    s.deliver(Delivery::Done { generation: g2 });
+    assert_eq!(s.capture().unwrap().title, "Current content");
+    let effects = s.restore(&saved).unwrap();
+    assert_eq!(s.query(), "first");
+    assert_eq!(s.command_id().as_str(), saved.mode);
+    assert_eq!(s.history().to_json(), history);
+    assert!(s.items().is_empty());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::Search { query, .. } if query == "first"))
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::Run(_) | Effect::SaveHistory))
+    );
+    let mut unavailable = saved.clone();
+    unavailable.mode = "removed.extension".into();
+    assert!(s.restore(&unavailable).is_err());
+    assert!(saved.search_text().contains("historical content"));
+    assert_eq!(s.query(), "first");
+}
+
+#[test]
+fn restoring_an_old_default_is_explicit_under_a_new_default() {
+    let mut original = session();
+    let generation = searched(&original.set_query("saved")).1;
+    original.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("Historical content")],
+    });
+    original.deliver(Delivery::Done { generation });
+    let saved = original.capture().unwrap();
+    original.restore(&saved).unwrap();
+    assert!(!original.explicit);
+
+    let mut registry = CommandRegistry::new(files_command(), None);
+    for id in [app_command(), files_command()] {
+        registry
+            .register(CommandSpec::new(id, 10, QueryPresentation::new("Search")))
+            .unwrap();
+    }
+    let mut changed = Session::new(History::default(), registry).unwrap();
+    let effects = changed.restore(&saved).unwrap();
+    assert_eq!(changed.command_id(), &app_command());
+    assert!(changed.explicit);
+    assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
+    assert_eq!(searched(&effects[1..]).0, app_command());
+}

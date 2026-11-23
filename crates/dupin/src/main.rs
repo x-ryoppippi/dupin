@@ -2,7 +2,9 @@
 //! press Space first to search files with Spotlight.
 
 mod backdrop;
+mod cli;
 mod commands;
+mod control;
 mod hotkey;
 mod icons;
 mod log;
@@ -10,6 +12,7 @@ mod prefs;
 mod scripts;
 mod settings;
 mod shader;
+mod snapshots;
 mod store;
 mod trace;
 mod ui;
@@ -29,6 +32,9 @@ pub const HEADER_HEIGHT: f32 = view::HEADER_H;
 const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
 
 fn main() {
+    if cli::run() {
+        return;
+    }
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
@@ -63,6 +69,18 @@ fn main() {
         .srgb_blend(true)
         .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
+    let _control = if rune::tooling::is_headless() {
+        None
+    } else {
+        let panel = handle.clone();
+        match control::Server::start(move |call| panel.update(move |s, tx| s.control(call, tx))) {
+            Ok(server) => Some(server),
+            Err(error) => {
+                log::warn(&format!("local control unavailable: {error}"));
+                None
+            }
+        }
+    };
     let binding = Arc::new(hotkey::Binding::new(handle.clone()));
 
     // The settings window: an ordinary titled window, made when ⌘, first opens it.
@@ -79,6 +97,27 @@ fn main() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
+    let snapshots = App::new(AppSpec {
+        fonts,
+        families: FAMILIES,
+        on_key: Some(snapshots::Snapshots::key),
+        ..AppSpec::new(
+            "Dupin Snapshots",
+            (900.0, 600.0),
+            || unreachable!(),
+            snapshots::view,
+        )
+    })
+    .windowless()
+    .on_close(snapshots::Snapshots::closed);
+    let snapshots_handle = snapshots.handle();
+    let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let snapshots = snapshots.init({
+        let panel = handle.clone();
+        let me = snapshots_handle.clone();
+        let running = running.clone();
+        move || snapshots::Snapshots::new(panel, me, running)
+    });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
@@ -111,13 +150,17 @@ fn main() {
             };
             move || {
                 ui::Ui::new(
-                    handle,
-                    prefs_handle,
+                    ui::Windows {
+                        panel: handle,
+                        prefs: prefs_handle,
+                        snapshots: snapshots_handle,
+                    },
                     updater,
                     configuration,
                     history,
                     config_problem,
                     quick_look,
+                    running,
                 )
             }
         })
@@ -150,7 +193,13 @@ fn main() {
                 ..Default::default()
             })
             .into();
-        [panel, prefs]
+        let snapshots: rune::AnyWindowSpec = WindowSpec::from_app("snapshots", snapshots)
+            .options(WindowOptions {
+                min_size: Some((720.0, 420.0)),
+                ..Default::default()
+            })
+            .into();
+        [panel, prefs, snapshots]
     });
 }
 
