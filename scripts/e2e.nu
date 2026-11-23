@@ -457,13 +457,14 @@ def scripts-stage [out: path] {
         (poll
             $out
             scripts-inline-finished
-            $found
+            {|r| $r.ok and (($r.data?.match?.name? | default '') =~ '^Finished · [0-9]+\.[0-9] s$') }
             find
             --app
             Dupin
+            --role
+            statictext
             --name
-            'Finished · Enter to copy'
-            --exact
+            'Finished ·'
             --first
         ) | ignore
         snap $out scripts-inline
@@ -553,7 +554,7 @@ def scripts-stage [out: path] {
             --app
             Dupin
             --name
-            'Exit 3'
+            'Exited with code 3'
             --exact
             --first
         ) | ignore
