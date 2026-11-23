@@ -25,6 +25,7 @@ let failure = try {
         codec
         frames
         reused
+        uncovered
     ] {
         let out = $root | path join $kind
         mkdir $out
@@ -46,6 +47,7 @@ let failure = try {
                 record $out {
                     assert ((open --raw $trace | str contains capture-started)) 'Capture must start before the scenario'
                     'scenario-ran' | save --append $trace
+                    if $kind == uncovered { '44' | save ($out | path join recording cli-start.json) }
                     if $kind == scenario { error make {msg: 'scenario fixture failed'} }
                 }
                 null
@@ -62,6 +64,9 @@ let failure = try {
         }
         if $kind == scenario {
             assert ($problem == 'scenario fixture failed') 'Recording must preserve the scenario failure'
+        }
+        if $kind == uncovered {
+            assert ($problem | str contains 'does not cover') 'Coverage must fail for the intended reason'
         }
     }
     null
