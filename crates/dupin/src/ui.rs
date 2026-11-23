@@ -12,7 +12,7 @@ use dupin_core::{
     Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
     Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer};
 use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
@@ -279,6 +279,7 @@ pub struct Ui {
     saver: crate::store::Saver,
     position: Position,
     display: DisplaySelection,
+    pub display_accessibility_required: bool,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -473,6 +474,7 @@ impl Ui {
             _apps_watcher: apps_watcher,
             position: config.position,
             display: config.display,
+            display_accessibility_required: false,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
@@ -525,6 +527,9 @@ impl Ui {
         }
         self.position = config.position;
         self.display = config.display;
+        if self.display != DisplaySelection::Active {
+            self.display_accessibility_required = false;
+        }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
@@ -675,7 +680,7 @@ impl Ui {
         }
         self.query.focused = true;
         if !self.shown {
-            self.place_panel(tx);
+            self.place_panel();
         }
         self.shown = true;
         self.shown_at = tx.clock();
@@ -683,16 +688,12 @@ impl Ui {
         self.me.show();
     }
 
-    fn place_panel(&mut self, tx: &mut Tx) {
+    fn place_panel(&mut self) {
+        self.display_accessibility_required = false;
         let (display, align, inset, margin) = if !rune::tooling::is_headless()
             && let Some(screen) = dupin_mac::window::display_geometry(self.display)
         {
-            if screen.active_unavailable {
-                self.timed_notice(
-                    "Couldn’t find the focused window. Using the main display.".into(),
-                    tx,
-                );
-            }
+            self.display_accessibility_required = screen.accessibility_required;
             let (inset, margin) = panel_offsets(
                 screen.frame,
                 screen.visible_frame,
@@ -707,8 +708,8 @@ impl Ui {
             )
         } else {
             let display = match self.display {
-                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
-                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
+                DisplaySelection::Mouse | DisplaySelection::Active => DisplayTarget::UnderPointer,
+                DisplaySelection::Main => DisplayTarget::Primary,
             };
             (display, Align::Center, 0.0, TOP_MARGIN)
         };
@@ -721,6 +722,16 @@ impl Ui {
                 inset,
             },
         );
+    }
+
+    pub fn open_display_accessibility_settings(&mut self, tx: &mut Tx) {
+        if !self.display_accessibility_required || rune::tooling::is_headless() {
+            return;
+        }
+        self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(
+            accessibility::SETTINGS_URL.into(),
+        ));
+        self.dismiss(tx);
     }
 
     fn force_input_source(&mut self) {
