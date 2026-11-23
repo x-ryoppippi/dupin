@@ -46,7 +46,7 @@ objc2-app-kit = { workspace = true, features = [
 	"block2",
 ] }
 objc2-quick-look-ui = { workspace = true }
-objc2-service-management = { version = "0.3", default-features = false, features = [
+objc2-service-management = { workspace = true, features = [
 	"objc2",
 	"objc2-foundation",
 	"SMAppService",
