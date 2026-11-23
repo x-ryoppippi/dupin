@@ -115,7 +115,7 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 
 ## A Wasm extension
 
-A folder whose `entry` names a `.wasm` file runs a WebAssembly module instead. A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).
+A folder whose `entry` names a `.wasm` file runs a WebAssembly module instead. A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). Bodies are plain text; list sections and Markdown details are host features that built-ins such as Calendar and Dictionary use, and extensions cannot return them yet. A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).
 
 Nothing else is reachable. A module that imports anything, including WASI, is rejected, so it cannot read files, use the network, start processes, read the clipboard or see the time. Each query runs in a fresh instance, on its own thread, with no memory of earlier queries.
 

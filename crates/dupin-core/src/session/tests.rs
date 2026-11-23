@@ -2628,3 +2628,102 @@ fn the_browse_action_enters_a_folder_and_dismissing_forgets_it() {
         "browsing records no queries"
     );
 }
+
+fn sectioned(generation: u64, section: &str, names: &[&str]) -> Delivery {
+    Delivery::Presented {
+        generation,
+        batch: crate::Batch::section(section, names.iter().map(|name| item(name)).collect()),
+    }
+}
+
+#[test]
+fn sections_head_their_first_row_and_navigation_moves_between_rows() {
+    let mut s = session();
+    let generation = searched(&s.set_query("plan")).1;
+    s.deliver(sectioned(generation, "Today", &["a", "b"]));
+    s.deliver(sectioned(generation, "Tomorrow", &["c"]));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("d")],
+    });
+    let headings: Vec<_> = (0..s.items().len()).map(|index| s.section_start(index)).collect();
+    assert_eq!(headings, [Some("Today"), None, Some("Tomorrow"), None]);
+    assert_eq!(s.section(1), Some("Today"));
+    assert_eq!(s.section(3), None);
+    s.intent(Intent::Down);
+    s.intent(Intent::Down);
+    assert_eq!(s.selected_item().unwrap().display_title(), "c");
+    s.intent(Intent::Up);
+    assert_eq!(s.selected_item().unwrap().display_title(), "b");
+}
+
+#[test]
+fn sections_follow_the_latest_answer_and_clear_with_the_results() {
+    let mut s = session();
+    let generation = searched(&s.set_query("plan")).1;
+    s.deliver(sectioned(generation, "Today", &["a"]));
+    let generation = searched(&s.set_query("plans")).1;
+    assert_eq!(s.section(0), Some("Today"), "kept while the next search runs");
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("a"), item("b")],
+    });
+    assert_eq!(s.section_start(0), None);
+    assert!(s.search.presentations.values().all(HashMap::is_empty));
+    let generation = searched(&s.set_query("plan")).1;
+    s.deliver(sectioned(generation, "Later", &["a"]));
+    assert_eq!(s.section_start(0), Some("Later"));
+    s.set_query("");
+    assert!(s.search.presentations.is_empty());
+}
+
+#[test]
+fn a_pushed_view_restores_the_sectioned_row_that_opened_it() {
+    let (mut s, _) = pushable_session("stats");
+    let generation = view_search(&s.intent(Intent::Open).unwrap()).1;
+    s.deliver_from(dictionary_command(), sectioned(generation, "Inside", &["x"]));
+    assert_eq!(s.section_start(0), Some("Inside"));
+    let generation = view_search(&s.intent(Intent::Backspace).unwrap()).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Presented {
+            generation,
+            batch: crate::Batch::section("Earlier", vec![item("first"), pushing_row("second", "stats")]),
+        },
+    );
+    assert_eq!(s.selected(), 1, "the row that pushed the view is selected again");
+    assert_eq!(s.section_start(0), Some("Earlier"));
+    assert_eq!(s.section_start(1), None);
+}
+
+#[test]
+fn detail_links_open_only_from_the_current_detail() {
+    let mut s = session();
+    let generation = searched(&s.set_query("define word")[1..]).1;
+    let row = item("word");
+    let detail = crate::Detail::new(
+        "word",
+        "See [the source](https://example.com/word) or [mail](mailto:a@b.c).",
+    )
+    .with_metadata("Pronunciation", "wɜːd");
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Presented {
+            generation,
+            batch: crate::Batch::from(vec![row.clone()]).with_detail(&row.id, detail),
+        },
+    );
+    assert_eq!(s.detail(0).unwrap().metadata[0].value, "wɜːd");
+    let key = s.result_key(0);
+    assert!(s.open_link(&key, "https://example.org/other").is_empty());
+    assert!(s.open_link(&key, "mailto:a@b.c").is_empty());
+    let stale = key.replacen(&generation.to_string(), "0", 1);
+    assert!(s.open_link(&stale, "https://example.com/word").is_empty());
+    let effects = s.open_link(&key, "https://example.com/word");
+    assert_eq!(
+        effects[0],
+        Effect::Run(Action::OpenUrl("https://example.com/word".into()))
+    );
+    assert!(effects.contains(&Effect::Hide));
+    assert!(s.detail(0).is_none());
+}

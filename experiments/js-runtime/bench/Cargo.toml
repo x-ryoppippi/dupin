@@ -1,0 +1,19 @@
+[package]
+name = "dupin-js-runtime-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Without `rust-alloc` or `allocator`, QuickJS keeps its own malloc wrapper, which
+# enforces the runtime memory limit.
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
+libc = "0.2"
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1

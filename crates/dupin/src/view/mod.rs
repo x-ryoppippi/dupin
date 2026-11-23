@@ -1,6 +1,7 @@
 //! The panel: a query field over a virtualised result list.
 
 mod actions;
+mod detail;
 mod extensions;
 mod files;
 mod header;

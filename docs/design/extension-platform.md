@@ -8,7 +8,7 @@ Give authors Raycast-style typed views, hot reload and useful diagnostics with a
 
 ## Decision summary
 
-- **Recommend native QuickJS-ng via `rquickjs` as the single guest runtime.** A package is a directory with `extension.toml`, a JavaScript ES module and optional local assets. The default entry is `main.js`. The loader resolves relative package imports and the host's `dupin` module. A four-field manifest and `search(query)` are sufficient. The first runtime PR must prove the signed size, responsiveness and isolation gates below.
+- **Recommend native QuickJS-ng via `rquickjs` as the single guest runtime.** A package is a directory with a `package.json` whose `dupin` key is the manifest, a JavaScript ES module and optional local assets. The default entry is `main.js`. The loader resolves relative package imports and the host's `dupin` module. A name, a version, a keyword and `search(query)` are sufficient. The first runtime PR must prove the signed size, responsiveness and isolation gates below.
 - **TypeScript builds on the author's machine.** `dupin ext dev` and `dupin ext build` invoke Bun or esbuild and ship a `dupin.d.ts` declaration file to authors. Installed packages contain runnable JavaScript. The host executes only JavaScript and never type-checks.
 - **Use one host contract.** Sources produce items, filters match, sort and convert them, and kinds supply actions. Built-ins implement those interfaces in Rust. Dupin owns the command registry, navigation, rendering and permissions. Settings shows feature switches and keywords. Recomposition lives in `[advanced]`.
 - **Retire wasmi after JavaScript reaches parity.** The existing implementation creates no release compatibility obligation. Keep it during the prototype, then port the examples and remove the Wasm guest loader, runtime and guest ABI together. Carry forward useful host schemas, limits and adversarial fixtures. Trusted script commands remain available for any-language automation.
@@ -68,13 +68,14 @@ The configured script resolves to a user-installed command and receives the sele
 
 ### A query in, a list out
 
-`extension.toml`
+`package.json`
 
-```toml
-id = "word-count"
-name = "Word Count"
-version = "0.1.0"
-keyword = "wc"
+```json
+{
+	"name": "word-count",
+	"version": "0.1.0",
+	"dupin": { "title": "Word Count", "keyword": "wc" }
+}
 ```
 
 `main.js`
@@ -96,7 +97,7 @@ Type `wc two words` to see **2 words**. Enter copies `2`. The two files above ar
 
 ### A list source
 
-Use the same manifest shape with `id = "bookmarks"`, `name = "Bookmarks"` and `keyword = "bm"`. Replace the entry with `items()`. Dupin caches the rows and supplies URL actions and native matching.
+Use the same manifest shape with `"name": "bookmarks"`, `"title": "Bookmarks"` and `"keyword": "bm"`. Replace the entry with `items()`. Dupin caches the rows and supplies URL actions and native matching.
 
 ```js
 export function items() {
@@ -109,12 +110,12 @@ export function items() {
 
 ### A pushed view with a capability
 
-Add the following declaration to the bookmarks manifest and append the handler below to its entry. Add `actions: [{ title: "Repository status", push: { view: "repository" } }]` to the Dupin row. Selecting that action opens a host-rendered Detail page. The entry requests HTTP access only for the declared origin and method.
+Add the following `capabilities` entry to the bookmarks `dupin` key and append the handler below to its entry. Add `actions: [{ title: "Repository status", push: { view: "repository" } }]` to the Dupin row. Selecting that action opens a host-rendered Detail page. The entry requests HTTP access only for the declared origin and method.
 
-```toml
-[[capabilities.http]]
-origin = "https://api.github.com"
-methods = ["GET"]
+```json
+"capabilities": {
+	"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }]
+}
 ```
 
 ```js
@@ -183,7 +184,27 @@ Plain HTTP(S) Open, Copy and Push actions use existing host validation and a del
 | `dupin ext test <dir>` / `dupin ext snap <dir> <fixture> <output>` | Replays input, actions and synthetic broker replies. Fix the clock, random seed, locale, fonts, dimensions and theme. Compare canonical JSON first and use the production renderer for PNG snapshots on a pinned platform.                                                     |
 | `dupin mcp`                                                        | Expose `ext_check`, `ext_run`, `ext_test` and `ext_snap` over the same offline fixture runner for prebuilt packages in a user-selected workspace. No package build hooks, live grants or OS prompting through these tools. Outbound `mcp` remains a possible later capability. |
 
-Ship a local folder first, with its manifest, emitted JS and assets. Installation validates size, paths, exports and keyword collisions before making a revision visible. Pin the accepted contents for local privileged installs and require approval for changed contents until publisher continuity exists. Display added scopes and drop removed scopes. A reviewed catalogue can index pinned packages after local install and update work. An install never needs a package manager or launches a build. [Existing CLI](../../crates/dupin/src/cli.rs) · [MCP direction](https://github.com/x-ryoppippi/dupin/issues/34)
+See [Packaging and distribution](#packaging-and-distribution). [Existing CLI](../../crates/dupin/src/cli.rs) · [MCP direction](https://github.com/x-ryoppippi/dupin/issues/34)
+
+## Packaging and distribution
+
+The manifest is the `dupin` key of `package.json`. It is static JSON, so Dupin reads the requested capabilities, keyword and entry without running guest code, and authors keep the file their JS tooling already uses. There is no separate manifest file and no manifest generated from code.
+
+Authors use npm dependencies freely and bundle them at build time. The installed entry is one self-contained ES module. A build fails when a dependency needs Node built-ins such as `fs` or `net`, which do not exist in the guest.
+
+Packages are distributed through Git, not a package registry:
+
+| Source | Example                                                  | Behavior                                                         |
+| ------ | -------------------------------------------------------- | ---------------------------------------------------------------- |
+| Git    | `dupin ext install github:user/repo@v1` or `@<commit>`   | Fetches the tag or commit and records the resolved commit SHA.   |
+| Local  | `dupin ext install ./word-count`, or `dupin ext dev ./…` | Loads the folder in place, for authoring and private extensions. |
+
+- **Built JS is committed.** Plain JS needs no build. A TypeScript package commits its built entry, as GitHub Actions do. The `dupin ext new` scaffold includes a workflow that rebuilds and commits it on push. An install never runs a package manager, install scripts or a build. A package without its built entry fails with a diagnostic.
+- **Pinning.** A lock file records each package's source, resolved commit SHA, content hash and granted scopes. Installed contents change only through `dupin ext update`, which moves to the newest tag, or the default branch when the repository has no tags. An update that adds scopes asks again. Removed scopes are dropped.
+- **Nix.** Home Manager declares packages with `fetchFromGitHub` and their grants. That configuration is the read-only base, and local grant choices overlay it in the writable data directory, as `config.toml` and `settings.toml` do.
+- **Discovery.** Dupin lists GitHub repositories with the `dupin-extension` topic through the GitHub API. There is no reviewed store, hosted index or publishing account. Listings show each package's requested capabilities, because the broker, not a review, protects users.
+
+npm publishing, a curated index repository and a reviewed store stay out of scope until real use shows a need.
 
 ## Performance budget and gates
 
@@ -211,13 +232,12 @@ Use the same QuickJS-ng release, schema, fixtures and limits on macOS and Linux 
 5. Adapt apps and files to native sources and kinds. Add cached `items()` and shared matchers with default-route regression coverage. Port other built-ins individually.
 6. Add the fixed UI in small slices, starting with sections and Detail, then host-held page state, Form and action outcomes.
 7. Ship the broker with a scoped HTTP read and its full consent, cancellation, revocation and Permissions page flow. Add scoped files and executable profiles with `@script` targets in separate PRs. Consider clipboard and outbound MCP after v1.
-8. Add advanced configuration with native filters and actions first. Enable third-party kinds and filters only after cross-producer scopes and limits are enforced. Package and update local installations before a catalogue.
+8. Add advanced configuration with native filters and actions first. Enable third-party kinds and filters only after cross-producer scopes and limits are enforced. Add Git installs, the lock file, updates, the Home Manager module and topic-based discovery.
 
 ## Open questions
 
 - Can the native engine bound all native-backed JS operations under hardened packaging, and who owns security patching for the pin? If a separate boundary is needed, measure QuickJS-ng in Wasm or a confined helper against the same fixtures.
-- Where should approved package revisions and scopes live for Nix-managed, read-only installs? Define precedence between declarative settings and local choices.
-- Which real extensions need large or incremental static catalogues, secure credential references, or a reviewed distribution catalogue? Use those use cases to set the next API boundaries.
+- Which real extensions need large or incremental static catalogues, secure credential references, or curation beyond topic search? Use those use cases to set the next API boundaries.
 
 ## Appendix · Agreement and differences
 

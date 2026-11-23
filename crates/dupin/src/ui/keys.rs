@@ -165,6 +165,14 @@ impl Ui {
             }
         }
     }
+
+    pub fn open_link(&mut self, id: &str, url: &str, tx: &mut Tx) {
+        if self.picker.is_some() || self.session.destination().is_some() {
+            return;
+        }
+        let effects = self.session.open_link(id, url);
+        self.apply(effects, tx);
+    }
 }
 
 fn is_quick_look_shortcut(key: &Key) -> bool {

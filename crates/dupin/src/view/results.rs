@@ -19,16 +19,31 @@ pub(super) fn visible_rows(row_height: f32) -> usize {
 }
 pub(super) const LIST_PAD: f32 = 6.0;
 
+/// The height of a section's heading row.
+pub(super) const SECTION_H: f32 = 30.0;
+
 pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
-    if !items.iter().all(|item| matches!(item.view, View::Text { .. })) {
+    let plain_rows = items
+        .iter()
+        .enumerate()
+        .all(|(index, item)| matches!(item.view, View::Text { .. }) && s.session.detail(index).is_none());
+    if !plain_rows {
         let rows = items
             .iter()
             .enumerate()
-            .map(|(index, item)| match &item.view {
-                View::Text { .. } => result_row(s, item, index, index == s.session.selected(), t, accent),
-                View::Detail { .. } | View::Pair { .. } => {
-                    content_card(s, item, index, index == s.session.selected(), t, accent)
-                }
+            .map(|(index, item)| {
+                let on = index == s.session.selected();
+                let row = if let Some(detail) = s.session.detail(index) {
+                    super::detail::detail_card(s, item, detail, index, on, t, accent)
+                } else {
+                    match &item.view {
+                        View::Text { .. } => result_row(s, item, index, on, t, accent),
+                        View::Detail { .. } | View::Pair { .. } => {
+                            content_card(s, item, index, on, t, accent)
+                        }
+                    }
+                };
+                sectioned(s, index, row, t)
             })
             .collect::<Vec<_>>();
         let content = col().key("content-rows").w_full().children(rows);
@@ -42,69 +57,71 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 .child(content),
         );
     }
-    let shown = items.len().min(visible_rows(s.theme.row_height as f32)) as f32;
+    let row_height = s.theme.row_height as f32;
     let selected = s.session.selected();
     let rows: Vec<El> = items
         .iter()
         .enumerate()
-        .map(|(i, item)| result_row(s, item, i, i == selected, t, accent))
+        .map(|(i, item)| sectioned(s, i, result_row(s, item, i, i == selected, t, accent), t))
         .collect();
+    let headings = (0..items.len())
+        .filter(|&index| s.session.section_start(index).is_some())
+        .count();
+    let list = col().key("rows").w_full().growth(GrowthSpec::default());
+    // Headings break the uniform row height that virtualisation needs; sectioned lists are
+    // short (a provider's own results), so they lay out every row instead.
+    let (height, list) = if headings == 0 {
+        let shown = items.len().min(visible_rows(row_height)) as f32;
+        (shown * row_height, list.virtualize(row_height))
+    } else {
+        let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
+        (full.min(visible_rows(row_height) as f32 * row_height), list)
+    };
     col().key("results").w_full().py(LIST_PAD).child(
         col()
             .key("scroll")
             .w_full()
-            .h(shown * s.theme.row_height as f32)
+            .h(height)
             .scroll(ScrollSpec { stick_bottom: false })
             .instant_changes()
-            .child(
-                col()
-                    .key("rows")
-                    .w_full()
-                    .growth(GrowthSpec::default())
-                    .virtualize(s.theme.row_height as f32)
-                    .children(rows),
-            ),
+            .child(list.children(rows)),
     )
 }
 
-fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
-    let id = s.session.result_key(index);
-    let mut card = col()
-        .w_full()
-        .px(22.0)
-        .py(18.0)
-        .gap(16.0)
-        .radius(8.0)
-        .fill(t.card)
-        .border(1.0, if on { accent } else { Color::TRANSPARENT });
-    let mut header = row().w_full().center_y().gap(12.0);
-    let has_title = if let View::Detail { title, .. } = &item.view {
-        header = header.child(
-            text(title)
-                .font(t.font(TextStyle::new(24.0, 600.0)))
-                .color(t.text)
-                .grow(1.0)
-                .min_w(0.0)
-                .wrap(),
-        );
-        true
-    } else {
-        header = header.child(el().grow(1.0));
-        false
+/// `result` under its section's heading when it starts one. The heading shares the row's key,
+/// so revealing the row reveals its heading too.
+fn sectioned(s: &Ui, index: usize, result: El, t: &ResolvedTheme) -> El {
+    let Some(section) = s.session.section_start(index) else {
+        return result.key(row_key(&s.session.layout_key(index)));
     };
-    if item.has_actions() {
-        header = header.child(
-            text("→ Actions")
-                .font(t.font(type_::BODY))
-                .color(accent)
-                .cursor(rune::Cursor::Pointer)
-                .hover(t.hover)
-                .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
-        );
-    }
-    if has_title || item.has_actions() {
-        card = card.child(header);
-    }
+    let key = row_key(&s.session.layout_key(index));
+    col()
+        .key(key.clone())
+        .w_full()
+        .child(
+            row()
+                .key(format!("{key}-section"))
+                .w_full()
+                .h(SECTION_H)
+                .px(LIST_PAD + 10.0)
+                .pt(8.0)
+                .center_y()
+                .role("heading")
+                .child(
+                    text(section)
+                        .font(t.font(type_::SECTION))
+                        .color(t.text_secondary)
+                        .truncate(),
+                ),
+        )
+        .child(result.key(format!("{key}-row")))
+}
+
+fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
+    let title = match &item.view {
+        View::Detail { title, .. } => Some(title.as_str()),
+        _ => None,
+    };
     let body = match &item.view {
         View::Detail { body, .. } => col()
             .key(format!("{}-body", row_key(&s.session.layout_key(index))))
@@ -141,12 +158,59 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, 
             )),
         View::Text { .. } => unreachable!("text row"),
     };
-    col()
-        .key(row_key(&s.session.layout_key(index)))
+    card_slot(card(s, item, index, on, title, t, accent).child(body))
+}
+
+pub(super) fn card_slot(card: El) -> El {
+    col().w_full().px(LIST_PAD).py(LIST_PAD).child(card)
+}
+
+/// A selectable card for a result that shows more than one line: its title, if any, beside
+/// the Actions link, above whatever the caller adds.
+pub(super) fn card(
+    s: &Ui,
+    item: &Item,
+    index: usize,
+    on: bool,
+    title: Option<&str>,
+    t: &ResolvedTheme,
+    accent: Color,
+) -> El {
+    let id = s.session.result_key(index);
+    let mut card = col()
         .w_full()
-        .px(LIST_PAD)
-        .py(LIST_PAD)
-        .child(card.child(body))
+        .px(22.0)
+        .py(18.0)
+        .gap(16.0)
+        .radius(8.0)
+        .fill(t.card)
+        .border(1.0, if on { accent } else { Color::TRANSPARENT });
+    let mut header = row().w_full().center_y().gap(12.0);
+    header = match title {
+        Some(title) => header.child(
+            text(title)
+                .font(t.font(TextStyle::new(24.0, 600.0)))
+                .color(t.text)
+                .grow(1.0)
+                .min_w(0.0)
+                .wrap(),
+        ),
+        None => header.child(el().grow(1.0)),
+    };
+    if item.has_actions() {
+        header = header.child(
+            text("→ Actions")
+                .font(t.font(type_::BODY))
+                .color(accent)
+                .cursor(rune::Cursor::Pointer)
+                .hover(t.hover)
+                .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
+        );
+    }
+    if title.is_some() || item.has_actions() {
+        card = card.child(header);
+    }
+    card
 }
 
 fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &ResolvedTheme) -> El {
@@ -218,7 +282,6 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, ac
         ),
         subtitle,
     )
-    .key(row_key(&s.session.layout_key(index)))
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
 }
 

@@ -1,8 +1,9 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Item, Page};
+use crate::{Detail, Item, Page};
 
 /// A source of candidates. Apps, files and (later) extensions all take this shape.
 ///
@@ -11,6 +12,52 @@ use crate::{Item, Page};
 /// in batches as they arrive and should return soon after `request.is_cancelled()` turns true.
 pub trait Provider: Send + Sync + 'static {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError>;
+
+    /// `search` for a provider that groups its rows under headings or shows a row as a
+    /// [`Detail`]. The host searches through this; the default hands over plain rows.
+    fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
+        self.search(request, &mut |items| emit(items.into()))
+    }
+}
+
+/// Rows handed over together, with how the host presents them beyond each row's own view.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Batch {
+    pub items: Vec<Item>,
+    /// The heading over these rows. The host starts a heading wherever the section changes
+    /// between rows, so a provider keeps each section's rows together.
+    pub section: Option<String>,
+    /// Shown in place of a row's own view, by item ID. The view remains the plain-text form
+    /// for places that don't render details.
+    pub details: HashMap<String, Arc<Detail>>,
+}
+
+impl Batch {
+    pub fn section(title: impl Into<String>, items: Vec<Item>) -> Self {
+        Self {
+            items,
+            section: Some(title.into()),
+            details: HashMap::new(),
+        }
+    }
+
+    pub fn with_detail(mut self, id: impl Into<String>, detail: Detail) -> Self {
+        self.details.insert(id.into(), Arc::new(detail));
+        self
+    }
+
+    pub(crate) fn is_plain(&self) -> bool {
+        self.section.is_none() && self.details.is_empty()
+    }
+}
+
+impl From<Vec<Item>> for Batch {
+    fn from(items: Vec<Item>) -> Self {
+        Self {
+            items,
+            ..Self::default()
+        }
+    }
 }
 
 pub struct Request {

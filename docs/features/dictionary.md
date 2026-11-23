@@ -1,6 +1,6 @@
 # Dictionary
 
-`define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](#configuration) to choose other aliases.
+`define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. When the entry starts with its headword and pronunciation, as Oxford dictionaries do, Dupin shows the pronunciation beside a label, the extra senses after each `•` as a list, and parts such as Phrases and Origin under their own headings. Other entries show as paragraphs. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](#configuration) to choose other aliases.
 
 ## Configuration
 

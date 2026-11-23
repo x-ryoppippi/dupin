@@ -24,7 +24,11 @@ fn main() {
     searcher.search(1, query, None, None, 50);
     for delivery in rx {
         match delivery {
-            Delivery::Batch { items, .. } => {
+            Delivery::Batch { items, .. }
+            | Delivery::Presented {
+                batch: dupin_core::Batch { items, .. },
+                ..
+            } => {
                 println!("-- batch of {} at {:?}", items.len(), start.elapsed());
                 for item in items {
                     println!("{}\t{:?}", item.display_title(), item.view);

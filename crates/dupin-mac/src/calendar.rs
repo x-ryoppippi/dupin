@@ -1,4 +1,4 @@
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Batch, Item, ItemAction, Provider, ProviderError, Request, View};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::{Message, msg_send};
 use objc2_event_kit::{EKAuthorizationStatus, EKEvent, EKEventStatus, EKEventStore};
@@ -34,6 +34,10 @@ impl CalendarProvider {
 
 impl Provider for CalendarProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.search_batches(request, &mut |batch| emit(batch.items))
+    }
+
+    fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         if request.limit == 0 || request.is_cancelled() {
             return Ok(());
         }
@@ -44,7 +48,7 @@ impl Provider for CalendarProvider {
                         return Ok(());
                     }
                     if let Some(row) = access_problem(access.request_on_use()) {
-                        emit(vec![row]);
+                        emit(vec![row].into());
                         return Ok(());
                     }
                     (NSDate::date(), NSTimeZone::systemTimeZone())
@@ -63,7 +67,7 @@ impl Provider for CalendarProvider {
                 Source::EventKit(_) => {
                     let events = STORE.with(|store| read_events(store, &start, &end, request));
                     if calendar_authorization() != EKAuthorizationStatus::FullAccess {
-                        emit(vec![permission_row()]);
+                        emit(vec![permission_row()].into());
                         return Ok(());
                     }
                     events
@@ -71,15 +75,16 @@ impl Provider for CalendarProvider {
                 Source::Fixtures => fixture_events(&now),
             };
             if !request.is_cancelled() {
-                emit(event_rows(
-                    events,
-                    &terms,
-                    request.limit,
-                    &now,
-                    &start,
-                    &end,
-                    &zone,
-                ));
+                let window = Window {
+                    now: &now,
+                    start: &start,
+                    end: &end,
+                    zone: &zone,
+                    calendar: &calendar,
+                };
+                for batch in event_rows(events, &terms, request.limit, &window) {
+                    emit(batch);
+                }
             }
             Ok(())
         })
@@ -188,18 +193,68 @@ fn read_events(store: &EKEventStore, start: &NSDate, end: &NSDate, request: &Req
         .collect()
 }
 
-fn event_rows(
-    mut events: Vec<Event>,
-    terms: &[&str],
-    limit: usize,
-    now: &NSDate,
-    start: &NSDate,
-    end: &NSDate,
-    zone: &NSTimeZone,
-) -> Vec<Item> {
-    let now = now.timeIntervalSince1970();
-    let start = start.timeIntervalSince1970();
-    let end = end.timeIntervalSince1970();
+struct Window<'a> {
+    now: &'a NSDate,
+    start: &'a NSDate,
+    end: &'a NSDate,
+    zone: &'a NSTimeZone,
+    calendar: &'a NSCalendar,
+}
+
+/// Section titles for the day an event is under way or next starts.
+struct Days<'a> {
+    calendar: &'a NSCalendar,
+    today: usize,
+    year: isize,
+    same_year: Retained<NSDateFormatter>,
+    other_year: Retained<NSDateFormatter>,
+}
+
+impl<'a> Days<'a> {
+    fn new(window: &Window<'a>) -> Self {
+        let formatter = |template: &str| {
+            let formatter = NSDateFormatter::new();
+            formatter.setTimeZone(Some(window.zone));
+            formatter.setLocalizedDateFormatFromTemplate(&NSString::from_str(template));
+            formatter
+        };
+        Self {
+            calendar: window.calendar,
+            today: day_number(window.calendar, window.now),
+            year: window
+                .calendar
+                .component_fromDate(NSCalendarUnit::Year, window.now),
+            same_year: formatter("EEEEdMMMM"),
+            other_year: formatter("EEEEdMMMMy"),
+        }
+    }
+
+    fn title(&self, date: &NSDate) -> String {
+        match day_number(self.calendar, date).checked_sub(self.today) {
+            Some(0) => "Today".into(),
+            Some(1) => "Tomorrow".into(),
+            _ if self.calendar.component_fromDate(NSCalendarUnit::Year, date) == self.year => {
+                self.same_year.stringFromDate(date).to_string()
+            }
+            _ => self.other_year.stringFromDate(date).to_string(),
+        }
+    }
+}
+
+fn day_number(calendar: &NSCalendar, date: &NSDate) -> usize {
+    calendar.ordinalityOfUnit_inUnit_forDate(NSCalendarUnit::Day, NSCalendarUnit::Era, date)
+}
+
+/// The one section for events that have ended, which typed searches list last.
+const ENDED: &str = "Earlier";
+
+fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Window) -> Vec<Batch> {
+    let days = Days::new(window);
+    let zone = window.zone;
+    let now_date = window.now;
+    let now = window.now.timeIntervalSince1970();
+    let start = window.start.timeIntervalSince1970();
+    let end = window.end.timeIntervalSince1970();
     events.retain(|event| {
         let begins = event.start.timeIntervalSince1970();
         if begins >= end || (begins < start && event.end.timeIntervalSince1970() <= start) {
@@ -230,22 +285,31 @@ fn event_rows(
     let formatter = NSDateIntervalFormatter::new();
     formatter.setDateStyle(NSDateIntervalFormatterStyle::MediumStyle);
     formatter.setTimeZone(Some(zone));
-    events
-        .into_iter()
-        .take(limit)
-        .map(|event| {
-            let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
-            let id = format!("{}:{}", event.id, occurrence.timeIntervalSince1970());
-            let url = event_url(&event, zone);
-            let subtitle = format!("{} · {}", event_time(&event, &formatter), event.calendar);
-            let title = if event.title.trim().is_empty() {
-                "Untitled event"
-            } else {
-                &event.title
-            };
-            row(&id, title, subtitle, Some(("Open in Calendar", url)))
-        })
-        .collect()
+    let mut batches: Vec<Batch> = Vec::new();
+    for event in events.into_iter().take(limit) {
+        let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
+        let id = format!("{}:{}", event.id, occurrence.timeIntervalSince1970());
+        let url = event_url(&event, zone);
+        let subtitle = format!("{} · {}", event_time(&event, &formatter), event.calendar);
+        let title = if event.title.trim().is_empty() {
+            "Untitled event"
+        } else {
+            &event.title
+        };
+        let section = if chronological_key(&event).0 {
+            ENDED.to_owned()
+        } else if event.start.timeIntervalSince1970() < now {
+            days.title(now_date)
+        } else {
+            days.title(&event.start)
+        };
+        let row = row(&id, title, subtitle, Some(("Open in Calendar", url)));
+        match batches.last_mut() {
+            Some(batch) if batch.section.as_deref() == Some(section.as_str()) => batch.items.push(row),
+            _ => batches.push(Batch::section(section, vec![row])),
+        }
+    }
+    batches
 }
 
 fn event_time(event: &Event, formatter: &NSDateIntervalFormatter) -> String {
@@ -309,6 +373,7 @@ fn fixture_events(now: &NSDate) -> Vec<Event> {
         ("Project planning", "Studio", "Work", 7_200, 10_800, false),
         ("Design review", "Meeting room", "Work", 28_800, 30_600, false),
         ("Out of office", "", "Personal", 57_600, 144_000, true),
+        ("Dentist", "High Street", "Personal", 180_000, 181_800, false),
     ]
     .into_iter()
     .map(|(title, location, calendar, start, end, all_day)| Event {
@@ -327,6 +392,31 @@ fn fixture_events(now: &NSDate) -> Vec<Event> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rows(
+        events: Vec<Event>,
+        terms: &[&str],
+        limit: usize,
+        now: &NSDate,
+        start: &NSDate,
+        end: &NSDate,
+        zone: &NSTimeZone,
+    ) -> Vec<Batch> {
+        let calendar = NSCalendar::currentCalendar();
+        calendar.setTimeZone(zone);
+        let window = Window {
+            now,
+            start,
+            end,
+            zone,
+            calendar: &calendar,
+        };
+        event_rows(events, terms, limit, &window)
+    }
+
+    fn flat(batches: Vec<Batch>) -> Vec<Item> {
+        batches.into_iter().flat_map(|batch| batch.items).collect()
+    }
 
     fn collect(query: &str, limit: usize) -> Vec<Item> {
         let mut rows = Vec::new();
@@ -353,6 +443,53 @@ mod tests {
     }
 
     #[test]
+    fn upcoming_events_are_grouped_by_the_day_they_are_under_way() {
+        let mut batches = Vec::new();
+        CalendarProvider::fixtures()
+            .search_batches(&Request::detached("", 30), &mut |batch| batches.push(batch))
+            .unwrap();
+        let sections: Vec<_> = batches
+            .iter()
+            .map(|batch| {
+                let titles: Vec<_> = batch.items.iter().map(Item::display_title).collect();
+                (batch.section.clone().unwrap(), titles)
+            })
+            .collect();
+        assert_eq!(sections.len(), 3, "{sections:?}");
+        assert_eq!(
+            sections[0],
+            ("Today".into(), vec!["Project planning", "Design review"])
+        );
+        assert_eq!(sections[1], ("Tomorrow".into(), vec!["Out of office"]));
+        assert!(sections[2].0.contains("25"), "{sections:?}");
+        assert_eq!(sections[2].1, ["Dentist"]);
+        assert!(batches.iter().all(|batch| batch.details.is_empty()));
+    }
+
+    #[test]
+    fn typed_searches_put_ongoing_events_under_today_and_ended_ones_last() {
+        let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
+        let zone = NSTimeZone::timeZoneForSecondsFromGMT(0);
+        let start = now.dateByAddingTimeInterval(-30.0 * 86_400.0);
+        let end = now.dateByAddingTimeInterval(400.0 * 86_400.0);
+        let mut events = fixture_events(&now);
+        events[0].start = now.dateByAddingTimeInterval(-2.0 * 86_400.0);
+        events[1].start = now.dateByAddingTimeInterval(-86_400.0);
+        events[1].end = now.dateByAddingTimeInterval(-82_800.0);
+        events[3].start = now.dateByAddingTimeInterval(365.0 * 86_400.0);
+        events[3].end = events[3].start.dateByAddingTimeInterval(1800.0);
+        let batches = rows(events, &[], 30, &now, &start, &end, &zone);
+        let sections: Vec<_> = batches
+            .iter()
+            .map(|batch| (batch.section.clone().unwrap(), batch.items.len()))
+            .collect();
+        assert_eq!(sections[0], ("Today".into(), 1));
+        assert_eq!(sections[1], ("Tomorrow".into(), 1));
+        assert!(sections[2].0.contains("2027"), "{sections:?}");
+        assert_eq!(sections[3], (ENDED.into(), 1));
+    }
+
+    #[test]
     fn search_windows_include_ongoing_events_and_exclude_out_of_range_events() {
         let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
         let zone = NSTimeZone::timeZoneForSecondsFromGMT(0);
@@ -365,7 +502,9 @@ mod tests {
         events[1].end = end.dateByAddingTimeInterval(3600.0);
         events[2].start = now.dateByAddingTimeInterval(-86_400.0);
         events[2].end = now.clone();
-        let rows = event_rows(events, &[], 30, &now, &start, &end, &zone);
+        events[3].start = now.dateByAddingTimeInterval(-7200.0);
+        events[3].end = start.dateByAddingTimeInterval(-1.0);
+        let rows = flat(rows(events, &[], 30, &now, &start, &end, &zone));
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].display_title(), "Project planning");
         let (start, end) = bounds(&calendar, &now, false).unwrap();
@@ -395,7 +534,7 @@ mod tests {
                 }
             })
             .collect();
-        let rows = event_rows(events, &["standup"], 4, &now, &start, &end, &zone);
+        let rows = flat(rows(events, &["standup"], 4, &now, &start, &end, &zone));
         let expected =
             [-900.0, 3600.0, 7200.0, -3600.0].map(|offset| format!("standup:{}", FIXTURE_NOW + offset));
         assert_eq!(rows.into_iter().map(|row| row.id).collect::<Vec<_>>(), expected);

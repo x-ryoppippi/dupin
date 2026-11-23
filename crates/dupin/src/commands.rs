@@ -511,22 +511,18 @@ mod tests {
         assert_eq!(command, &calendar);
         assert!(query.is_empty());
         let generation = *generation;
-        let mut rows = Vec::new();
         CalendarProvider::fixtures()
-            .search(&Request::detached(query, 30), &mut |batch| rows.extend(batch))
+            .search_batches(&Request::detached(query, 30), &mut |batch| {
+                session.deliver_from(calendar.clone(), Delivery::Presented { generation, batch });
+            })
             .unwrap();
-        session.deliver_from(
-            calendar.clone(),
-            Delivery::Batch {
-                generation,
-                items: rows,
-            },
-        );
         session.deliver_from(calendar.clone(), Delivery::Done { generation });
-        assert_eq!(session.items().len(), 3);
+        assert_eq!(session.items().len(), 4);
+        assert_eq!(session.section_start(0), Some("Today"));
+        assert_eq!(session.section_start(2), Some("Tomorrow"));
         assert!(session.capture().is_err());
         session.intent(Intent::Up).unwrap();
-        assert_eq!(session.selected_item().unwrap().display_title(), "Out of office");
+        assert_eq!(session.selected_item().unwrap().display_title(), "Dentist");
         let effects = session.intent(Intent::Open).unwrap();
         assert!(effects.iter().any(
             |effect| matches!(effect, Effect::Run(Action::OpenUrl(url)) if url.starts_with("ical://ekevent/"))

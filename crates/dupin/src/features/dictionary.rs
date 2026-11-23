@@ -33,5 +33,10 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
 }
 
 fn start(providers: &mut Providers) {
-    providers.add(DICTIONARY, Arc::new(DictionaryProvider::default()));
+    let provider = if rune::tooling::is_headless() {
+        DictionaryProvider::fixtures()
+    } else {
+        DictionaryProvider::default()
+    };
+    providers.add(DICTIONARY, Arc::new(provider));
 }
