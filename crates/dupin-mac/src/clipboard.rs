@@ -6,7 +6,6 @@
 //! read without raising its paste prompt.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -22,10 +21,6 @@ use objc2_app_kit::{
 use objc2_foundation::{NSArray, NSString, NSURL};
 
 const INTERVAL: Duration = Duration::from_millis(500);
-
-/// macOS keeps reporting the default access behavior after a read where it doesn't enforce its
-/// paste prompt, so a deliberate request is what lets the monitor read in that state.
-static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Records clipboard changes into a history until dropped.
 pub struct Monitor {
@@ -76,14 +71,17 @@ impl Monitor {
 }
 
 fn access(board: &NSPasteboard) -> Access {
-    // `accessBehavior` arrived with the paste prompt in macOS 15.4; earlier systems never prompt.
-    if !board.respondsToSelector(sel!(accessBehavior)) {
-        return Access::Allowed;
-    }
-    match board.accessBehavior() {
-        NSPasteboardAccessBehavior::AlwaysAllow => Access::Allowed,
-        NSPasteboardAccessBehavior::Default if REQUESTED.load(Ordering::Acquire) => Access::Allowed,
-        NSPasteboardAccessBehavior::Default => Access::Unasked,
+    background_access(
+        board
+            .respondsToSelector(sel!(accessBehavior))
+            .then(|| board.accessBehavior()),
+    )
+}
+
+fn background_access(policy: Option<NSPasteboardAccessBehavior>) -> Access {
+    match policy {
+        None | Some(NSPasteboardAccessBehavior::AlwaysAllow) => Access::Allowed,
+        Some(NSPasteboardAccessBehavior::Default) => Access::Unasked,
         _ => Access::Restricted,
     }
 }
@@ -94,7 +92,6 @@ pub fn request_access() {
     autoreleasepool(|_| {
         drop(NSPasteboard::generalPasteboard().stringForType(unsafe { NSPasteboardTypeString }));
     });
-    REQUESTED.store(true, Ordering::Release);
 }
 
 fn frontmost() -> Option<String> {
@@ -124,6 +121,9 @@ fn capture(
     let max_bytes = guard.policy().max_entry_bytes;
     drop(guard);
 
+    if access(board) != Access::Allowed {
+        return;
+    }
     if types.iter().any(|kind| kind == SOURCE_TYPE) {
         let source = board
             .stringForType(&NSString::from_str(SOURCE_TYPE))
@@ -198,4 +198,22 @@ pub fn copy_files(paths: &[PathBuf]) -> Result<(), String> {
             .then_some(())
             .ok_or_else(|| "Couldn't copy the files.".to_owned())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_reads_require_always_allow_when_macos_reports_a_policy() {
+        for (policy, expected) in [
+            (None, Access::Allowed),
+            (Some(NSPasteboardAccessBehavior::AlwaysAllow), Access::Allowed),
+            (Some(NSPasteboardAccessBehavior::Default), Access::Unasked),
+            (Some(NSPasteboardAccessBehavior::Ask), Access::Restricted),
+            (Some(NSPasteboardAccessBehavior::AlwaysDeny), Access::Restricted),
+        ] {
+            assert_eq!(background_access(policy), expected);
+        }
+    }
 }
