@@ -1,5 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const MAX_ARGS: usize = 64;
 const MAX_ARG_BYTES: usize = 64 * 1024;
@@ -264,8 +265,11 @@ pub enum Stream {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OutputLine {
     pub stream: Stream,
-    pub text: String,
+    pub text: Arc<str>,
 }
+
+// The shared string allocates its reference counts even for an empty line.
+const OUTPUT_LINE_OVERHEAD: usize = std::mem::size_of::<OutputLine>() + 2 * std::mem::size_of::<usize>();
 
 #[derive(Clone, Debug, Default)]
 pub struct OutputBuffer {
@@ -294,11 +298,14 @@ impl OutputBuffer {
                 self.stderr_tail.drain(..boundary);
             }
         }
-        self.bytes += text.len() + std::mem::size_of::<OutputLine>();
-        self.lines.push_back(OutputLine { stream, text });
+        self.bytes += text.len() + OUTPUT_LINE_OVERHEAD;
+        self.lines.push_back(OutputLine {
+            stream,
+            text: text.into(),
+        });
         while self.bytes > MAX_OUTPUT_BYTES {
             let line = self.lines.pop_front().unwrap();
-            self.bytes -= line.text.len() + std::mem::size_of::<OutputLine>();
+            self.bytes -= line.text.len() + OUTPUT_LINE_OVERHEAD;
             self.dropped = self.dropped.saturating_add(1);
         }
     }
@@ -504,7 +511,7 @@ mod tests {
             output
                 .lines
                 .iter()
-                .map(|line| line.text.as_str())
+                .map(|line| line.text.as_ref())
                 .collect::<Vec<_>>(),
             ["red", "next", "invalid �"]
         );

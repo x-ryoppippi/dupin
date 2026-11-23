@@ -256,7 +256,7 @@ pub struct Ui {
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
     pub script_entry: Option<crate::scripts::entry::Entry>,
-    pub script_card: Option<crate::scripts::runner::Snapshot>,
+    pub script_card: Option<Arc<crate::scripts::runner::Snapshot>>,
     pub scripts_notice: Option<String>,
     scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     runner: crate::scripts::runner::Runner,
@@ -424,7 +424,7 @@ impl Ui {
                 .unwrap_or_default(),
             Arc::new({
                 let me = me.clone();
-                move |id| me.update(move |s, tx| s.script_changed(id, tx))
+                move |id, finished| me.update_if(move |s, tx| s.script_changed(id, finished, tx))
             }),
         );
         let scripts_watcher = crate::scripts::watch(me.clone());
@@ -769,7 +769,7 @@ impl Ui {
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
         if let Some(id) = self.script_output_after_close.take() {
-            self.show_script_output(id, self.runner.snapshots());
+            self.show_script_output(id);
         }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
@@ -910,7 +910,7 @@ impl Ui {
         }
         if let Some(card) = &self.script_card {
             if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
-                self.show_script_output(card.id, self.runner.snapshots());
+                self.show_script_output(card.id);
                 return true;
             }
             if matches!(ev.key, Key::Enter) {
@@ -1307,30 +1307,35 @@ impl Ui {
         self.runner.cancel(id);
     }
 
-    fn show_script_output(
-        &self,
-        id: crate::scripts::runner::RunId,
-        runs: Vec<crate::scripts::runner::Snapshot>,
-    ) {
+    fn show_script_output(&self, id: crate::scripts::runner::RunId) {
+        let runs = self.runner.snapshots();
         self.script_output.update(move |s, _| s.update(runs, Some(id)));
         self.script_output.open();
     }
 
-    fn script_changed(&mut self, id: crate::scripts::runner::RunId, tx: &mut Tx) {
-        let runs = self.runner.snapshots();
-        if let Some(snapshot) = runs.iter().find(|run| run.id == id) {
-            if self.script_card.as_ref().is_some_and(|card| card.id == id) {
-                self.script_card = Some(snapshot.clone());
-                tx.instant();
-            }
-            if snapshot.status.failed()
-                && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
-            {
-                self.show_script_output(id, runs);
-                return;
-            }
+    fn script_changed(&mut self, id: crate::scripts::runner::RunId, finished: bool, tx: &mut Tx) -> bool {
+        let Some(snapshot) = self.runner.snapshot(id) else {
+            return false;
+        };
+        if !finished && snapshot.status != crate::scripts::runner::Status::Running {
+            return false;
         }
-        self.script_output.update(move |s, _| s.update(runs, None));
+        let changed = self
+            .script_card
+            .as_ref()
+            .is_some_and(|card| card.id == id && !Arc::ptr_eq(card, &snapshot));
+        if changed {
+            self.script_card = Some(snapshot.clone());
+            tx.instant();
+        }
+        if snapshot.status.failed()
+            && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
+        {
+            self.show_script_output(id);
+        } else {
+            self.script_output.update_if(move |s, _| s.replace_run(snapshot));
+        }
+        changed
     }
 
     pub(crate) fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
@@ -1352,16 +1357,21 @@ impl Ui {
         }
         let mode = command.mode;
         match self.runner.start(command) {
-            Ok(id) => match mode {
-                OutputMode::Inline => {
-                    self.script_card = self.runner.snapshots().into_iter().find(|run| run.id == id);
+            Ok(id) => {
+                match mode {
+                    OutputMode::Inline => self.script_card = self.runner.snapshot(id),
+                    OutputMode::Full if self.me.is_visible() => self.script_output_after_close = Some(id),
+                    OutputMode::Full => {
+                        self.show_script_output(id);
+                        return;
+                    }
+                    OutputMode::Silent => {}
                 }
-                OutputMode::Full if self.me.is_visible() => {
-                    self.script_output_after_close = Some(id);
+                if self.script_output.is_visible() {
+                    let runs = self.runner.snapshots();
+                    self.script_output.update(move |s, _| s.update(runs, None));
                 }
-                OutputMode::Full => self.show_script_output(id, self.runner.snapshots()),
-                OutputMode::Silent => {}
-            },
+            }
             Err(problem) => self.show_notice(problem, tx),
         }
     }

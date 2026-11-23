@@ -1,8 +1,13 @@
 use super::runner::{RunId, Snapshot, Status};
+use dupin_core::script::{OutputBuffer, Stream};
 use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, Tx, col, row, text};
+use std::sync::Arc;
+
+const DISPLAY_LINE_LIMIT: usize = 200;
+const DISPLAY_BYTE_LIMIT: usize = 64 * 1024;
 
 pub struct Output {
-    runs: Vec<Snapshot>,
+    runs: Vec<Arc<Snapshot>>,
     selected: Option<RunId>,
     panel: AppHandle<crate::ui::Ui>,
 }
@@ -14,7 +19,7 @@ impl Output {
             panel,
         }
     }
-    pub fn update(&mut self, runs: Vec<Snapshot>, selected: Option<RunId>) {
+    pub fn update(&mut self, runs: Vec<Arc<Snapshot>>, selected: Option<RunId>) {
         self.runs = runs;
         if let Some(id) = selected {
             self.selected = Some(id);
@@ -23,8 +28,20 @@ impl Output {
             self.selected = self.runs.first().map(|run| run.id);
         }
     }
+    pub fn replace_run(&mut self, snapshot: Arc<Snapshot>) -> bool {
+        let Some(run) = self.runs.iter_mut().find(|run| run.id == snapshot.id) else {
+            return false;
+        };
+        let changed =
+            !Arc::ptr_eq(run, &snapshot) && (self.selected == Some(run.id) || run.status != snapshot.status);
+        *run = snapshot;
+        changed
+    }
     fn selected_run(&self) -> Option<&Snapshot> {
-        self.runs.iter().find(|run| Some(run.id) == self.selected)
+        self.runs
+            .iter()
+            .find(|run| Some(run.id) == self.selected)
+            .map(Arc::as_ref)
     }
     fn cancel(&mut self) {
         if let Some(id) = self.selected {
@@ -33,7 +50,7 @@ impl Output {
     }
     fn repeat(&mut self) {
         if let Some(run) = self.selected_run() {
-            let command = run.command.clone();
+            let command = (*run.command).clone();
             self.panel.update(move |s, tx| s.start_script(command, tx));
         }
     }
@@ -44,7 +61,7 @@ impl Output {
                 notice
                     .as_deref()
                     .into_iter()
-                    .chain(run.output.lines().iter().map(|line| line.text.as_str()))
+                    .chain(run.output.lines().iter().map(|line| line.text.as_ref()))
                     .collect::<Vec<_>>()
                     .join("\n"),
             );
@@ -65,8 +82,21 @@ impl Output {
     }
 }
 
-fn dropped_notice(output: &dupin_core::script::OutputBuffer) -> Option<String> {
+fn dropped_notice(output: &OutputBuffer) -> Option<String> {
     (output.dropped() > 0).then(|| format!("… {} lines dropped", output.dropped()))
+}
+
+fn display_start(output: &OutputBuffer) -> usize {
+    let mut bytes = 0;
+    let mut count = 0;
+    for line in output.lines().iter().rev().take(DISPLAY_LINE_LIMIT) {
+        bytes += line.text.len();
+        if bytes > DISPLAY_BYTE_LIMIT {
+            break;
+        }
+        count += 1;
+    }
+    output.lines().len() - count
 }
 
 pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
@@ -180,11 +210,23 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                     .key("script-output-dropped"),
             );
         }
+        let display_start = display_start(&run.output);
+        if display_start > 0 {
+            detail = detail.child(
+                text(format!(
+                    "… {display_start} earlier lines available via Copy output"
+                ))
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .key("script-output-hidden"),
+            );
+        }
         let mut lines = col().w_full().padding(12.0).gap(2.0).selection_group(true);
         let mut style = k.ty.ui;
         style.family = rune::tok::Family::SystemMono;
-        for (i, line) in run.output.lines().iter().enumerate() {
-            let stderr = line.stream == dupin_core::script::Stream::Stderr;
+        for (i, line) in run.output.lines().iter().enumerate().skip(display_start) {
+            let stderr = line.stream == Stream::Stderr;
+            let index = run.output.dropped().saturating_add(i);
             lines = lines.child(
                 text(format!("{}{}", if stderr { "stderr: " } else { "" }, line.text))
                     .w_full()
@@ -192,7 +234,7 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                     .color(if stderr { k.c.danger.fg } else { k.c.text_base })
                     .wrap()
                     .selectable(true)
-                    .key(format!("output-{i}")),
+                    .key(format!("output-{index}")),
             );
         }
         detail = detail.child(
@@ -224,6 +266,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn display_bounds_leave_earlier_output_retained_for_copying() {
+        let mut output = OutputBuffer::default();
+        for _ in 0..DISPLAY_LINE_LIMIT + 2 {
+            output.push(Stream::Stdout, b"short line");
+        }
+        assert_eq!(display_start(&output), 2);
+        assert_eq!(output.dropped(), 0);
+
+        let long_line = vec![b'x'; 4096];
+        for _ in 0..17 {
+            output.push(Stream::Stderr, &long_line);
+        }
+        assert_eq!(output.lines().len() - display_start(&output), 16);
+        assert_eq!(output.dropped(), 0);
+    }
+
+    #[test]
     #[ignore = "offscreen screenshot, run explicitly"]
     fn render_output_fixture() {
         let panel = rune::App::new(rune::AppSpec::new(
@@ -234,23 +293,23 @@ mod tests {
         ))
         .handle();
         let mut state = Output::new(panel);
-        let mut output = dupin_core::script::OutputBuffer::default();
-        output.push(dupin_core::script::Stream::Stdout, b"Stream line 1");
-        output.push(dupin_core::script::Stream::Stdout, b"Stream line 2");
-        output.push(dupin_core::script::Stream::Stderr, b"A fixture warning");
+        let mut output = OutputBuffer::default();
+        output.push(Stream::Stdout, b"Stream line 1");
+        output.push(Stream::Stdout, b"Stream line 2");
+        output.push(Stream::Stderr, b"A fixture warning");
         state.update(
-            vec![Snapshot {
+            vec![Arc::new(Snapshot {
                 id: 1,
-                command: dupin_core::script::ScriptRun {
+                command: Arc::new(dupin_core::script::ScriptRun {
                     path: "/fixture/stream".into(),
                     title: "Fixture stream".into(),
                     args: vec!["hello world".into()],
                     mode: dupin_core::script::OutputMode::Full,
-                },
+                }),
                 status: Status::Running,
                 output,
                 elapsed: std::time::Duration::from_secs(2),
-            }],
+            })],
             Some(1),
         );
         let app = rune::App::new(rune::AppSpec::new(

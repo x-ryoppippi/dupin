@@ -15,7 +15,7 @@ use std::{
 };
 
 pub type RunId = u64;
-type Notify = Arc<dyn Fn(RunId) + Send + Sync>;
+type Notify = Arc<dyn Fn(RunId, bool) + Send + Sync>;
 type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
 const EXIT_DRAIN: Duration = Duration::from_millis(100);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
@@ -49,10 +49,10 @@ impl std::fmt::Display for Status {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Snapshot {
     pub id: RunId,
-    pub command: ScriptRun,
+    pub command: Arc<ScriptRun>,
     pub status: Status,
     pub output: OutputBuffer,
     pub elapsed: Duration,
@@ -66,16 +66,10 @@ impl Snapshot {
 
 struct Run {
     id: RunId,
-    command: ScriptRun,
+    command: Arc<ScriptRun>,
     started: Instant,
     cancelled: AtomicBool,
-    data: Mutex<RunData>,
-}
-
-struct RunData {
-    status: Status,
-    output: OutputBuffer,
-    elapsed: Option<Duration>,
+    snapshot: Mutex<Arc<Snapshot>>,
 }
 
 #[derive(Default)]
@@ -208,28 +202,31 @@ impl Runner {
         }
         if runs
             .iter()
-            .filter(|run| lock(&run.data).status == Status::Running)
+            .filter(|run| lock(&run.snapshot).status == Status::Running)
             .count()
             >= 8
         {
             return Err("Eight scripts are already running.".into());
         }
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
+        let command = Arc::new(command);
         let run = Arc::new(Run {
             id,
-            command,
+            command: command.clone(),
             started: Instant::now(),
             cancelled: AtomicBool::new(false),
-            data: Mutex::new(RunData {
+            snapshot: Mutex::new(Arc::new(Snapshot {
+                id,
+                command,
                 status: Status::Running,
                 output: OutputBuffer::default(),
-                elapsed: None,
-            }),
+                elapsed: Duration::ZERO,
+            })),
         });
         while runs.len() >= 20 {
             let index = runs
                 .iter()
-                .position(|run| lock(&run.data).status != Status::Running)
+                .position(|run| lock(&run.snapshot).status != Status::Running)
                 .unwrap();
             runs.remove(index);
         }
@@ -241,29 +238,33 @@ impl Runner {
         if let Err(error) = thread::Builder::new()
             .name(format!("dupin-script-{id}"))
             .spawn(move || {
-                let status = execute(&inner, &worker_run);
-                finish(&inner, &worker_run, status);
+                let mut output = OutputBuffer::default();
+                let status = execute(&inner, &worker_run, &mut output);
+                publish(&inner, &worker_run, status, output);
             })
         {
-            finish(&self.inner, &run, Status::Failed(error.to_string()));
+            publish(
+                &self.inner,
+                &run,
+                Status::Failed(error.to_string()),
+                OutputBuffer::default(),
+            );
         }
         Ok(id)
     }
 
-    pub fn snapshots(&self) -> Vec<Snapshot> {
+    pub fn snapshots(&self) -> Vec<Arc<Snapshot>> {
         lock(&self.inner.runs)
             .iter()
-            .map(|run| {
-                let data = lock(&run.data);
-                Snapshot {
-                    id: run.id,
-                    command: run.command.clone(),
-                    status: data.status.clone(),
-                    output: data.output.clone(),
-                    elapsed: data.elapsed.unwrap_or_else(|| run.started.elapsed()),
-                }
-            })
+            .map(|run| lock(&run.snapshot).clone())
             .collect()
+    }
+
+    pub fn snapshot(&self, id: RunId) -> Option<Arc<Snapshot>> {
+        lock(&self.inner.runs)
+            .iter()
+            .find(|run| run.id == id)
+            .map(|run| lock(&run.snapshot).clone())
     }
 
     pub fn cancel(&self, id: RunId) {
@@ -294,14 +295,23 @@ fn signal_group(pgid: i32, signal: i32) {
     }
 }
 
-fn finish(inner: &Inner, run: &Run, status: Status) {
+fn publish(inner: &Inner, run: &Run, status: Status, output: OutputBuffer) {
+    let finished = status != Status::Running;
+    let snapshot = Arc::new(Snapshot {
+        id: run.id,
+        command: run.command.clone(),
+        status,
+        output,
+        elapsed: run.started.elapsed(),
+    });
     {
-        let mut data = lock(&run.data);
-        data.status = status;
-        data.elapsed = Some(run.started.elapsed());
-        inner.running.fetch_sub(1, Ordering::AcqRel);
+        let mut current = lock(&run.snapshot);
+        if finished {
+            inner.running.fetch_sub(1, Ordering::AcqRel);
+        }
+        *current = snapshot;
     }
-    (inner.notify)(run.id);
+    (inner.notify)(run.id, finished);
 }
 
 struct Pipe<R> {
@@ -363,7 +373,7 @@ impl<R: Read + AsRawFd> Pipe<R> {
     }
 }
 
-fn execute(inner: &Inner, run: &Run) -> Status {
+fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
     let mut command = Command::new(&run.command.path);
     command
         .args(&run.command.args)
@@ -426,9 +436,8 @@ fn execute(inner: &Inner, run: &Run) -> Status {
         if let Some((status, at)) = exited
             && ((stdout.fd() == -1 && stderr.fd() == -1) || at.elapsed() >= EXIT_DRAIN)
         {
-            let mut data = lock(&run.data);
-            stdout.close(&mut data.output);
-            stderr.close(&mut data.output);
+            stdout.close(output);
+            stderr.close(output);
             return if cancel_at.is_some() {
                 Status::Cancelled
             } else if let Some(error) = problem {
@@ -452,11 +461,7 @@ fn execute(inner: &Inner, run: &Run) -> Status {
             }
         }
         if fds.iter().any(|fd| fd.revents != 0) {
-            let mut data = lock(&run.data);
-            let reads = [
-                stdout.read(&mut bytes, &mut data.output),
-                stderr.read(&mut bytes, &mut data.output),
-            ];
+            let reads = [stdout.read(&mut bytes, output), stderr.read(&mut bytes, output)];
             for result in reads {
                 match result {
                     Ok(changed) => dirty |= changed,
@@ -465,7 +470,7 @@ fn execute(inner: &Inner, run: &Run) -> Status {
             }
         }
         if dirty && notified.elapsed() >= Duration::from_millis(50) {
-            (inner.notify)(run.id);
+            publish(inner, run, Status::Running, output.clone());
             notified = Instant::now();
             dirty = false;
         }
@@ -636,10 +641,10 @@ mod tests {
         }
     }
 
-    fn wait(runner: &Runner, id: RunId) -> Snapshot {
+    fn wait(runner: &Runner, id: RunId) -> Arc<Snapshot> {
         let start = Instant::now();
         loop {
-            let snapshot = runner.snapshots().into_iter().find(|run| run.id == id).unwrap();
+            let snapshot = runner.snapshot(id).unwrap();
             if snapshot.status != Status::Running {
                 return snapshot;
             }
@@ -653,7 +658,7 @@ mod tests {
         let fixture = Fixture::new(
             "read value && exit 99\nprintf '%s\\n' \"$PWD\" \"$1\" \"$2\"\nprintf 'fixture error' >&2\nexit 7\n",
         );
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
         let id = runner.start(fixture.command(&["$HOME * ~", "a b"])).unwrap();
         let result = wait(&runner, id);
@@ -663,7 +668,7 @@ mod tests {
             .lines()
             .iter()
             .filter(|line| line.stream == Stream::Stdout)
-            .map(|line| line.text.as_str())
+            .map(|line| line.text.as_ref())
             .collect();
         assert_eq!(stdout, [fixture.0.to_str().unwrap(), "$HOME * ~", "a b"]);
         assert_eq!(result.output.stderr_tail(), "fixture error\n");
@@ -675,7 +680,7 @@ mod tests {
         let fixture = Fixture::new(
             "(for _ in 1 2 3 4 5 6 7 8; do [ ! -f stop ] || exit; sleep 0.25; done; touch timed-out) &\nprintf 'last stdout'\nprintf 'last stderr' >&2\nexit 7\n",
         );
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
         let id = runner.start(fixture.command(&[])).unwrap();
         let result = wait(&runner, id);
@@ -690,7 +695,7 @@ mod tests {
     #[test]
     fn cancellation_escalates_for_a_term_ignoring_process_group() {
         let fixture = Fixture::new("trap '' TERM\nsleep 60 &\nprintf 'ready\\n'\nwait\n");
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let id = runner.start(fixture.command(&[])).unwrap();
         let start = Instant::now();
         while runner.snapshots()[0].output.last_stdout() != Some("ready") {
@@ -715,7 +720,7 @@ mod tests {
     #[test]
     fn active_limit_and_drop_cleanup_include_queued_runs() {
         let fixture = Fixture::new("sleep 60\n");
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
         for _ in 0..8 {
             runner.start(fixture.command(&[])).unwrap();
@@ -755,7 +760,7 @@ mod tests {
         let fixture = Fixture::new(
             "DUPIN_RUNNER_ESCAPE_MARKER=\"$2\" \"$1\" --exact scripts::runner::tests::escaped_pipe_holder --ignored --nocapture &\nwait\n",
         );
-        let runner = Runner::new(fixture.0.clone(), Arc::new(|_| {}));
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
         let executable = std::env::current_exe().unwrap();
         let marker = fixture.0.join("holder.ready");
