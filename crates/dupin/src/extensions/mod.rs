@@ -2,38 +2,26 @@
 //! JavaScript package run by QuickJS-ng, or a Wasm guest. Guests get the query and return
 //! views; neither runtime gives them any host access.
 
+mod manifest;
 mod provider;
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::Page;
-use dupin_js_runtime::{Control, DEFAULT_ENTRY, Diagnostic, Package, RunError};
+use dupin_js_runtime::{Control, Diagnostic, Package, RunError};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
-use serde::Deserialize;
 
 pub use provider::{ExtensionProvider, QUERY_DEADLINE};
 
 pub(crate) use crate::catalog_watch::Watch;
 
-pub const MANIFEST: &str = "extension.toml";
-const MAX_MANIFEST_BYTES: usize = 16 * 1024;
 const MAX_EXTENSIONS: usize = 64;
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Manifest {
-    id: String,
-    name: String,
-    version: String,
-    keyword: String,
-    entry: Option<String>,
-}
 
 pub struct Extension {
     pub id: String,
@@ -46,7 +34,7 @@ pub struct Extension {
     requests: AtomicU64,
 }
 
-/// The manifest's `entry` decides the runtime: a `.wasm` module, or a JavaScript module.
+/// package.json's `dupin` key declares a JavaScript package; extension.toml a Wasm module.
 pub(crate) enum Guest {
     Wasm(GuestModule),
     JavaScript(Package),
@@ -227,7 +215,7 @@ fn folder_name(folder: &Path) -> std::borrow::Cow<'_, str> {
 }
 
 struct LoadedExtension {
-    manifest: FileStamp,
+    manifests: manifest::Stamps,
     entry: PathBuf,
     /// Every file the guest was built from: the Wasm module, or each JavaScript file.
     files: Vec<FileStamp>,
@@ -268,37 +256,20 @@ fn load_with(
     previous: Option<LoadedExtension>,
     build: impl FnOnce(&Path, &str, &[FileStamp]) -> Result<Guest, Diagnostic>,
 ) -> Result<LoadedExtension, Diagnostic> {
-    let manifest_file = folder
-        .join(MANIFEST)
-        .canonicalize()
-        .and_then(FileStamp::read)
-        .map_err(|error| {
-            Diagnostic::new("missing-manifest", format!("Couldn't read it: {error}"))
-                .file(MANIFEST)
-                .hint("Create extension.toml with `id`, `name`, `version` and `keyword`.")
-        })?;
+    let manifests = manifest::Stamps::read(folder)?;
     if let Some(previous) = previous
-        && previous.manifest == manifest_file
+        && previous.manifests == manifests
         && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files)
     {
         return Ok(previous);
     }
 
-    let source = read_capped(&manifest_file.path, MAX_MANIFEST_BYTES)
-        .map_err(|error| Diagnostic::new("invalid-manifest", error).file(MANIFEST))?;
-    let source = std::str::from_utf8(&source).map_err(|_| {
-        Diagnostic::new("invalid-manifest", "is not UTF-8")
-            .file(MANIFEST)
-            .hint("Save extension.toml as UTF-8.")
-    })?;
-    let manifest: Manifest = toml::from_str(source).map_err(|error| toml_problem(source, &error))?;
-    validate(&manifest)?;
-    let entry_name = manifest.entry.as_deref().unwrap_or(DEFAULT_ENTRY);
-    let entry = PathBuf::from(entry_name);
+    let manifest = manifest::read(&manifests)?;
+    let entry = PathBuf::from(&manifest.entry);
     let files = revision(folder, &entry)?;
-    let guest = build(folder, entry_name, &files)?;
+    let guest = build(folder, &manifest.entry, &files)?;
     Ok(LoadedExtension {
-        manifest: manifest_file,
+        manifests,
         entry,
         files,
         extension: Arc::new(Extension {
@@ -352,19 +323,6 @@ fn stamps(paths: impl Iterator<Item = PathBuf>) -> Result<Vec<FileStamp>, Diagno
         .collect()
 }
 
-fn toml_problem(source: &str, error: &toml::de::Error) -> Diagnostic {
-    let mut diagnostic = Diagnostic::new("invalid-manifest", error.message().trim_end())
-        .file(MANIFEST)
-        .hint("extension.toml takes `id`, `name`, `version`, `keyword` and optionally `entry`, all strings.");
-    if let Some(span) = error.span() {
-        let before = &source[..span.start.min(source.len())];
-        let line = before.matches('\n').count() + 1;
-        let column = before.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
-        diagnostic = diagnostic.at(line as u32, column as u32);
-    }
-    diagnostic
-}
-
 fn module_stamp(folder: &Path, entry: &Path) -> Result<FileStamp, Diagnostic> {
     let missing = || {
         Diagnostic::new("missing-entry", "is not a file in this folder")
@@ -377,80 +335,6 @@ fn module_stamp(folder: &Path, entry: &Path) -> Result<FileStamp, Diagnostic> {
         _ => return Err(missing()),
     };
     FileStamp::read(entry_path).map_err(|_| missing())
-}
-
-fn validate(manifest: &Manifest) -> Result<(), Diagnostic> {
-    let invalid = |field: &str, message: &str, hint: &str| {
-        Diagnostic::new("invalid-manifest", message)
-            .file(MANIFEST)
-            .field(field)
-            .hint(hint)
-    };
-    let id = &manifest.id;
-    if id.is_empty()
-        || id.len() > 64
-        || !id
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    {
-        return Err(invalid(
-            "id",
-            "must be 1–64 lowercase letters, digits or hyphens",
-            "Use a name such as `word-count`.",
-        ));
-    }
-    let printable = |value: &str| !value.chars().any(char::is_control);
-    if manifest.name.trim().is_empty() || manifest.name.chars().count() > 80 || !printable(&manifest.name) {
-        return Err(invalid(
-            "name",
-            "must be 1–80 printable characters",
-            "Use the name Settings and the keyword chip should show, such as `Word Count`.",
-        ));
-    }
-    if manifest.version.is_empty()
-        || manifest.version.len() > 32
-        || manifest
-            .version
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-    {
-        return Err(invalid(
-            "version",
-            "must be 1–32 characters without spaces",
-            "Use a version such as `0.1.0`.",
-        ));
-    }
-    if manifest.keyword.is_empty()
-        || manifest.keyword.len() > 32
-        || manifest
-            .keyword
-            .chars()
-            .any(|ch| ch.is_whitespace() || ch.is_control())
-    {
-        return Err(invalid(
-            "keyword",
-            "must be 1–32 bytes without spaces",
-            "Use a short word such as `wc`.",
-        ));
-    }
-    if let Some(entry) = &manifest.entry {
-        let entry = Path::new(entry);
-        let runnable = entry
-            .extension()
-            .is_some_and(|extension| extension == "wasm" || extension == "js" || extension == "mjs");
-        if !runnable
-            || !entry
-                .components()
-                .all(|part| matches!(part, Component::Normal(_)))
-        {
-            return Err(invalid(
-                "entry",
-                "must be a relative path to a .js, .mjs or .wasm file inside the folder",
-                "Leave `entry` out to use main.js.",
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
@@ -478,6 +362,7 @@ pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> 
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::manifest::{PACKAGE_JSON, WASM_MANIFEST as MANIFEST};
     use super::*;
     use std::fs;
     use std::os::unix::fs::symlink;
@@ -744,7 +629,7 @@ pub(crate) mod tests {
             ("g-escape", "`entry` must be a relative path"),
             ("h-not-wasm", "invalid plugin module"),
             ("i-imports", "imports are unavailable"),
-            ("j-no-manifest", "extension.toml"),
+            ("j-no-manifest", "package.json"),
             ("k-symlink", "not a file in this folder"),
         ] {
             assert!(
@@ -761,7 +646,7 @@ pub(crate) mod tests {
     fn oversized_manifests_are_rejected_before_parsing() {
         let fixture = folder();
         let root = fixture.path();
-        install(root, "big", &"#".repeat(MAX_MANIFEST_BYTES + 1), None);
+        install(root, "big", &"#".repeat(16 * 1024 + 1), None);
         let catalog = Scanner::default().scan(root);
         assert!(
             catalog.problems[0].contains("larger than 16 KiB"),
@@ -771,14 +656,23 @@ pub(crate) mod tests {
     }
 
     fn install_javascript(root: &Path, folder: &str, id: &str, keyword: &str, files: &[(&str, &str)]) {
-        let manifest =
-            format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"0.1.0\"\nkeyword = \"{keyword}\"\n");
-        install(root, folder, &manifest, None);
+        let dir = root.join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(PACKAGE_JSON), package_json(id, keyword, None)).unwrap();
         for (name, source) in files {
-            let path = root.join(folder).join(name);
+            let path = dir.join(name);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             fs::write(path, source).unwrap();
         }
+    }
+
+    fn package_json(id: &str, keyword: &str, main: Option<&str>) -> String {
+        let main = main
+            .map(|main| format!(r#", "main": "{main}""#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"name": "{id}", "version": "0.1.0", "dupin": {{"title": "{id}", "keyword": "{keyword}"{main}}}}}"#
+        )
     }
 
     #[test]
@@ -807,8 +701,8 @@ pub(crate) mod tests {
             &[("src/index.mjs", "export function search() { return []; }")],
         );
         fs::write(
-            root.join("c-entry").join(MANIFEST),
-            "id = \"entry\"\nname = \"Entry\"\nversion = \"1\"\nkeyword = \"en\"\nentry = \"src/index.mjs\"\n",
+            root.join("c-entry").join(PACKAGE_JSON),
+            package_json("entry", "en", Some("src/index.mjs")),
         )
         .unwrap();
         install_javascript(
@@ -866,6 +760,29 @@ pub(crate) mod tests {
 
         fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
         assert!(scanner.update(root, None).is_some());
+    }
+
+    #[test]
+    fn a_wasm_manifest_added_beside_a_package_makes_it_ambiguous() {
+        let fixture = folder();
+        let root = fixture.path();
+        install_javascript(
+            root,
+            "js",
+            "js",
+            "js",
+            &[("main.js", "export const search = () => [];")],
+        );
+        let mut scanner = Scanner::default();
+        assert_eq!(scanner.update(root, None).unwrap().extensions.len(), 1);
+
+        fs::write(root.join("js").join(MANIFEST), manifest("js", "js")).unwrap();
+        let catalog = scanner.update(root, None).unwrap();
+        assert!(catalog.extensions.is_empty());
+        assert_eq!(
+            catalog.problems,
+            ["js: extension.toml: sits beside a package.json with a `dupin` key"]
+        );
     }
 
     #[test]

@@ -79,7 +79,7 @@ impl Package {
             return Err(Diagnostic::new("missing-entry", "is not a JavaScript file in the package folder")
                 .file(&entry)
                 .hint(format!(
-                    "Create `{DEFAULT_ENTRY}` exporting `search`, or point `entry` in extension.toml at the module that does."
+                    "Create `{DEFAULT_ENTRY}` exporting `search`, or point `dupin.main` in package.json at the module that does."
                 )));
         }
         let sources = package::read_sources(&files)?;
