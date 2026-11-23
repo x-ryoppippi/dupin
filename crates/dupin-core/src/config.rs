@@ -4,12 +4,17 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub const MAPS_SEARCH_TEMPLATE: &str = "maps://?q={query}";
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// The global shortcut that shows and hides the panel, as Rune parses accelerators:
     /// modifiers (`cmd`, `alt`, `ctrl`, `shift`) and a key joined by `+`.
     pub hotkey: String,
+    /// Optional shortcut to search text selected in another app.
+    pub selection_hotkey: String,
+    pub bindings: BTreeMap<String, HotkeyTarget>,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
     /// Directories to rank lower in file search. Relative names match directory components;
@@ -21,7 +26,8 @@ pub struct Config {
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
-    /// Where the panel opens on the display under the pointer.
+    pub display: DisplaySelection,
+    /// Where the panel opens on the selected display.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
@@ -31,6 +37,19 @@ pub struct Config {
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     pub theme: Theme,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "target", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HotkeyTarget {
+    App {
+        bundle_id: String,
+        #[serde(default)]
+        hide_if_frontmost: bool,
+    },
+    Command {
+        command: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -121,10 +140,21 @@ pub enum Position {
     Top,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplaySelection {
+    #[default]
+    Mouse,
+    Main,
+    Active,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             hotkey: "cmd+space".into(),
+            selection_hotkey: String::new(),
+            bindings: BTreeMap::new(),
             file_limit: 200,
             file_demotions: [
                 "~/Library",
@@ -139,6 +169,7 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
+            display: DisplaySelection::default(),
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
@@ -152,6 +183,13 @@ impl Default for Config {
                     WebSearch {
                         name: "GitHub".into(),
                         url: "https://github.com/search?q={query}".into(),
+                    },
+                ),
+                (
+                    "maps".into(),
+                    WebSearch {
+                        name: "Apple Maps".into(),
+                        url: MAPS_SEARCH_TEMPLATE.into(),
                     },
                 ),
                 (
@@ -183,17 +221,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_command_space() {
-        assert_eq!(Config::parse("").unwrap(), Config::default());
-        assert_eq!(Config::default().hotkey, "cmd+space");
+    fn reads_the_display_selection() {
+        assert_eq!(Config::default().display, DisplaySelection::Mouse);
+        for (name, expected) in [
+            ("mouse", DisplaySelection::Mouse),
+            ("main", DisplaySelection::Main),
+            ("active", DisplaySelection::Active),
+        ] {
+            let config = Config::parse(&format!("display = \"{name}\"")).unwrap();
+            assert_eq!(config.display, expected);
+            assert_eq!(serde_json::to_value(&config).unwrap()["display"], name);
+        }
+        assert!(Config::parse("display = \"other\"").is_err());
     }
 
     #[test]
-    fn reads_the_hotkey() {
+    fn defaults_to_command_space() {
+        assert_eq!(Config::parse("").unwrap(), Config::default());
+        assert_eq!(Config::default().hotkey, "cmd+space");
+        assert!(Config::default().selection_hotkey.is_empty());
+    }
+
+    #[test]
+    fn reads_the_hotkeys() {
+        let config = Config::parse("hotkey = \"alt+space\"\nselection_hotkey = \"ctrl+alt+k\"").unwrap();
+        assert_eq!(config.hotkey, "alt+space");
+        assert_eq!(config.selection_hotkey, "ctrl+alt+k");
+    }
+
+    #[test]
+    fn app_bindings_round_trip_with_hiding_opt_in() {
+        let config = Config::parse(
+            r#"
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+"#,
+        )
+        .unwrap();
+        assert!(Config::default().bindings.is_empty());
         assert_eq!(
-            Config::parse("hotkey = \"alt+space\"").unwrap().hotkey,
-            "alt+space"
+            config.bindings["ctrl+alt+c"],
+            HotkeyTarget::App {
+                bundle_id: "com.apple.calculator".into(),
+                hide_if_frontmost: false,
+            }
         );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+    }
+
+    #[test]
+    fn command_bindings_round_trip_without_changing_the_command_line() {
+        let config = Config::parse(
+            r#"
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.bindings["alt+cmd+g"],
+            HotkeyTarget::Command {
+                command: "dupin open --query 'gh '".into(),
+            }
+        );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
     }
 
     #[test]
@@ -239,6 +332,13 @@ web_fallbacks = ["docs", "g"]
         )
         .unwrap();
         assert_eq!(config.web_searches["docs"].name, "Docs");
+        assert_eq!(config.web_searches.len(), 1);
+        assert!(
+            Config::parse("web_searches = {}")
+                .unwrap()
+                .web_searches
+                .is_empty()
+        );
         assert_eq!(config.web_fallbacks, ["docs", "g"]);
 
         assert!(

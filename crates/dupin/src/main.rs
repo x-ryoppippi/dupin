@@ -8,6 +8,7 @@ mod control;
 mod hotkey;
 mod icons;
 mod log;
+mod mcp;
 mod prefs;
 mod settings;
 mod shader;
@@ -41,8 +42,8 @@ fn main() {
                 log::warn(&format!("couldn't clean up abandoned copies: {error}"));
             }
         });
+        rune::prewarm_gpu();
     }
-    rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
@@ -99,7 +100,12 @@ fn main() {
     .windowless()
     .on_window(|_| trace::settings("created"))
     .on_ready(|_| trace::settings("ready"))
-    .on_focus(|_, focused, _| {
+    .on_focus(|s, focused, _| {
+        if focused {
+            s.refresh_login_item();
+            s.refresh_permissions();
+            s.refresh_hotkey();
+        }
         trace::settings(if focused { "focused" } else { "unfocused" });
     })
     .on_close(prefs::Prefs::closed);
@@ -131,6 +137,7 @@ fn main() {
     }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));
+    let welcome = prefs::welcome::first_run();
     let prefs = prefs.init({
         let (config, binding, panel, updater, settings) = (
             current_config.clone(),
@@ -139,10 +146,13 @@ fn main() {
             updater.clone(),
             settings.clone(),
         );
-        move || prefs::Prefs::new(config, binding, panel, updater, settings)
+        move || prefs::Prefs::new(config, binding, panel, updater, settings, welcome)
     });
+    if welcome {
+        prefs_handle.open();
+    }
 
-    let hotkey = config.hotkey.clone();
+    let settings_window = prefs_handle.clone();
     let radius = config.theme.corner_radius as f32;
     let mut registered = false;
     let quick_look = Rc::new(RefCell::new(None));
@@ -176,12 +186,14 @@ fn main() {
             install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
-                binding.register_at_launch(&hotkey);
+                binding.register_at_launch(&config, !welcome);
+                settings_window.update(|s, _| s.reflect_launch_hotkey());
                 settings.activate();
             }
         })
         .on_frame_encoded(trace::frame)
         .on_close(ui::Ui::closed)
+        .on_quit(ui::Ui::stop_hotkey_commands)
         .on_focus(|s, focused, tx| {
             if !focused && !s.preview_focus_is_active() {
                 s.dismiss(tx);
