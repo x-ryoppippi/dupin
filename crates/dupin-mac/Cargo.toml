@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 dupin-core = { workspace = true }
 objc2 = { workspace = true }
+block2 = "0.6"
 objc2-foundation = { workspace = true, features = [
 	"std",
 	"NSArray",
@@ -18,6 +19,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSDate",
 	"NSDictionary",
 	"NSEnumerator",
+	"NSError",
 	"NSFileManager",
 	"NSNotification",
 	"NSMetadata",
@@ -41,6 +43,8 @@ objc2-app-kit = { workspace = true, features = [
 	"NSView",
 	"NSWindow",
 	"NSWorkspace",
+	"NSRunningApplication",
+	"block2",
 ] }
 objc2-quick-look-ui = { workspace = true }
 

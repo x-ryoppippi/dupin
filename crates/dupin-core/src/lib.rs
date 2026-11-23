@@ -24,3 +24,4 @@ pub use session::{Effect, Intent, Session};
 
 #[cfg(test)]
 mod concurrent_tests;
+pub mod snapshots;

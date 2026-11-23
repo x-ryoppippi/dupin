@@ -3,6 +3,152 @@ use std::path::PathBuf;
 use super::*;
 use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
 
+fn trash_row() -> Item {
+    let mut row = item("file");
+    row.actions.push(ItemAction::new(
+        "choose",
+        "Open with…",
+        Action::ChooseApplication("/file".into()),
+    ));
+    row.actions.push(
+        ItemAction::new("trash", "Trash", Action::Trash("/file".into()))
+            .confirm("Trash?", "Trash")
+            .consumes(),
+    );
+    row.primary = Some("trash".into());
+    row.alternate = Some("trash".into());
+    row
+}
+
+fn file_action_session() -> (Session, String, u64) {
+    let mut s = session();
+    let generation = searched(&s.set_query("file")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![trash_row()],
+    });
+    let key = s.result_key(0);
+    (s, key, generation)
+}
+
+#[test]
+fn confirmed_consumption_cannot_run_from_normal_activation() {
+    let (mut s, key, _) = file_action_session();
+    let history = s.history().clone();
+    assert!(s.intent(Intent::Open).unwrap().is_empty());
+    assert!(s.intent(Intent::OpenAlternate).unwrap().is_empty());
+    assert!(s.run_key_action(&key, "trash").is_empty());
+    assert!(s.run_key_action(&key, "choose").is_empty());
+    assert!(s.run_confirmed_key_action(&key, "choose").is_empty());
+    assert_eq!(
+        s.run_confirmed_key_action(&key, "trash"),
+        vec![Effect::RunConsuming {
+            id: key.clone(),
+            action: Action::Trash("/file".into())
+        }]
+    );
+    assert_eq!(s.history(), &history);
+    s.set_query("other");
+    assert!(s.run_confirmed_key_action(&key, "trash").is_empty());
+}
+
+#[test]
+fn application_choices_belong_to_the_current_parent_resource() {
+    let (mut s, key, _) = file_action_session();
+    let choice = |path: &str| Action::OpenWith {
+        path: path.into(),
+        application: "/Viewer.app".into(),
+    };
+    assert!(s.run_key_choice(&key, "choose", choice("/wrong")).is_empty());
+    assert!(s.run_key_choice(&key, "trash", choice("/file")).is_empty());
+    assert!(
+        s.run_key_choice(&key, "choose", Action::Trash("/file".into()))
+            .is_empty()
+    );
+    let effects = s.run_key_choice(&key, "choose", choice("/file"));
+    assert!(effects.contains(&Effect::Run(choice("/file"))));
+    assert!(effects.contains(&Effect::SaveHistory));
+    assert!(effects.contains(&Effect::Hide));
+    assert!(s.run_key_choice(&key, "choose", choice("/file")).is_empty());
+}
+
+#[test]
+fn consumed_rows_cannot_return_in_late_batches_or_remove_new_generations() {
+    let (mut s, key, generation) = file_action_session();
+    assert!(s.forget(&key));
+    assert!(s.items().is_empty());
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("file")],
+    });
+    assert!(s.items().is_empty());
+    let generation = searched(&s.set_query("new file")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("file")],
+    });
+    assert!(!s.forget(&key));
+    assert_eq!(s.items().len(), 1);
+}
+
+#[test]
+fn consumed_candidates_cannot_return_after_becoming_hidden() {
+    let mut commands = CommandRegistry::new(app_command(), None);
+    commands
+        .register(
+            CommandSpec::new(app_command(), 10, QueryPresentation::new("Search")).with_candidate_limit(20),
+        )
+        .unwrap();
+    let mut s = Session::new(History::default(), commands).unwrap();
+    let generation = searched(&s.set_query("file")).1;
+    let mut row = trash_row();
+    row.score = Some(0);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row.clone()],
+    });
+    let key = s.result_key(0);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: (0..10)
+            .map(|i| {
+                let mut other = item(&format!("other-{i}"));
+                other.score = Some(100 + i);
+                other
+            })
+            .collect(),
+    });
+    assert!(!s.items().iter().any(|item| item.id == row.id));
+    let selected = s.selected_item().unwrap().id.clone();
+    assert!(s.forget(&key));
+    assert_eq!(s.selected_item().unwrap().id, selected);
+    assert!(
+        s.providers
+            .values()
+            .all(|state| state.items.iter().all(|item| item.id != row.id))
+    );
+    row.score = Some(i32::MAX);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row.clone()],
+    });
+    s.deliver(Delivery::Done { generation });
+    assert!(!s.items().iter().any(|item| item.id == row.id));
+}
+
+#[test]
+fn consuming_an_earlier_row_keeps_the_same_item_selected() {
+    let (mut s, key, generation) = file_action_session();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("next"), item("last")],
+    });
+    s.intent(Intent::Down);
+    let selected = s.selected_item().unwrap().id.clone();
+    assert!(s.forget(&key));
+    assert_eq!(s.selected_item().unwrap().id, selected);
+}
+
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
 }
@@ -1242,4 +1388,78 @@ fn non_text_actions_obey_generation_and_selection() {
         let effects = s.run_key_action(&next_key, "open");
         assert!(effects.contains(&Effect::Run(Action::Open(PathBuf::from("/x/result")))));
     }
+}
+
+#[test]
+fn snapshot_capture_rejects_inert_and_stale_results_and_restore_has_no_activation() {
+    let mut s = session();
+    assert!(s.capture().is_err());
+    let g1 = searched(&s.set_query("first")).1;
+    s.deliver(Delivery::Batch {
+        generation: g1,
+        items: vec![item("Historical content")],
+    });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    let saved = s.capture().unwrap();
+    assert_eq!(saved.query, "first");
+    assert_eq!(saved.title, "Historical content");
+    let history = s.history().to_json();
+    let g2 = searched(&s.set_query("second")).1;
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Batch {
+        generation: g2,
+        items: vec![item("Current content")],
+    });
+    s.deliver(Delivery::Done { generation: g2 });
+    assert_eq!(s.capture().unwrap().title, "Current content");
+    let effects = s.restore(&saved).unwrap();
+    assert_eq!(s.query(), "first");
+    assert_eq!(s.command_id().as_str(), saved.mode);
+    assert_eq!(s.history().to_json(), history);
+    assert!(s.items().is_empty());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::Search { query, .. } if query == "first"))
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::Run(_) | Effect::SaveHistory))
+    );
+    let mut unavailable = saved.clone();
+    unavailable.mode = "removed.extension".into();
+    assert!(s.restore(&unavailable).is_err());
+    assert!(saved.search_text().contains("historical content"));
+    assert_eq!(s.query(), "first");
+}
+
+#[test]
+fn restoring_an_old_default_is_explicit_under_a_new_default() {
+    let mut original = session();
+    let generation = searched(&original.set_query("saved")).1;
+    original.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("Historical content")],
+    });
+    original.deliver(Delivery::Done { generation });
+    let saved = original.capture().unwrap();
+    original.restore(&saved).unwrap();
+    assert!(!original.explicit);
+
+    let mut registry = CommandRegistry::new(files_command(), None);
+    for id in [app_command(), files_command()] {
+        registry
+            .register(CommandSpec::new(id, 10, QueryPresentation::new("Search")))
+            .unwrap();
+    }
+    let mut changed = Session::new(History::default(), registry).unwrap();
+    let effects = changed.restore(&saved).unwrap();
+    assert_eq!(changed.command_id(), &app_command());
+    assert!(changed.explicit);
+    assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
+    assert_eq!(searched(&effects[1..]).0, app_command());
 }
