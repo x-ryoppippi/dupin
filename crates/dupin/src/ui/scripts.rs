@@ -184,7 +184,7 @@ impl Ui {
 
     pub(super) fn script_card_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         if let Some(card) = &self.script_card {
-            if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
+            if is_script_output_shortcut(ev) {
                 self.show_script_output(card.id);
                 return true;
             }
@@ -205,4 +205,22 @@ impl Ui {
         }
         false
     }
+}
+
+fn is_script_output_shortcut(ev: &KeyEvent) -> bool {
+    ev.mods.cmd && !ev.mods.shift && matches!(ev.key, Key::Command('o'))
+}
+
+#[test]
+fn script_output_shortcut_does_not_consume_the_snapshots_chord() {
+    let mut ev = KeyEvent {
+        key: Key::Command('o'),
+        mods: rune::Mods {
+            cmd: true,
+            ..Default::default()
+        },
+    };
+    assert!(is_script_output_shortcut(&ev));
+    ev.mods.shift = true;
+    assert!(!is_script_output_shortcut(&ev));
 }
