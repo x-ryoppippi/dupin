@@ -24,7 +24,7 @@ impl Ui {
                 self.session.pending(&origin, generation)
             });
             if self.session.results() == dupin_core::session::Results::Done {
-                crate::latency::results_done();
+                crate::latency::results_done(self.session.origins());
                 if !self.session.command().private_results {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
@@ -111,7 +111,7 @@ impl Ui {
                     });
                 }
                 if delivered && self.session.results() == dupin_core::session::Results::Done {
-                    crate::latency::results_done();
+                    crate::latency::results_done(self.session.origins());
                     if !self.session.command().private_results {
                         crate::trace::results_done(&self.query.text, self.session.items().len());
                     }

@@ -32,6 +32,8 @@ struct Sample {
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,
     done: Option<Instant>,
+    /// Rows per provider in the finished results, so the driver can tell which feature answered.
+    shown: BTreeMap<String, usize>,
 }
 
 thread_local! {
@@ -80,20 +82,21 @@ pub fn edit_started(t: f64, query: &str) {
             providers: BTreeMap::new(),
             last_provider: None,
             done: None,
+            shown: BTreeMap::new(),
         });
     });
 }
 
 /// The session took the edit and its searches have started. `settled` is true when nothing
-/// is left to wait for.
-pub fn edit_applied(command: &CommandId, settled: bool) {
+/// is left to wait for, and `origins` are then the providers of the rows it shows.
+pub fn edit_applied(command: &CommandId, settled: bool, origins: &[CommandId]) {
     with(|probe| {
         let Some(sample) = &mut probe.sample else { return };
         let now = Instant::now();
         sample.command = command.as_str().to_owned();
         sample.dispatched = Some(now);
         if settled || sample.pending.is_empty() {
-            sample.done = Some(now);
+            sample.finish(now, origins);
         }
     });
 }
@@ -129,16 +132,27 @@ pub fn delivered(provider: &CommandId, sent: Instant, pending: impl Fn(u64) -> b
     });
 }
 
-/// Every provider for the current query has finished and the session has merged them.
-pub fn results_done() {
+/// Every provider for the current query has finished and the session has merged them into
+/// rows from `origins`.
+pub fn results_done(origins: &[CommandId]) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_some()
             && sample.done.is_none()
         {
-            sample.done = Some(Instant::now());
+            sample.finish(Instant::now(), origins);
         }
     });
+}
+
+impl Sample {
+    fn finish(&mut self, at: Instant, origins: &[CommandId]) {
+        self.done = Some(at);
+        self.shown.clear();
+        for origin in origins {
+            *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
+        }
+    }
 }
 
 /// `App::on_frame_encoded`.
@@ -172,6 +186,7 @@ impl Probe {
                     "merge_ms": ms(provided, done),
                     "layout_ms": ms(done, drawn),
                     "providers": sample.providers,
+                    "shown": sample.shown,
                 })
             }
             _ => serde_json::json!({

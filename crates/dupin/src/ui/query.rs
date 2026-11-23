@@ -39,6 +39,7 @@ impl Ui {
                 self.session.results(),
                 dupin_core::session::Results::Searching { .. }
             ),
+            self.session.origins(),
         );
     }
 }

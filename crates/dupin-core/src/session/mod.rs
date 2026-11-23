@@ -333,6 +333,11 @@ impl Session {
         &self.search.items
     }
 
+    /// The provider each of [`Self::items`] came from, index for index.
+    pub fn origins(&self) -> &[CommandId] {
+        &self.search.origins
+    }
+
     pub fn selected(&self) -> usize {
         self.search.selected
     }

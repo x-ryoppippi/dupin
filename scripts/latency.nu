@@ -192,6 +192,13 @@ def measure [
         }
     }
     let samples = $matched | where superseded? != true
+    let provider = $job.setup.provider
+    let missed = unanswered $samples $provider
+    if $missed > 0 {
+        error make {
+            msg: $"($job.id) [($job.implementation)]: ($missed) of ($samples | length) measured keypresses showed no rows from ($provider); the scenario does not reach its feature"
+        }
+    }
     {
         commands: ($samples | get command | uniq)
         samples: ($samples | length)
@@ -203,6 +210,13 @@ def measure [
             | into record
         )
     }
+}
+
+# How many samples show no rows from `provider`.
+export def unanswered [samples: list<record>, provider: string]: nothing -> int {
+    $samples
+    | where {|sample| ($sample.shown? | default {} | get --optional $provider | default 0) == 0 }
+    | length
 }
 
 def stage-names []: nothing -> list<string> {
@@ -268,6 +282,7 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
         implementation: $job.implementation
         prefix: $job.prefix
         typed: $job.typed
+        provider: $job.setup.provider
         commands: (
             $runs
             | get commands
