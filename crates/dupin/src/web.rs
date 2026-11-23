@@ -24,14 +24,10 @@ struct ValidatedSearch {
 }
 
 impl WebCatalog {
-    pub fn receivers(&self, query: &str) -> impl Iterator<Item = ItemAction> {
+    pub fn search_urls<'a>(&'a self, query: &'a str) -> impl Iterator<Item = (&'a str, &'a str, String)> {
         self.searches.iter().filter_map(move |(keyword, search)| {
             let url = fill_template(&search.url, query)?;
-            Some(ItemAction::new(
-                &format!("web:{keyword}"),
-                &format!("Search {} ({keyword})", search.name),
-                Action::OpenUrl(url),
-            ))
+            Some((keyword.as_str(), search.name.as_str(), url))
         })
     }
 
@@ -368,7 +364,12 @@ mod tests {
     fn configured_search_receivers_use_the_same_templates_as_keyword_search() {
         let (catalog, _) = compile(&Config::default());
         let query = "日本語 +&/#?";
-        let receivers: Vec<_> = catalog.receivers(query).collect();
+        let result = keyword_item(&catalog, &format!("g {query}")).unwrap();
+        let mut receivers = crate::receivers::for_payload(&result.payload, &catalog).into_iter();
+        assert_eq!(
+            receivers.next().unwrap(),
+            ItemAction::new("copy-text", "Copy", Action::Copy(query.into()))
+        );
         assert_eq!(receivers.len(), catalog.searches.len());
         for receiver in receivers {
             let keyword = receiver.id.strip_prefix("web:").unwrap();
@@ -378,7 +379,7 @@ mod tests {
                 ItemAction::new(&receiver.id, &receiver.title, Action::OpenUrl(url(&item).into()),)
             );
         }
-        assert_eq!(catalog.receivers(&"x".repeat(MAX_TEMPLATE_BYTES)).count(), 0);
+        assert_eq!(catalog.search_urls(&"x".repeat(MAX_TEMPLATE_BYTES)).count(), 0);
     }
 
     #[test]

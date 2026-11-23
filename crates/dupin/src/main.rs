@@ -9,6 +9,7 @@ mod hotkey;
 mod icons;
 mod log;
 mod prefs;
+mod receivers;
 mod settings;
 mod shader;
 mod snapshots;

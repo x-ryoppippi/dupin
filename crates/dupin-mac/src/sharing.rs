@@ -4,7 +4,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 
-use dupin_core::SharingService;
+use dupin_core::ShareTarget;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send};
@@ -12,7 +12,30 @@ use objc2_app_kit::{
     NSApplication, NSSharingService, NSSharingServiceNameComposeEmail, NSSharingServiceNameSendViaAirDrop,
     NSSharingServicePicker, NSSharingServicePickerDelegate,
 };
-use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSRectEdge, NSURL};
+use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSRectEdge, NSString, NSURL};
+
+pub fn targets() -> [(&'static str, &'static str, ShareTarget); 3] {
+    let service = |name: &NSString, label: &str| ShareTarget::Service {
+        name: name.to_string(),
+        label: label.into(),
+    };
+    // SAFETY: AppKit exports these immutable service names.
+    unsafe {
+        [
+            ("share", "Share…", ShareTarget::Picker),
+            (
+                "airdrop",
+                "AirDrop",
+                service(NSSharingServiceNameSendViaAirDrop, "AirDrop"),
+            ),
+            (
+                "mail",
+                "New Mail with Attachment",
+                service(NSSharingServiceNameComposeEmail, "Mail"),
+            ),
+        ]
+    }
+}
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -53,7 +76,7 @@ impl Picker {
         }
     }
 
-    pub fn share(&mut self, service: SharingService, paths: &[PathBuf]) -> Result<(), String> {
+    pub fn share(&mut self, target: ShareTarget, paths: &[PathBuf]) -> Result<(), String> {
         let main = MainThreadMarker::new().ok_or("Sharing requires the main thread.")?;
         let urls = paths
             .iter()
@@ -62,8 +85,8 @@ impl Picker {
         let urls = NSArray::from_retained_slice(&urls);
         // SAFETY: Erasing the array's element type leaves the immutable file URLs intact.
         let items: &NSArray = unsafe { urls.cast_unchecked() };
-        match service {
-            SharingService::Picker => {
+        match target {
+            ShareTarget::Picker => {
                 let view = NSApplication::sharedApplication(main)
                     .keyWindow()
                     .and_then(|window| window.contentView())
@@ -80,15 +103,8 @@ impl Picker {
                 let (picker, _) = self.picker.as_ref().unwrap();
                 picker.showRelativeToRect_ofView_preferredEdge(view.bounds(), &view, NSRectEdge::MaxX);
             }
-            SharingService::AirDrop | SharingService::Mail => {
-                // SAFETY: AppKit exports these immutable service names.
-                let (name, label) = unsafe {
-                    match service {
-                        SharingService::AirDrop => (NSSharingServiceNameSendViaAirDrop, "AirDrop"),
-                        _ => (NSSharingServiceNameComposeEmail, "Mail"),
-                    }
-                };
-                let service = NSSharingService::sharingServiceNamed(name)
+            ShareTarget::Service { name, label } => {
+                let service = NSSharingService::sharingServiceNamed(&NSString::from_str(&name))
                     .ok_or_else(|| format!("{label} is unavailable."))?;
                 // SAFETY: File URLs conform to NSPasteboardWriting.
                 unsafe {

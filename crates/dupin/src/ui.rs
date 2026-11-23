@@ -1187,11 +1187,7 @@ impl Ui {
         else {
             return;
         };
-        let payload = &screen.item.payload;
-        let mut actions = payload.receivers();
-        if let Some(text) = payload.nonblank_text() {
-            actions.extend(self.web.read().unwrap().receivers(text));
-        }
+        let actions = crate::receivers::for_payload(&screen.item.payload, &self.web.read().unwrap());
         if actions.is_empty() {
             return;
         }
@@ -1301,9 +1297,9 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
-                    dupin_core::Action::Share { service, paths } => {
+                    dupin_core::Action::Share { target, paths } => {
                         if !rune::tooling::is_headless()
-                            && let Err(error) = self.sharing.share(service, &paths)
+                            && let Err(error) = self.sharing.share(target, &paths)
                         {
                             self.me.update(move |ui, tx| ui.show_notice(error, tx));
                         }
@@ -1931,7 +1927,7 @@ mod action_screen_tests {
         screen.selected = screen.item.actions.len();
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
         screen.stage = ActionStage::Receivers {
-            actions: screen.item.payload.receivers(),
+            actions: crate::receivers::for_payload(&screen.item.payload, &crate::web::WebCatalog::default()),
             selected: 0,
         };
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);

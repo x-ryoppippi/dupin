@@ -311,7 +311,7 @@ fn receivers_require_the_captured_result_and_payload() {
         }]
     );
 
-    let copy = payload.receivers().pop().unwrap();
+    let copy = ItemAction::new("copy-path", "Copy path", Action::Copy("/x/notes.md".into()));
     assert!(
         s.run_key_receiver(&key, &crate::Payload::text("different"), copy.clone())
             .is_empty()

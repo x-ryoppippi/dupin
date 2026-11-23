@@ -19,7 +19,7 @@ pub enum Action {
     OpenUrl(String),
     Copy(String),
     Share {
-        service: SharingService,
+        target: ShareTarget,
         paths: Vec<PathBuf>,
     },
     /// Show the path in the platform's native preview UI.
@@ -28,11 +28,10 @@ pub enum Action {
     OpenPreferences,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SharingService {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ShareTarget {
     Picker,
-    AirDrop,
-    Mail,
+    Service { name: String, label: String },
 }
 
 /// The primary values a result can pass to other actions.
@@ -56,50 +55,6 @@ impl Payload {
 
     pub fn is_empty(&self) -> bool {
         self.paths.is_empty() && self.nonblank_text().is_none()
-    }
-
-    pub fn receivers(&self) -> Vec<ItemAction> {
-        let mut actions = Vec::new();
-        if let Some(text) = self.nonblank_text() {
-            actions.push(ItemAction::new("copy-text", "Copy", Action::Copy(text.into())));
-        }
-        if !self.paths.is_empty() {
-            for (id, title, service) in [
-                ("share", "Share…", SharingService::Picker),
-                ("airdrop", "AirDrop", SharingService::AirDrop),
-                ("mail", "New Mail with Attachment", SharingService::Mail),
-            ] {
-                let action = ItemAction::new(
-                    id,
-                    title,
-                    Action::Share {
-                        service,
-                        paths: self.paths.clone(),
-                    },
-                );
-                actions.push(if service == SharingService::Picker {
-                    action.keep_open()
-                } else {
-                    action
-                });
-            }
-            let paths = self
-                .paths
-                .iter()
-                .map(|path| path.to_string_lossy())
-                .collect::<Vec<_>>();
-            let title = if paths.len() == 1 {
-                "Copy path"
-            } else {
-                "Copy paths"
-            };
-            actions.push(ItemAction::new(
-                "copy-path",
-                title,
-                Action::Copy(paths.join("\n")),
-            ));
-        }
-        actions
     }
 }
 
@@ -252,54 +207,5 @@ pub fn tilde(path: &str) -> String {
             }
         }
         _ => path.to_owned(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn receivers_follow_the_payload_types() {
-        let ids = |payload: &Payload| {
-            payload
-                .receivers()
-                .into_iter()
-                .map(|action| action.id)
-                .collect::<Vec<_>>()
-        };
-        assert!(ids(&Payload::default()).is_empty());
-        assert!(ids(&Payload::text(" \n ")).is_empty());
-        assert_eq!(ids(&Payload::text("Definition")), ["copy-text"]);
-
-        let mut payload = Item::path("/tmp/file.txt".into(), "file.txt".into(), vec![]).payload;
-        assert_eq!(ids(&payload), ["share", "airdrop", "mail", "copy-path"]);
-        payload.text = Some("  Definition  ".into());
-        payload.paths.push("/tmp/another file.txt".into());
-        assert_eq!(
-            ids(&payload),
-            ["copy-text", "share", "airdrop", "mail", "copy-path"]
-        );
-
-        let actions = payload.receivers();
-        assert_eq!(actions[0].action, Action::Copy("  Definition  ".into()));
-        assert_eq!(actions[1].disposition, ActionDisposition::KeepOpen);
-        for (action, service) in actions[1..4].iter().zip([
-            SharingService::Picker,
-            SharingService::AirDrop,
-            SharingService::Mail,
-        ]) {
-            assert_eq!(
-                action.action,
-                Action::Share {
-                    service,
-                    paths: payload.paths.clone()
-                }
-            );
-        }
-        assert_eq!(
-            actions[4].action,
-            Action::Copy("/tmp/file.txt\n/tmp/another file.txt".into())
-        );
     }
 }
