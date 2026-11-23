@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::file_query::{FileKind, FileQuery};
 use crate::searcher::Delivery;
-use crate::{CommandId, Item};
+use crate::{Batch, CommandId, Detail, Item};
 
 use super::{Effect, Results, SearchState, Session};
 
@@ -15,6 +16,12 @@ pub(super) struct ProviderState {
     pub(super) fallback: bool,
     candidate_limit: usize,
     pub(super) result_limit: usize,
+}
+
+#[derive(Debug)]
+pub(super) struct Presentation {
+    pub(super) section: Option<Arc<str>>,
+    pub(super) detail: Option<Arc<Detail>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -184,30 +191,54 @@ impl Session {
         let selected = self.held_selection();
         let state = self.search.providers.get_mut(&origin).unwrap();
         let limit = state.candidate_limit;
-        match delivery {
-            Delivery::Batch { items, .. } => {
-                for item in items {
-                    if state.items.len() >= limit {
-                        break;
-                    }
-                    if state.ids.insert(item.id.clone()) {
-                        state.items.push(item);
-                    }
-                }
-                self.history
-                    .read()
-                    .unwrap()
-                    .rerank(&mut state.items, &self.search.query, (self.clock)());
+        let batch = match delivery {
+            Delivery::Batch { items, .. } => Batch::from(items),
+            Delivery::Presented { batch, .. } => batch,
+            Delivery::Done { .. } => {
+                state.phase = ProviderPhase::Done;
+                Batch::default()
             }
-            Delivery::Done { .. } => state.phase = ProviderPhase::Done,
             Delivery::Failed { .. } => {
                 state.phase = ProviderPhase::Failed;
                 state.items.clear();
                 state.ids.clear();
+                Batch::default()
             }
             Delivery::Expired { .. } => {
                 state.phase = ProviderPhase::Expired;
+                Batch::default()
             }
+        };
+        if !batch.items.is_empty() {
+            let Batch {
+                items,
+                section,
+                mut details,
+            } = batch;
+            let section: Option<Arc<str>> = section.map(Into::into);
+            let shown = self.search.presentations.entry(origin.clone()).or_default();
+            for item in items {
+                if state.items.len() >= limit {
+                    break;
+                }
+                if state.ids.insert(item.id.clone()) {
+                    let detail = details.remove(&item.id);
+                    if section.is_some() || detail.is_some() {
+                        let presentation = Presentation {
+                            section: section.clone(),
+                            detail,
+                        };
+                        shown.insert(item.id.clone(), presentation);
+                    } else {
+                        shown.remove(&item.id);
+                    }
+                    state.items.push(item);
+                }
+            }
+            self.history
+                .read()
+                .unwrap()
+                .rerank(&mut state.items, &self.search.query, (self.clock)());
         }
         let pending = self
             .search
@@ -270,6 +301,13 @@ impl Session {
         }
         self.search.items = items;
         self.search.origins = origins;
+        let providers = &self.search.providers;
+        self.search.presentations.retain(|origin, rows| {
+            providers.get(origin).is_some_and(|state| {
+                rows.retain(|id, _| state.ids.contains(id));
+                !rows.is_empty()
+            })
+        });
         self.restore_selection(selected, show_fallback);
         self.search.results = if pending {
             Results::Searching { replaced: true }
@@ -360,6 +398,7 @@ impl Session {
         self.advance_generation();
         self.search.items.clear();
         self.search.origins.clear();
+        self.search.presentations.clear();
         self.search.providers.clear();
         self.search.selected = 0;
         self.search.results = Results::Idle;

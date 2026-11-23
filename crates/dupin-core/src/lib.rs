@@ -5,6 +5,7 @@
 pub mod clipboard;
 pub mod command;
 pub mod config;
+pub mod detail;
 pub mod file_name;
 pub mod file_query;
 pub mod file_rank;
@@ -22,10 +23,11 @@ pub use command::{
     CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,
 };
 pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
+pub use detail::Detail;
 pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{Action, Item, ItemAction, Page, Payload, ShareTarget, SystemCommand, View};
-pub use provider::{Provider, ProviderError, Request};
+pub use provider::{Batch, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Session};
 

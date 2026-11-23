@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-plugin-protocol = { workspace = true }
+pulldown-cmark = { version = "0.13", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }

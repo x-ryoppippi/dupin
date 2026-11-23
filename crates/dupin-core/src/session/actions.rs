@@ -105,6 +105,23 @@ impl Session {
         self.activate(&item, action)
     }
 
+    /// Open a link pressed in the detail of the row with result key `key`. Only a web link
+    /// the detail itself shows opens.
+    pub fn open_link(&mut self, key: &str, url: &str) -> Vec<Effect> {
+        if crate::detail::web_link(url).is_none()
+            || !self.select_key(key)
+            || !self
+                .detail(self.search.selected)
+                .is_some_and(|detail| detail.body.links_to(url))
+        {
+            return Vec::new();
+        }
+        let mut effects = vec![Effect::Run(Action::OpenUrl(url.to_owned()))];
+        self.remember_query(true);
+        effects.extend(self.dismiss());
+        effects
+    }
+
     pub fn followup_target(&self, parent: &str) -> Option<FollowupTarget> {
         let item = self.actionable_items().get(self.selected())?;
         item.item_action(parent)?;

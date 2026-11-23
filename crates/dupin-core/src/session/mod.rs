@@ -9,15 +9,15 @@ mod search;
 mod selection;
 mod snapshots;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::item::Transfer;
-use crate::{Action, CommandId, CommandRegistry, History, Item, Page};
+use crate::{Action, CommandId, CommandRegistry, Detail, History, Item, Page};
 
-use self::search::ProviderState;
+use self::search::{Presentation, ProviderState};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 const MAX_PAGE_DEPTH: usize = 8;
@@ -160,6 +160,9 @@ struct SearchState {
     location: SearchLocation,
     items: Vec<Item>,
     origins: Vec<CommandId>,
+    /// Sections and details of rows, by origin and item ID. Kept apart from the rows so
+    /// they follow a row through ranking and survive while a search replaces it.
+    presentations: HashMap<CommandId, HashMap<String, Presentation>>,
     providers: BTreeMap<CommandId, ProviderState>,
     active_order: Vec<CommandId>,
     active_pin: Option<CommandId>,
@@ -212,6 +215,7 @@ impl SearchState {
             location: SearchLocation::Command,
             items: Vec::new(),
             origins: Vec::new(),
+            presentations: HashMap::new(),
             providers: BTreeMap::new(),
             active_order: Vec::new(),
             active_pin: None,
@@ -335,6 +339,27 @@ impl Session {
 
     pub fn selected_item(&self) -> Option<&Item> {
         self.search.items.get(self.search.selected)
+    }
+
+    fn presentation(&self, index: usize) -> Option<&Presentation> {
+        let origin = self.search.origins.get(index)?;
+        let item = self.search.items.get(index)?;
+        self.search.presentations.get(origin)?.get(&item.id)
+    }
+
+    fn section(&self, index: usize) -> Option<&str> {
+        self.presentation(index)?.section.as_deref()
+    }
+
+    /// The heading to show above row `index`: its section, where that differs from the row
+    /// above.
+    pub fn section_start(&self, index: usize) -> Option<&str> {
+        let section = self.section(index)?;
+        (index == 0 || self.section(index - 1) != Some(section)).then_some(section)
+    }
+
+    pub fn detail(&self, index: usize) -> Option<&Detail> {
+        self.presentation(index)?.detail.as_deref()
     }
 
     pub fn renaming(&self) -> Option<&Renaming> {
