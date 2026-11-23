@@ -244,6 +244,7 @@ fn item_for_path(
         }
     };
     let mut item = Item::path(path, title, matched);
+    crate::quick_look::add_action(&mut item);
     item.score = score;
     Some(item)
 }
