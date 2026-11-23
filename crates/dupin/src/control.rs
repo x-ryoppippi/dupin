@@ -109,11 +109,15 @@ fn owned(path: &std::path::Path, directory: bool) -> io::Result<()> {
     Ok(())
 }
 pub fn socket_path(create: bool) -> io::Result<PathBuf> {
+    let runtime_configured = std::env::var_os("XDG_RUNTIME_DIR").is_some();
     let root = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     if !root.is_absolute() {
         return Err(io::Error::other("runtime directory must be absolute"));
+    }
+    if runtime_configured {
+        owned(&root, true)?;
     }
     // SAFETY: geteuid has no preconditions.
     let dir = root.join(format!("dupin-{}", unsafe { libc::geteuid() }));
