@@ -719,11 +719,8 @@ impl Ui {
 
     pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
         let url = dupin_mac::selection::ACCESSIBILITY_SETTINGS_URL;
-        let action = dupin_mac::workspace::Action::OpenUrl(url.into());
-        match dupin_mac::workspace::run(&action) {
-            Ok(()) => self.dismiss(tx),
-            Err(error) => self.show_notice(error, tx),
-        }
+        self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url.into()));
+        self.dismiss(tx);
     }
 
     /// The hotkey: show the panel, or hide it when it already shows.
