@@ -13,7 +13,7 @@ use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
 };
 use dupin_mac::window_management::{self, Error as WindowError};
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -683,6 +683,9 @@ impl Ui {
 
     fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
+        if self.window_permission_required && accessibility::is_trusted() {
+            self.window_permission_required = false;
+        }
         if !self.shown && !rune::tooling::is_headless() {
             self.frontmost_pid = window_management::frontmost_pid();
         }
@@ -1352,13 +1355,18 @@ impl Ui {
                 .and_then(|pid| window_management::arrange(pid, layout, &displays));
             me.update(move |ui, tx| {
                 ui.window_action_running = false;
-                ui.window_permission_required =
-                    ui.window_management_enabled && matches!(result, Err(WindowError::PermissionRequired));
+                ui.window_permission_required = ui.window_management_enabled
+                    && matches!(
+                        result,
+                        Err(WindowError::PermissionRequested | WindowError::PermissionRequired)
+                    )
+                    && !accessibility::is_trusted();
                 if !ui.window_management_enabled || ui.picker.is_some() {
                     return;
                 }
                 match result {
-                    Err(WindowError::PermissionRequired) => ui.show(tx),
+                    Err(WindowError::PermissionRequired) if ui.window_permission_required => ui.show(tx),
+                    Err(WindowError::PermissionRequested | WindowError::PermissionRequired) => {}
                     Err(error) => ui.show_notice(error.message().into(), tx),
                     Ok(()) => {}
                 }
@@ -1371,8 +1379,7 @@ impl Ui {
         if !self.window_permission_required || rune::tooling::is_headless() {
             return;
         }
-        self.window_permission_required = false;
-        let url = dupin_mac::accessibility::SETTINGS_URL;
+        let url = accessibility::SETTINGS_URL;
         self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url.into()));
         self.dismiss(tx);
     }

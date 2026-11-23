@@ -22,10 +22,10 @@ pub fn is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
-/// Shows macOS's prompt at most once per user, so a denial is answered with an explanation
-/// rather than repeated prompts.
-pub fn request_once() {
+/// Requests the macOS prompt at most once per user. Returns whether this call requested it.
+pub fn request_once() -> bool {
     static REQUEST: Once = Once::new();
+    let mut requested = false;
     REQUEST.call_once(|| {
         autoreleasepool(|_| {
             let defaults = NSUserDefaults::standardUserDefaults();
@@ -40,6 +40,8 @@ pub fn request_once() {
                     CFDictionary::from_slices(&[&*kAXTrustedCheckOptionPrompt], &[CFBoolean::new(true)]);
                 AXIsProcessTrustedWithOptions(&*options);
             }
+            requested = true;
         });
     });
+    requested
 }

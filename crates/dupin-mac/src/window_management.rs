@@ -30,6 +30,7 @@ unsafe extern "C" {
 
 #[derive(Clone, Copy)]
 pub enum Error {
+    PermissionRequested,
     PermissionRequired,
     NoWindow,
     NoDisplay,
@@ -40,7 +41,9 @@ pub enum Error {
 impl Error {
     pub fn message(self) -> &'static str {
         match self {
-            Self::PermissionRequired => "Dupin needs Accessibility access to move and resize windows.",
+            Self::PermissionRequested | Self::PermissionRequired => {
+                "Dupin needs Accessibility access to move and resize windows."
+            }
             Self::NoWindow => "There is no focused window to arrange.",
             Self::NoDisplay => "No display is available to arrange this window.",
             Self::WindowUnavailable => "Dupin couldn’t read the focused window.",
@@ -83,8 +86,11 @@ pub fn arrange(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Err
         return Err(Error::NoDisplay);
     }
     if !accessibility::is_trusted() {
-        accessibility::request_once();
-        return Err(Error::PermissionRequired);
+        return Err(if accessibility::request_once() {
+            Error::PermissionRequested
+        } else {
+            Error::PermissionRequired
+        });
     }
 
     arrange_trusted(pid, layout, displays).map_err(|error| {
