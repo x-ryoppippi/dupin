@@ -46,6 +46,8 @@ command = "dupin open --query 'gh '"
 
 Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
 
+Dupin stops active command groups after five minutes or when it quits or relaunches. A background job can keep running after its shell exits. Redirect that job's standard error if it needs to keep writing after Dupin quits.
+
 Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 
 ## Web searches

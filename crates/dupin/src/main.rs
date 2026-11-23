@@ -174,6 +174,7 @@ fn main() {
         })
         .on_frame_encoded(trace::frame)
         .on_close(ui::Ui::closed)
+        .on_quit(ui::Ui::stop_hotkey_commands)
         .on_focus(|s, focused, tx| {
             if !focused && !s.preview_focus_is_active() {
                 s.dismiss(tx);

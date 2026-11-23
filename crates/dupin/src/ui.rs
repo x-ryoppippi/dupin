@@ -275,6 +275,7 @@ pub struct Ui {
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     running_hotkey_commands: Arc<AtomicUsize>,
+    hotkey_commands: Arc<crate::hotkey::command::Runner>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -436,6 +437,7 @@ impl Ui {
             next_lookup: 0,
             notice_until: None,
             running_hotkey_commands: Arc::default(),
+            hotkey_commands: Arc::default(),
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
@@ -680,15 +682,18 @@ impl Ui {
         let panel = self.me.clone();
         let keys = shortcut.keycaps().join("");
         let busy = Busy::new(self.running_hotkey_commands.clone());
+        let runner = self.hotkey_commands.clone();
         if let Err(error) = std::thread::Builder::new()
             .name("dupin-hotkey-command".into())
             .spawn(move || {
-                let _busy = busy;
-                if let Err(error) = crate::hotkey::command::run(&command) {
-                    panel.update(move |ui, tx| {
-                        ui.show_notice(format!("The {keys} command failed: {error}"), tx);
-                    });
-                }
+                runner.run(&command, move |result| {
+                    drop(busy);
+                    if let Err(error) = result {
+                        panel.update(move |ui, tx| {
+                            ui.show_notice(format!("The {keys} command failed: {error}"), tx);
+                        });
+                    }
+                });
             })
         {
             self.show_notice(
@@ -699,6 +704,10 @@ impl Ui {
                 tx,
             );
         }
+    }
+
+    pub fn stop_hotkey_commands(&mut self, _: &mut Tx) {
+        self.hotkey_commands.stop();
     }
 
     /// The hotkey: show the panel, or hide it when it already shows.
