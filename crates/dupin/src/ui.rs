@@ -1269,18 +1269,12 @@ impl Ui {
             return true;
         }
         if matches!(ev.key, Key::Enter) {
-            let entry = self.script_entry.as_ref().unwrap();
-            if entry.is_current(&self.session, &self.scripts.read().unwrap())
-                && let Ok(command) = entry.command()
-            {
-                let entry = self.script_entry.take().unwrap();
-                let effects = self.session.run_key_followup(
-                    &entry.key,
-                    crate::scripts::provider::ARGUMENTS,
-                    crate::scripts::provider::run_action(command),
-                );
-                self.apply(effects, tx);
-            }
+            let effects = crate::scripts::entry::Entry::submit(
+                &mut self.script_entry,
+                &mut self.session,
+                &self.scripts.read().unwrap(),
+            );
+            self.apply(effects, tx);
             return true;
         }
         false
