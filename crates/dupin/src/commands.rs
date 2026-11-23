@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
+use dupin_core::clipboard::ClipboardProvider;
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
 };
@@ -13,6 +14,7 @@ pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
 pub const CALENDAR: &str = "calendar.events";
+pub const CLIPBOARD: &str = "clipboard.history";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -172,7 +174,31 @@ pub fn configured(
     }
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
+    let clipboard_id = id(CLIPBOARD);
+    let off = "Clipboard history is off  ·  turn it on in Settings › Search";
+    let (empty, no_results) = if config.clipboard.enabled {
+        ("Nothing copied yet  ·  ⌫ back to apps", "No matches")
+    } else {
+        (off, off)
+    };
+    let mut spec = CommandSpec::new(
+        clipboard_id.clone(),
+        config.clipboard.max_entries,
+        presentation(
+            "Search clipboard history",
+            Some("Clipboard"),
+            Some(empty),
+            Some(no_results),
+            false,
+            4.0,
+        ),
+    )
+    .with_query_eligibility(QueryEligibility::Any);
+    spec.private_results = true;
+    registry.register(spec)?;
+
     registry.add_keyword(&contents_id, "in")?;
+    registry.add_keyword(&clipboard_id, "clip")?;
     if config.calendar_enabled || calendar_fixtures {
         let calendar = id(CALENDAR);
         let mut spec = CommandSpec::new(
@@ -222,6 +248,7 @@ pub fn register(
     history: Arc<RwLock<History>>,
     calendar_fixtures: bool,
     calendar: CalendarProvider,
+    clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
 ) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
@@ -259,6 +286,10 @@ pub fn register(
         (
             dictionary_id,
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
+        ),
+        (
+            id(CLIPBOARD),
+            Arc::new(ClipboardProvider::new(clipboard)) as Arc<dyn Provider>,
         ),
         (
             id(WEB_KEYWORDS),
@@ -414,6 +445,43 @@ mod tests {
             "https://github.com/search?q=dupin%20%26%20Rust".into(),
         ))));
         assert!(!activation.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn clip_enters_private_clipboard_history_that_explains_when_off() {
+        use dupin_core::{Effect, Session};
+
+        for enabled in [false, true] {
+            let mut config = Config::default();
+            config.clipboard.enabled = enabled;
+            config.web_searches.insert(
+                "clip".into(),
+                dupin_core::config::WebSearch {
+                    name: "Clips".into(),
+                    url: "https://clips.example/?q={query}".into(),
+                },
+            );
+            let configured = configured(&config, false).unwrap();
+            assert_eq!(configured.registry.keyword("clip"), Some(&id(CLIPBOARD)));
+            assert!(configured.notice.unwrap().contains("web searches were ignored"));
+
+            let mut session = Session::new(History::default(), configured.registry).unwrap();
+            let spec = session.provider_spec(&id(CLIPBOARD)).unwrap();
+            assert!(spec.private_results);
+            assert_eq!(
+                spec.presentation
+                    .empty_hint
+                    .as_deref()
+                    .unwrap()
+                    .contains("is off"),
+                !enabled
+            );
+            let effects = session.set_query("clip ");
+            assert!(effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Search { command, query, .. } if command.as_str() == CLIPBOARD && query.is_empty()
+            )));
+        }
     }
 
     #[test]

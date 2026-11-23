@@ -12,6 +12,7 @@ def main [
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
+    $env.DUPIN_HEADLESS_CLIPBOARD = $root | path join scripts/fixtures/clipboard.json
     let tmp = mktemp --directory
     let runs = glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem

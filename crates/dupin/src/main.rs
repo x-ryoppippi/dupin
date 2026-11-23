@@ -3,6 +3,7 @@
 
 mod backdrop;
 mod cli;
+mod clipboard;
 mod commands;
 mod control;
 mod hotkey;

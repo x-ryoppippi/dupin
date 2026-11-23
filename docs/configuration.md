@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows, whether clipboard history is kept and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
 
@@ -47,13 +47,37 @@ name = "Rust documentation"
 url = "https://doc.rust-lang.org/std/?search={query}"
 ```
 
-Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in`, `clip` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
 
 ## File ranking
 
 File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
 
 `file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
+
+## Clipboard history
+
+Clipboard history is off by default because it records what you copy. Turn it on with the switch in Settings → Search, or in `config.toml`:
+
+```toml
+[clipboard]
+enabled = false # keep text and files copied while Dupin runs, searchable with `clip`
+max_entries = 200 # 1 to 1000; the oldest entry goes first
+max_entry_bytes = 65536 # 1024 to 1048576; larger copies are skipped, never truncated
+ignored_apps = [
+	"com.apple.keychainaccess",
+	"com.apple.Passwords",
+	"com.1password.1password",
+	"com.agilebits.onepassword7",
+	"com.bitwarden.desktop",
+]
+```
+
+While it is on, Dupin checks the clipboard's change count twice a second on a background thread and records each new copy: plain text, or the files copied in Finder. Images and rich text are not recorded yet. Copies already on the clipboard when the history is turned on are not recorded. Copying something already in the history moves it to the top.
+
+Copies that password managers and other apps mark as concealed, transient or auto-generated ([nspasteboard.org](http://nspasteboard.org) types) are never read. Nor are copies that name an app in `ignored_apps` as their source, or that land while such an app is frontmost: Dupin checks the apps frontmost at the polls just before and just after a copy, so switching apps several times within half a second can slip past it. Rely on the concealed marker, which password managers set, for secrets. Setting `ignored_apps` replaces the defaults; find an app's identifier with `osascript -e 'id of app "Name"'`.
+
+The history lives only in Dupin's memory: it is never written to disk, never included in snapshots, never logged, and is gone when Dupin quits. Turning it off stops watching and forgets every entry at once. Lowering a limit drops entries that no longer fit. Turning the history on never asks macOS for anything. On macOS 15.4 and later, where macOS can prompt before an app reads the clipboard, Dupin records only while that read would not prompt. Until then, `clip` shows why nothing is being recorded: when Dupin has never asked, Enter on that row reads the clipboard once (discarding it) so macOS can ask; when macOS asks or refuses on every read, the row opens Privacy & Security in System Settings, where you can always allow Dupin to paste from other apps. Dupin never asks again by itself.
 
 ## Updates
 

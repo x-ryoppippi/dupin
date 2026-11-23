@@ -18,6 +18,12 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    CopyFiles(Vec<PathBuf>),
+    /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
+    DeleteClipboardEntry(u64),
+    ClearClipboardHistory,
+    /// Read the clipboard once so macOS asks whether Dupin may; the contents are discarded.
+    RequestClipboardAccess,
     /// Show the path in the platform's native preview UI.
     Preview(PathBuf),
     /// Open the host application's preferences.

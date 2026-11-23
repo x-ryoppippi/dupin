@@ -716,6 +716,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar_enabled = calendar_enabled))
         .build(k);
+    let next_clipboard = !s.config.clipboard.enabled;
+    let clipboard = Switch::new(s.config.clipboard.enabled)
+        .label("Clipboard history")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.enabled = next_clipboard))
+        .build(k);
     vec![
         setting(
             k,
@@ -737,6 +744,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
             "Calendar search",
             Some("Type cal then Space to search events"),
             calendar,
+        ),
+        setting(
+            k,
+            &icons::CLIPBOARD,
+            "Clipboard history",
+            Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
+            clipboard,
         ),
     ]
 }
