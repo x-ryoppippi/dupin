@@ -484,7 +484,7 @@ pub fn has_extension(path: &Path) -> bool {
         })
 }
 
-fn file_name_of(path: &Path) -> Result<&str, String> {
+pub(super) fn file_name_of(path: &Path) -> Result<&str, String> {
     path.file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| format!("“{}” has no usable name.", path.display()))
