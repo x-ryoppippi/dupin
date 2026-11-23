@@ -4,7 +4,7 @@ Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`,
 
 Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,.
 
-Settings saves to `config.toml` when it is writable. With a read-only file, such as one managed by Nix, rows marked **Set in config.toml** are locked. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
+Settings saves to `config.toml` when it is writable. With a read-only file, the keys it sets are locked: rows show **Managed by Nix** when the file links into the Nix store, and **Set in config.toml** otherwise. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
 
 ## First run
 
