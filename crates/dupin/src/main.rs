@@ -94,6 +94,7 @@ fn main() {
     .on_focus(|s, focused, _| {
         if focused {
             s.refresh_login_item();
+            s.refresh_permissions();
         }
         trace::settings(if focused { "focused" } else { "unfocused" });
     })

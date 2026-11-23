@@ -3,12 +3,15 @@
 //! Changes apply to the panel at once and are written back to config.toml. A read-only
 //! config.toml (one Nix manages) shows its values, locked.
 
+mod permissions;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
 use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
+use dupin_mac::privacy::Access;
 use rune::{
     AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
     el, icon, row, text,
@@ -60,6 +63,7 @@ enum Page {
     General,
     Search,
     Appearance,
+    Permissions,
     Updates,
 }
 
@@ -69,6 +73,7 @@ impl Page {
             Page::General => "General",
             Page::Search => "Search",
             Page::Appearance => "Appearance",
+            Page::Permissions => "Permissions",
             Page::Updates => "Updates",
         }
     }
@@ -79,6 +84,7 @@ impl Page {
             Page::General => "page-general",
             Page::Search => "page-search",
             Page::Appearance => "page-appearance",
+            Page::Permissions => "page-permissions",
             Page::Updates => "page-updates",
         }
     }
@@ -88,6 +94,7 @@ impl Page {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
             Page::Appearance => &icons::SPARKLES,
+            Page::Permissions => &icons::SHIELD,
             Page::Updates => &icons::REFRESH,
         }
     }
@@ -166,6 +173,8 @@ pub struct Prefs {
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
     login: Option<LoginPreference>,
+    /// Each permission's status, in `permissions::ENTRIES` order.
+    permissions: Vec<Access>,
     preview_dark: Option<bool>,
     active_radius: u16,
 }
@@ -226,6 +235,7 @@ impl Prefs {
                     item,
                     error: None,
                 }),
+            permissions: permissions::read(),
         }
     }
 
@@ -234,6 +244,10 @@ impl Prefs {
             login.status = login.item.status();
             login.error = None;
         }
+    }
+
+    pub fn refresh_permissions(&mut self) {
+        self.permissions = permissions::read();
     }
 
     fn change_login_item(&mut self, action: LoginAction) {
@@ -477,6 +491,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         Page::General => general(s, k),
         Page::Search => search(s, k),
         Page::Appearance => appearance(s, k, cx.system_dark()),
+        Page::Permissions => permissions::page(s, k, hair),
         Page::Updates => updates(s, k),
     };
     let panel = col()
@@ -523,18 +538,15 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                         .color(k.c.text_base)
                         .wrap()
                 }))
-                .children(if s.page == Page::Appearance {
+                .children(if matches!(s.page, Page::Appearance | Page::Permissions) {
                     rows
                 } else {
                     vec![card(k, hair, rows)]
                 })
-                .children(s.read_only.then(|| {
-                    text("config.toml is read-only, so change these where it's managed.")
-                        .font(DESCRIPTION)
-                        .color(k.c.text_muted)
-                        .mx(ROW_PX)
-                        .wrap()
-                })),
+                .children(
+                    s.read_only
+                        .then(|| note(k, "config.toml is read-only, so change these where it's managed.")),
+                ),
         );
     row()
         .key("prefs")
@@ -553,7 +565,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_group()
         .focus_follows()
         .gap(4.0);
-    for page in [Page::General, Page::Search, Page::Appearance] {
+    for page in [Page::General, Page::Search, Page::Appearance, Page::Permissions] {
         let on = s.page == page;
         let mut item = row()
             .key(page.key())
@@ -1228,6 +1240,15 @@ fn card(k: &Kit, hair: f32, rows: Vec<El>) -> El {
         }
     }
     card
+}
+
+/// A muted remark under a page's cards.
+fn note(k: &Kit, words: &str) -> El {
+    text(words.to_owned())
+        .font(DESCRIPTION)
+        .color(k.c.text_muted)
+        .mx(ROW_PX)
+        .wrap()
 }
 
 /// `$HOME/x` as `~/x`.
