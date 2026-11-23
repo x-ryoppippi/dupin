@@ -123,7 +123,17 @@ pub fn run() -> bool {
     let json = args.iter().any(|v| v == "--json");
     let action = parse(&args);
     let picked = matches!(action, Ok(Action::Pick(_)));
-    let result = action.and_then(|action| execute(action, json));
+    let result = action.and_then(|action| {
+        let output = match &action {
+            Action::Snap(_, output) | Action::Ext(_, _, Some(output)) if json => Some(output.clone()),
+            _ => None,
+        };
+        if let Some(output) = output {
+            isolated_render(&args, &output)
+        } else {
+            execute(action, json)
+        }
+    });
     match result {
         Ok(value) => {
             if json || !value.is_null() || picked {
@@ -149,6 +159,38 @@ pub fn run() -> bool {
         }
     }
 }
+fn isolated_render(args: &[String], output: &str) -> Result<Value, String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    // Rune's headless API exits the process on renderer errors. Contain it so JSON callers
+    // receive a structured error, including when GPU initialization or PNG output fails.
+    let mut child = Command::new(std::env::current_exe().map_err(|_| "could not locate renderer")?)
+        .args(args.iter().filter(|arg| arg.as_str() != "--json"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| "could not start headless renderer")?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    Ok(serde_json::json!({"png": output}))
+                } else {
+                    Err("headless rendering failed".into())
+                };
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("headless rendering exceeded its deadline or stopped".into());
+            }
+        }
+    }
+}
+
 fn execute(action: Action, json: bool) -> Result<Value, String> {
     use dupin_plugin_protocol as protocol;
     match action {
