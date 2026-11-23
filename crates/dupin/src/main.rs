@@ -34,7 +34,10 @@ fn main() {
     if cli::run() {
         return;
     }
-    rune::prewarm_gpu();
+    let headless = rune::tooling::is_headless();
+    if !headless {
+        rune::prewarm_gpu();
+    }
     let (config, config_problem) = settings::load();
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
@@ -68,7 +71,7 @@ fn main() {
         .srgb_blend(true)
         .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
-    let _control = if rune::tooling::is_headless() {
+    let _control = if headless {
         None
     } else {
         let panel = handle.clone();
