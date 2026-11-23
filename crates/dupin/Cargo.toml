@@ -9,6 +9,9 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+pico-args = "0.5"
+dupin-plugin-protocol = { workspace = true }
+dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }

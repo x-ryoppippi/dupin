@@ -28,6 +28,48 @@ const WARNING: Color = Color {
 };
 
 pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
+    if let Some(picker) = &s.picker {
+        let mut list = col().w_full().fill(Color::BLACK).on_key(Ui::key);
+        list = list.child(
+            text_input(&s.query, TextStyle::new(22.0, 400.0))
+                .key("pick-query")
+                .single_line()
+                .color(Color::WHITE)
+                .on_edit(|s: &mut Ui| &mut s.query)
+                .on_input_key(Ui::key)
+                .on_input_change(Ui::edited),
+        );
+        for (index, original) in crate::ui::pick_indices(&picker.values, &s.query.text)
+            .into_iter()
+            .enumerate()
+            .skip(picker.selected.saturating_sub(7))
+            .take(8)
+        {
+            let value = &picker.values[original];
+            let label = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
+            list = list.child(
+                row()
+                    .w_full()
+                    .px(16.0)
+                    .py(8.0)
+                    .fill(if index == picker.selected {
+                        Color {
+                            r: 0.2,
+                            g: 0.27,
+                            b: 0.4,
+                            a: 1.0,
+                        }
+                    } else {
+                        Color::BLACK
+                    })
+                    .child(text(label).color(Color::WHITE)),
+            );
+        }
+        return list;
+    }
     let dark = cx.system_dark();
     let t = tok::theme(dark);
     let accent = tok::accent(0, dark);

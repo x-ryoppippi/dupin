@@ -2,7 +2,9 @@
 //! press Space first to search files with Spotlight.
 
 mod backdrop;
+mod cli;
 mod commands;
+mod control;
 mod hotkey;
 mod icons;
 mod log;
@@ -30,6 +32,9 @@ pub const HEADER_HEIGHT: f32 = view::HEADER_H;
 const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
 
 fn main() {
+    if cli::run() {
+        return;
+    }
     rune::prewarm_gpu();
     let (config, config_problem) = settings::load();
     let history = store::load();
@@ -64,6 +69,18 @@ fn main() {
         .srgb_blend(true)
         .compositor(backdrop::Backdrop::default());
     let handle = app.handle();
+    let _control = if rune::tooling::is_headless() {
+        None
+    } else {
+        let panel = handle.clone();
+        match control::Server::start(move |call| panel.update(move |s, tx| s.control(call, tx))) {
+            Ok(server) => Some(server),
+            Err(error) => {
+                log::warn(&format!("local control unavailable: {error}"));
+                None
+            }
+        }
+    };
     let binding = Arc::new(hotkey::Binding::new(handle.clone()));
 
     // The settings window: an ordinary titled window, made when ⌘, first opens it.
