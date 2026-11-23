@@ -702,13 +702,29 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
-    vec![setting(
-        k,
-        &icons::FILES,
-        "Files shown",
-        Some("The most files a Spotlight search lists"),
-        limit,
-    )]
+    let enabled = s.config.window_management;
+    let window_management = Switch::new(enabled)
+        .label("Window Management")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
+        .build(k);
+    vec![
+        setting(
+            k,
+            &icons::FILES,
+            "Files shown",
+            Some("The most files a Spotlight search lists"),
+            limit,
+        ),
+        setting(
+            k,
+            &icons::PANEL,
+            "Window Management",
+            Some("Show commands to move and resize windows. Requires Accessibility on first use."),
+            window_management,
+        ),
+    ]
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};

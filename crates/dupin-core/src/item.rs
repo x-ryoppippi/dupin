@@ -22,6 +22,7 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    ArrangeWindow(crate::window_management::Layout),
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

@@ -18,6 +18,7 @@ mod ui;
 mod update;
 mod view;
 mod web;
+mod window_management;
 
 use std::cell::RefCell;
 use std::rc::Rc;

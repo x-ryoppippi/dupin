@@ -39,6 +39,22 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 
 When an app matches through one of those other names, the name shows before its folder in the result.
 
+## Window management
+
+Turn on **Window Management** in Settings → Search, then type `window` or a
+command name such as `Left Half`, `Centre Third` or `Maximise`. Enter hides
+Dupin and arranges the focused window of the app that was frontmost when you
+opened the panel.
+
+Halves, thirds and Maximise use the display’s usable area, outside the Dock
+and menu bar. Centre keeps the current size where it fits. Next Display
+cycles through displays, keeping the window’s relative placement and shrinking
+it only if it is too large for the destination.
+
+Dupin requests Accessibility access on the first command that needs it.
+If access is missing, choose **Open Accessibility Settings** in the panel,
+allow Dupin and run the command again.
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.

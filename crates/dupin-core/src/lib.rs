@@ -12,6 +12,7 @@ pub mod item;
 pub mod provider;
 pub mod searcher;
 pub mod session;
+pub mod window_management;
 
 pub use command::{CommandError, CommandId, CommandRegistry, CommandSpec, QueryPresentation};
 pub use config::{Backdrop, Config, InputSource, Position};

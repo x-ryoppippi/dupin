@@ -8,11 +8,13 @@ pub mod dictionary;
 mod file_actions;
 pub mod font;
 pub mod input_source;
+pub mod permission;
 pub mod quick_look;
 mod settings_search;
 pub mod spotlight;
 pub mod watcher;
 pub mod window;
+pub mod window_management;
 pub mod workspace;
 
 pub use apps::{AppsProvider, AppsWatcher};

@@ -11,6 +11,7 @@ hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
+window_management = false # show commands to move and resize windows in normal search
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
