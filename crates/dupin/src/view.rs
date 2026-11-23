@@ -150,9 +150,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         panel = panel.child(divider(&t)).child(rename_status(s, renaming, &t));
     } else if s.action_screen.is_some() {
         panel = panel.child(divider(&t)).child(action_list(s, &t, accent));
-    } else if !items.is_empty()
-        && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
-    {
+    } else if !items.is_empty() && query_problem(s).is_none() {
         panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
     } else if let Some(hint) = hint(s) {
         panel = panel.child(divider(&t)).child(
@@ -163,6 +161,15 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .px(20.0)
                 .center_y()
                 .child(text(hint).font(t.font(type_::BODY)).color(t.text_secondary)),
+        );
+    }
+    if s.session.destination().is_some() {
+        panel = panel.child(divider(&t)).child(
+            row().w_full().px(20.0).py(8.0).child(
+                text("↩ Choose folder · esc Cancel")
+                    .font(t.font(type_::LABEL))
+                    .color(t.text_secondary),
+            ),
         );
     }
     // Liquid Glass (NSGlassEffectView) under the panel on macOS 26 and later. Headless renders
@@ -436,8 +443,11 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
 fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
     let renaming = s.session.renaming().is_some();
+    let destination = s.session.destination();
     let placeholder = if renaming {
         "Name"
+    } else if destination.is_some() {
+        "Search folders"
     } else {
         presentation.placeholder.as_str()
     };
@@ -446,6 +456,7 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .label(placeholder)
         .single_line()
         .grow(1.0)
+        .min_w(0.0)
         .color(t.text)
         .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
@@ -459,7 +470,17 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    let chip = if renaming {
+    let destination_chip = destination.map(|picker| {
+        let operation = match picker.transfer() {
+            dupin_core::item::Transfer::Move => "Move to",
+            dupin_core::item::Transfer::Copy => "Copy to",
+        };
+        let name = picker.path().file_name().unwrap_or(picker.path().as_os_str());
+        format!("{operation} · {}", name.to_string_lossy())
+    });
+    let chip = if let Some(chip) = destination_chip.as_deref() {
+        Some(chip)
+    } else if renaming {
         Some("Rename")
     } else {
         presentation.chip.as_deref()
@@ -468,12 +489,13 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         bar.child(
             row()
                 .key("mode")
+                .max_w(280.0)
                 .h(28.0)
                 .px(10.0)
                 .radius(7.0)
                 .center_y()
                 .fill(accent.alpha(0.16))
-                .child(text(chip).font(t.font(type_::TITLE)).color(accent)),
+                .child(text(chip).font(t.font(type_::TITLE)).color(accent).truncate()),
         )
     } else {
         bar.child(
@@ -537,9 +559,27 @@ fn rename_status(s: &Ui, renaming: &dupin_core::session::Renaming, t: &ResolvedT
         .child(text(status).font(t.font(type_::LABEL)).color(color))
 }
 
+fn query_problem(s: &Ui) -> Option<&'static str> {
+    let query = s.session.query();
+    if s.session.destination().is_some()
+        && dupin_core::file_query::FileQuery::parse(query).is_ok_and(|query| {
+            query
+                .kind
+                .is_some_and(|kind| kind != dupin_core::file_query::FileKind::Folder)
+        })
+    {
+        return Some("Choose a folder. Use kind:folder or remove the kind filter.");
+    }
+    crate::commands::query_problem(s.session.command_id(), query)
+}
+
 fn hint(s: &Ui) -> Option<&str> {
-    if let Some(problem) = crate::commands::query_problem(s.session.command_id(), s.session.query()) {
+    if let Some(problem) = query_problem(s) {
         return Some(problem);
+    }
+    if s.session.destination().is_some() {
+        return (s.session.results() == Results::Done && s.session.failures().next().is_none())
+            .then_some("No matching folders");
     }
     let presentation = &s.session.command().presentation;
     if s.session.query().trim().is_empty() {

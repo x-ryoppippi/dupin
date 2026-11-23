@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use dupin_core::item::Transfer;
 use dupin_core::{Action, Item, ItemAction};
 
 /// A file or folder result with every file action, as Spotlight results and renamed entries
@@ -46,6 +47,22 @@ pub(crate) fn add(item: &mut Item) {
         ));
     }
     item.actions.extend([
+        ItemAction::new(
+            "move-to",
+            "Move to…",
+            Action::ChooseDestination {
+                path: path.clone(),
+                transfer: Transfer::Move,
+            },
+        ),
+        ItemAction::new(
+            "copy-to",
+            "Copy to…",
+            Action::ChooseDestination {
+                path: path.clone(),
+                transfer: Transfer::Copy,
+            },
+        ),
         ItemAction::new("duplicate", "Duplicate", Action::Duplicate(path.clone())).keep_open(),
         ItemAction::new("compress", "Compress", Action::Compress(path.clone())).keep_open(),
         ItemAction::new("trash", "Move to Trash", Action::Trash(path))
@@ -72,6 +89,8 @@ mod tests {
                     "copy-path",
                     "copy-name",
                     "rename",
+                    "move-to",
+                    "copy-to",
                     "duplicate",
                     "compress",
                     "trash"

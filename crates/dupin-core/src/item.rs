@@ -20,6 +20,11 @@ pub enum Action {
         /// for files and packages but not folders.
         extension: bool,
     },
+    /// Search for a destination folder before transferring the entry.
+    ChooseDestination {
+        path: PathBuf,
+        transfer: Transfer,
+    },
     /// Copy beside the original under a name that is not taken.
     Duplicate(PathBuf),
     /// Zip beside the original under a name that is not taken.
@@ -33,6 +38,12 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    Move,
+    Copy,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

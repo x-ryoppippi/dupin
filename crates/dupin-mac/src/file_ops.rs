@@ -1,8 +1,9 @@
-//! File operations that create or rename entries beside an existing one. None of them
-//! replaces an existing entry: each picks a free name, and the system call it ends in fails
-//! rather than overwrite one that appeared in the meantime.
+//! File operations that never replace an existing entry.
 
+use std::ffi::CString;
 use std::fs::OpenOptions;
+use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -16,48 +17,153 @@ pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     if let Some(problem) = file_name::problem(name) {
         return Err(problem.into());
     }
-    let old = file_name_of(path)?;
-    let destination = sibling(path, name)?;
-    if old != name && old.to_lowercase() == name.to_lowercase() && same_entry(path, &destination) {
-        // On a case-insensitive volume the new spelling "exists" because it is the source itself,
-        // so rename(2) can't replace anything else. Between two hard links it does nothing.
-        std::fs::rename(path, &destination).map_err(|error| error.to_string())?;
-        return if listed(path) {
-            Err(format!("“{name}” already exists."))
-        } else {
-            Ok(destination)
-        };
+    file_name_of(path)?;
+    move_exclusively(path, parent_folder(path)?.join(name))
+}
+
+/// Move an entry into a different folder, preserving its name.
+pub fn move_to(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    let name = file_name_of(path)?;
+    let folder = transfer_folder(path, folder)?;
+    if path
+        .parent()
+        .is_some_and(|parent| same_entry_following_links(parent, &folder))
+    {
+        return Err("The item is already in this folder.".into());
+    }
+    let destination = folder.join(name);
+    match rename_exclusive(path, &destination) {
+        Ok(()) => Ok(destination),
+        Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
+            move_across_volumes(path, &folder, destination)
+        }
+        Err(error) => Err(move_problem(error, &destination)),
+    }
+}
+
+fn move_exclusively(path: &Path, destination: PathBuf) -> Result<PathBuf, String> {
+    rename_exclusive(path, &destination).map_err(|error| move_problem(error, &destination))?;
+    Ok(destination)
+}
+
+fn rename_exclusive(source: &Path, destination: &Path) -> io::Result<()> {
+    let source = CString::new(source.as_os_str().as_encoded_bytes())?;
+    let destination = CString::new(destination.as_os_str().as_encoded_bytes())?;
+    // SAFETY: Both paths are NUL-terminated and live through the call.
+    let status = unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn move_problem(error: io::Error, destination: &Path) -> String {
+    if error.kind() == io::ErrorKind::AlreadyExists {
+        let name = destination.file_name().unwrap_or_default().to_string_lossy();
+        format!("“{name}” already exists in the destination folder.")
+    } else {
+        error.to_string()
+    }
+}
+
+fn move_across_volumes(path: &Path, folder: &Path, destination: PathBuf) -> Result<PathBuf, String> {
+    let source = path.symlink_metadata().map_err(|error| error.to_string())?;
+    let staging = CopyStaging::new(path, folder)?;
+    let destination = move_exclusively(&staging.entry(), destination)?;
+    if !path
+        .symlink_metadata()
+        .is_ok_and(|current| file_identity(&current) == file_identity(&source))
+    {
+        return Err("The copy was saved in the destination. The source changed during the move.".into());
     }
     autoreleasepool(|_| {
         NSFileManager::defaultManager()
-            .moveItemAtURL_toURL_error(&file_url(path), &file_url(&destination))
-            .map(|()| destination.clone())
-            .map_err(|error| error.localizedDescription().to_string())
-    })
+            .removeItemAtURL_error(&file_url(path))
+            .map_err(|error| {
+                format!(
+                    "The copy was saved in the destination. Couldn't remove the source: {}",
+                    error.localizedDescription()
+                )
+            })
+    })?;
+    Ok(destination)
+}
+
+/// Copy into a folder, keeping the original name when available.
+pub fn copy_to(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    let name = file_name_of(path)?;
+    let folder = transfer_folder(path, folder)?;
+    let candidates =
+        std::iter::once(name.to_owned()).chain(file_name::duplicate_names(name, has_extension(path)));
+    copy_with_names(path, &folder, candidates)
+}
+
+fn transfer_folder(path: &Path, folder: &Path) -> Result<PathBuf, String> {
+    let folder = folder
+        .canonicalize()
+        .map_err(|error| format!("Destination folder: {error}"))?;
+    if !folder.is_dir() {
+        return Err("The destination is no longer a folder.".into());
+    }
+    let source = path.symlink_metadata().map_err(|error| error.to_string())?;
+    // Compare identities so case-insensitive volumes and symlinked destinations are covered.
+    if source.is_dir()
+        && folder.ancestors().any(|ancestor| {
+            ancestor
+                .metadata()
+                .is_ok_and(|entry| file_identity(&entry) == file_identity(&source))
+        })
+    {
+        return Err("Choose a folder outside the source folder.".into());
+    }
+    Ok(folder)
 }
 
 /// Copy `path` beside itself as "name copy", "name copy 2", …, returning the copy's path.
 pub fn duplicate(path: &Path) -> Result<PathBuf, String> {
     let name = file_name_of(path)?;
-    claim(
+    copy_with_names(
         path,
+        parent_folder(path)?,
         file_name::duplicate_names(name, has_extension(path)),
-        |destination| {
-            autoreleasepool(|_| {
-                NSFileManager::defaultManager()
-                    .copyItemAtURL_toURL_error(&file_url(path), &file_url(destination))
-                    .map_err(|error| {
-                        if error.domain().to_string() == "NSCocoaErrorDomain"
-                            && error.code() == NS_FILE_WRITE_FILE_EXISTS_ERROR
-                        {
-                            Attempt::Taken
-                        } else {
-                            Attempt::Failed(error.localizedDescription().to_string())
-                        }
-                    })
-            })
-        },
     )
+}
+
+fn copy_with_names(
+    path: &Path,
+    folder: &Path,
+    names: impl Iterator<Item = String>,
+) -> Result<PathBuf, String> {
+    let staging = CopyStaging::new(path, folder)?;
+    let entry = staging.entry();
+    claim(folder, names, |destination| {
+        rename_exclusive(&entry, destination).map_err(Attempt::from)
+    })
+}
+
+struct CopyStaging(tempfile::TempDir);
+
+impl CopyStaging {
+    fn new(path: &Path, folder: &Path) -> Result<Self, String> {
+        // Publish the completed copy atomically, even when another app creates the same name.
+        let staging = Self(
+            tempfile::Builder::new()
+                .prefix(".dupin-")
+                .tempdir_in(folder)
+                .map_err(|error| error.to_string())?,
+        );
+        autoreleasepool(|_| {
+            NSFileManager::defaultManager()
+                .copyItemAtURL_toURL_error(&file_url(path), &file_url(&staging.entry()))
+                .map_err(|error| error.localizedDescription().to_string())
+        })?;
+        Ok(staging)
+    }
+
+    fn entry(&self) -> PathBuf {
+        self.0.path().join("entry")
+    }
 }
 
 /// Zip `path` beside itself as "name.zip", "name 2.zip", …, as Finder's Compress does,
@@ -68,17 +174,18 @@ pub fn compress(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("“{name}” no longer exists."));
     }
     // ditto replaces whatever is at its destination, so claim the name first.
-    let destination = claim(path, file_name::archive_names(name), |destination| {
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(destination)
-            .map(drop)
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::AlreadyExists => Attempt::Taken,
-                _ => Attempt::Failed(error.to_string()),
-            })
-    })?;
+    let destination = claim(
+        parent_folder(path)?,
+        file_name::archive_names(name),
+        |destination| {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(destination)
+                .map(drop)
+                .map_err(Attempt::from)
+        },
+    )?;
     let mut ditto = Command::new("/usr/bin/ditto");
     ditto.args(["-c", "-k", "--sequesterRsrc"]);
     // A folder's archive holds the folder itself; a file's would otherwise hold its parent.
@@ -102,27 +209,30 @@ pub fn compress(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// `NSFileWriteFileExistsError` in `NSCocoaErrorDomain`.
-const NS_FILE_WRITE_FILE_EXISTS_ERROR: isize = 516;
-
 enum Attempt {
     /// Something took the name since it looked free; try the next one.
     Taken,
     Failed(String),
 }
 
-/// Create an entry beside `path` under the first candidate name nothing occupies. `create`
+impl From<io::Error> for Attempt {
+    fn from(error: io::Error) -> Self {
+        match error.kind() {
+            io::ErrorKind::AlreadyExists => Self::Taken,
+            _ => Self::Failed(error.to_string()),
+        }
+    }
+}
+
+/// Create an entry in `folder` under the first candidate name nothing occupies. `create`
 /// must refuse an existing destination; when it does, the next candidate is tried, so an
 /// entry that appears meanwhile (another Duplicate of the same item) is never replaced.
 fn claim(
-    path: &Path,
+    folder: &Path,
     candidates: impl Iterator<Item = String>,
     mut create: impl FnMut(&Path) -> Result<(), Attempt>,
 ) -> Result<PathBuf, String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("“{}” has no parent folder.", path.display()))?;
-    for candidate in candidates.map(|name| parent.join(name)) {
+    for candidate in candidates.map(|name| folder.join(name)) {
         if std::fs::symlink_metadata(&candidate).is_ok() {
             continue;
         }
@@ -150,26 +260,20 @@ fn file_name_of(path: &Path) -> Result<&str, String> {
         .ok_or_else(|| format!("“{}” has no usable name.", path.display()))
 }
 
-fn sibling(path: &Path, name: &str) -> Result<PathBuf, String> {
+fn parent_folder(path: &Path) -> Result<&Path, String> {
     path.parent()
-        .map(|parent| parent.join(name))
         .ok_or_else(|| format!("“{}” has no parent folder.", path.display()))
 }
 
-/// Whether a directory listing holds exactly this name, case included.
-fn listed(path: &Path) -> bool {
-    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-        return false;
-    };
-    std::fs::read_dir(parent).is_ok_and(|entries| entries.flatten().any(|entry| entry.file_name() == name))
-}
-
-fn same_entry(a: &Path, b: &Path) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
-        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+fn same_entry_following_links(a: &Path, b: &Path) -> bool {
+    match (a.metadata(), b.metadata()) {
+        (Ok(a), Ok(b)) => file_identity(&a) == file_identity(&b),
         _ => false,
     }
+}
+
+fn file_identity(entry: &std::fs::Metadata) -> (u64, u64) {
+    (entry.dev(), entry.ino())
 }
 
 fn file_url(path: &Path) -> objc2::rc::Retained<NSURL> {
@@ -238,10 +342,9 @@ mod tests {
     #[test]
     fn a_name_taken_after_it_looked_free_moves_on_to_the_next() {
         let dir = Scratch::new("claim");
-        let source = dir.file("report.pdf", "r");
         let mut tries = Vec::new();
         let claimed = claim(
-            &source,
+            &dir.0,
             file_name::duplicate_names("report.pdf", true),
             |candidate| {
                 tries.push(candidate.file_name().unwrap().to_string_lossy().into_owned());
@@ -288,6 +391,151 @@ mod tests {
         let copy = duplicate(&folder).unwrap();
         assert_eq!(copy, dir.0.join("v1.2 copy"));
         assert_eq!(std::fs::read_to_string(copy.join("inner")).unwrap(), "i");
+    }
+
+    #[test]
+    fn copy_keeps_the_original_name_until_a_collision() {
+        let dir = Scratch::new("copy-to");
+        let source = dir.file("report.pdf", "original");
+        let folder = dir.0.join("destination");
+        std::fs::create_dir(&folder).unwrap();
+        let folder = folder.canonicalize().unwrap();
+        let first = copy_to(&source, &folder).unwrap();
+        assert_eq!(first, folder.join("report.pdf"));
+        std::fs::write(&first, "existing").unwrap();
+        std::os::unix::fs::symlink("missing", folder.join("report copy.pdf")).unwrap();
+        let next = copy_to(&source, &folder).unwrap();
+        assert_eq!(next, folder.join("report copy 2.pdf"));
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "existing");
+        assert_eq!(std::fs::read_to_string(next).unwrap(), "original");
+        assert_eq!(std::fs::read_to_string(source).unwrap(), "original");
+    }
+
+    #[test]
+    fn move_keeps_the_name_and_refuses_existing_entries_and_its_own_folder() {
+        let dir = Scratch::new("move-to");
+        let source = dir.file("report.pdf", "original");
+        let folder = dir.0.join("destination");
+        std::fs::create_dir(&folder).unwrap();
+        let alias = folder.join("own-folder");
+        std::os::unix::fs::symlink(&dir.0, &alias).unwrap();
+        assert_eq!(
+            move_to(&source, &alias).unwrap_err(),
+            "The item is already in this folder."
+        );
+        let occupied = folder.join("report.pdf");
+        std::fs::write(&occupied, "existing").unwrap();
+        assert!(move_to(&source, &folder).unwrap_err().contains("already exists"));
+        assert_eq!(std::fs::read_to_string(&source).unwrap(), "original");
+        assert_eq!(std::fs::read_to_string(&occupied).unwrap(), "existing");
+        std::fs::remove_file(&occupied).unwrap();
+        let output = move_to(&source, &folder).unwrap();
+        assert_eq!(output, occupied.canonicalize().unwrap());
+        assert!(!source.exists());
+        assert_eq!(std::fs::read_to_string(output).unwrap(), "original");
+    }
+
+    #[test]
+    fn folder_transfers_refuse_the_source_its_descendants_and_non_folders() {
+        let dir = Scratch::new("recursive-transfer");
+        let source = dir.0.join("source");
+        let child = source.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        let alias = dir.0.join("alias");
+        std::os::unix::fs::symlink(&child, &alias).unwrap();
+        let file = dir.file("file", "contents");
+        for operation in [move_to, copy_to] {
+            for folder in [&source, &child, &alias] {
+                assert_eq!(
+                    operation(&source, folder).unwrap_err(),
+                    "Choose a folder outside the source folder."
+                );
+            }
+            assert_eq!(
+                operation(&source, &file).unwrap_err(),
+                "The destination is no longer a folder."
+            );
+        }
+        assert_eq!(std::fs::read_dir(&child).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn competing_moves_cannot_replace_one_another() {
+        let dir = Scratch::new("competing-moves");
+        for name in ["a", "b", "destination"] {
+            std::fs::create_dir(dir.0.join(name)).unwrap();
+        }
+        let destination = dir.0.join("destination");
+        for index in 0..24 {
+            let name = format!("document-{index}");
+            let a = dir.file(&format!("a/{name}"), "a");
+            let b = dir.file(&format!("b/{name}"), "b");
+            let barrier = std::sync::Barrier::new(2);
+            let (first, second) = std::thread::scope(|scope| {
+                let first = scope.spawn(|| {
+                    barrier.wait();
+                    move_to(&a, &destination)
+                });
+                barrier.wait();
+                let second = move_to(&b, &destination);
+                (first.join().unwrap(), second)
+            });
+            assert_ne!(first.is_ok(), second.is_ok());
+            let (output, winner, remaining) = match (first, second) {
+                (Ok(output), Err(_)) => (output, "a", b),
+                (Err(_), Ok(output)) => (output, "b", a),
+                _ => unreachable!(),
+            };
+            assert_eq!(std::fs::read_to_string(output).unwrap(), winner);
+            assert!(remaining.exists());
+        }
+    }
+
+    #[test]
+    fn copies_and_moves_competing_for_a_name_keep_both_contents() {
+        let dir = Scratch::new("competing-transfers");
+        for name in ["a", "b", "destination"] {
+            std::fs::create_dir(dir.0.join(name)).unwrap();
+        }
+        let destination = dir.0.join("destination").canonicalize().unwrap();
+        let a = dir.file("a/report.pdf", "a");
+        let b = dir.file("b/report.pdf", "b");
+        let (copy, moved) = std::thread::scope(|scope| {
+            let copy = scope.spawn(|| copy_to(&a, &destination).unwrap());
+            let moved = move_to(&b, &destination);
+            (copy.join().unwrap(), moved)
+        });
+        assert_eq!(std::fs::read_to_string(copy).unwrap(), "a");
+        assert_eq!(std::fs::read_to_string(moved.unwrap_or(b)).unwrap(), "b");
+        assert_eq!(std::fs::read_to_string(a).unwrap(), "a");
+        assert!(std::fs::read_dir(destination).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".dupin-")
+        }));
+    }
+
+    #[test]
+    fn staged_move_preserves_a_folder_and_removes_it_only_after_publishing() {
+        let dir = Scratch::new("staged-move");
+        let source = dir.0.join("source");
+        let folder = dir.0.join("destination");
+        let target = folder.join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        dir.file("source/child.txt", "original");
+        assert!(move_across_volumes(&source, &folder, target.clone()).is_err());
+        assert!(source.join("child.txt").exists());
+        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
+        std::fs::remove_dir(&target).unwrap();
+        let output = move_across_volumes(&source, &folder, target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(output.join("child.txt")).unwrap(),
+            "original"
+        );
+        assert!(!source.exists());
     }
 
     #[test]

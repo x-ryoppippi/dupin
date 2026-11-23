@@ -126,6 +126,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     ] {
         registry.register(command)?;
     }
+    registry.set_destination_search(files_id)?;
 
     registry.register(CommandSpec::new(
         id(SETTINGS),
