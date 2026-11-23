@@ -54,6 +54,15 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     }
 }
 
+/// A proposed file name is plain text: qualifiers only mean something in a search.
+fn mark_session_query(edit: &mut TextEdit, session: &Session) {
+    if session.renaming().is_none() {
+        mark_query_qualifiers(edit, session.command_id());
+    } else if !edit.marks().is_empty() {
+        edit.set_marks(Vec::new());
+    }
+}
+
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
@@ -293,6 +302,10 @@ impl Ui {
                     return;
                 }
                 if let Some(query) = query {
+                    if self.session.renaming().is_some() {
+                        let effects = self.session.intent(Intent::Dismiss).unwrap_or_default();
+                        self.apply(effects, tx);
+                    }
                     self.query = TextEdit::new(query);
                     self.edited(tx);
                 }
@@ -363,12 +376,12 @@ impl Ui {
     /// Cursor-only redraws do not emit Rune input-change callbacks.
     pub fn query_display(&self) -> TextEdit {
         let mut query = self.query.clone();
-        mark_query_qualifiers(&mut query, self.session.command_id());
+        mark_session_query(&mut query, &self.session);
         query
     }
 
     pub fn query_edit(&mut self) -> &mut TextEdit {
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
         &mut self.query
     }
 
@@ -901,6 +914,11 @@ impl Ui {
         if self.query.is_composing() {
             return false;
         }
+        // Enter that starts or confirms a rename changes what Enter means; held, it must not
+        // carry on into the next state.
+        if ev.key == Key::Enter && tx.key_repeat() {
+            return true;
+        }
         if is_quick_look_shortcut(&ev.key) {
             if !self
                 .session
@@ -1227,6 +1245,36 @@ impl Ui {
                 }
                 Effect::ClearQuery => self.query.clear(),
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
+                Effect::SelectQuery(range) => {
+                    tx.focus("query", false);
+                    self.query.set_selection(range.start, range.end);
+                }
+                Effect::Rename { row, path, name } => {
+                    let old = file_name(&path);
+                    self.on_worker(
+                        move || {
+                            dupin_mac::file_ops::rename(&path, &name).map(|renamed| {
+                                dupin_mac::file_actions::item(renamed, name.clone(), Vec::new())
+                            })
+                        },
+                        move |ui, result, tx| match result {
+                            Ok(item) => {
+                                let notice = format!("Renamed to “{}”", item.display_title());
+                                ui.session.replace(&row, item);
+                                if ui
+                                    .action_screen
+                                    .as_ref()
+                                    .is_some_and(|screen| !screen.is_current(&ui.session))
+                                {
+                                    ui.action_screen = None;
+                                }
+                                ui.fetch_icons();
+                                ui.timed_notice(notice, tx);
+                            }
+                            Err(error) => ui.show_notice(format!("Couldn't rename “{old}”: {error}"), tx),
+                        },
+                    );
+                }
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
@@ -1241,7 +1289,37 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
-                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::ChooseApplication(_)
+                    | dupin_core::Action::Trash(_)
+                    | dupin_core::Action::Rename { .. } => {}
+                    dupin_core::Action::Duplicate(path) => {
+                        let name = file_name(&path);
+                        self.on_worker(
+                            move || dupin_mac::file_ops::duplicate(&path),
+                            move |ui, result, tx| match result {
+                                Ok(copy) => {
+                                    ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't duplicate “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
+                    dupin_core::Action::Compress(path) => {
+                        let name = file_name(&path);
+                        self.on_worker(
+                            move || dupin_mac::file_ops::compress(&path),
+                            move |ui, result, tx| match result {
+                                Ok(archive) => {
+                                    ui.timed_notice(format!("Compressed to “{}”", file_name(&archive)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't compress “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
                     dupin_core::Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {
@@ -1259,17 +1337,10 @@ impl Ui {
                     action: dupin_core::Action::Trash(path),
                 } => {
                     self.action_screen = None;
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let me = self.me.clone();
-                    let running = self.running.clone();
-                    running.fetch_add(1, Ordering::AcqRel);
-                    std::thread::spawn(move || {
-                        let result = dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path));
-                        me.update(move |ui, tx| match result {
+                    let name = file_name(&path);
+                    self.on_worker(
+                        move || dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path)),
+                        move |ui, result, tx| match result {
                             Ok(()) => {
                                 ui.session.forget(&id);
                                 ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
@@ -1277,9 +1348,8 @@ impl Ui {
                             Err(error) => {
                                 ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
                             }
-                        });
-                        running.fetch_sub(1, Ordering::AcqRel);
-                    });
+                        },
+                    );
                 }
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
@@ -1292,7 +1362,7 @@ impl Ui {
                 }
             }
         }
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
@@ -1302,6 +1372,22 @@ impl Ui {
             if let Err(error) = dupin_mac::workspace::run(&action) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
+            drop(busy);
+        });
+    }
+
+    /// Run a file operation off the main thread and report its result back on it. A relaunch
+    /// waits until it has finished.
+    fn on_worker<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Ui, T, &mut Tx) + Send + 'static,
+    ) {
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        std::thread::spawn(move || {
+            let result = work();
+            me.update(move |ui, tx| done(ui, result, tx));
             drop(busy);
         });
     }
@@ -1438,6 +1524,13 @@ fn accept_config(
         ));
     }
     Ok(config)
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn is_quick_look_shortcut(key: &Key) -> bool {
