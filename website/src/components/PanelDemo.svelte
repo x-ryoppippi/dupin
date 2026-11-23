@@ -16,7 +16,7 @@
 	let found = $state('');
 	let searching = $state(false);
 	let selected = $state(0);
-	let actionsOpen = $state(false);
+	let menu = $state<'actions' | 'receivers'>();
 	const rows = $derived(found ? (shown.steps[found.toLowerCase()] ?? []) : []);
 	let keys = $state<{ id: number; label: string }[]>([]);
 	let keysShown = $state(false);
@@ -135,7 +135,7 @@
 		launching = false;
 		searching = false;
 		selected = 0;
-		actionsOpen = false;
+		menu = undefined;
 		keys = [];
 		keysShown = false;
 		shownAt = performance.now();
@@ -244,11 +244,21 @@
 			}
 			if (scenario.actions || scenario.detail) {
 				press('→', true);
-				actionsOpen = true;
+				menu = 'actions';
 				await sleep(700);
 				if (!scenario.detail) {
+					press('↓', true);
+					await sleep(140);
+					press('↓');
+					await sleep(140);
+					press('↩', true);
+					menu = 'receivers';
+					await sleep(900);
 					press('Esc', true);
-					actionsOpen = false;
+					menu = 'actions';
+					await sleep(350);
+					press('Esc', true);
+					menu = undefined;
 					await sleep(600);
 				}
 			}
@@ -261,7 +271,7 @@
 			found = '';
 			selected = 0;
 			mode = undefined;
-			actionsOpen = false;
+			menu = undefined;
 			await sleep(600);
 			query = scenario.query;
 			found = scenario.query;
@@ -327,14 +337,20 @@
 			</ul>
 		{/if}
 	</div>
-	{#if actionsOpen}
+	{#if menu}
 		<div class="action-menu">
-			{#if shown.detail}
+			{#if menu === 'receivers'}
+				<div>Send to…</div>
+				<div>Share…</div>
+				<div>AirDrop</div>
+				<div>New Mail with Attachment</div>
+				<div>Copy path</div>
+			{:else if shown.detail}
 				<div>Open in Dictionary</div>
 			{:else}
 				<div>Open</div>
 				<div>Reveal in Finder</div>
-				<div>Copy path</div>
+				<div>Send to…</div>
 			{/if}
 		</div>
 	{/if}
