@@ -1,18 +1,19 @@
 //! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
-//! JavaScript package run by QuickJS-ng, or a Wasm guest. Guests get the query and return
-//! views; neither runtime gives them any host access.
+//! JavaScript package run by QuickJS-ng in the sandboxed extension host process, or a Wasm
+//! guest. Guests get the query and return views; neither runtime gives them any host access.
 
 mod provider;
 
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::Page;
-use dupin_js_runtime::{Control, DEFAULT_ENTRY, Diagnostic, Package, RunError};
+use dupin_extension_host::Host;
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, Package, RunError};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 use serde::Deserialize;
@@ -76,10 +77,7 @@ impl Extension {
     pub fn check(&self, deadline: Instant) -> Result<(), RunError> {
         match &self.guest {
             Guest::Wasm(_) => Ok(()),
-            Guest::JavaScript(package) => package.check(Control {
-                deadline,
-                is_cancelled: Box::new(|| false),
-            }),
+            Guest::JavaScript(package) => host().check(package, deadline, &|| false),
         }
     }
 
@@ -109,11 +107,7 @@ impl Extension {
                 "JavaScript extensions can't open views yet",
             ))),
             Guest::JavaScript(package) => {
-                let control = Control {
-                    deadline,
-                    is_cancelled: Box::new(is_cancelled),
-                };
-                let items = package.search(query, limit, control)?;
+                let items = host().search(package, query, limit, deadline, &is_cancelled)?;
                 Ok(protocol::Outcome::Results { items, state: None })
             }
         }
@@ -133,6 +127,30 @@ impl Extension {
             context: page.and_then(|page| page.context.clone()),
         }
     }
+}
+
+/// The one extension host every JavaScript extension shares, started on the first query.
+fn host() -> &'static Host {
+    static HOST: OnceLock<Host> = OnceLock::new();
+    HOST.get_or_init(|| Host::new(Box::new(helper_command)))
+}
+
+/// Dupin's own executable as the extension host, with nothing inherited it doesn't need.
+fn helper_command() -> std::io::Result<std::process::Command> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.env_clear().current_dir("/");
+    #[cfg(not(test))]
+    command.arg(dupin_extension_host::FLAG);
+    #[cfg(test)]
+    command
+        .args([
+            "--exact",
+            "extensions::tests::extension_host",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(tests::EXTENSION_HOST_ENV, "1");
+    Ok(command)
 }
 
 /// What a scan of the extensions folder found: the valid extensions, sorted by folder name,
@@ -483,6 +501,17 @@ pub(crate) mod tests {
     use std::os::unix::fs::symlink;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
+
+    pub(super) const EXTENSION_HOST_ENV: &str = "DUPIN_EXTENSION_HOST_TEST";
+
+    /// Not a test: [`helper_command`] starts this test binary, running only this function, as
+    /// the extension host.
+    #[test]
+    fn extension_host() {
+        if std::env::var_os(EXTENSION_HOST_ENV).is_some() {
+            dupin_extension_host::serve();
+        }
+    }
 
     pub(crate) fn guest(response: &str) -> Vec<u8> {
         let data: String = response.bytes().map(|byte| format!("\\{byte:02x}")).collect();
