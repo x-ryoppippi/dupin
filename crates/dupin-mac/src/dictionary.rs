@@ -2,9 +2,10 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::detail::escape_markdown;
-use dupin_core::{Action, Batch, Detail, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
+
+mod layout;
 
 #[repr(C)]
 struct DCSDictionary {
@@ -46,11 +47,12 @@ fn fixture_definition(term: &str) -> Option<String> {
             without looking for it: a moment of pure serendipity. ORIGIN mid 18th century: from Serendip, \
             an old name for Sri Lanka, after a fairy tale whose heroes kept making such discoveries."
             .into(),
-        "run" => "run | rʌn | verb 1 move quickly on foot, faster than walking: she ran to the station. \
-            • (of a machine) operate: the engine runs on diesel. • (of a road or path) extend in a \
-            direction: the path runs along the river. 2 be in charge of: he runs a small bakery. noun an \
-            act of running: a morning run. PHRASES on the run trying to avoid being caught. ORIGIN Old \
-            English."
+        "run" => "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on \
+            foot faster than walking: she ran to the station | he ran the last few yards. • (of a machine) \
+            operate: the engine runs on diesel. • [with object] cause to operate: run the dishwasher twice a \
+            week. 2 [with object] be in charge of: he runs a small bakery. 3 extend in a direction: the path \
+            runs along the river. noun 1 an act of running: a morning run. 2 a journey on a regular route: \
+            the school run. PHRASES on the run trying to avoid being caught. ORIGIN Old English."
             .into(),
         _ => return None,
     })
@@ -70,7 +72,7 @@ impl Provider for DictionaryProvider {
             return Ok(());
         };
         if !request.is_cancelled() {
-            let detail = detail(term, &definition);
+            let detail = layout::detail(term, &definition);
             let item = item(term, definition);
             let id = item.id.clone();
             emit(Batch::from(vec![item]).with_detail(id, detail));
@@ -122,84 +124,6 @@ fn item(term: &str, definition: String) -> Item {
     }
 }
 
-/// Parts Oxford-style dictionaries start with a label in capitals, in the order they appear.
-const PARTS: [(&str, &str); 5] = [
-    ("PHRASAL VERBS", "Phrasal verbs"),
-    ("PHRASES", "Phrases"),
-    ("DERIVATIVES", "Derivatives"),
-    ("USAGE", "Usage"),
-    ("ORIGIN", "Origin"),
-];
-
-/// The definition laid out: the pronunciation between the headword's bars as metadata, each
-/// labeled part under a heading, and the senses after each `•` as a list.
-fn detail(term: &str, definition: &str) -> Detail {
-    let (pronunciation, body) = pronunciation(term, definition)
-        .map_or((None, definition), |(pronunciation, body)| {
-            (Some(pronunciation), body)
-        });
-    let mut markdown = String::new();
-    let mut rest = body;
-    let mut heading = None;
-    loop {
-        let next = PARTS
-            .iter()
-            .filter_map(|&(label, title)| Some((part_start(rest, label)?, label, title)))
-            .min_by_key(|&(at, ..)| at);
-        let (text, following) = match next {
-            Some((at, label, title)) => (&rest[..at], Some((&rest[at + label.len()..], title))),
-            None => (rest, None),
-        };
-        if let Some(title) = heading {
-            markdown.push_str(&format!("## {title}\n\n"));
-        }
-        senses(&mut markdown, text);
-        let Some((following, title)) = following else {
-            break;
-        };
-        rest = following;
-        heading = Some(title);
-    }
-    let detail = Detail::new(term, &markdown);
-    match pronunciation {
-        Some(pronunciation) => detail.with_metadata("Pronunciation", pronunciation),
-        None => detail,
-    }
-}
-
-/// `pronunciation` and the rest from `headword | pronunciation | rest`, when the definition
-/// opens that way.
-fn pronunciation<'a>(term: &str, definition: &'a str) -> Option<(&'a str, &'a str)> {
-    let mut parts = definition.splitn(3, " | ");
-    let (headword, pronunciation, rest) = (parts.next()?, parts.next()?, parts.next()?);
-    let short = |part: &str| part.chars().count() <= 60 && !part.contains('|');
-    (short(headword) && short(pronunciation) && headword.to_lowercase().starts_with(&term.to_lowercase()))
-        .then(|| (pronunciation.trim(), rest))
-}
-
-/// Where `label` starts as a word of its own in `text`.
-fn part_start(text: &str, label: &str) -> Option<usize> {
-    text.match_indices(label)
-        .map(|(at, _)| at)
-        .find(|&at| text[..at].ends_with(' ') && text[at + label.len()..].starts_with(' '))
-}
-
-fn senses(markdown: &mut String, text: &str) {
-    let mut chunks = text.split('•').map(str::trim).filter(|chunk| !chunk.is_empty());
-    let line = |chunk: &str| escape_markdown(&chunk.split_whitespace().collect::<Vec<_>>().join(" "));
-    if let Some(first) = chunks.next() {
-        if text.trim_start().starts_with('•') {
-            markdown.push_str(&format!("- {}\n", line(first)));
-        } else {
-            markdown.push_str(&format!("{}\n\n", line(first)));
-        }
-    }
-    for chunk in chunks {
-        markdown.push_str(&format!("- {}\n", line(chunk)));
-    }
-    markdown.push('\n');
-}
-
 fn dictionary_url(term: &str) -> String {
     format!("dict://{}", crate::workspace::encode_url_component(term))
 }
@@ -213,7 +137,7 @@ mod tests {
         body
     }
     use super::*;
-    use dupin_core::detail::{Block, Metadata};
+    use dupin_core::detail::Block;
 
     fn chance(term: &str) -> Option<String> {
         (term == "serendipity").then(|| "The occurrence of events by chance.".into())
@@ -233,63 +157,6 @@ mod tests {
         assert_eq!(detail_body(&batches[0][0]), "The occurrence of events by chance.");
     }
 
-    fn texts(blocks: &[Block]) -> Vec<String> {
-        blocks
-            .iter()
-            .map(|block| match block {
-                Block::Heading { level, text } => format!("h{level} {}", text.text),
-                Block::Paragraph(text) => text.text.clone(),
-                Block::List { items, .. } => items
-                    .iter()
-                    .map(|item| format!("- {}", texts(item).join(" ")))
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-                Block::Code(code) => format!("`{code}`"),
-            })
-            .collect()
-    }
-
-    #[test]
-    fn a_definition_becomes_a_detail_with_its_pronunciation_parts_and_senses() {
-        let detail = detail(
-            "Cat",
-            "cat 1 | kat | noun 1 a small mammal • a wild animal: a marbled cat. • *slang* a man | \
-             the cat. PHRASES cat and mouse a series [of] moves. ORIGIN Old English catt.",
-        );
-        assert_eq!(detail.title, "Cat");
-        assert_eq!(
-            detail.metadata,
-            [Metadata {
-                label: "Pronunciation".into(),
-                value: "kat".into()
-            }]
-        );
-        assert_eq!(
-            texts(&detail.body.blocks),
-            [
-                "noun 1 a small mammal",
-                "- a wild animal: a marbled cat.\n- *slang* a man | the cat.",
-                "h2 Phrases",
-                "cat and mouse a series [of] moves.",
-                "h2 Origin",
-                "Old English catt.",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_definition_without_a_headword_line_keeps_all_its_text() {
-        for definition in [
-            "UN abbreviation United Nations.",
-            "other | word | text",
-            "Japanese 日本 | にほん | text with ORIGINAL words",
-        ] {
-            let detail = detail("UN", definition);
-            assert!(detail.metadata.is_empty(), "{definition}");
-            assert_eq!(texts(&detail.body.blocks), [definition], "{definition}");
-        }
-    }
-
     #[test]
     fn the_provider_shows_its_result_as_a_detail() {
         let provider = DictionaryProvider { lookup: chance };
@@ -304,21 +171,10 @@ mod tests {
         };
         assert_eq!(batch.section, None);
         let detail = &batch.details[&batch.items[0].id];
-        assert_eq!(
-            texts(&detail.body.blocks),
-            ["The occurrence of events by chance."]
-        );
-    }
-
-    #[test]
-    fn the_fixtures_cover_senses_and_labeled_parts() {
-        let definition = fixture_definition("run").unwrap();
-        let blocks = texts(&detail("run", &definition).body.blocks);
-        assert_eq!(blocks.len(), 6, "{blocks:?}");
-        assert!(blocks[1].starts_with("- (of a machine)") && blocks[1].contains("\n- (of a road"));
-        assert_eq!(blocks[2], "h2 Phrases");
-        assert_eq!(blocks[4], "h2 Origin");
-        assert!(fixture_definition("other").is_none());
+        let [Block::Paragraph(text)] = detail.body.blocks.as_slice() else {
+            panic!("expected one paragraph: {:?}", detail.body.blocks)
+        };
+        assert_eq!(text.text, "The occurrence of events by chance.");
     }
 
     #[test]
