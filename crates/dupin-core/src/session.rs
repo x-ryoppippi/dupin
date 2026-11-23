@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::file_query::{FileKind, FileQuery};
 use crate::item::Transfer;
@@ -142,7 +143,7 @@ pub struct Session {
     commands: CommandRegistry,
     search: SearchState,
     last_generation: u64,
-    history: History,
+    history: Arc<RwLock<History>>,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
     queries: VecDeque<(CommandId, String)>,
@@ -169,6 +170,22 @@ struct SearchState {
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+}
+
+/// Read access to the session's ranked history for the recent-items provider.
+#[derive(Debug)]
+pub struct RecentHistory {
+    history: Arc<RwLock<History>>,
+    clock: fn() -> u64,
+}
+
+impl RecentHistory {
+    pub fn ranked_ids(&self) -> Vec<String> {
+        self.history
+            .read()
+            .unwrap()
+            .ranked_ids(usize::MAX, (self.clock)())
+    }
 }
 
 #[derive(Debug)]
@@ -324,7 +341,7 @@ impl Session {
             commands,
             search: SearchState::new(command, false),
             last_generation: 0,
-            history,
+            history: Arc::new(RwLock::new(history)),
             clock: unix_now,
             queries: VecDeque::new(),
             renaming: None,
@@ -406,12 +423,23 @@ impl Session {
         Ok(effects)
     }
 
-    pub fn history(&self) -> &History {
-        &self.history
+    pub fn history(&self) -> RwLockReadGuard<'_, History> {
+        self.history.read().unwrap()
+    }
+
+    pub fn recent_history(&self) -> RecentHistory {
+        RecentHistory {
+            history: self.history.clone(),
+            clock: self.clock,
+        }
     }
 
     pub fn command_id(&self) -> &CommandId {
         &self.search.command
+    }
+
+    pub fn command_ids(&self) -> Vec<String> {
+        self.commands.ids()
     }
 
     pub fn command(&self) -> &crate::CommandSpec {
@@ -584,7 +612,10 @@ impl Session {
         let mut effects = vec![Effect::Run(action.action)];
         if action.disposition == ActionDisposition::Dismiss {
             if item.record_usage {
-                self.history.record(&item.id, &self.search.query, (self.clock)());
+                self.history
+                    .write()
+                    .unwrap()
+                    .record(&item.id, &self.search.query, (self.clock)());
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);
@@ -646,10 +677,11 @@ impl Session {
             self.search.deleting = false;
             self.search.before_deletion = None;
             self.search.items.clear();
+            self.search.origins.clear();
             self.search.selected = 0;
             self.search.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.search.query.clone())];
-            effects.extend(self.switch(command));
+            effects.extend(self.switch(command, true));
             return effects;
         }
         self.search.query = text.to_owned();
@@ -729,22 +761,28 @@ impl Session {
                 .commands
                 .space_on_empty(&self.search.command)
                 .cloned()
-                .map_or_else(Vec::new, |command| self.switch(command)),
+                .map_or_else(Vec::new, |command| self.switch(command, true)),
             Intent::Space if self.search.command == *self.commands.default() => {
                 let command = self.commands.keyword(&self.search.query)?.clone();
                 self.search.query.clear();
                 let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(command));
+                effects.extend(self.switch(command, true));
                 effects
             }
             Intent::Backspace if empty && self.search.command != *self.commands.default() => {
-                let effects = self.switch(self.commands.default().clone());
-                self.search.explicit = false;
-                effects
+                self.switch(self.commands.default().clone(), false)
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if empty || self.search.recalled.is_some() => self.recall(true),
+            Intent::Up
+                if self.search.recalled.is_some()
+                    || (empty
+                        && self.search.selected == 0
+                        && !(self.search.explicit
+                            && self.command().query_eligibility.allows(&self.search.query))) =>
+            {
+                self.recall(true)
+            }
             Intent::Down if self.search.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => self.move_selection(intent),
             Intent::Open | Intent::OpenAlternate => {
@@ -792,11 +830,19 @@ impl Session {
         self.commands.command(id)
     }
     pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
-        if self.search.explicit {
+        let candidates = if self.search.explicit {
             vec![self.search.command.clone()]
         } else {
             self.commands.providers(&self.search.command)
-        }
+        };
+        candidates
+            .into_iter()
+            .filter(|id| {
+                self.commands
+                    .command(id)
+                    .is_some_and(|spec| spec.query_eligibility.allows(&self.search.query))
+            })
+            .collect()
     }
     pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
         self.search
@@ -935,6 +981,8 @@ impl Session {
                     }
                 }
                 self.history
+                    .read()
+                    .unwrap()
                     .rerank(&mut state.items, &self.search.query, (self.clock)());
             }
             Delivery::Done { .. } => state.phase = ProviderPhase::Done,
@@ -1070,17 +1118,17 @@ impl Session {
         self.remember_query(false);
         self.renaming = None;
         self.search = SearchState::new(self.commands.default().clone(), false);
-        self.advance_generation();
-        if was_searching {
+        let effects = self.search();
+        if effects.is_empty() && was_searching {
             vec![Effect::CancelSearch]
         } else {
-            Vec::new()
+            effects
         }
     }
 
     fn dismiss(&mut self) -> Vec<Effect> {
-        let mut effects = self.reset();
-        effects.push(Effect::Hide);
+        let mut effects = vec![Effect::Hide];
+        effects.extend(self.reset());
         effects
     }
 
@@ -1134,20 +1182,20 @@ impl Session {
         effects
     }
 
-    fn switch(&mut self, command: CommandId) -> Vec<Effect> {
+    fn switch(&mut self, command: CommandId, explicit: bool) -> Vec<Effect> {
         self.search.recalled = None;
         self.search.deleting = false;
         self.search.before_deletion = None;
         self.search.command = command;
-        self.search.explicit = true;
+        self.search.explicit = explicit;
         self.search()
     }
 
     fn search(&mut self) -> Vec<Effect> {
         self.search.refresh_selection = None;
         self.search.selection_held = false;
-        let query = self.search.query.trim();
-        if query.is_empty() {
+        let provider_ids = self.provider_ids();
+        if provider_ids.is_empty() {
             let was_searching = matches!(self.search.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -1157,21 +1205,36 @@ impl Session {
             };
         }
         let query = if self.destination.is_some()
-            && !FileQuery::parse(query).is_ok_and(|parsed| parsed.kind == Some(FileKind::Folder))
+            && !FileQuery::parse(self.search.query.trim())
+                .is_ok_and(|parsed| parsed.kind == Some(FileKind::Folder))
         {
             format!("kind:folder {}", self.search.query)
         } else {
             self.search.query.clone()
         };
         self.advance_generation();
-        // A command change clears the previous command's rows before starting a search.
+        if self
+            .search
+            .origins
+            .iter()
+            .all(|origin| !provider_ids.contains(origin))
+        {
+            self.search.items.clear();
+            self.search.origins.clear();
+            self.search.selected = 0;
+        }
         self.search.results = Results::Searching { replaced: false };
-        self.search.active_order = self.provider_ids();
-        self.search.active_pin = self.commands.pinned().filter(|_| !self.search.explicit).cloned();
+        self.search.active_order.clone_from(&provider_ids);
+        self.search.active_pin = self
+            .commands
+            .pinned()
+            .filter(|pin| !self.search.explicit && provider_ids.contains(pin))
+            .cloned();
         self.search.active_limit = self.command().result_limit;
         self.search.providers = self
-            .provider_ids()
-            .into_iter()
+            .search
+            .active_order
+            .iter()
             .map(|id| {
                 (
                     id.clone(),
@@ -1179,14 +1242,14 @@ impl Session {
                         items: Vec::new(),
                         ids: HashSet::new(),
                         phase: ProviderPhase::Pending,
-                        fallback: !self.search.explicit && self.commands.command(&id).unwrap().is_fallback(),
-                        candidate_limit: self.commands.command(&id).unwrap().candidate_limit(),
-                        result_limit: self.commands.command(&id).unwrap().result_limit,
+                        fallback: !self.search.explicit && self.commands.command(id).unwrap().is_fallback(),
+                        candidate_limit: self.commands.command(id).unwrap().candidate_limit(),
+                        result_limit: self.commands.command(id).unwrap().result_limit,
                     },
                 )
             })
             .collect();
-        self.provider_ids()
+        provider_ids
             .into_iter()
             .map(|command| Effect::Search {
                 command,

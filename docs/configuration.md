@@ -9,6 +9,7 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 selection_hotkey = "" # optional shortcut for searching selected text
+show_recent = true # show recently and frequently used apps and files before typing
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
@@ -22,6 +23,8 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the panel shortcut.
 
 Leave `selection_hotkey` empty to keep selected-text search off. To enable it, record a **Selection hotkey** in Settings → General or set `selection_hotkey`. Dupin requests Accessibility access on the first press that needs it.
+
+Set `show_recent = false` or turn off **Show recent items** in Settings → Search to keep the launcher empty before typing.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 

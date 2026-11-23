@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
+use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation, View};
 
 fn trash_row() -> Item {
     let mut row = item("file");
@@ -47,7 +47,7 @@ fn confirmed_consumption_cannot_run_from_normal_activation() {
             action: Action::Trash("/file".into())
         }]
     );
-    assert_eq!(s.history(), &history);
+    assert_eq!(&*s.history(), &history);
     s.set_query("other");
     assert!(s.run_confirmed_key_action(&key, "trash").is_empty());
 }
@@ -210,6 +210,55 @@ fn session_with_clock(history: History, clock: fn() -> u64) -> Session {
     .unwrap()
 }
 
+fn empty_provider_registry(include_empty_provider: bool) -> (CommandRegistry, CommandId, CommandId) {
+    let default = app_command();
+    let empty = command("sample.empty");
+    let lookup = dictionary_command();
+    let mut registry = CommandRegistry::new(default.clone(), None);
+    registry
+        .register(CommandSpec::new(
+            default.clone(),
+            10,
+            QueryPresentation::new("Search"),
+        ))
+        .unwrap();
+    registry
+        .register(
+            CommandSpec::new(empty.clone(), 10, QueryPresentation::new("Empty"))
+                .with_query_eligibility(QueryEligibility::EmptyOnly),
+        )
+        .unwrap();
+    registry.add_keyword(&empty, "blank").unwrap();
+    registry
+        .register(CommandSpec::new(
+            lookup.clone(),
+            10,
+            QueryPresentation::new("Lookup"),
+        ))
+        .unwrap();
+    registry.add_keyword(&lookup, "lookup").unwrap();
+    registry
+        .set_default_providers(
+            if include_empty_provider {
+                vec![default.clone(), empty.clone()]
+            } else {
+                vec![default.clone()]
+            },
+            include_empty_provider.then(|| empty.clone()),
+        )
+        .unwrap();
+    (registry, default, empty)
+}
+
+fn session_with_empty_provider() -> (Session, CommandId, CommandId) {
+    let (registry, default, empty) = empty_provider_registry(true);
+    (
+        Session::new(History::default(), registry).unwrap(),
+        default,
+        empty,
+    )
+}
+
 fn item(name: &str) -> Item {
     Item::path(PathBuf::from(format!("/x/{name}")), name.to_owned(), vec![])
 }
@@ -269,6 +318,187 @@ fn starts_in_apps_mode_with_nothing_shown() {
 }
 
 #[test]
+fn empty_queries_search_only_eligible_providers_and_keep_pinning() {
+    let (mut s, default, empty) = session_with_empty_provider();
+    let effects = s.refresh();
+    let (provider, generation, query) = searched(&effects);
+    assert_eq!(provider, empty);
+    assert_eq!(query, "");
+    assert!(!s.pending(&default, generation));
+    assert!(s.pending(&provider, generation));
+
+    assert!(s.deliver_from(
+        provider.clone(),
+        Delivery::Batch {
+            generation,
+            items: vec![item("empty-a"), item("empty-b")],
+        }
+    ));
+    assert_eq!(
+        s.items().len(),
+        1,
+        "the eligible pinned provider keeps its pin limit"
+    );
+}
+
+#[test]
+fn explicit_blank_commands_resume_default_providers_only_after_backspace() {
+    let (mut s, default, empty) = session_with_empty_provider();
+    let routed = s.set_query("lookup term");
+    assert!(matches!(
+        routed.iter().find(|effect| matches!(effect, Effect::Search { .. })),
+        Some(Effect::Search { command, query, .. }) if command == &dictionary_command() && query == "term"
+    ));
+
+    let effects = s.set_query("");
+    assert_eq!(effects, [Effect::CancelSearch]);
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Search { command, .. } if command == &empty))
+    );
+    assert_eq!(s.results(), Results::Idle);
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    let (provider, generation, query) = searched(&effects);
+    assert_eq!(provider, empty);
+    assert_eq!(query, "");
+    assert_eq!(s.command_id(), &default);
+    assert!(!s.search.explicit);
+    assert!(s.pending(&empty, generation));
+    assert!(!s.pending(&default, generation));
+}
+
+#[test]
+fn an_explicit_empty_only_command_searches_its_own_provider() {
+    let (mut s, default, empty) = session_with_empty_provider();
+    s.set_query("blank");
+    let effects = s.intent(Intent::Space).unwrap();
+    assert_eq!(s.command_id(), &empty);
+    assert!(s.search.explicit);
+    let generation = match effects.as_slice() {
+        [
+            Effect::ClearQuery,
+            Effect::Search {
+                command,
+                generation,
+                query,
+            },
+        ] if command == &empty && query.is_empty() => *generation,
+        other => panic!("expected one empty-provider search, got {other:?}"),
+    };
+    assert!(!s.pending(&default, generation));
+    assert!(s.pending(&empty, generation));
+}
+
+#[test]
+fn typing_and_clearing_replace_generations_for_the_eligible_provider_set() {
+    let (mut s, default, empty) = session_with_empty_provider();
+    let empty_generation = searched(&s.refresh()).1;
+    assert!(s.deliver_from(
+        empty.clone(),
+        Delivery::Batch {
+            generation: empty_generation,
+            items: vec![item("suggestion")],
+        }
+    ));
+    assert_eq!(s.items().len(), 1);
+    let typed = s.set_query("term");
+    let (provider, typed_generation, query) = searched(&typed);
+    assert_eq!(provider, default);
+    assert_eq!(query, "term");
+    assert!(s.items().is_empty());
+    assert!(!s.deliver_from(
+        empty.clone(),
+        Delivery::Batch {
+            generation: empty_generation,
+            items: vec![item("stale-empty")],
+        }
+    ));
+
+    let cleared = s.set_query("");
+    let (provider, cleared_generation, query) = searched(&cleared);
+    assert_eq!(provider, empty);
+    assert_eq!(query, "");
+    assert!(!s.deliver_from(
+        default,
+        Delivery::Batch {
+            generation: typed_generation,
+            items: vec![item("stale-typed")],
+        }
+    ));
+    assert!(s.pending(&empty, cleared_generation));
+    assert!(s.items().is_empty());
+}
+
+#[test]
+fn up_can_return_to_the_first_suggestion_after_moving_down() {
+    let (mut s, _, empty) = session_with_empty_provider();
+    let (mut registry, _, _) = empty_provider_registry(true);
+    registry
+        .set_default_providers(vec![app_command(), empty.clone()], None)
+        .unwrap();
+    s.set_commands(registry).unwrap();
+    let generation = searched(&s.refresh()).1;
+    s.deliver_from(
+        empty,
+        Delivery::Batch {
+            generation,
+            items: vec![item("first"), item("second")],
+        },
+    );
+
+    s.intent(Intent::Down).unwrap();
+    assert_eq!(s.selected(), 1);
+    s.intent(Intent::Up).unwrap();
+    assert_eq!(s.selected(), 0);
+}
+
+#[test]
+fn opening_a_result_starts_the_empty_search_with_the_new_pick() {
+    let (mut s, default, recent) = session_with_empty_provider();
+    let history = s.recent_history();
+    let generation = searched(&s.set_query("example")).1;
+    s.deliver_from(
+        default,
+        Delivery::Batch {
+            generation,
+            items: vec![item("example")],
+        },
+    );
+
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::Run(_), Effect::SaveHistory, Effect::Hide, Effect::Search { command, query, .. }]
+                if *command == recent && query.is_empty()
+        ),
+        "{effects:?}"
+    );
+    assert_eq!(history.ranked_ids(), ["/x/example"]);
+}
+
+#[test]
+fn removing_the_only_empty_query_provider_cancels_and_rejects_its_delivery() {
+    let (mut s, _, empty) = session_with_empty_provider();
+    let generation = searched(&s.refresh()).1;
+    let (replacement, _, _) = empty_provider_registry(false);
+
+    s.set_commands(replacement).unwrap();
+    assert_eq!(s.refresh(), [Effect::CancelSearch]);
+    assert_eq!(s.results(), Results::Idle);
+    assert!(!s.deliver_from(
+        empty,
+        Delivery::Batch {
+            generation,
+            items: vec![item("stale")],
+        }
+    ));
+    assert!(s.items().is_empty());
+}
+
+#[test]
 fn actions_run_the_named_result_even_after_selection_moves() {
     let mut s = session();
     let generation = searched(&s.set_query("note")).1;
@@ -319,7 +549,7 @@ fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
         assert_eq!(s.items(), before);
         assert_eq!(s.result_key(1), key);
         assert_eq!(s.selected_item(), before.get(1));
-        assert_eq!(s.history(), &History::default());
+        assert_eq!(&*s.history(), &History::default());
         assert!(s.queries.is_empty());
     }
 }
@@ -352,7 +582,7 @@ fn keep_open_actions_cannot_preview_stale_or_retained_results() {
         vec![Effect::Run(Action::Preview("/x/notes.md".into()))]
     );
     assert_eq!(s.query(), "new");
-    assert_eq!(s.history(), &History::default());
+    assert_eq!(&*s.history(), &History::default());
 }
 
 #[test]
@@ -412,7 +642,7 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
         assert!(s.run_key_action(&old_key, "open").is_empty());
         let retained_key = s.result_key(0);
         assert!(s.run_key_action(&retained_key, "open").is_empty());
-        assert_eq!(s.history(), &History::default());
+        assert_eq!(&*s.history(), &History::default());
         s.deliver(Delivery::Batch {
             generation,
             items: vec![item("new.md")],
@@ -454,7 +684,7 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let effects = s.run_key_action(&key, "dictionary");
     assert!(effects.contains(&Effect::Run(action)));
     assert!(!effects.contains(&Effect::SaveHistory));
-    assert_eq!(s.history(), &history);
+    assert_eq!(&*s.history(), &history);
 }
 
 #[test]
@@ -900,7 +1130,7 @@ fn command_enter_reveals_in_the_file_manager() {
         effects.contains(&Effect::CancelSearch),
         "the unfinished search stops: {effects:?}"
     );
-    assert_eq!(effects.last(), Some(&Effect::Hide));
+    assert!(effects.contains(&Effect::Hide));
 }
 
 #[test]
@@ -1125,6 +1355,82 @@ fn query_recall_walks_backwards_and_forwards_to_the_empty_draft() {
 }
 
 #[test]
+fn empty_up_recalls_typed_query_even_when_empty_query_suggestions_exist() {
+    let (mut s, default, empty) = session_with_empty_provider();
+    let typed_generation = searched(&s.set_query("typed query")).1;
+    s.deliver_from(
+        default,
+        Delivery::Done {
+            generation: typed_generation,
+        },
+    );
+
+    let empty_generation = searched(&s.set_query("")).1;
+    s.deliver_from(
+        empty.clone(),
+        Delivery::Batch {
+            generation: empty_generation,
+            items: vec![item("suggestion")],
+        },
+    );
+    s.deliver_from(
+        empty,
+        Delivery::Done {
+            generation: empty_generation,
+        },
+    );
+    assert_eq!(s.results(), Results::Done);
+    assert_eq!(s.items().len(), 1);
+
+    let effects = s.intent(Intent::Up).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("typed query".into()));
+    assert_eq!(searched(&effects[1..]).0, app_command());
+    assert_eq!(s.query(), "typed query");
+}
+
+#[test]
+fn an_explicit_list_searches_every_query_and_up_wraps_on_an_empty_query() {
+    let default = command("shell.launch");
+    let listing = command("sample.list");
+    let mut registry = CommandRegistry::new(default.clone(), None);
+    registry
+        .register(CommandSpec::new(default, 10, QueryPresentation::new("Launch")))
+        .unwrap();
+    registry
+        .register(
+            CommandSpec::new(listing.clone(), 10, QueryPresentation::new("Browse"))
+                .with_query_eligibility(QueryEligibility::Any),
+        )
+        .unwrap();
+    registry.add_keyword(&listing, "browse").unwrap();
+    let mut s = Session::new(History::default(), registry).unwrap();
+    assert!(s.refresh().is_empty());
+
+    s.set_query("browse");
+    let effects = s.intent(Intent::Space).unwrap();
+    assert_eq!(effects[0], Effect::ClearQuery);
+    let (provider, _, query) = searched(&effects[1..]);
+    assert_eq!((provider, query), (listing.clone(), ""));
+
+    complete_query(&mut s, "previous");
+    let effects = s.set_query("");
+    let (provider, generation, query) = searched(&effects);
+    assert_eq!((provider, query), (listing, ""));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("one"), item("two")],
+    });
+    s.deliver(Delivery::Done { generation });
+
+    assert_eq!(s.selected(), 0);
+    assert_eq!(s.intent(Intent::Up).unwrap(), [Effect::RevealSelection]);
+    assert_eq!(s.selected(), 1);
+    assert_eq!(s.query(), "");
+    assert_eq!(s.intent(Intent::Up).unwrap(), [Effect::RevealSelection]);
+    assert_eq!(s.selected(), 0);
+}
+
+#[test]
 fn dictionary_words_are_recalled_without_opening_dictionary() {
     let mut s = session();
     s.set_query("d ");
@@ -1134,7 +1440,7 @@ fn dictionary_words_are_recalled_without_opening_dictionary() {
     let effects = s.intent(Intent::Up).unwrap();
     assert_eq!(effects[0], Effect::ReplaceQuery("serendipity".into()));
     assert_eq!(searched(&effects[1..]).0, dictionary_command());
-    assert_eq!(s.history(), &History::default());
+    assert_eq!(&*s.history(), &History::default());
 }
 
 #[test]
@@ -1508,7 +1814,7 @@ fn rename_puts_the_name_in_the_field_with_its_stem_selected() {
     assert_eq!(renaming.name, "report.pdf");
     assert_eq!(renaming.layout_key(), s.layout_key(1));
     assert_eq!(s.query(), "report");
-    assert_eq!(s.history(), &history);
+    assert_eq!(*s.history(), history);
 }
 
 fn destination_session(transfer: Transfer, settled: bool) -> (Session, u64) {
@@ -1574,7 +1880,7 @@ fn cancelling_a_destination_restores_the_original_search_and_selection() {
     assert_eq!(s.results(), Results::Done);
     assert_eq!(s.items().len(), 2);
     assert_eq!(s.selected_item().unwrap().id, "/x/report.pdf");
-    assert_eq!(s.history(), &history);
+    assert_eq!(*s.history(), history);
 }
 
 #[test]

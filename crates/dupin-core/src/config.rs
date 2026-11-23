@@ -15,6 +15,7 @@ pub struct Config {
     /// Optional shortcut to search text selected in another app.
     pub selection_hotkey: String,
     pub bindings: BTreeMap<String, HotkeyTarget>,
+    pub show_recent: bool,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
     /// Directories to rank lower in file search. Relative names match directory components;
@@ -155,6 +156,7 @@ impl Default for Config {
             hotkey: "cmd+space".into(),
             selection_hotkey: String::new(),
             bindings: BTreeMap::new(),
+            show_recent: true,
             file_limit: 200,
             file_demotions: [
                 "~/Library",

@@ -666,12 +666,17 @@ fn hint(s: &Ui) -> Option<&str> {
             .then_some("No matching folders");
     }
     let presentation = &s.session.command().presentation;
-    if s.session.query().trim().is_empty() {
-        presentation.empty_hint.as_deref()
-    } else if s.session.results() == Results::Done && s.session.failures().next().is_none() {
-        presentation.no_results_hint.as_deref()
-    } else {
-        None
+    let empty = s.session.query().trim().is_empty();
+    match s.session.results() {
+        Results::Idle if empty => presentation.empty_hint.as_deref(),
+        Results::Done if s.session.failures().next().is_none() => {
+            if empty {
+                presentation.empty_hint.as_deref()
+            } else {
+                presentation.no_results_hint.as_deref()
+            }
+        }
+        _ => None,
     }
 }
 

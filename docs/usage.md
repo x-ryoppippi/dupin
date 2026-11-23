@@ -39,11 +39,16 @@ Dupin needs macOS Accessibility access for this shortcut. If access is missing, 
 
 Completed searches are remembered for the current Dupin process when you clear
 the input, hide the panel or activate a result. With an empty input, ↑ recalls the
-latest term in the current mode; further ↑ and ↓ walk through those terms and
+latest term in the current mode from the first row; further ↑ and ↓ walk through those terms and
 back to the empty input. Editing a recalled term restores normal result selection.
 This history holds up to 100 terms and is separate from app-ranking history.
 
 ## Apps
+
+With an empty query, Dupin shows up to ten apps and files from your usage history,
+ranked by how recently and how often you used them. These rows have the regular
+app and file actions. Turn off **Show recent items** in Settings → Search to keep
+the panel empty before typing.
 
 Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included). An app matches by any name macOS knows it by:
 

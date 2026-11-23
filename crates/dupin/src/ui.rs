@@ -444,7 +444,7 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
+        let registration = crate::commands::register(&config, apps_provider.clone(), history)
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -481,8 +481,9 @@ impl Ui {
                 )
             })
             .collect();
-        let sources = registration.registry.ids();
+        let sources = registration.session.command_ids();
         snapshots.update(move |s, _| s.set_sources(sources));
+        me.update(|s, tx| s.refresh_apps(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -496,8 +497,7 @@ impl Ui {
             running_hotkey_commands: Arc::default(),
             hotkey_commands: Arc::default(),
             acknowledged_config: config.clone(),
-            session: Session::new(history, registration.registry)
-                .expect("built-in command registration is valid"),
+            session: registration.session,
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
@@ -561,14 +561,23 @@ impl Ui {
         };
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
+        let recent_changed = config.show_recent
+            != self
+                .session
+                .provider_spec(&crate::commands::recent_id())
+                .is_some();
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
+        let empty = self.session.query().trim().is_empty();
         if self.session.command().result_limit != previous_limit
-            || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
+            || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
+            || (recent_changed && is_apps && empty)
         {
+            self.action_screen = None;
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
@@ -853,6 +862,9 @@ impl Ui {
         self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
+        if self.session.query().is_empty() {
+            self.refresh_apps(tx);
+        }
     }
 
     fn place_panel(&mut self) {
@@ -921,9 +933,12 @@ impl Ui {
             self.finish_pick(None, tx);
             return;
         }
+        if !self.shown {
+            return;
+        }
         let effects = self.session.reset();
-        self.apply(effects, tx);
         self.hide(tx);
+        self.apply(effects, tx);
     }
 
     fn prepare_settings(&mut self) {
@@ -1570,7 +1585,7 @@ impl Ui {
                         },
                     );
                 }
-                Effect::SaveHistory => self.saver.save(self.session.history()),
+                Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),

@@ -964,6 +964,13 @@ fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
 }
 
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {
+    let show_recent = !s.config.show_recent;
+    let recent = Switch::new(s.config.show_recent)
+        .label("Show recent items")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.show_recent = show_recent))
+        .build(k);
     let limit = menu_value(
         s,
         k,
@@ -972,13 +979,22 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
-    vec![setting(
-        k,
-        &icons::FILES,
-        "Files shown",
-        Some("The most files a Spotlight search lists"),
-        limit,
-    )]
+    vec![
+        setting(
+            k,
+            &icons::PANEL,
+            "Show recent items",
+            Some("Show recently and frequently used apps and files when the search is empty"),
+            recent,
+        ),
+        setting(
+            k,
+            &icons::FILES,
+            "Files shown",
+            Some("The most files a Spotlight search lists"),
+            limit,
+        ),
+    ]
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};

@@ -14,7 +14,9 @@ pub mod provider;
 pub mod searcher;
 pub mod session;
 
-pub use command::{CommandError, CommandId, CommandRegistry, CommandSpec, QueryPresentation};
+pub use command::{
+    CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,
+};
 pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
 pub use history::History;
 pub(crate) use item::ActionDisposition;
