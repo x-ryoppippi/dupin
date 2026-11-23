@@ -262,7 +262,7 @@ fn actions(actions: &[PluginAction]) -> Result<(), ProtocolError> {
                 context: carried,
             } => {
                 identifier(view, "effect.view")?;
-                bounded(title, 512, "effect.title")?;
+                printable(title, 512, "effect.title")?;
                 context(carried, "effect.context")?;
             }
         }
@@ -287,7 +287,10 @@ fn bounded(value: &str, cap: usize, field: &'static str) -> Result<(), ProtocolE
     }
 }
 fn identifier(value: &str, field: &'static str) -> Result<(), ProtocolError> {
-    bounded(value, 128, field)?;
+    printable(value, 128, field)
+}
+fn printable(value: &str, cap: usize, field: &'static str) -> Result<(), ProtocolError> {
+    bounded(value, cap, field)?;
     if value.chars().any(char::is_control) {
         return Err(ProtocolError::InvalidField(field));
     }
@@ -866,6 +869,10 @@ mod tests {
                 "effect.view",
             ),
             (json!({"kind": "push", "view": "a", "title": ""}), "effect.title"),
+            (
+                json!({"kind": "push", "view": "a", "title": "Two\nLines"}),
+                "effect.title",
+            ),
             (
                 json!({"kind": "push", "view": "a", "title": "T", "context": "x".repeat(MAX_CONTEXT_BYTES)}),
                 "effect.context",
