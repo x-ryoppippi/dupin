@@ -7,6 +7,7 @@
 
 use e2e-recording.nu record
 use e2e-state.nu is-focused-query
+use e2e-script-fixtures.nu [prepare-scripts cleanup-scripts script-processes-stopped]
 use e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
@@ -30,6 +31,9 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         error make {msg: $"not granted: ($denied.permission | str join ', ')"}
     }
 
+    if ($out | path join script-fixtures | path exists) or ($out | path join config dupin scripts | path exists) {
+        error make {msg: 'Script fixtures already exist'}
+    }
     if (viewer-running) {
         error make {msg: 'Cannot establish ownership of the file-action viewer'}
     }
@@ -49,12 +53,32 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     let config = $out | path join config
     mkdir ($config | path join dupin)
     "hotkey = \"alt+space\"\nbackdrop = \"flow\"\n" | save --force ($config | path join dupin config.toml)
+    try { prepare-scripts $out } catch {|failure|
+        try { cleanup-scripts $out }
+        try { cleanup $out }
+        error make $failure
+    }
     let log = $out | path join dupin.log
     let data = $out | path join data
     rm --recursive --force $data
     mkdir $data
+    let runtime = $out | path join runtime
+    mkdir $runtime
+    ^chmod 700 $runtime
+    let binary = $app | path join Contents MacOS dupin
+    let control = $out | path join cli dupin-control-e2e
+    mkdir ($control | path dirname)
+    # A waiting CLI inside the bundle shares the resident's AX application name.
+    cp $binary $control
+    ^chmod +x $control
     let dupin = job spawn {
-        with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: $data, DUPIN_TRACE: '1'} {
+        with-env {
+            XDG_CONFIG_HOME: $config
+            XDG_DATA_HOME: $data
+            XDG_RUNTIME_DIR: $runtime
+            DUPIN_TRACE: '1'
+            DUPIN_E2E_SCRIPT_OUT: ($out | path join script-fixtures)
+        } {
             ^($app | path join Contents MacOS dupin) o+e> $log
         }
     }
@@ -64,12 +88,26 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         # Dupin is running well before its on_ready callback registers the hotkey.
         wait-for-log $log 'dupin-trace: hotkey alt+space registered'
         snap $out launched
-        if $record { record $out { scenario $out } } else { scenario $out }
+        if $record {
+            record $out {
+                scenario $out
+                with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
+            }
+        } else {
+            scenario $out
+            with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
+        }
         null
     } catch {|error| $error }
 
     let stop_failure = try {
         job kill $dupin
+        null
+    } catch {|error|
+        $error
+    }
+    let script_cleanup_failure = try {
+        cleanup-scripts $out
         null
     } catch {|error|
         $error
@@ -82,17 +120,203 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     }
     if $failure != null { error make $failure }
     if $stop_failure != null { error make $stop_failure }
+    if $script_cleanup_failure != null { error make $script_cleanup_failure }
     if $cleanup_failure != null { error make $cleanup_failure }
     # A shader that fails falls back to the built-in one with a warning, which the
     # screenshots alone wouldn't show.
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: Quick Look restored the query; Calculator, Settings, Bluetooth, Open with… and confirmed Trash passed'
+    print 'e2e: Quick Look, Calculator, Settings, Bluetooth, Open with…, confirmed Trash, CLI picker, Snapshot controls and Script Commands passed'
+}
+
+def cli-stage [out: path, binary: path] {
+    let recording = $out | path join recording
+    if ($recording | path join started.json | path exists) {
+        let started = open ($recording | path join started.json) | into datetime
+        ((date now) - $started) / 1sec | to json | save --force ($recording | path join cli-start.json)
+    }
+    let log = $out | path join dupin.log
+    let archive = $out | path join data dupin snapshots archive.json
+    let history = $env.HOME | path join 'Library/Application Support/Dupin/history.json'
+    let before = file-proof $history
+    let archive_before = file-proof $archive
+    try {
+        let opened = ^$binary open --query calculator --json | from json
+        if $opened != null { error make {msg: 'CLI open returned unexpected data'} }
+        wait-for-log $log 'dupin-trace: control open ok=true'
+        (poll
+            $out
+            cli-open
+            {|r| is-focused-query $r calculator }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+        snap $out cli-open
+        let closed = log-count $log 'dupin-trace: panel closed '
+        ad $out cli-hide press escape | ignore
+        wait-for-log --after $closed $log 'dupin-trace: panel closed '
+
+        let selected_closed = log-count $log 'dupin-trace: panel closed '
+        job spawn { "red\nblue\n" | ^$binary pick --json | complete | job send 0 --tag 2 } | ignore
+        (poll
+            $out
+            cli-pick
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --native-id
+            pick-query
+            --first
+        ) | ignore
+        (poll
+            $out
+            cli-picker-panel
+            {|r| $r.ok and (
+                $r.data?.tree?.children?
+                | default []
+                | any {|window|
+                    let fits = $window.role == dialog and ($window.bounds?.height? | default 0) >= 168
+                    $fits and (mentions {data: $window} red) and (mentions {data: $window} blue)
+                }
+            ) }
+            snapshot
+            --app
+            Dupin
+            --include-bounds
+        ) | ignore
+        snap $out cli-pick
+        ^osascript -e 'tell application "System Events"
+            key code 125
+            key code 36
+        end tell'
+        let selected = job recv --tag 2 --timeout 20sec
+        $selected | to json | save ($out | path join cli-picked.json)
+        if $selected.exit_code != 0 or ($selected.stdout | from json) != blue {
+            error make {msg: 'CLI picker did not return the original blue value'}
+        }
+        wait-for-log $log 'dupin-trace: control pick ok=true'
+        wait-for-log --after $selected_closed $log 'dupin-trace: panel closed '
+        let closed = log-count $log 'dupin-trace: panel closed '
+        job spawn { "red\nblue\n" | ^$binary pick --json | complete | job send 0 --tag 3 } | ignore
+        (poll
+            $out
+            cli-cancel-field
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --native-id
+            pick-query
+            --first
+        ) | ignore
+        ad $out cli-cancel press escape | ignore
+        let result = job recv --tag 3 --timeout 20sec
+        $result | to json | save ($out | path join cli-cancelled.json)
+        if $result.exit_code != 1 or ($result.stdout | from json).error != Cancelled {
+            error make {msg: 'CLI picker cancellation did not return Cancelled'}
+        }
+        wait-for-log --after $closed $log 'dupin-trace: panel closed '
+        (poll
+            $out
+            cli-hidden
+            {|r| $r.ok and $r.data?.match? == null }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+
+        let listed = ^$binary snapshots list --json | from json
+        $listed | to json | save ($out | path join cli-snapshots.json)
+        if ($listed.entries | length) != 1 or $listed.truncated {
+            error make {msg: 'CLI Snapshot list did not return the saved fixture'}
+        }
+        if ($listed.entries.0 | columns | sort) != ([id mode query saved_at title] | sort) {
+            error make {msg: 'CLI Snapshot list exposed unexpected fields'}
+        }
+        let id = $listed.entries.0.id
+        let opened = ^$binary snapshots open --id $id --json | from json
+        if $opened != null { error make {msg: 'CLI Snapshot open returned unexpected data'} }
+        poll $out cli-snapshot-window {|r| $r.ok and (
+            $r.data?
+            | default []
+            | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
+        ) } list-windows --app Dupin | ignore
+        (poll
+            $out
+            cli-snapshot-field
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --name
+            'Search saved snapshots'
+            --exact
+            --first
+        ) | ignore
+        snap $out cli-snapshots-open
+        let closed = ^$binary snapshots close --json | from json
+        if $closed != null { error make {msg: 'CLI Snapshot close returned unexpected data'} }
+        (poll
+            $out
+            cli-snapshot-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        let panel_closed = log-count $log 'dupin-trace: panel closed '
+        ^$binary open --query calculator --json | from json | ignore
+        (poll
+            $out
+            cli-before-snapshot-handoff
+            {|r| is-focused-query $r calculator }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+        ^$binary snapshots open --id $id --json | from json | ignore
+        ^$binary snapshots close --json | from json | ignore
+        wait-for-log --after $panel_closed $log 'dupin-trace: panel closed '
+        (poll
+            $out
+            cli-snapshot-handoff-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
+            error make {msg: 'CLI controls changed the Snapshot archive or launch history'}
+        }
+        {
+            archive_before: $archive_before
+            archive_after: (file-proof $archive)
+            history_before: $before
+            history_after: (file-proof $history)
+        } | to json | save ($out | path join cli-storage-proof.json)
+    } catch {|failure|
+        try { snap $out cli-failure }
+        error make $failure
+    }
 }
 
 def scenario [out: path] {
     let log = $out | path join dupin.log
+    close-startup-welcome $out
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
@@ -314,6 +538,306 @@ def scenario [out: path] {
 
     system-pane $out $focused $found
     file-actions-stage $out $found
+    scripts-stage $out
+}
+
+def type-script-text [value: string] {
+    ^osascript -e 'on run argv
+        tell application "System Events"
+            repeat with typedKey in characters of (item 1 of argv)
+                keystroke (typedKey as text)
+                delay 0.12
+            end repeat
+        end tell
+    end run' $value
+}
+
+def script-query [out: path, title: string] {
+    ad $out $'($title)-summon' press alt+space | ignore
+    (poll
+        $out
+        $'($title)-empty'
+        {|r| is-focused-query $r '' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --name
+        'Search apps'
+        --exact
+        --first
+    ) | ignore
+    let stale = (ad
+        $out
+        $'($title)-stale-card'
+        find
+        --app
+        Dupin
+        --name
+        '↵ Copy · ⌘O Full output'
+        --exact
+        --first
+    )
+    if $stale.data?.match? != null { error make {msg: 'Launcher reopened with an old script card'} }
+    type-script-text $title
+    (poll
+        $out
+        $'($title)-query'
+        {|r| is-focused-query $r $title }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --name
+        'Search apps'
+        --exact
+        --first
+    ) | ignore
+    (poll
+        $out
+        $'($title)-result'
+        {|r| $r.ok and $r.data?.match? != null }
+        find
+        --app
+        Dupin
+        --name
+        $title
+        --exact
+        --first
+    ) | ignore
+}
+
+def scripts-stage [out: path] {
+    let log = $out | path join dupin.log
+    let scripts = $out | path join config dupin scripts
+    let extra = $scripts | path join refresh-fixture
+    let echo_searched = 'dupin-trace: results done query="E2E script echo"'
+    let focused = {|r| $r.ok and (
+        $r.data?
+        | default []
+        | any {|w| $w.title == 'Dupin Script Output' and $w.is_focused }
+    ) }
+    let found = {|r| $r.ok and $r.data?.match? != null }
+    try {
+        (poll
+            $out
+            scripts-panel-hidden
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.is_focused }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        script-query $out 'E2E script echo'
+        ad $out scripts-arguments press tab | ignore
+        (poll
+            $out
+            scripts-argument-field
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --name
+            'Script arguments'
+            --exact
+            --first
+        ) | ignore
+        let arguments = "first '$HOME' '*.rs'"
+        type-script-text $arguments
+        wait-for-log $log $echo_searched
+        let before_argument_refresh = log-count $log $echo_searched
+        cp ($scripts | path join failure) $extra
+        ^chmod 700 $extra
+        wait-for-log --after $before_argument_refresh $log $echo_searched
+        (poll
+            $out
+            scripts-arguments-value
+            {|r| is-focused-query $r $arguments }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --name
+            'Script arguments'
+            --exact
+            --first
+        ) | ignore
+        snap $out scripts-arguments
+        ad $out scripts-submit press return | ignore
+        (poll
+            $out
+            scripts-inline
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'first | $HOME | *.rs'
+            --exact
+            --first
+        ) | ignore
+        let argv = open ($out | path join script-fixtures argv.json)
+        if $argv != [first '$HOME' '*.rs'] { error make {msg: 'Script arguments were expanded or changed'} }
+        let before_card_refresh = log-count $log $echo_searched
+        rm $extra
+        wait-for-log --after $before_card_refresh $log $echo_searched
+        (poll
+            $out
+            scripts-inline-finished
+            {|r| $r.ok and (($r.data?.match?.name? | default '') =~ '^Finished · [0-9]+\.[0-9] s$') }
+            find
+            --app
+            Dupin
+            --role
+            statictext
+            --name
+            'Finished ·'
+            --first
+        ) | ignore
+        snap $out scripts-inline
+        let closed = log-count $log 'dupin-trace: panel closed '
+        'Dupin E2E clipboard baseline' | ^pbcopy
+        ad $out scripts-inline-copy press return | ignore
+        wait-for-log --after $closed $log 'dupin-trace: panel closed '
+        let copied = ^pbpaste
+        $copied | save ($out | path join scripts-inline-copied.txt)
+        if $copied != 'first | $HOME | *.rs' { error make {msg: 'Inline Enter did not copy the script result'} }
+
+        script-query $out 'E2E script stream'
+        ad $out scripts-stream-start press return | ignore
+        (poll
+            $out
+            scripts-output-window
+            $focused
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        (poll
+            $out
+            scripts-stream-line
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'Stream line 3'
+            --exact
+            --first
+        ) | ignore
+        (poll
+            $out
+            scripts-still-running
+            $found
+            find
+            --app
+            Dupin
+            --name
+            Running
+            --exact
+            --first
+        ) | ignore
+        snap $out scripts-streaming
+        ad $out scripts-cancel press cmd+. | ignore
+        (poll
+            $out
+            scripts-cancelled
+            $found
+            find
+            --app
+            Dupin
+            --name
+            Cancelled
+            --exact
+            --first
+        ) | ignore
+        wait-condition 'script fixture process group exit' { script-processes-stopped $out }
+        snap $out scripts-cancelled
+        let echo = (poll
+            $out
+            scripts-echo-in-history
+            {|r| $r.ok and $r.data?.match?.ref_id? != null }
+            find --app Dupin --role button --name 'E2E script echo Finished' --exact --first
+        )
+        ad $out scripts-select-echo click $echo.data.match.ref_id | ignore
+        ad $out scripts-repeat-echo press cmd+r | ignore
+        (poll
+            $out
+            scripts-repeated-echo-selected
+            $found
+            find --app Dupin --name 'Repeated echo' --exact --first
+        ) | ignore
+        ad $out scripts-output-close press cmd+w | ignore
+        (poll
+            $out
+            scripts-output-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Script Output' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+
+        script-query $out 'E2E script failure'
+        ad $out scripts-failure-start press return | ignore
+        (poll
+            $out
+            scripts-failure-window
+            $focused
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        (poll
+            $out
+            scripts-failure-status
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'Exited with code 3'
+            --exact
+            --first
+        ) | ignore
+        (poll
+            $out
+            scripts-failure-stderr
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'stderr: E2E script failed deliberately'
+            --exact
+            --first
+        ) | ignore
+        snap $out scripts-failure
+        ad $out scripts-failure-close press cmd+w | ignore
+    } catch {|failure|
+        try { snap $out scripts-failure-evidence }
+        error make $failure
+    }
+}
+
+def close-startup-welcome [out: path] {
+    let settings_closed = {|r| $r.ok and not ($r.data | any {|w| $w.title == 'Dupin Settings' }) }
+    let windows = ad $out startup-windows list-windows --app Dupin
+    if not $windows.ok { error make {msg: 'Could not inspect Dupin startup windows'} }
+    if (do $settings_closed $windows) { return }
+
+    let close = (poll
+        $out
+        welcome-close-button
+        {|r| $r.ok and $r.data?.match?.ref_id? != null }
+        find --app Dupin --role button --name Close --exact --first
+    )
+    let clicked = ad $out welcome-close click $close.data.match.ref_id
+    if not $clicked.ok { error make {msg: 'Could not close the startup welcome'} }
+    poll $out welcome-closed $settings_closed list-windows --app Dupin | ignore
 }
 
 def file-actions-stage [out: path, found: closure] {

@@ -1,6 +1,8 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Executable [script commands](./scripts.md) live beside the configuration in the `scripts` directory. Their headers define their titles, arguments and output mode; no `config.toml` key is required.
+
+Settings (⌘, in the panel) changes the hotkeys, where the panel opens, the input source, how many files a search shows, whether clipboard history is kept, whether Enter pastes snippets and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
 
@@ -8,26 +10,94 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
+selection_hotkey = "" # optional shortcut for searching selected text
+show_recent = true # show recently and frequently used apps and files before typing
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
+display = "mouse" # "mouse", "main", or "active"
+snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets
+snippet_paste = false # whether Enter on a snippet also pastes it into the front app
+window_management = false # show commands to move and resize windows in normal search
+calculator = true # show calculations and unit conversions in app search
+calculator_currency = false # allow downloading exchange rates when Calculator is on
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
+system_automation = false # show Restart, Shut Down, Log Out and Empty Trash, which send Apple events
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
-At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
+At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the panel shortcut.
+
+Leave `selection_hotkey` empty to keep selected-text search off. To enable it, record a **Selection hotkey** in Settings → General or set `selection_hotkey`. Dupin requests Accessibility access on the first press that needs it.
+
+Set `show_recent = false` or turn off **Show recent items** in Settings → Search to keep the launcher empty before typing.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
+Turn on **Calendar search** in Settings → Search, or set `enabled = true` in `[calendar]`. This reserves the `cal` keyword. Dupin asks for Calendar access when you first use the command in the packaged app. Turning the setting off removes the command immediately.
+
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+Set `calculator = false` or turn off **Calculator** in Settings → Search to hide calculator results. Changes apply immediately.
+
+In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
+
+## Launch at login
+
+In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
+
+## Hotkeys
+
+Add a table to `config.toml` for each shortcut. An app binding uses the app's macOS bundle identifier.
+
+```toml
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+hide_if_frontmost = true # optional, defaults to false
+```
+
+A command binding runs a shell command line.
+
+```toml
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+```
+
+Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
+
+Commands run until they exit or Dupin quits or relaunches. Automatic updates can restart Dupin while commands are running. If all four slots are in use, wait for a command to finish or quit and reopen Dupin to clear the slots. A background job can keep running after its shell exits, which frees the command slot. Redirect that job's standard error if it needs to keep writing after Dupin quits.
+
+A [script binding](./scripts.md#hotkeys) uses the executable's filename, including its extension, and can pass an array of arguments.
+
+```toml
+[bindings."alt+cmd+t"]
+target = "script"
+script = "echo-message.sh"
+args = ["Hello from Dupin"]
+```
+
+Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel. If the script is missing, unavailable or its arguments are invalid, Dupin skips that binding and applies the rest of the configuration. Fixing the script or binding makes the shortcut available automatically.
+
+Turn on **Currency conversion** in Settings → Search to convert currencies in
+app search. Try `100 USD to JPY`, `€50 in GBP` or `10 GBP` (which converts to EUR).
+Dupin checks the European Central Bank's public reference feed in the background
+at most once every 12 hours. The request contains no search text. The calculator
+uses the last good rates offline and shows their observation date. It labels
+rates as cached if they have not been refreshed in the past 12 hours.
+Rates are stored in `~/Library/Caches/Dupin/calculator`, or in
+`$XDG_CACHE_HOME/dupin/calculator` when that variable is set.
 
 ## Web searches
 
-The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.
+The default keywords are `g` (Google), `gh` (GitHub), `maps` (Apple Maps) and `yt` (YouTube). An explicit `web_searches` table replaces the defaults. Add the Maps entry below to use it with a custom table, or set `web_searches = {}` to disable all web searches.
+
+Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. The exact template `maps://?q={query}` opens Apple Maps directly. Dupin encodes the text as UTF-8 URL data. Templates cannot contain credentials or put the placeholder in the origin.
 
 ```toml
 web_fallbacks = ["gh"]
@@ -36,18 +106,80 @@ web_fallbacks = ["gh"]
 name = "GitHub"
 url = "https://github.com/search?q={query}"
 
+[web_searches.maps]
+name = "Apple Maps"
+url = "maps://?q={query}"
+
 [web_searches.docs]
 name = "Rust documentation"
 url = "https://doc.rust-lang.org/std/?search={query}"
 ```
 
-Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in`, configured Dictionary aliases and snippet aliases such as the default `snip` take precedence over web searches. `cal` and `clip` also take precedence when Calendar search and clipboard history are enabled, respectively. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+
+## Snippets
+
+Each entry under `snippets` is keyed by a short keyword and holds the text to copy, with an optional display name. Type `snip`, then Space, to list and search them (see [usage](./usage.md#snippets)); `snippet_keywords` sets other aliases under the same rules as `dictionary_keywords`.
+
+```toml
+[snippets.sig]
+name = "Email signature"
+text = """
+Best wishes,
+Sherlock"""
+
+[snippets.stamp]
+text = "Checked on {datetime}"
+
+[snippets.quote]
+name = "Quote the clipboard"
+text = "> {clipboard}"
+```
+
+Placeholders are filled in when the snippet is used, not when it is listed:
+
+| Placeholder   | Becomes                                             |
+| ------------- | --------------------------------------------------- |
+| `{date}`      | The local date, as `2026-01-31`                     |
+| `{time}`      | The local time on a 24-hour clock, as `09:05`       |
+| `{datetime}`  | Both, as `2026-01-31 09:05`                         |
+| `{clipboard}` | The clipboard's text, or nothing when it holds none |
+
+Any other braces are ordinary text, so code snippets need no escaping. Dupin reads the clipboard only when the snippet uses `{clipboard}`.
+
+Keywords are case-sensitive, up to 32 bytes, without spaces. Names are up to 80 characters; text is required and up to 64 KiB. Invalid snippets are skipped with a notice in the panel; the rest still work. Edits apply live, including to an open snippet search.
+
+Enter copies a snippet's text to the clipboard and closes the panel. With `snippet_paste = true`, or Paste snippets turned on in Settings → Search, Enter also pastes it into the app you were using by pressing ⌘V for you, and ⌘Enter only copies. Pressing keys in another app needs Accessibility access. Turning the setting on does not ask for it, and neither does starting Dupin or opening Settings. The first paste without access since Dupin started asks macOS, which prompts only until you have answered, and copies the text instead. If access is still missing on a later paste, Dupin copies the text and explains in the panel rather than asking again. Settings → Search then shows an Open button for System Settings → Privacy & Security → Accessibility.
 
 ## File ranking
 
 File-name search gathers up to four times `file_limit` candidates, ranks them, then applies the display limit. Both limits are capped at 10,000; zero displays no results. Better candidates can replace early results while the search runs. Selecting a row or opening its actions keeps that file available even if it falls below the normal display cut.
 
 `file_demotions` lowers the rank of noisy directories without excluding them. Absolute paths and `~/` paths match directory prefixes; relative entries match directory-component sequences, ignoring case. Entries do not match file names, and an empty list disables these demotions. Edits reload automatically and refresh an active file-name search. Content search keeps Spotlight's order and does not use these rules.
+
+## Clipboard history
+
+Clipboard history is off by default because it records what you copy. Turn it on with the switch in Settings → Search, or in `config.toml`:
+
+```toml
+[clipboard]
+enabled = false # keep text and files copied while Dupin runs, searchable with `clip`
+max_entries = 200 # 1 to 1000; the oldest entry goes first
+max_entry_bytes = 65536 # 1024 to 1048576; larger copies are skipped, never truncated
+ignored_apps = [
+	"com.apple.keychainaccess",
+	"com.apple.Passwords",
+	"com.1password.1password",
+	"com.agilebits.onepassword7",
+	"com.bitwarden.desktop",
+]
+```
+
+While it is on, Dupin checks the clipboard's change count twice a second on a background thread and records each new copy: plain text, or the files copied in Finder. Images and rich text are not recorded yet. Copies already on the clipboard when the history is turned on are not recorded. Copying something already in the history moves it to the top.
+
+Copies that password managers and other apps mark as concealed, transient or auto-generated ([nspasteboard.org](http://nspasteboard.org) types) are never read. Nor are copies that name an app in `ignored_apps` as their source, or that land while such an app is frontmost: Dupin checks the apps frontmost at the polls just before and just after a copy, so switching apps several times within half a second can slip past it. Rely on the concealed marker, which password managers set, for secrets. Setting `ignored_apps` replaces the defaults; find an app's identifier with `osascript -e 'id of app "Name"'`.
+
+The history lives only in Dupin's memory. It is never written to disk, included in snapshots or logged, and it is gone when Dupin quits. Turning it off stops watching and forgets every entry at once. On macOS versions that report the pasteboard access policy, background recording requires **Always Allow**. Under the default policy, `clip` offers a one-time clipboard read so macOS can prompt and list Dupin in System Settings. If macOS is set to ask or deny, the row opens Privacy & Security, where you can always allow Dupin to paste from other apps.
 
 ## Updates
 

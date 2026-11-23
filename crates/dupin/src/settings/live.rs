@@ -283,7 +283,7 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow(requested.paths.clone(), move |rebuild| {
+        match PathWatcher::start_shallow_with_file(requested.paths.clone(), path.clone(), move |rebuild| {
             let _ = sender.send(Job::Changed { rebuild });
         }) {
             Ok(watcher) => {
@@ -425,16 +425,7 @@ fn parse_problem(source: &str, error: &toml::de::Error) -> String {
     let Some(span) = error.span() else {
         return "config.toml is invalid (location unavailable)".into();
     };
-    let mut start = span.start.min(source.len());
-    while !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let prefix = &source[..start];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let column = prefix
-        .rsplit('\n')
-        .next()
-        .map_or(1, |line| line.chars().count() + 1);
+    let (line, column) = super::location(source, span.start);
     format!("config.toml is invalid at line {line}, column {column}")
 }
 
@@ -496,6 +487,39 @@ mod tests {
                 return update;
             }
         }
+    }
+
+    #[test]
+    fn reload_and_settings_save_keep_a_missing_script_binding() {
+        let root = TempDir::new();
+        let config_path = root.path().join("config.toml");
+        let source = r#"
+file_limit = 37
+[bindings."alt+cmd+t"]
+target = "script"
+script = "missing.sh"
+"#;
+        fs::write(&config_path, source).unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(Some(config_path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
+        send_changed(&service);
+        let config = Config::parse(source).unwrap();
+        assert_eq!(receive_revision(&receiver, 0).result.unwrap(), config);
+
+        let desired = Config {
+            file_limit: 58,
+            ..config.clone()
+        };
+        let revision = service.save(&config, &desired).unwrap();
+        let saved = receive_revision(&receiver, revision);
+        assert!(saved.save_problem.is_none());
+        assert_eq!(saved.result.unwrap(), desired);
+        assert_eq!(
+            Config::parse(&fs::read_to_string(config_path).unwrap()).unwrap(),
+            desired
+        );
     }
 
     #[test]
@@ -1053,14 +1077,19 @@ mod tests {
         let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
 
         service.activate();
-        let initial = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let initial = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not start");
+        assert!(initial.watch_problem.is_none(), "{:?}", initial.watch_problem);
         assert_eq!(initial.result.unwrap().position, dupin_core::Position::Center);
 
         fs::write(&path, "position = \"top\"").unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let changed = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let update = receiver.recv_timeout(remaining).unwrap();
+            let update = receiver
+                .recv_timeout(remaining)
+                .expect("settings watcher did not reload");
             if update
                 .result
                 .as_ref()
@@ -1076,6 +1105,8 @@ mod tests {
             drop(service);
             let _ = done.send(());
         });
-        stopped.recv_timeout(Duration::from_secs(5)).unwrap();
+        stopped
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not shut down");
     }
 }
