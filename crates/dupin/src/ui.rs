@@ -509,9 +509,16 @@ impl Ui {
             return;
         };
         let (me, epoch) = (self.me.clone(), self.extensions.epoch);
-        self.extensions.watch = Some(crate::extensions::watch(directory, move |catalog| {
+        match crate::extensions::watch(directory, move |catalog| {
             me.update(move |s, tx| s.extensions_scanned(epoch, catalog, tx));
-        }));
+        }) {
+            Ok(watch) => self.extensions.watch = Some(watch),
+            Err(error) => {
+                let problem = format!("Couldn't start the extension scanner: {error}");
+                crate::log::warn(&problem);
+                self.extensions.scan_problems.push(problem);
+            }
+        }
     }
 
     fn extensions_scanned(&mut self, epoch: u64, catalog: crate::extensions::Catalog, tx: &mut Tx) {
