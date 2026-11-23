@@ -349,17 +349,21 @@ impl Session {
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    /// Replace the command registry, returning effects if the active command disappears.
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
-        for search in std::iter::once(&self.search)
-            .chain(self.destination.iter().map(|destination| &destination.original))
+        if commands.contains(&self.search.command)
+            && self
+                .destination
+                .as_ref()
+                .is_none_or(|destination| commands.contains(&destination.original.command))
         {
-            if !commands.contains(&search.command) {
-                return Err(crate::CommandError::ActiveCommandRemoved(search.command.clone()));
-            }
+            self.commands = commands;
+            return Ok(Vec::new());
         }
-        self.commands = commands;
-        Ok(())
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.reset_to_default(Some(commands)));
+        Ok(effects)
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -379,6 +383,9 @@ impl Session {
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
         if self.destination.is_some() {
             return Err("Finish choosing a destination before saving.".into());
+        }
+        if self.command().private_results {
+            return Err("This search cannot be saved as a snapshot.".into());
         }
         if self.search.results != Results::Done || self.search.items.is_empty() {
             return Err("Wait for the current search to finish before saving.".into());
@@ -406,7 +413,11 @@ impl Session {
     pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
         saved.validate()?;
         let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
-        if !self.commands.contains(&command) {
+        if self
+            .commands
+            .command(&command)
+            .is_none_or(|spec| spec.private_results)
+        {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
         self.clear_results();
@@ -676,9 +687,6 @@ impl Session {
         {
             self.search.deleting = false;
             self.search.before_deletion = None;
-            self.search.items.clear();
-            self.search.origins.clear();
-            self.search.selected = 0;
             self.search.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.search.query.clone())];
             effects.extend(self.switch(command, true));
@@ -951,7 +959,7 @@ impl Session {
     }
 
     #[cfg(test)]
-    pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
+    fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.search.command.clone(), delivery)
     }
     pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {
@@ -1111,11 +1119,18 @@ impl Session {
 
     /// Back to an empty default-command search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
+        self.reset_to_default(None)
+    }
+
+    fn reset_to_default(&mut self, commands: Option<CommandRegistry>) -> Vec<Effect> {
         let was_searching = matches!(self.search.results, Results::Searching { .. });
         if let Some(destination) = self.destination.take() {
             self.search = destination.original;
         }
         self.remember_query(false);
+        if let Some(commands) = commands {
+            self.commands = commands;
+        }
         self.renaming = None;
         self.search = SearchState::new(self.commands.default().clone(), false);
         let effects = self.search();
@@ -1148,6 +1163,9 @@ impl Session {
     }
 
     fn record_query(&mut self, query: String) {
+        if self.command().private_results {
+            return;
+        }
         let previous = self
             .queries
             .iter()

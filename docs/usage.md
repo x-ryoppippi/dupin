@@ -106,6 +106,14 @@ Typing a query sends no network request. Dupin encodes the query into the URL wh
 
 Set `web_searches` and optional `web_fallbacks` in [configuration](./configuration.md). Fallback searches appear only after ordinary providers finish without results. They are disabled by default. File and Dictionary modes keep their own providers.
 
+## Calendar
+
+Enable **Calendar search** in Settings → Search. Type `cal` followed by Space for up to 30 events over the next seven days. To search from 30 days ago to 90 days ahead, type words from the title or location in any order. Each row shows the calendar and the event time in the Mac's local time zone. All-day events show their dates and an “All day” label.
+
+The first search may ask for Full Access to Calendars. If access is missing, select the permission row to open System Settings → Privacy & Security → Calendars. Invoke `cal` again after granting access there. Calendar results stay out of Snapshots and search history.
+
+Press Enter to open the original event in Calendar. Dupin uses an undocumented Calendar link. If Calendar cannot resolve an event or recurring occurrence, it may open without selecting it.
+
 ## Files
 
 Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).

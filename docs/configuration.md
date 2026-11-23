@@ -30,6 +30,8 @@ Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaul
 
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
+Turn on **Calendar search** in Settings → Search, or set `enabled = true` in `[calendar]`. This reserves the `cal` keyword. Dupin asks for Calendar access when you first use the command in the packaged app. Turning the setting off removes the command immediately.
+
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 
 In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.

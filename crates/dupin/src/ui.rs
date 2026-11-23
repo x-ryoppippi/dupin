@@ -444,7 +444,20 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone(), history)
+        let calendar = if rune::tooling::is_headless() {
+            dupin_mac::CalendarProvider::fixtures()
+        } else {
+            let panel = me.clone();
+            dupin_mac::CalendarProvider::new(move || {
+                panel.update(|ui, tx| {
+                    if ui.session.command_id().as_str() == crate::commands::CALENDAR {
+                        let effects = ui.session.refresh();
+                        ui.apply(effects, tx);
+                    }
+                });
+            })
+        };
+        let registration = crate::commands::register(&config, apps_provider.clone(), history, calendar)
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -566,13 +579,16 @@ impl Ui {
                 .session
                 .provider_spec(&crate::commands::recent_id())
                 .is_some();
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
         let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
         let empty = self.session.query().trim().is_empty();
-        if self.session.command().result_limit != previous_limit
+        if !effects.is_empty() {
+            self.apply(effects, tx);
+        } else if self.session.command().result_limit != previous_limit
             || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (recent_changed && is_apps && empty)
@@ -1013,9 +1029,11 @@ impl Ui {
             return;
         }
         self.action_screen = None;
-        crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
         let effects = self.session.set_query(&self.query.text);
+        if !self.session.command().private_results {
+            crate::trace::edited(&self.query.text);
+        }
         self.apply(effects, tx);
     }
 
@@ -1133,7 +1151,9 @@ impl Ui {
             self.show_snapshots(tx);
             return true;
         }
-        crate::trace::key(ev);
+        if !self.session.command().private_results {
+            crate::trace::key(ev);
+        }
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
         }
@@ -1421,7 +1441,9 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
-            if self.session.results() == dupin_core::session::Results::Done {
+            if self.session.results() == dupin_core::session::Results::Done
+                && !self.session.command().private_results
+            {
                 crate::trace::results_done(&self.query.text, self.session.items().len());
             }
             if self
@@ -1502,7 +1524,14 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
+                Effect::ClearQuery => {
+                    self.action_screen = None;
+                    if let Some(picker) = &mut self.picker {
+                        picker.original.clear();
+                    } else {
+                        self.query.clear();
+                    }
+                }
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SelectQuery(range) => {
                     tx.focus("query", false);
@@ -1759,7 +1788,10 @@ impl Ui {
                 }
                 let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
                 changed |= delivered;
-                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                if delivered
+                    && self.session.results() == dupin_core::session::Results::Done
+                    && !self.session.command().private_results
+                {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
             }

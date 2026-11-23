@@ -38,6 +38,13 @@ pub struct Config {
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     pub theme: Theme,
+    pub calendar: Calendar,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Calendar {
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -208,6 +215,7 @@ impl Default for Config {
             auto_update: true,
             backdrop: Backdrop::Off,
             theme: Theme::default(),
+            calendar: Calendar::default(),
         }
     }
 }

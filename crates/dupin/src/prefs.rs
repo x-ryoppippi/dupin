@@ -263,8 +263,6 @@ impl Prefs {
         }
     }
 
-    /// Settings' state is made at launch, so reading only for the page keeps EventKit
-    /// unloaded until someone looks.
     pub fn refresh_permissions(&mut self) {
         if self.welcome.is_none() && self.page == Page::Permissions {
             self.permissions = permissions::read();
@@ -979,6 +977,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
+    let calendar_enabled = !s.config.calendar.enabled;
+    let calendar = Switch::new(s.config.calendar.enabled)
+        .label("Calendar search")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar.enabled = calendar_enabled))
+        .build(k);
     vec![
         setting(
             k,
@@ -993,6 +998,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
             "Files shown",
             Some("The most files a Spotlight search lists"),
             limit,
+        ),
+        setting(
+            k,
+            &icons::SEARCH,
+            "Calendar search",
+            Some("Type cal then Space to search events"),
+            calendar,
         ),
     ]
 }

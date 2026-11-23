@@ -18,12 +18,17 @@ objc2-foundation = { workspace = true, features = [
 	"std",
 	"NSArray",
 	"NSBundle",
+	"NSCalendar",
 	"NSDate",
+	"NSDateFormatter",
+	"NSDateIntervalFormatter",
 	"NSDictionary",
 	"NSEnumerator",
 	"NSError",
 	"NSFileManager",
+	"NSFormatter",
 	"NSGeometry",
+	"NSLocale",
 	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
@@ -33,6 +38,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSPredicate",
 	"NSRunLoop",
 	"NSString",
+	"NSTimeZone",
 	"NSURL",
 	"NSUserDefaults",
 	"NSValue",
@@ -52,6 +58,16 @@ objc2-app-kit = { workspace = true, features = [
 	"libc",
 ] }
 objc2-quick-look-ui = { workspace = true }
+objc2-event-kit = { version = "0.3", default-features = false, features = [
+	"std",
+	"block2",
+	"EKCalendar",
+	"EKCalendarItem",
+	"EKEvent",
+	"EKEventStore",
+	"EKObject",
+	"EKTypes",
+] }
 objc2-service-management = { workspace = true, features = [
 	"objc2",
 	"objc2-foundation",

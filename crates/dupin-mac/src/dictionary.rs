@@ -88,16 +88,7 @@ fn item(term: &str, definition: String) -> Item {
 }
 
 fn dictionary_url(term: &str) -> String {
-    let mut url = String::from("dict://");
-    for byte in term.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            url.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(url, "%{byte:02X}").expect("writing to a String cannot fail");
-        }
-    }
-    url
+    format!("dict://{}", crate::workspace::encode_url_component(term))
 }
 
 #[cfg(test)]

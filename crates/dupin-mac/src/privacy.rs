@@ -2,9 +2,7 @@
 //! read without prompting, and the System Settings pane that changes it. Asking for access
 //! belongs to the feature that needs it, when it is used (#12), never to this module.
 
-use objc2::msg_send;
-use objc2::runtime::AnyClass;
-use objc2_foundation::{NSBundle, NSString};
+use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEventStore};
 
 use crate::accessibility;
 
@@ -46,11 +44,11 @@ impl Permission {
         match self {
             Permission::Accessibility if accessibility::is_trusted() => Access::Allowed,
             Permission::Accessibility => Access::NotAllowed,
-            Permission::Calendars => calendars(),
+            Permission::Calendars => calendar_access(calendar_authorization().0),
         }
     }
 
-    fn settings_url(self) -> &'static str {
+    pub(crate) fn settings_url(self) -> &'static str {
         match self {
             Permission::Accessibility => accessibility::SETTINGS_URL,
             Permission::Calendars => CALENDARS_SETTINGS_URL,
@@ -63,25 +61,9 @@ impl Permission {
     }
 }
 
-/// EventKit is loaded on first use rather than linked, so a launch that never looks at
-/// Calendars doesn't load it.
-fn calendars() -> Access {
-    let class = AnyClass::get(c"EKEventStore").or_else(|| {
-        NSBundle::bundleWithPath(&NSString::from_str(
-            "/System/Library/Frameworks/EventKit.framework",
-        ))
-        // SAFETY: A system framework, loaded only for its Objective-C classes.
-        .filter(|bundle| unsafe { bundle.load() })
-        .and_then(|_| AnyClass::get(c"EKEventStore"))
-    });
-    let Some(class) = class else {
-        return Access::Unknown;
-    };
-    const EK_ENTITY_TYPE_EVENT: usize = 0;
-    // SAFETY: `+[EKEventStore authorizationStatusForEntityType:]` takes an `EKEntityType`
-    // (NSUInteger) and returns an `EKAuthorizationStatus` (NSInteger); it only reads the status.
-    let raw: isize = unsafe { msg_send![class, authorizationStatusForEntityType: EK_ENTITY_TYPE_EVENT] };
-    calendar_access(raw)
+pub(crate) fn calendar_authorization() -> EKAuthorizationStatus {
+    // SAFETY: This status query neither requests access nor reads calendar events.
+    unsafe { EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) }
 }
 
 /// `EKAuthorizationStatus`; macOS 14 renamed `authorized` (3) to `fullAccess` and added

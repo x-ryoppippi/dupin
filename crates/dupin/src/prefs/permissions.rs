@@ -23,7 +23,7 @@ pub(super) const ENTRIES: &[Entry] = &[
     },
     Entry {
         permission: Permission::Calendars,
-        used_by: &[],
+        used_by: &["calendar search"],
     },
 ];
 
