@@ -1,0 +1,8 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": " " },
+		{ "t": 0.3, "type": "type", "text": "readme" },
+		{ "t": 3.0, "type": "key", "name": "k", "cmd": true },
+		{ "t": 3.8, "type": "mark", "name": "end" }
+	]
+}

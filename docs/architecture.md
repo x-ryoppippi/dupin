@@ -14,6 +14,8 @@ Registered routes and shared internal views advance the plugin migration. Native
 
 ## Searching off the main thread
 
+Trusted [script commands](./scripts.md) use a separate native execution path. Discovery only reads bounded headers; activation runs the executable directly on a worker with bounded output and an owned process group. The lifecycle lock serializes spawning and group registration with synchronous quit cleanup. Script operations are absent from the guest protocol.
+
 Each provider runs on its own long-lived thread behind a `Searcher`. The newest request wins: queued requests never start, a running one sees `Request::is_cancelled`, and its late batches are dropped before they reach the UI. A dedicated thread, rather than a pool, lets the Spotlight provider turn that thread's run loop, which `NSMetadataQuery` delivers through.
 
 Candidate budgets and display limits are separate. The worker enforces each request's cumulative output budget; the session stores at most that many unique candidates, applies usage ranking, then cuts each provider and the merged list to their display limits. A chosen row or open action menu keeps its target in a visible slot while ranking changes, except when the only available slot belongs to the pinned provider. Automatic first-row selection does not pin a weak result indefinitely.

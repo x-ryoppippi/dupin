@@ -61,13 +61,11 @@ impl Provider for FolderProvider {
 }
 
 fn item(entry: Entry) -> Item {
-    let mut item = Item::path(entry.path, entry.name, entry.matched);
+    let mut item = crate::file_actions::item_with_folder(entry.path, entry.name, entry.matched, entry.folder);
     if let dupin_core::View::Text { subtitle, .. } = &mut item.view {
         // Every entry shares the browsed folder, which the chip already names.
         subtitle.clear();
     }
-    crate::quick_look::add_action(&mut item);
-    crate::file_actions::add(&mut item, entry.folder);
     item.score = entry.score;
     item
 }
@@ -83,7 +81,7 @@ fn is_folder(entry: &DirEntry) -> bool {
     directory && !is_package(&path)
 }
 
-fn is_package(path: &Path) -> bool {
+pub(crate) fn is_package(path: &Path) -> bool {
     autoreleasepool(|_| {
         NSWorkspace::sharedWorkspace().isFilePackageAtPath(&NSString::from_str(&path.to_string_lossy()))
     })

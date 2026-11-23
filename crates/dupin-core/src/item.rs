@@ -13,17 +13,48 @@ pub enum Action {
         application: PathBuf,
     },
     Trash(PathBuf),
+    /// List the folder's entries in the launcher.
+    Browse(PathBuf),
+    /// Ask for a new name in the query field; the session then renames the entry.
+    Rename(PathBuf),
+    /// Search for a destination folder before transferring the entry.
+    ChooseDestination {
+        path: PathBuf,
+        transfer: Transfer,
+    },
+    /// Copy beside the original under a name that is not taken.
+    Duplicate(PathBuf),
+    /// Zip beside the original under a name that is not taken.
+    Compress(PathBuf),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    CopyFiles(Vec<PathBuf>),
+    /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
+    DeleteClipboardEntry(u64),
+    ClearClipboardHistory,
+    /// Read the clipboard once so macOS asks whether Dupin may; the contents are discarded.
+    RequestClipboardAccess,
+    /// Copy a snippet's text with its placeholders filled in as it runs, then, with `paste`,
+    /// paste it into the frontmost app.
+    Snippet {
+        text: String,
+        paste: bool,
+    },
     /// Show the path in the platform's native preview UI.
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
-    /// List the folder's entries in the launcher.
-    Browse(PathBuf),
+    ScriptArguments(PathBuf),
+    RunScript(crate::script::ScriptRun),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    Move,
+    Copy,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.
@@ -32,7 +63,7 @@ pub(crate) enum ActionDisposition {
     /// Run the action, record usage and dismiss the launcher.
     #[default]
     Dismiss,
-    /// Run the action without recording a pick or dismissing the launcher.
+    /// Run the action without dismissing the launcher.
     KeepOpen,
     Consume,
 }
