@@ -222,6 +222,36 @@ fn typescript_scaffold_builds_with_each_bundler_on_path() {
 }
 
 #[test]
+fn scaffolding_names_a_package_after_the_folder_a_dot_path_leads_to() {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    // The crate's folder is a valid name and not empty, so getting past the name check proves
+    // the name came from the folder `src/..` leads to.
+    assert_eq!(
+        scaffold(&crate_dir.join("src/.."), Template::JavaScript)
+            .unwrap_err()
+            .code,
+        "folder-not-empty"
+    );
+}
+
+#[test]
+fn bundling_a_package_named_by_a_relative_path_writes_its_own_entry() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("relative");
+    scaffold(&dir, Template::TypeScript).unwrap();
+    let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+    let mut relative: std::path::PathBuf = cwd.components().skip(1).map(|_| "..").collect();
+    relative.push(dir.canonicalize().unwrap().strip_prefix("/").unwrap());
+    assert!(relative.is_relative());
+    for bundler in bundlers() {
+        let _ = std::fs::remove_dir_all(dir.join("dist"));
+        build(&relative, Some(&bundler), BuildOptions::default(), &validate)
+            .unwrap_or_else(|error| panic!("{}: {error:?}", bundler.kind.name()));
+        assert_fixture_matches(&dir);
+    }
+}
+
+#[test]
 fn bundling_rejects_node_builtins_and_keeps_the_previous_entry() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();

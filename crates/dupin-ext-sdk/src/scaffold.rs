@@ -20,7 +20,14 @@ pub enum Template {
 /// Creates a package in `dir`, which must not exist or be empty. Its name is the folder's name.
 /// Returns the files written, relative to `dir`.
 pub fn scaffold(dir: &Path, template: Template) -> Result<Vec<PathBuf>, Diagnostic> {
-    let name = dir
+    // `.` and `..` have no name of their own; the folder they lead to does.
+    let resolved = match dir.file_name() {
+        Some(_) => None,
+        None => dir.canonicalize().ok(),
+    };
+    let name = resolved
+        .as_deref()
+        .unwrap_or(dir)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default()

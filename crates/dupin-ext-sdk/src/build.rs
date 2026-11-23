@@ -262,10 +262,13 @@ pub(crate) fn bundle(
             .file(source)
             .hint("Point `source` in package.json at the module to bundle, such as `src/main.ts`."));
     }
+    let unwritable = |error: std::io::Error| {
+        Diagnostic::new("unwritable", format!("Couldn't create its folder: {error}")).file(&package.main)
+    };
+    // The bundler runs in `dir`, so a path relative to this process would be read from there.
+    let outfile = std::path::absolute(outfile).map_err(unwritable)?;
     if let Some(parent) = outfile.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
-            Diagnostic::new("unwritable", format!("Couldn't create its folder: {error}")).file(&package.main)
-        })?;
+        std::fs::create_dir_all(parent).map_err(unwritable)?;
     }
     let metafile = std::env::temp_dir().join(format!(
         "dupin-build-{}-{}.json",
@@ -273,7 +276,7 @@ pub(crate) fn bundle(
         BUILDS.fetch_add(1, Ordering::Relaxed)
     ));
     let outcome = run(Command::new(&bundler.program)
-        .args(bundler.arguments(source, outfile, &metafile, options.sourcemap))
+        .args(bundler.arguments(source, &outfile, &metafile, options.sourcemap))
         .current_dir(dir));
     let metadata = std::fs::read(&metafile);
     let _ = std::fs::remove_file(&metafile);

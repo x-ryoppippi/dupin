@@ -143,6 +143,8 @@ Creates a package in a new or empty folder. The folder's name becomes the id, so
 | `tsconfig.json`, `.gitignore` | `--ts` only. The compiler sees ES2023 and nothing else, as the guest does.                                  |
 | `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Bun and commits it on every push to `main`.                       |
 
+`dupin ext new .` names the package after the current folder.
+
 With `--ts`, `package.json` adds `"source": "src/main.ts"` and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle.
 
 `dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
