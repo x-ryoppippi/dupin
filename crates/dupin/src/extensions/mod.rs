@@ -139,6 +139,9 @@ fn host() -> &'static Host {
 fn helper_command() -> std::io::Result<std::process::Command> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.env_clear().current_dir("/");
+    if let Some(zone) = std::env::var_os("TZ") {
+        command.env("TZ", zone);
+    }
     #[cfg(not(test))]
     command.arg(dupin_extension_host::FLAG);
     #[cfg(test)]

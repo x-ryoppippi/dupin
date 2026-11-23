@@ -21,17 +21,34 @@ fn helper_entry() {
 }
 
 fn host() -> Host {
-    Host::new(Box::new(|| {
-        let mut command = Command::new(std::env::current_exe()?);
+    Host::new(Box::new(|| helper_command("tests::helper_entry")))
+}
+
+/// This test binary running only `entry`. The zone is one without daylight saving time that is
+/// unlikely to be the machine's, so a guest that sees UTC instead is caught.
+fn helper_command(entry: &str) -> std::io::Result<Command> {
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .args(["--exact", entry, "--nocapture", "--test-threads=1"])
+        .env_clear()
+        .env(HELPER_ENV, "1")
+        .env("TZ", "Asia/Tokyo")
+        .current_dir("/");
+    Ok(command)
+}
+
+/// A host whose helper takes `delay` to start.
+fn slow_host(delay: &'static str) -> Host {
+    Host::new(Box::new(move || {
+        let helper = helper_command("tests::helper_entry")?;
+        let mut command = Command::new("/bin/sh");
         command
-            .args([
-                "--exact",
-                "tests::helper_entry",
-                "--nocapture",
-                "--test-threads=1",
-            ])
+            .arg("-c")
+            .arg(format!("/bin/sleep {delay}; exec \"$0\" \"$@\""))
+            .arg(helper.get_program())
+            .args(helper.get_args())
             .env_clear()
-            .env(HELPER_ENV, "1")
+            .envs(helper.get_envs().filter_map(|(key, value)| Some((key, value?))))
             .current_dir("/");
         Ok(command)
     }))
@@ -117,6 +134,125 @@ fn queries_run_in_one_resident_helper_and_packages_are_sent_once() {
         Some(pid),
         "a guest error leaves the helper running"
     );
+}
+
+#[test]
+fn guests_see_the_local_time_zone() {
+    let host = host();
+    let (_folder, probe) = package(
+        "export const search = () => [{ title: `${new Date(1790000000000).getTimezoneOffset()} ${new Date(0).getHours()}` }];",
+    );
+    assert_eq!(
+        titles(&search(&host, &probe, "", Duration::from_secs(5)).unwrap()),
+        ["-540 9"]
+    );
+}
+
+#[test]
+fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_cancellation() {
+    let host = slow_host("1");
+    let (_folder, echo) = package(ECHO);
+    let started = Instant::now();
+    let diagnostic = failure(search(&host, &echo, "", Duration::from_millis(100)));
+    assert_eq!(diagnostic.code, "host-starting", "{diagnostic:?}");
+    assert!(
+        started.elapsed() < Duration::from_millis(400),
+        "{:?}",
+        started.elapsed()
+    );
+    let pid = host.helper_pid().expect("the starting helper is kept");
+
+    let started = Instant::now();
+    let result = host.search(&echo, "", 10, Instant::now() + Duration::from_secs(10), &|| {
+        started.elapsed() > Duration::from_millis(50)
+    });
+    assert_eq!(result, Err(RunError::Cancelled));
+    assert!(
+        started.elapsed() < Duration::from_millis(400),
+        "{:?}",
+        started.elapsed()
+    );
+
+    assert_eq!(
+        titles(&search(&host, &echo, "ready", Duration::from_secs(5)).unwrap()),
+        ["echo ready"]
+    );
+    assert_eq!(host.helper_pid(), Some(pid), "the same helper finished starting");
+}
+
+const ROGUE_ENV: &str = "DUPIN_EXTENSION_HOST_ROGUE";
+
+/// Not a test: a compromised helper. It answers each call, then forges an answer to the next
+/// one and keeps writing frames nobody asked for.
+#[test]
+fn rogue_helper_entry() {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::net::UnixStream;
+
+    use dupin_plugin_protocol::PluginItem;
+    use wire::{Answer, FromHelper, ToHelper};
+
+    if std::env::var_os(ROGUE_ENV).is_none() {
+        return;
+    }
+    // SAFETY: the host starts this process with the socket as standard input.
+    let mut socket = unsafe { UnixStream::from_raw_fd(0) };
+    let rows = |title: &str| Answer::Rows {
+        items: vec![PluginItem {
+            id: "1".into(),
+            view: View::Text {
+                title: title.into(),
+                subtitle: String::new(),
+            },
+            actions: Vec::new(),
+        }],
+    };
+    let hello = FromHelper::Hello {
+        version: wire::VERSION,
+        engine: dupin_js_runtime::engine_version().into(),
+    };
+    wire::write(&mut socket, &hello, &[]).unwrap();
+    while let Ok(Some((message, _))) = wire::read::<ToHelper>(&mut socket) {
+        let ToHelper::Run { id, .. } = message else {
+            continue;
+        };
+        let answer = FromHelper::Done {
+            id,
+            answer: rows("genuine"),
+        };
+        wire::write(&mut socket, &answer, &[]).unwrap();
+        for forged in id + 1.. {
+            let forged = FromHelper::Done {
+                id: forged,
+                answer: rows("forged"),
+            };
+            if wire::write(&mut socket, &forged, &[]).is_err() {
+                std::process::exit(0);
+            }
+        }
+    }
+    std::process::exit(0);
+}
+
+#[test]
+fn a_helper_that_speaks_out_of_turn_is_replaced_before_the_next_call() {
+    let host = Host::new(Box::new(|| {
+        let mut command = helper_command("tests::rogue_helper_entry")?;
+        command.env(ROGUE_ENV, "1");
+        Ok(command)
+    }));
+    let (_folder, echo) = package(ECHO);
+    assert_eq!(
+        titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
+        ["genuine"]
+    );
+    let first = host.helper_pid().unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
+        ["genuine"]
+    );
+    assert_ne!(host.helper_pid(), Some(first));
 }
 
 const UNINTERRUPTIBLE: &str = "export function search() { return [{ title: String('a'.repeat(4e6).indexOf('a'.repeat(2e6) + 'b')) }]; }";
@@ -301,8 +437,8 @@ fn sandbox_probe() {
         println!("probe {stage} {}", allowed.join(","));
     };
     report("before");
+    // Without the resource limits, which would deny some of these on their own.
     sandbox::enter().unwrap();
-    sandbox::limit_resources();
     report("after");
 }
 

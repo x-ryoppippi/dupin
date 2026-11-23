@@ -123,17 +123,22 @@ impl Host {
             return Err(RunError::Cancelled);
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
-        if lease
-            .helper
-            .as_mut()
-            .is_some_and(|helper| !matches!(helper.child.try_wait(), Ok(None)))
-        {
+        if lease.helper.as_mut().is_some_and(|helper| !helper.is_idle()) {
             lease.helper = None;
         }
         let helper = match lease.helper.as_mut() {
             Some(helper) => helper,
             None => lease.helper.insert(Helper::start(&self.shared.launch)?),
         };
+        match helper.greet(package, deadline, is_cancelled) {
+            Greeting::Ready => {}
+            // A helper still starting is kept, so the next call doesn't pay for another start.
+            Greeting::Waiting(error) => return Err(error),
+            Greeting::Failed(error) => {
+                lease.helper = None;
+                return Err(error);
+            }
+        }
         let outcome = helper
             .load(package)
             .and_then(|()| helper.run(id, package, call, deadline, is_cancelled));
@@ -240,7 +245,11 @@ fn spawn_reaper(shared: Weak<Shared>) -> bool {
 struct Helper {
     child: Child,
     socket: UnixStream,
+    /// Bounded, so a helper that writes without being asked stalls on its own socket instead
+    /// of growing Dupin's memory.
     replies: mpsc::Receiver<FromHelper>,
+    started: Instant,
+    greeted: bool,
     /// Packages the helper holds, least recently used first, with their bytecode size.
     loaded: VecDeque<(u64, usize)>,
 }
@@ -270,7 +279,7 @@ impl Helper {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let child = command.spawn().map_err(unavailable)?;
-        let (replies, received) = mpsc::channel();
+        let (replies, received) = mpsc::sync_channel(1);
         let mut reader = ours.try_clone().map_err(unavailable)?;
         ours.set_write_timeout(Some(HANDSHAKE)).map_err(unavailable)?;
         std::thread::Builder::new()
@@ -283,12 +292,18 @@ impl Helper {
                 }
             })
             .map_err(unavailable)?;
-        let helper = Self {
+        Ok(Self {
             child,
             socket: ours,
             replies: received,
+            started: Instant::now(),
+            greeted: false,
             loaded: VecDeque::new(),
-        };
+        })
+    }
+
+    /// Waits for the helper's hello, but no longer than the call may wait.
+    fn greet(&mut self, package: &Package, deadline: Instant, is_cancelled: &dyn Fn() -> bool) -> Greeting {
         let refused = |reason: String| {
             RunError::Failed(
                 Diagnostic::new(
@@ -298,21 +313,53 @@ impl Helper {
                 .hint("Dupin runs extensions only inside its sandbox."),
             )
         };
-        match helper.replies.recv_timeout(HANDSHAKE) {
-            Ok(FromHelper::Hello { version, engine })
-                if version == wire::VERSION && engine == dupin_js_runtime::engine_version() =>
-            {
-                Ok(helper)
-            }
-            Ok(FromHelper::Hello { .. }) => Err(RunError::Failed(
-                host_error("the extension host is from another Dupin build")
-                    .hint("Quit and reopen Dupin after an update."),
-            )),
-            Ok(FromHelper::Refused { reason }) => Err(refused(reason)),
-            Ok(FromHelper::Done { .. }) | Err(_) => {
-                Err(RunError::Failed(host_error("the extension host didn't start")))
+        let didnt_start =
+            || Greeting::Failed(RunError::Failed(host_error("the extension host didn't start")));
+        while !self.greeted {
+            match self.replies.recv_timeout(TICK) {
+                Ok(FromHelper::Hello { version, engine })
+                    if version == wire::VERSION && engine == dupin_js_runtime::engine_version() =>
+                {
+                    self.greeted = true;
+                }
+                Ok(FromHelper::Hello { .. }) => {
+                    return Greeting::Failed(RunError::Failed(
+                        host_error("the extension host is from another Dupin build")
+                            .hint("Quit and reopen Dupin after an update."),
+                    ));
+                }
+                Ok(FromHelper::Refused { reason }) => return Greeting::Failed(refused(reason)),
+                Ok(FromHelper::Done { .. }) | Err(RecvTimeoutError::Disconnected) => return didnt_start(),
+                Err(RecvTimeoutError::Timeout) => {
+                    let now = Instant::now();
+                    if now >= self.started + HANDSHAKE {
+                        return didnt_start();
+                    }
+                    if is_cancelled() {
+                        return Greeting::Waiting(RunError::Cancelled);
+                    }
+                    if now >= deadline {
+                        return Greeting::Waiting(RunError::Failed(
+                            Diagnostic::new(
+                                "host-starting",
+                                "the extension host was still starting when search's deadline passed",
+                            )
+                            .file(package.entry())
+                            .hint("Try again; Dupin keeps starting the extension host."),
+                        ));
+                    }
+                }
             }
         }
+        Greeting::Ready
+    }
+
+    /// Whether the helper is alive and, once greeted, has sent nothing since its last answer.
+    /// It speaks only to answer a call, so anything queued between calls, such as a reply
+    /// forged for a later call, means it can't be trusted with another.
+    fn is_idle(&mut self) -> bool {
+        let quiet = !self.greeted || matches!(self.replies.try_recv(), Err(mpsc::TryRecvError::Empty));
+        quiet && matches!(self.child.try_wait(), Ok(None))
     }
 
     fn send(&mut self, message: &ToHelper, tail: &[&[u8]]) -> Result<(), RunError> {
@@ -387,8 +434,13 @@ impl Helper {
         loop {
             match self.replies.recv_timeout(TICK) {
                 Ok(FromHelper::Done { id: answered, answer }) if answered == id => return Ok(answer),
-                // A reply to a call that was already given up on.
-                Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+                // Every call given up on stops the helper, so no other reply is ever due.
+                Ok(_) => {
+                    return Err(RunError::Failed(host_error(
+                        "the extension host answered out of turn",
+                    )));
+                }
+                Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(RunError::Failed(crashed().file(package.entry())));
                 }
@@ -416,6 +468,13 @@ impl Helper {
             }
         }
     }
+}
+
+enum Greeting {
+    Ready,
+    /// The call gave up while the helper was still starting.
+    Waiting(RunError),
+    Failed(RunError),
 }
 
 /// The helper's physical footprint, the figure macOS itself charges a process for.

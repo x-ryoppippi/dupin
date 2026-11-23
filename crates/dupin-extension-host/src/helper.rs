@@ -16,6 +16,10 @@ use dupin_js_runtime::{Control, Diagnostic, Package, RunError};
 use crate::sandbox;
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
+unsafe extern "C" {
+    fn tzset();
+}
+
 /// Serves Dupin until it closes the socket, then exits.
 pub fn serve() -> ! {
     // SAFETY: Dupin starts the helper with the socket as standard input, and nothing else in
@@ -38,6 +42,10 @@ fn run(socket: UnixStream) -> io::Result<()> {
             .name("extension-host-reader".into())
             .spawn(move || read(socket, &cancelled, &messages))?
     };
+    // The C library reads the time zone on first use, which the sandbox would deny, leaving
+    // every local-time `Date` method in UTC.
+    // SAFETY: no other thread of this process reads or sets the time zone.
+    unsafe { tzset() };
     if let Err(reason) = sandbox::enter() {
         wire::write(&mut writer, &FromHelper::Refused { reason }, &[])?;
         return Err(io::Error::other("no sandbox"));
