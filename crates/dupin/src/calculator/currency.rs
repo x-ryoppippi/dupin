@@ -91,6 +91,14 @@ pub(super) struct State {
 }
 
 impl State {
+    #[cfg(test)]
+    pub(super) fn with_snapshot(snapshot: Option<Snapshot>) -> Self {
+        Self {
+            enabled: AtomicBool::new(true),
+            snapshot: RwLock::new(snapshot),
+        }
+    }
+
     pub fn enabled(&self) -> bool {
         self.enabled.load(Ordering::Acquire)
     }

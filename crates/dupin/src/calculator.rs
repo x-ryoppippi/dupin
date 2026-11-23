@@ -42,8 +42,7 @@ pub(super) struct Calculator {
 
 #[derive(Debug, PartialEq)]
 enum Answer {
-    Local(String),
-    Currency { amount: String, caption: String },
+    Value { display: String, number: String },
     RatesUnavailable,
 }
 
@@ -61,8 +60,7 @@ impl Provider for Calculator {
         let rates = currency_enabled.then(|| self.currency.snapshot()).flatten();
         if let Some(answer) = calculate(source, &budget, currency_enabled, rates.as_ref()) {
             let (result, copy) = match answer {
-                Answer::Local(result) => (result.clone(), Some(result)),
-                Answer::Currency { amount, caption } => (format!("{amount}\n{caption}"), Some(amount)),
+                Answer::Value { display, number } => (display, Some(number)),
                 Answer::RatesUnavailable => ("Exchange rates unavailable".into(), None),
             };
             emit(vec![Item {
@@ -80,7 +78,7 @@ impl Provider for Calculator {
                 alternate: None,
                 actions: copy
                     .into_iter()
-                    .map(|value| ItemAction::new("copy", "Copy result", Action::Copy(value)))
+                    .map(|value| ItemAction::new("copy", "Copy number", Action::Copy(value)))
                     .collect(),
             }]);
         }
@@ -121,48 +119,48 @@ fn calculate(
             missing: missing.clone(),
         });
     }
-    let result = evaluate(&input, &mut context, budget)?;
+    let (result, number) = evaluate(&input, &mut context, budget)?;
     if !used.load(Ordering::Relaxed) {
-        return is_expression(source, false, false).then(|| Answer::Local(result.get_main_result().into()));
+        return is_expression(source, false, false).then(|| Answer::Value {
+            display: result.get_main_result().into(),
+            number,
+        });
     }
     if missing.load(Ordering::Relaxed) || snapshot.is_none() {
         return Some(Answer::RatesUnavailable);
     }
     let snapshot = snapshot?;
-    let amount = if let Some(code) = result_currency(&result, &snapshot.rates) {
+    let (amount, number) = if let Some(code) = result_currency(&result, &snapshot.rates) {
         let explicit = source
             .split_whitespace()
             .any(|word| matches!(word, "to" | "in" | "as"));
         let target = if explicit { code.as_str() } else { "EUR" };
         let precision = if target == "JPY" { 0 } else { 2 };
-        let rounded = evaluate(
+        let (_, number) = evaluate(
             &format!("({input}) to {target} to {precision}dp"),
             &mut context,
             budget,
         )?;
-        let number = rounded
-            .get_main_result_spans()
-            .find(|span| span.kind() == SpanKind::Number)?
-            .string();
-        let grouped = group_digits(number);
-        match target {
+        let grouped = group_digits(&number);
+        let amount = match target {
             "EUR" => format!("≈ €{grouped}"),
             "GBP" => format!("≈ £{grouped}"),
             "JPY" => format!("≈ ¥{grouped}"),
             "USD" => format!("≈ ${grouped}"),
             _ => format!("≈ {grouped} {target}"),
-        }
+        };
+        (amount, number)
     } else {
-        result.get_main_result().into()
+        (result.get_main_result().into(), number)
     };
     let status = if snapshot.is_stale() {
         "Cached ECB rate"
     } else {
         "ECB rate"
     };
-    Some(Answer::Currency {
-        amount,
-        caption: format!("{status} {}", snapshot.rates.date),
+    Some(Answer::Value {
+        display: format!("{amount}\n{status} {}", snapshot.rates.date),
+        number,
     })
 }
 
@@ -188,15 +186,21 @@ impl ExchangeRateFnV2 for RateLookup {
     }
 }
 
-fn evaluate(input: &str, context: &mut Context, budget: &impl Interrupt) -> Option<fend_core::FendResult> {
+fn evaluate(
+    input: &str,
+    context: &mut Context,
+    budget: &impl Interrupt,
+) -> Option<(fend_core::FendResult, String)> {
     let result = fend_core::evaluate_with_interrupt(input, context, budget).ok()?;
-    let answer = result.get_main_result();
-    (!budget.should_interrupt()
-        && answer.len() <= MAX_ANSWER_BYTES
-        && result
-            .get_main_result_spans()
-            .any(|span| span.kind() == SpanKind::Number))
-    .then_some(result)
+    if budget.should_interrupt() || result.get_main_result().len() > MAX_ANSWER_BYTES {
+        return None;
+    }
+    let number = result
+        .get_main_result_spans()
+        .find(|span| span.kind() == SpanKind::Number)?
+        .string()
+        .to_owned();
+    Some((result, number))
 }
 
 fn result_currency(result: &fend_core::FendResult, rates: &currency::Rates) -> Option<String> {
@@ -338,20 +342,20 @@ mod tests {
     #[test]
     fn converts_currencies_with_the_observation_date() {
         let snapshot = currency::fixture();
-        for (query, amount) in [
-            ("100 usd to jpy", "≈ ¥14,950"),
-            ("€50 in gbp", "≈ £42.5"),
-            ("¥5000 in gbp", "≈ £25.84"),
-            ("30*(60+1) usd in jpy", "≈ ¥273,585"),
-            ("10 GBP", "≈ €11.76"),
-            ("-10 GBP", "≈ €-11.76"),
-            ("100 usd to CAD", "≈ 131.82 CAD"),
+        for (query, amount, number) in [
+            ("100 usd to jpy", "≈ ¥14,950", "14950"),
+            ("€50 in gbp", "≈ £42.5", "42.5"),
+            ("¥5000 in gbp", "≈ £25.84", "25.84"),
+            ("30*(60+1) usd in jpy", "≈ ¥273,585", "273585"),
+            ("10 GBP", "≈ €11.76", "11.76"),
+            ("-10 GBP", "≈ €-11.76", "-11.76"),
+            ("100 usd to CAD", "≈ 131.82 CAD", "131.82"),
         ] {
             assert_eq!(
                 currency_answer(query, Some(&snapshot)),
-                Some(Answer::Currency {
-                    amount: amount.into(),
-                    caption: "ECB rate 2026-11-20".into()
+                Some(Answer::Value {
+                    display: format!("{amount}\nECB rate 2026-11-20"),
+                    number: number.into(),
                 }),
                 "{query}"
             );
@@ -362,9 +366,9 @@ mod tests {
         };
         assert_eq!(
             currency_answer("100 usd to jpy", Some(&stale)),
-            Some(Answer::Currency {
-                amount: "≈ ¥14,950".into(),
-                caption: "Cached ECB rate 2026-11-20".into()
+            Some(Answer::Value {
+                display: "≈ ¥14,950\nCached ECB rate 2026-11-20".into(),
+                number: "14950".into(),
             })
         );
     }
@@ -395,7 +399,10 @@ mod tests {
         }
         assert_eq!(
             currency_answer("1 gb to tb", None),
-            Some(Answer::Local("0.001 Tb".into()))
+            Some(Answer::Value {
+                display: "0.001 Tb".into(),
+                number: "0.001".into(),
+            })
         );
     }
 
@@ -406,8 +413,51 @@ mod tests {
             deadline: Instant::now() + Duration::from_secs(1),
         };
         match calculate(source, &budget, false, None)? {
-            Answer::Local(result) => Some(result),
+            Answer::Value { display, .. } => Some(display),
             _ => None,
+        }
+    }
+
+    #[test]
+    fn primary_action_copies_the_displayed_number() {
+        let local = Calculator::default();
+        let currency = Calculator {
+            currency: Arc::new(currency::State::with_snapshot(Some(currency::fixture()))),
+        };
+        let unavailable = Calculator {
+            currency: Arc::new(currency::State::with_snapshot(None)),
+        };
+        for (calculator, source, display, number) in [
+            (&local, "12*3", "36", Some("36")),
+            (
+                &local,
+                "100 f to c",
+                "approx. 37.7777777778 °C",
+                Some("37.7777777778"),
+            ),
+            (&local, "5 miles to feet", "26400 feet", Some("26400")),
+            (
+                &currency,
+                "100 usd to jpy",
+                "≈ ¥14,950\nECB rate 2026-11-20",
+                Some("14950"),
+            ),
+            (&unavailable, "100 usd to jpy", "Exchange rates unavailable", None),
+        ] {
+            let mut items = Vec::new();
+            calculator
+                .search(&Request::detached(source, 1), &mut |batch| items.extend(batch))
+                .unwrap();
+            let item = &items[0];
+            assert!(matches!(&item.view, View::Pair { result, .. } if result == display));
+            if let Some(number) = number {
+                assert_eq!(item.primary.as_deref(), Some("copy"));
+                assert_eq!(item.actions[0].title, "Copy number");
+                assert_eq!(item.action("copy"), Some(&Action::Copy(number.into())));
+            } else {
+                assert!(item.primary.is_none());
+                assert!(item.actions.is_empty());
+            }
         }
     }
 
