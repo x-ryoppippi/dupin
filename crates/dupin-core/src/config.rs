@@ -27,6 +27,13 @@ pub struct Config {
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
+    /// Text snippets by keyword. Placeholders in the text are filled in when one is used.
+    pub snippets: BTreeMap<String, Snippet>,
+    /// Keywords followed by Space that enter snippet search.
+    pub snippet_keywords: Vec<String>,
+    /// Whether Enter on a snippet also pastes it into the frontmost app, which needs
+    /// Accessibility access. Off, it only copies.
+    pub snippet_paste: bool,
     pub display: DisplaySelection,
     /// Where the panel opens on the selected display.
     pub position: Position,
@@ -66,6 +73,15 @@ pub enum HotkeyTarget {
 pub struct WebSearch {
     pub name: String,
     pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Snippet {
+    /// Shown in results instead of the keyword.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub text: String,
 }
 
 /// What animates behind the query field. In config.toml: `"flow"`, `"off"`, or the path to a
@@ -211,6 +227,9 @@ impl Default for Config {
                 ),
             ]),
             web_fallbacks: Vec::new(),
+            snippets: BTreeMap::new(),
+            snippet_keywords: vec!["snip".into()],
+            snippet_paste: false,
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
@@ -367,6 +386,40 @@ unexpected = true
 
         let encoded = serde_json::to_string(&config).unwrap();
         assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+    }
+
+    #[test]
+    fn snippets_default_to_none_and_round_trip() {
+        let defaults = Config::default();
+        assert!(defaults.snippets.is_empty());
+        assert_eq!(defaults.snippet_keywords, ["snip"]);
+        assert!(!defaults.snippet_paste);
+
+        let config = Config::parse(
+            r#"
+snippet_keywords = ["s"]
+snippet_paste = true
+
+[snippets.sig]
+name = "Signature"
+text = "Best wishes,\nDupin"
+
+[snippets.today]
+text = "{date}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.snippet_keywords, ["s"]);
+        assert!(config.snippet_paste);
+        assert_eq!(config.snippets["sig"].name.as_deref(), Some("Signature"));
+        assert_eq!(config.snippets["sig"].text, "Best wishes,\nDupin");
+        assert_eq!(config.snippets["today"].name, None);
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+
+        assert!(Config::parse("[snippets.sig]\nname = \"Signature\"").is_err());
+        assert!(Config::parse("[snippets.sig]\ntext = \"x\"\nkeyword = \"y\"").is_err());
     }
 
     #[test]

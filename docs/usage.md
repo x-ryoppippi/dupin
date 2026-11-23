@@ -121,6 +121,14 @@ The first search may ask for Full Access to Calendars. If access is missing, sel
 
 Press Enter to open the original event in Calendar. Dupin uses an undocumented Calendar link. If Calendar cannot resolve an event or recurring occurrence, it may open without selecting it.
 
+## Snippets
+
+Type `snip`, then Space, to list your [snippets](./configuration.md#snippets) ("Snippets"); type to narrow them by name or keyword. Each row shows the snippet's name, its keyword and the start of its text. Enter copies the text, with any date, time or clipboard placeholders filled in, and closes the panel; paste it wherever you like. Backspace on an empty query returns to app search.
+
+With pasting turned on in Settings → Search, Enter pastes the snippet into the app you were using and ⌘Enter only copies it. The actions screen (Right Arrow or ⌘K) offers both. Pasting needs Accessibility access, which Dupin asks for only when you paste a snippet without it, once per launch; after that, it copies the snippet and explains how to allow access. Snippets don't expand as you type in other apps.
+
+Snippets you use often rank higher, as apps do.
+
 ## Files
 
 Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).

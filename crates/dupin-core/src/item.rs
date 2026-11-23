@@ -35,6 +35,12 @@ pub enum Action {
     ClearClipboardHistory,
     /// Read the clipboard once so macOS asks whether Dupin may; the contents are discarded.
     RequestClipboardAccess,
+    /// Copy a snippet's text with its placeholders filled in as it runs, then, with `paste`,
+    /// paste it into the frontmost app.
+    Snippet {
+        text: String,
+        paste: bool,
+    },
     /// Show the path in the platform's native preview UI.
     Preview(PathBuf),
     /// Open the host application's preferences.

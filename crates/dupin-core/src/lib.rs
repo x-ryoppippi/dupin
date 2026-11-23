@@ -14,6 +14,7 @@ pub mod item;
 pub mod provider;
 pub mod searcher;
 pub mod session;
+pub mod snippets;
 
 pub use command::{
     CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,

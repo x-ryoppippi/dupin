@@ -991,7 +991,14 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.enabled = next_clipboard))
         .build(k);
-    vec![
+    let next_paste = !s.config.snippet_paste;
+    let paste = Switch::new(s.config.snippet_paste)
+        .label("Paste snippets")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.snippet_paste = next_paste))
+        .build(k);
+    let mut rows = vec![
         setting(
             k,
             &icons::PANEL,
@@ -1020,7 +1027,40 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
             Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
             clipboard,
         ),
-    ]
+        setting(
+            k,
+            &icons::KEYBOARD,
+            "Paste snippets",
+            Some("Enter pastes a snippet into the front app instead of only copying it"),
+            paste,
+        ),
+    ];
+    // Checking doesn't ask macOS for access; only pasting a snippet does.
+    if s.config.snippet_paste && !dupin_mac::paste::allowed() {
+        let open = value_button(
+            k,
+            "open-accessibility",
+            "Open",
+            &rune_theme_opencode::icons::CHEVRON_RIGHT,
+        )
+        .on_press(|_: &mut Prefs| {
+            std::thread::spawn(|| {
+                let action =
+                    dupin_mac::workspace::Action::OpenUrl(dupin_mac::accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&action) {
+                    crate::log::warn(&error);
+                }
+            });
+        });
+        rows.push(setting(
+            k,
+            &icons::INFO,
+            "Accessibility access",
+            Some("Pasting needs Dupin allowed in Privacy & Security › Accessibility"),
+            open,
+        ));
+    }
+    rows
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};
