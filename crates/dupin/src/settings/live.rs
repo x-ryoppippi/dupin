@@ -283,7 +283,7 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow(requested.paths.clone(), move |rebuild| {
+        match PathWatcher::start_shallow(requested.paths.clone(), path.clone(), move |rebuild| {
             let _ = sender.send(Job::Changed { rebuild });
         }) {
             Ok(watcher) => {
@@ -1053,14 +1053,19 @@ mod tests {
         let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
 
         service.activate();
-        let initial = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let initial = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not start");
+        assert!(initial.watch_problem.is_none(), "{:?}", initial.watch_problem);
         assert_eq!(initial.result.unwrap().position, dupin_core::Position::Center);
 
         fs::write(&path, "position = \"top\"").unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let changed = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let update = receiver.recv_timeout(remaining).unwrap();
+            let update = receiver
+                .recv_timeout(remaining)
+                .expect("settings watcher did not reload");
             if update
                 .result
                 .as_ref()
@@ -1076,6 +1081,8 @@ mod tests {
             drop(service);
             let _ = done.send(());
         });
-        stopped.recv_timeout(Duration::from_secs(5)).unwrap();
+        stopped
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not shut down");
     }
 }

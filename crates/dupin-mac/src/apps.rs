@@ -435,7 +435,7 @@ mod tests {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             event
                 .recv_timeout(remaining)
-                .expect("FSEvents should report an app bundle created in a watched root");
+                .expect("the watcher should invalidate the index after a bundle is added");
             if provider.apps().iter().any(|app| app.name == "Watched App") {
                 break;
             }

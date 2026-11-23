@@ -1,6 +1,8 @@
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Duration;
 
 /// Watches filesystem roots and calls `changed` after their events settle.
 ///
@@ -22,27 +24,32 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, true, move |_| changed())
+        Self::start_with_scope(roots, true, None, move |_| changed())
     }
 
-    /// Watches directory entries without forwarding descendant events. The callback receives
-    /// `true` when a watched root moved and the stream must be rebuilt.
+    /// Watches directory entries without forwarding descendant events. Tracks the file's
+    /// metadata as well so an in-place write can be detected if FSEvents is silent.
+    /// The callback receives `true` when the watch may need to be rebuilt.
     pub fn start_shallow(
         roots: Vec<PathBuf>,
+        file: PathBuf,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, false, changed)
+        Self::start_with_scope(roots, false, Some(file), changed)
     }
 
     fn start_with_scope(
         roots: Vec<PathBuf>,
         recursive: bool,
+        file: Option<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
+        let tracked: Vec<_> = roots.iter().cloned().chain(file).collect();
+        let initial = snapshot(&tracked);
         let (events, received) = mpsc::channel();
         let debounce = std::thread::Builder::new()
             .name("dupin-path-watch-debounce".into())
-            .spawn(move || debounce_events(received, changed))
+            .spawn(move || debounce_events(received, &tracked, initial, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
         match watch_roots(roots, recursive, events) {
             Ok(mut watcher) => {
@@ -78,13 +85,48 @@ impl Drop for PathWatcher {
     }
 }
 
-fn debounce_events(events: mpsc::Receiver<bool>, changed: impl Fn(bool)) {
-    const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
-    while let Ok(mut root_changed) = events.recv() {
+#[derive(PartialEq, Eq)]
+struct Stamp {
+    identity: (u64, u64),
+    changed: (i64, i64),
+}
+
+fn snapshot(paths: &[PathBuf]) -> Vec<Option<Stamp>> {
+    paths
+        .iter()
+        .map(|path| {
+            fs::metadata(path).ok().map(|metadata| Stamp {
+                identity: (metadata.dev(), metadata.ino()),
+                changed: (metadata.ctime(), metadata.ctime_nsec()),
+            })
+        })
+        .collect()
+}
+
+fn debounce_events(
+    events: mpsc::Receiver<bool>,
+    tracked: &[PathBuf],
+    mut last: Vec<Option<Stamp>>,
+    changed: impl Fn(bool),
+) {
+    const QUIET: Duration = Duration::from_millis(300);
+    const RECONCILE: Duration = Duration::from_secs(2);
+    loop {
+        let mut root_changed = match events.recv_timeout(RECONCILE) {
+            Ok(root_changed) => root_changed,
+            // A busy FSEvents daemon can miss a notification without delivering a drop flag.
+            Err(mpsc::RecvTimeoutError::Timeout) if snapshot(tracked) == last => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
         loop {
             match events.recv_timeout(QUIET) {
                 Ok(root) => root_changed |= root,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let current = snapshot(tracked);
+                    let identities = |stamp: &Option<Stamp>| stamp.as_ref().map(|stamp| stamp.identity);
+                    root_changed |= last.iter().map(identities).ne(current.iter().map(identities));
+                    last = current;
                     changed(root_changed);
                     break;
                 }
@@ -301,11 +343,33 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn reconciliation_reports_a_change_without_an_fsevent() {
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dupin-reconcile-{}-{id}", std::process::id()));
+        let tracked = [path.clone()];
+        let initial = super::snapshot(&tracked);
+        std::fs::create_dir(&path).unwrap();
+        let (events, receiver) = std::sync::mpsc::channel();
+        let (fired, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            super::debounce_events(receiver, &tracked, initial, move |root| fired.send(root).unwrap());
+        });
+        let change = received.recv_timeout(std::time::Duration::from_secs(5));
+        drop(events);
+        worker.join().unwrap();
+        std::fs::remove_dir(path).unwrap();
+        assert!(change.expect("report the new directory even without an FSEvent"));
+    }
+
+    #[test]
     fn debouncing_keeps_a_root_change_between_ordinary_events() {
         let (events, receiver) = std::sync::mpsc::channel();
         let (fired, received) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            super::debounce_events(receiver, move |root| fired.send(root).unwrap());
+            super::debounce_events(receiver, &[], Vec::new(), move |root| fired.send(root).unwrap());
         });
         for root in [false, true, false] {
             events.send(root).unwrap();
