@@ -497,6 +497,14 @@ fn a_registered_extension_command_owns_its_trigger_and_search_identity() {
 }
 
 #[test]
+fn a_literal_query_preserves_a_matching_keyword() {
+    let mut s = session();
+    let effects = s.set_literal_query("define a term");
+    assert_eq!(searched(&effects).0, app_command());
+    assert_eq!(s.query(), "define a term");
+}
+
+#[test]
 fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
     for (keyword, mode) in [
         ("in", contents_command()),
@@ -1462,4 +1470,204 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     assert!(changed.explicit);
     assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
     assert_eq!(searched(&effects[1..]).0, app_command());
+}
+
+fn rename_session() -> (Session, String) {
+    let mut s = session();
+    let generation = searched(&s.set_query("report")).1;
+    let mut row = item("report.pdf");
+    row.actions.push(ItemAction::new(
+        "rename",
+        "Rename…",
+        Action::Rename("/x/report.pdf".into()),
+    ));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("other"), row],
+    });
+    s.deliver(Delivery::Done { generation });
+    s.intent(Intent::Down);
+    let key = s.result_key(1);
+    (s, key)
+}
+
+#[test]
+fn rename_puts_the_name_in_the_field_with_its_stem_selected() {
+    let (mut s, key) = rename_session();
+    let history = s.history().clone();
+    assert_eq!(
+        s.run_key_action(&key, "rename"),
+        vec![
+            Effect::ReplaceQuery("report.pdf".into()),
+            Effect::SelectRenameStem("/x/report.pdf".into())
+        ]
+    );
+    let renaming = s.renaming().unwrap();
+    assert_eq!(renaming.path(), std::path::Path::new("/x/report.pdf"));
+    assert_eq!(renaming.name, "report.pdf");
+    assert_eq!(renaming.layout_key(), s.layout_key(1));
+    assert_eq!(s.query(), "report");
+    assert_eq!(s.history(), &history);
+}
+
+#[test]
+fn editing_a_name_never_searches_and_enter_renames_then_restores_the_search() {
+    let (mut s, key) = rename_session();
+    s.run_key_action(&key, "rename");
+    assert!(s.set_query("summary.pdf").is_empty());
+    assert_eq!(s.renaming().unwrap().name, "summary.pdf");
+    assert_eq!(s.intent(Intent::Up), Some(Vec::new()));
+    assert_eq!(s.intent(Intent::Actions), Some(Vec::new()));
+    assert_eq!(s.intent(Intent::Backspace), None);
+    assert_eq!(s.intent(Intent::Space), None);
+    assert_eq!(s.selected(), 1);
+    assert_eq!(
+        s.intent(Intent::Open).unwrap(),
+        vec![
+            Effect::ReplaceQuery("report".into()),
+            Effect::Rename {
+                row: s.layout_key(1),
+                path: "/x/report.pdf".into(),
+                name: "summary.pdf".into(),
+            }
+        ]
+    );
+    assert!(s.renaming().is_none());
+    assert_eq!(s.query(), "report");
+    assert_eq!(s.items().len(), 2);
+    assert_eq!(s.selected(), 1);
+}
+
+#[test]
+fn enter_keeps_an_invalid_name_for_correction() {
+    let (mut s, key) = rename_session();
+    s.run_key_action(&key, "rename");
+    for name in ["", "a/b", ".."] {
+        s.set_query(name);
+        assert!(s.renaming().unwrap().problem().is_some());
+        assert_eq!(s.intent(Intent::Open), Some(Vec::new()));
+        assert!(s.renaming().is_some());
+    }
+}
+
+#[test]
+fn an_unchanged_name_or_esc_leaves_without_renaming() {
+    let (mut s, key) = rename_session();
+    s.run_key_action(&key, "rename");
+    assert_eq!(
+        s.intent(Intent::Open).unwrap(),
+        vec![Effect::ReplaceQuery("report".into())]
+    );
+    s.run_key_action(&key, "rename");
+    s.set_query("changed.pdf");
+    assert_eq!(
+        s.intent(Intent::Dismiss).unwrap(),
+        vec![Effect::ReplaceQuery("report".into())]
+    );
+    assert!(s.renaming().is_none());
+    assert_eq!(s.selected(), 1);
+    assert!(searched(&s.set_query("next")).1 > 0);
+}
+
+#[test]
+fn hiding_or_selecting_elsewhere_cannot_reach_a_pending_rename() {
+    let (mut s, key) = rename_session();
+    s.run_key_action(&key, "rename");
+    assert!(!s.select_key(&s.result_key(0)));
+    assert!(s.run_key_action(&key, "rename").is_empty());
+    s.reset();
+    assert!(s.renaming().is_none());
+    assert!(s.query().is_empty());
+}
+
+#[test]
+fn a_renamed_entry_replaces_its_row_and_its_old_path_cannot_return() {
+    let (mut s, _) = rename_session();
+    let key = s.layout_key(1);
+    let generation = s.generation;
+    let renamed = item("summary.pdf");
+    assert!(s.replace(&key, renamed.clone()));
+    assert_eq!(s.items()[1].id, renamed.id);
+    assert_eq!(s.selected(), 1);
+    assert!(!s.replace(&key, renamed));
+    s.generation = generation;
+    s.providers
+        .values_mut()
+        .for_each(|p| p.phase = ProviderPhase::Pending);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("report.pdf"), item("summary.pdf")],
+    });
+    assert_eq!(
+        s.items().iter().map(|i| i.display_title()).collect::<Vec<_>>(),
+        ["other", "summary.pdf"]
+    );
+}
+
+#[test]
+fn replacing_with_an_entry_already_listed_drops_the_old_row() {
+    let (mut s, _) = rename_session();
+    let key = s.layout_key(1);
+    assert!(s.replace(&key, item("other")));
+    assert_eq!(
+        s.items().iter().map(|i| i.display_title()).collect::<Vec<_>>(),
+        ["other"]
+    );
+}
+
+#[test]
+fn renaming_back_restores_the_original_row() {
+    let (mut s, _) = rename_session();
+    assert!(s.replace(&s.layout_key(1), item("summary.pdf")));
+    let renamed = s.layout_key(1);
+    assert!(s.replace(&renamed, item("report.pdf")));
+    assert_eq!(
+        s.items().iter().map(|i| i.display_title()).collect::<Vec<_>>(),
+        ["other", "report.pdf"]
+    );
+}
+
+#[test]
+fn a_search_started_during_a_rename_still_receives_the_renamed_row() {
+    let (mut s, key) = rename_session();
+    s.run_key_action(&key, "rename");
+    s.set_query("summary.pdf");
+    let generation = searched(&s.refresh()).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("other"), item("report.pdf")],
+    });
+    let row = match s.intent(Intent::Open).unwrap().pop() {
+        Some(Effect::Rename { row, .. }) => row,
+        other => panic!("expected a rename, got {other:?}"),
+    };
+    assert!(s.replace(&row, item("summary.pdf")));
+    assert_eq!(
+        s.items().iter().map(|i| i.display_title()).collect::<Vec<_>>(),
+        ["other", "summary.pdf"]
+    );
+}
+
+#[test]
+fn enter_on_an_unchanged_name_leaves_even_when_the_name_is_now_invalid() {
+    let mut s = session();
+    let generation = searched(&s.set_query("long")).1;
+    let name = "あ".repeat(256);
+    let mut row = item(&name);
+    row.actions.push(ItemAction::new(
+        "rename",
+        "Rename…",
+        Action::Rename(format!("/x/{name}").into()),
+    ));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row],
+    });
+    let key = s.result_key(0);
+    s.run_key_action(&key, "rename");
+    assert!(s.renaming().unwrap().problem().is_some());
+    assert_eq!(
+        s.intent(Intent::Open).unwrap(),
+        vec![Effect::ReplaceQuery("long".into())]
+    );
 }

@@ -13,6 +13,12 @@ pub enum Action {
         application: PathBuf,
     },
     Trash(PathBuf),
+    /// Ask for a new name in the query field; the session then renames the entry.
+    Rename(PathBuf),
+    /// Copy beside the original under a name that is not taken.
+    Duplicate(PathBuf),
+    /// Zip beside the original under a name that is not taken.
+    Compress(PathBuf),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.

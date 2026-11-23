@@ -2,6 +2,8 @@ use dupin_core::snapshots::{Snapshot, Store};
 use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, row, text, text_input};
 
 pub struct Snapshots {
+    me: AppHandle<Self>,
+    loaded: bool,
     sources: Vec<String>,
     entries: Vec<Snapshot>,
     filtered: Vec<usize>,
@@ -23,6 +25,7 @@ impl Snapshots {
         running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     ) -> Self {
         let (writer, rx) = std::sync::mpsc::channel();
+        let handle = me.clone();
         std::thread::Builder::new()
             .name("dupin-snapshots".into())
             .spawn(move || {
@@ -46,6 +49,8 @@ impl Snapshots {
         let mut query = TextEdit::new("");
         query.focused = true;
         Self {
+            me: handle,
+            loaded: false,
             sources: Vec::new(),
             entries: Vec::new(),
             filtered: Vec::new(),
@@ -63,6 +68,62 @@ impl Snapshots {
 
     pub fn set_sources(&mut self, sources: Vec<String>) {
         self.sources = sources;
+    }
+
+    pub fn control(&self, call: crate::control::Call) {
+        use crate::control::Command;
+        if call.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let result = match &call.request.command {
+            Command::SnapshotsList {} if !self.loaded => Err("Busy: snapshots loading".into()),
+            Command::SnapshotsList {} => serde_json::to_value(summaries(
+                &self.entries,
+                self.archive_problem.clone(),
+                crate::control::MAX_FRAME / 2,
+            ))
+            .map_err(|_| "could not encode snapshots".into()),
+            Command::SnapshotsOpen { id } => {
+                if id.is_some() && !self.loaded {
+                    Err("Busy: snapshots loading".into())
+                } else if id
+                    .as_ref()
+                    .is_some_and(|id| !self.entries.iter().any(|s| &s.id == id))
+                {
+                    Err("NotFound: snapshot".into())
+                } else {
+                    self.panel
+                        .update(move |ui, tx| ui.control_snapshots_open(call, tx));
+                    return;
+                }
+            }
+            _ => Err("invalid snapshots command".into()),
+        };
+        call.finish(result);
+    }
+
+    pub fn accept_open(&mut self, call: crate::control::Call) {
+        if let crate::control::Command::SnapshotsOpen { id: Some(id) } = &call.request.command
+            && !self.open(id)
+        {
+            call.finish(Err("NotFound: snapshot".into()));
+            return;
+        }
+        self.query = TextEdit::new("");
+        self.query.focused = true;
+        self.pending_delete = None;
+        self.filter();
+        call.finish(Ok(serde_json::Value::Null));
+    }
+
+    pub fn show(&self) {
+        self.me.open();
+    }
+
+    pub fn control_close(&mut self, call: crate::control::Call) {
+        self.pending_delete = None;
+        self.me.close();
+        call.finish(Ok(serde_json::Value::Null));
     }
 
     fn filter(&mut self) {
@@ -95,7 +156,7 @@ impl Snapshots {
     }
 
     pub fn open(&mut self, id: &str) -> bool {
-        if self.entries.iter().find(|s| s.id == id).is_none() {
+        if !self.entries.iter().any(|s| s.id == id) {
             return false;
         }
         self.selected = Some(id.into());
@@ -426,6 +487,7 @@ fn publish(
         .collect();
     let problem = store.problem().map(str::to_owned);
     me.update(move |s, _| {
+        s.loaded = true;
         s.entries = entries;
         s.search = search;
         s.archive_problem = problem;
@@ -449,6 +511,35 @@ fn publish(
         }
         s.filter();
     });
+}
+
+fn summaries(entries: &[Snapshot], problem: Option<String>, budget: usize) -> crate::control::SnapshotList {
+    let mut list = crate::control::SnapshotList {
+        entries: Vec::new(),
+        truncated: false,
+        problem,
+    };
+    let mut ordered: Vec<_> = entries.iter().collect();
+    ordered.sort_by_key(|s| std::cmp::Reverse(s.saved_at));
+    for entry in ordered {
+        list.entries.push(crate::control::SnapshotSummary {
+            id: entry.id.clone(),
+            saved_at: entry.saved_at,
+            mode: entry.mode.clone(),
+            title: entry.title.clone(),
+            query: entry.query.clone(),
+        });
+        if serde_json::to_vec(&list)
+            .expect("snapshot metadata encodes")
+            .len()
+            > budget
+        {
+            list.entries.pop();
+            list.truncated = true;
+            break;
+        }
+    }
+    list
 }
 
 fn source_name(mode: &str) -> &str {
@@ -514,6 +605,168 @@ fn write_requests(
 mod tests {
     use super::*;
 
+    fn snapshot_handle() -> AppHandle<Snapshots> {
+        rune::App::new(rune::AppSpec::new(
+            "snapshots",
+            (900.0, 600.0),
+            || unreachable!(),
+            view,
+        ))
+        .handle()
+    }
+
+    fn saved(id: &str, saved_at: u64) -> Snapshot {
+        Snapshot {
+            version: 1,
+            id: id.into(),
+            saved_at,
+            mode: "apps.search".into(),
+            explicit: false,
+            query: "query".into(),
+            title: "Saved".into(),
+            views: vec![dupin_core::View::Text {
+                title: "Private content".into(),
+                subtitle: String::new(),
+            }],
+            state: None,
+        }
+    }
+
+    #[test]
+    fn summary_metadata_is_ordered_private_and_frame_bounded() {
+        let entries = vec![saved("older", 1), saved("newer", 2)];
+        let list = summaries(
+            &entries,
+            Some("Archive problem".into()),
+            crate::control::MAX_FRAME / 2,
+        );
+        assert_eq!(list.entries[0].id, "newer");
+        assert_eq!(list.problem.as_deref(), Some("Archive problem"));
+        let json = serde_json::to_value(&list).unwrap();
+        for entry in json["entries"].as_array().unwrap() {
+            assert_eq!(entry.as_object().unwrap().len(), 5);
+            for key in ["views", "state", "explicit"] {
+                assert!(entry.get(key).is_none());
+            }
+        }
+        let entries: Vec<_> = (0..100)
+            .map(|i| {
+                let mut entry = saved(&i.to_string(), i);
+                entry.title = "\"".repeat(4096);
+                entry.query = "\\".repeat(4096);
+                entry
+            })
+            .collect();
+        let list = summaries(&entries, None, crate::control::MAX_FRAME / 2);
+        assert!(list.truncated);
+        crate::control::write_frame(
+            &mut Vec::new(),
+            &crate::control::Reply {
+                id: 1,
+                result: Ok(serde_json::to_value(list).unwrap()),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn snapshot_control_never_writes_or_resumes() {
+        use crate::control::{Call, Command, Request as ControlRequest};
+        let panel = rune::App::new(rune::AppSpec::new(
+            "panel",
+            (1.0, 1.0),
+            || unreachable!(),
+            crate::view::view,
+        ))
+        .handle();
+        let (writer, received) = std::sync::mpsc::channel();
+        let mut s = Snapshots {
+            me: snapshot_handle(),
+            loaded: false,
+            sources: vec![],
+            entries: vec![saved("other", 2), saved("saved", 1)],
+            filtered: vec![0, 1],
+            search: vec!["query".into(), "query".into()],
+            writer,
+            archive_problem: None,
+            query: TextEdit::new("query"),
+            selected: Some("other".into()),
+            pending_delete: Some("other".into()),
+            problem: None,
+            panel,
+            running: Default::default(),
+        };
+        let request = |command| {
+            let (reply, receiver) = std::sync::mpsc::sync_channel(1);
+            let call = Call {
+                request: ControlRequest { id: 1, command },
+                cancelled: Default::default(),
+                reply,
+            };
+            (call, receiver)
+        };
+        let (call, reply) = request(Command::SnapshotsList {});
+        s.control(call);
+        assert_eq!(
+            reply.recv().unwrap().result.unwrap_err(),
+            "Busy: snapshots loading"
+        );
+        s.loaded = true;
+        for (command, expected) in [
+            (
+                Command::SnapshotsOpen {
+                    id: Some("missing".into()),
+                },
+                Some("NotFound: snapshot"),
+            ),
+            (Command::SnapshotsList {}, None),
+        ] {
+            let (call, reply) = request(command);
+            s.control(call);
+            assert_eq!(reply.recv().unwrap().result.err().as_deref(), expected);
+            assert_eq!(s.selected.as_deref(), Some("other"));
+        }
+        let open = || {
+            request(Command::SnapshotsOpen {
+                id: Some("saved".into()),
+            })
+        };
+        let (call, reply) = open();
+        s.control(call);
+        assert!(
+            matches!(reply.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+            "opening replies only after the panel's final Busy check"
+        );
+        assert_eq!(s.selected.as_deref(), Some("other"));
+        assert_eq!(s.query.text, "query");
+        assert_eq!(s.pending_delete.as_deref(), Some("other"));
+
+        let removed = s.entries.pop().unwrap();
+        let search = s.search.pop().unwrap();
+        s.filter();
+        let (call, reply) = open();
+        s.accept_open(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap_err(), "NotFound: snapshot");
+        assert_eq!(s.selected.as_deref(), Some("other"));
+        assert_eq!(s.query.text, "query");
+        assert_eq!(s.pending_delete.as_deref(), Some("other"));
+        s.entries.push(removed);
+        s.search.push(search);
+
+        let (call, reply) = open();
+        s.accept_open(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
+        assert_eq!(s.selected.as_deref(), Some("saved"));
+        assert!(s.query.text.is_empty());
+        assert!(s.pending_delete.is_none());
+
+        let (call, reply) = request(Command::SnapshotsClose {});
+        s.control_close(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
+        assert_eq!(s.selected.as_deref(), Some("saved"));
+        assert!(received.try_recv().is_err());
+    }
+
     #[test]
     #[ignore = "offscreen screenshot, run explicitly"]
     fn render_saved_content() {
@@ -551,6 +804,8 @@ mod tests {
         };
         let search = vec![saved.search_text()];
         let state = Snapshots {
+            me: snapshot_handle(),
+            loaded: true,
             sources: vec!["apps.search".into()],
             entries: vec![saved],
             filtered: vec![0],
@@ -703,6 +958,8 @@ mod tests {
         .handle();
         let (writer, received) = std::sync::mpsc::channel();
         let mut s = Snapshots {
+            me: snapshot_handle(),
+            loaded: true,
             sources: vec![],
             entries: vec![],
             filtered: vec![],

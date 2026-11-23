@@ -243,9 +243,7 @@ fn item_for_path(
             (None, matched)
         }
     };
-    let mut item = Item::path(path, title, matched);
-    crate::quick_look::add_action(&mut item);
-    crate::file_actions::add(&mut item);
+    let mut item = crate::file_actions::item(path, title, matched);
     item.score = score;
     Some(item)
 }

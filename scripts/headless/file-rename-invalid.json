@@ -1,0 +1,16 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": " " },
+		{ "t": 0.3, "type": "type", "text": "readme" },
+		{ "t": 3.0, "type": "key", "name": "k", "cmd": true },
+		{ "t": 3.1, "type": "key", "name": "Down" },
+		{ "t": 3.15, "type": "key", "name": "Down" },
+		{ "t": 3.2, "type": "key", "name": "Down" },
+		{ "t": 3.25, "type": "key", "name": "Down" },
+		{ "t": 3.3, "type": "key", "name": "Down" },
+		{ "t": 3.35, "type": "key", "name": "Down" },
+		{ "t": 3.5, "type": "key", "name": "Enter" },
+		{ "t": 3.7, "type": "type", "text": "bad/name" },
+		{ "t": 4.0, "type": "mark", "name": "end" }
+	]
+}
