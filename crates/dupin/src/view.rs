@@ -15,6 +15,13 @@ use crate::ui::{ICON_SIZE, Ui};
 pub const HEADER_H: f32 = 64.0;
 /// Rows shown before the list scrolls.
 const VISIBLE_ROWS: usize = 8;
+const LIST_HEIGHT_BUDGET: f32 = 416.0;
+
+fn visible_rows(row_height: f32) -> usize {
+    VISIBLE_ROWS
+        .min((LIST_HEIGHT_BUDGET / row_height).floor() as usize)
+        .max(1)
+}
 const LIST_PAD: f32 = 6.0;
 /// How much of the theme's card color covers the glass.
 const FROST: f32 = 0.45;
@@ -180,7 +187,7 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     col().key("actions").w_full().py(LIST_PAD).child(
         col()
             .w_full()
-            .max_h((s.theme.row_height as f32 - 8.0) * VISIBLE_ROWS as f32)
+            .max_h((s.theme.row_height as f32 - 8.0) * visible_rows(s.theme.row_height as f32 - 8.0) as f32)
             .scroll(ScrollSpec { stick_bottom: false })
             .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
                 let on = index == screen.selected;
@@ -227,7 +234,6 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .single_line()
         .grow(1.0)
         .color(t.text)
-        .caret(accent, accent.alpha(0.25))
         .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
         .on_edit(Ui::query_edit)
@@ -306,7 +312,7 @@ fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
                 .child(content),
         );
     }
-    let shown = items.len().min(VISIBLE_ROWS) as f32;
+    let shown = items.len().min(visible_rows(s.theme.row_height as f32)) as f32;
     let selected = s.session.selected();
     let rows: Vec<El> = items
         .iter()
@@ -426,8 +432,7 @@ fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &ResolvedTheme)
                 .color(t.text)
                 .align(Align::Center)
                 .wrap()
-                .selectable(true)
-                .selection_color(t.accent.alpha(0.25)),
+                .selectable(true),
         )
         .child(
             text(label)
@@ -460,7 +465,6 @@ fn detail_body(id: &str, body: &str, t: &ResolvedTheme) -> El {
                 .color(t.text)
                 .wrap()
                 .selectable(true)
-                .selection_color(t.accent.alpha(0.25))
         }))
 }
 
@@ -594,7 +598,7 @@ impl ResolvedTheme {
 pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool) -> El {
     let t = ResolvedTheme::new(theme, dark);
     let radius = theme.corner_radius as f32;
-    col().w_full().scroll(ScrollSpec { stick_bottom: false }).child(
+    col().w_full().scroll_x().child(
         col()
             .w(theme.panel_width as f32)
             .radius(radius)
@@ -644,6 +648,14 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool) -> El {
 #[cfg(test)]
 mod theme_tests {
     use super::*;
+    #[test]
+    fn themed_lists_keep_the_original_height_budget() {
+        assert_eq!(visible_rows(52.0), 8);
+        assert_eq!(visible_rows(44.0), 8);
+        for height in [52.0, 64.0, 72.0, 92.0, 100.0] {
+            assert!(visible_rows(height) as f32 * height <= LIST_HEIGHT_BUDGET);
+        }
+    }
     #[test]
     fn defaults_and_mode_overrides_resolve_independently() {
         let mut theme = dupin_core::config::Theme::default();

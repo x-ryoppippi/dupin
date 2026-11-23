@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
 use rune::{
-    AppHandle, Cx, El, Icon, PopupItem, PopupMenu, Shortcut, ShortcutError, TextStyle, Tx, col, el, icon,
-    row, text,
+    AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
+    el, icon, row, text,
 };
 use rune_kit::{
     Button, Kit, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, Switch,
@@ -292,6 +292,9 @@ impl Prefs {
                         let color = if picked == "blue" { "#176EA6" } else { "#A52D61" };
                         t.light.accent = Some(color.into());
                         t.dark.accent = Some(color.into());
+                        t.light.background =
+                            Some(if picked == "blue" { "#E9F4FA" } else { "#FFF0F5" }.into());
+                        t.dark.background = Some(if picked == "blue" { "#142734" } else { "#30202A" }.into());
                     }
                     "font15" => t.font_size = 15,
                     "font18" => {
@@ -507,7 +510,11 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         )
         .child(
             col()
+                .key("page-body")
                 .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .scroll(ScrollSpec { stick_bottom: false })
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
                 .children(s.config_problem.as_ref().map(|problem| {

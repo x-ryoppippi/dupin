@@ -1,0 +1,8 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "click", "key": "page-appearance" },
+		{ "t": 0.5, "type": "mark", "name": "top" },
+		{ "t": 0.7, "type": "scroll", "key": "page-body", "dy": -900 },
+		{ "t": 1.5, "type": "mark", "name": "end" }
+	]
+}
