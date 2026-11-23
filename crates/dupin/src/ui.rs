@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -58,6 +59,7 @@ pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
     pub snapshots: AppHandle<crate::snapshots::Snapshots>,
+    pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
 pub struct Configuration {
@@ -72,10 +74,27 @@ enum Restart {
     Requested,
 }
 
+impl Restart {
+    fn waiting_for_work(self, actions: &AtomicUsize, scripts: &AtomicUsize) -> bool {
+        actions.load(Ordering::Acquire) > 0 || (self == Self::Update && scripts.load(Ordering::Acquire) > 0)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn only_automatic_restart_waits_for_scripts() {
+    let actions = AtomicUsize::new(0);
+    let scripts = AtomicUsize::new(1);
+    assert!(Restart::Update.waiting_for_work(&actions, &scripts));
+    assert!(!Restart::Requested.waiting_for_work(&actions, &scripts));
+
+    actions.store(1, Ordering::Release);
+    assert!(Restart::Requested.waiting_for_work(&actions, &scripts));
+}
+
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
-    pub layout_key: String,
     pub selected: usize,
     pub stage: ActionStage,
 }
@@ -236,6 +255,11 @@ pub struct Ui {
     control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
+    pub script_entry: Option<crate::scripts::entry::Entry>,
+    pub script_card: Option<Arc<crate::scripts::runner::Snapshot>>,
+    scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
+    runner: crate::scripts::runner::Runner,
+    _scripts_watcher: Option<crate::scripts::CatalogWatch>,
     pub action_screen: Option<ActionScreen>,
     next_lookup: u64,
     notice_until: Option<f64>,
@@ -249,7 +273,7 @@ pub struct Ui {
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
-    pub icons: HashMap<String, Image>,
+    pub icons: HashMap<PathBuf, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -280,6 +304,8 @@ pub struct Ui {
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
     snapshots: AppHandle<crate::snapshots::Snapshots>,
+    script_output: AppHandle<crate::scripts::output::Output>,
+    script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
 
 impl Ui {
@@ -384,14 +410,25 @@ impl Ui {
             panel: me,
             prefs,
             snapshots,
+            scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
+        let runner = crate::scripts::runner::Runner::new(
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default(),
+            Arc::new({
+                let me = me.clone();
+                move |id, finished| me.update_if(move |s, tx| s.script_changed(id, finished, tx))
+            }),
+        );
+        let scripts_watcher = crate::scripts::watch(me.clone());
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
-            move || me.update(|s, tx| s.refresh_apps(tx))
+            move || me.update(|s, tx| s.refresh_default(tx))
         });
         let apps_watcher = match apps_watcher {
             Ok(watcher) => Some(watcher),
@@ -429,6 +466,13 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            script_output,
+            script_output_after_close: None,
+            script_entry: None,
+            script_card: None,
+            scripts: registration.scripts,
+            runner,
+            _scripts_watcher: scripts_watcher,
             picker: None,
             control_save: None,
             theme: config.theme.clone(),
@@ -605,18 +649,24 @@ impl Ui {
     }
 
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
-    /// Automatic updates wait for both windows to hide; an explicit request closes them.
+    /// Automatic updates wait so a restart does not interrupt work in a visible window.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
-            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+            && (self.me.is_visible()
+                || self.prefs.is_visible()
+                || self.snapshots.is_visible()
+                || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
-        } else if self.running.load(Ordering::Acquire) > 0 {
+        } else if request.waiting_for_work(&self.running, self.runner.activity()) {
             self.relaunch_when_idle(request);
         } else {
             match self.updater.install_staged() {
                 Ok(installed) => {
                     if installed || request == Restart::Requested {
+                        if request == Restart::Requested {
+                            self.stop_child_processes(tx);
+                        }
                         tx.relaunch();
                     }
                 }
@@ -635,9 +685,10 @@ impl Ui {
     /// summoned meanwhile, so automatic updates check visibility again.
     fn relaunch_when_idle(&self, request: Restart) {
         let running = self.running.clone();
+        let scripts = self.runner.activity().clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
-            while running.load(Ordering::Acquire) > 0 {
+            while request.waiting_for_work(&running, &scripts) {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             me.update(move |s, tx| s.restart(request, tx));
@@ -704,10 +755,6 @@ impl Ui {
                 tx,
             );
         }
-    }
-
-    pub fn stop_hotkey_commands(&mut self, _: &mut Tx) {
-        self.hotkey_commands.stop();
     }
 
     /// The hotkey: show the panel, or hide it when it already shows.
@@ -788,6 +835,9 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if let Some(id) = self.script_output_after_close.take() {
+            self.show_script_output(id);
+        }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
         }
@@ -798,6 +848,8 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        self.script_entry = None;
+        self.script_card = None;
         crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
         if let Some(preview) = self.quick_look.borrow().as_ref() {
@@ -813,6 +865,7 @@ impl Ui {
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
+            && self.script_output_after_close.is_none()
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -828,6 +881,8 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        self.script_card = None;
+        self.script_entry = None;
         if let Some(picker) = &mut self.picker {
             picker.selected = 0;
             tx.instant();
@@ -918,6 +973,29 @@ impl Ui {
             tx.instant();
             return true;
         }
+        if self.script_entry.is_some() {
+            return self.script_entry_key(ev, tx);
+        }
+        if let Some(card) = &self.script_card {
+            if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
+                self.show_script_output(card.id);
+                return true;
+            }
+            if matches!(ev.key, Key::Enter) {
+                if card.status != crate::scripts::runner::Status::Exited(Some(0)) {
+                    return true;
+                }
+                if let Some(text) = card.output.last_stdout() {
+                    tx.copy(text.to_owned());
+                }
+                self.dismiss(tx);
+                return true;
+            }
+            if ev.mods.cmd && matches!(ev.key, Key::Command('.')) {
+                self.cancel_script(card.id);
+                return true;
+            }
+        }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
             match self.session.capture() {
                 Ok(saved) => {
@@ -991,6 +1069,23 @@ impl Ui {
         }
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
+        if plain
+            && !m.shift
+            && matches!(ev.key, Key::Tab | Key::Right)
+            && self.query.anchor == self.query.focus
+            && self.query.focus == self.query.text.len()
+            && self
+                .session
+                .selected_item()
+                .is_some_and(|item| item.action(crate::scripts::provider::ARGUMENTS).is_some())
+        {
+            let key = self.session.result_key(self.session.selected());
+            let effects = self
+                .session
+                .run_key_action(&key, crate::scripts::provider::ARGUMENTS);
+            self.apply(effects, tx);
+            return true;
+        }
         let intent = match &ev.key {
             Key::Tab
                 if plain
@@ -1140,10 +1235,9 @@ impl Ui {
         ) = (&screen.stage, &self.icon_cache)
         {
             for app in apps {
-                self.icons.insert(
-                    format!("choice-{}", app.path.display()),
-                    cache.app_icon(&app.path, ICON_SIZE),
-                );
+                self.icons
+                    .entry(app.path.clone())
+                    .or_insert_with(|| cache.app_icon(&app.path, ICON_SIZE));
             }
         }
         crate::trace::action_screen(
@@ -1238,7 +1332,139 @@ impl Ui {
         }
     }
 
-    fn refresh_apps(&mut self, tx: &mut Tx) {
+    pub(crate) fn scripts_catalog(&mut self, mut catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
+        let notice = catalog.notice.take();
+        self.prefs.update(move |prefs, _| prefs.scripts_notice = notice);
+        let changed = {
+            let mut current = self.scripts.write().unwrap();
+            let changed = current.scripts != catalog.scripts;
+            if changed {
+                *current = catalog;
+            }
+            changed
+        };
+        if changed {
+            self.refresh_default(tx);
+        }
+    }
+
+    fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let Some(entry) = &self.script_entry else {
+            return false;
+        };
+        if entry.query.is_composing() {
+            return false;
+        }
+        if matches!(ev.key, Key::Escape) || (matches!(ev.key, Key::Backspace) && entry.query.text.is_empty())
+        {
+            self.script_entry = None;
+            tx.focus("query", false);
+            return true;
+        }
+        if matches!(ev.key, Key::Enter) {
+            let effects = crate::scripts::entry::Entry::submit(
+                &mut self.script_entry,
+                &mut self.session,
+                &self.scripts.read().unwrap(),
+            );
+            self.apply(effects, tx);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn script_entry_current(&self, entry: &crate::scripts::entry::Entry) -> bool {
+        entry.is_current(&self.session, &self.scripts.read().unwrap())
+    }
+
+    pub fn stop_child_processes(&mut self, _: &mut Tx) {
+        self.hotkey_commands.stop();
+        self.runner.kill_all_now();
+    }
+
+    pub(crate) fn cancel_script(&mut self, id: crate::scripts::runner::RunId) {
+        self.runner.cancel(id);
+    }
+
+    fn show_script_output(&self, id: crate::scripts::runner::RunId) {
+        let runs = self.runner.snapshots();
+        self.script_output.update(move |s, _| s.update(runs, Some(id)));
+        self.script_output.open();
+    }
+
+    fn script_changed(&mut self, id: crate::scripts::runner::RunId, finished: bool, tx: &mut Tx) -> bool {
+        let Some(snapshot) = self.runner.snapshot(id) else {
+            return false;
+        };
+        if !finished && snapshot.status != crate::scripts::runner::Status::Running {
+            return false;
+        }
+        let changed = self
+            .script_card
+            .as_ref()
+            .is_some_and(|card| card.id == id && !Arc::ptr_eq(card, &snapshot));
+        if changed {
+            self.script_card = Some(snapshot.clone());
+            tx.instant();
+        }
+        let inline_card = self
+            .script_card
+            .as_ref()
+            .filter(|_| self.picker.is_none())
+            .map(|card| card.id);
+        if crate::scripts::output::show_failure(&snapshot, inline_card, self.me.is_visible()) {
+            self.show_script_output(id);
+        } else {
+            self.script_output.update_if(move |s, _| s.replace_run(snapshot));
+        }
+        changed
+    }
+
+    fn launch_script(&self, command: dupin_core::script::ScriptRun) -> crate::scripts::runner::Start {
+        let valid = self
+            .scripts
+            .read()
+            .unwrap()
+            .scripts
+            .get(&command.path)
+            .is_some_and(|s| {
+                s.header.title == command.title
+                    && s.header.mode == command.mode
+                    && s.header.bind_args(&command.args).is_ok()
+            });
+        if valid {
+            self.runner.start(command)
+        } else {
+            self.runner
+                .refuse(command, "Script changed. Search again before running it.".into())
+        }
+    }
+
+    pub(crate) fn repeat_script(&self, command: dupin_core::script::ScriptRun) {
+        let start = self.launch_script(command);
+        self.show_script_output(start.id);
+    }
+
+    fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        use dupin_core::script::OutputMode;
+        let mode = command.mode;
+        let start = self.launch_script(command);
+        match mode {
+            OutputMode::Inline => {
+                self.script_card = self.runner.snapshot(start.id);
+                tx.focus("query", false);
+            }
+            OutputMode::Full => self.script_output_after_close = Some(start.id),
+            OutputMode::Silent if start.refused => self.script_output_after_close = Some(start.id),
+            OutputMode::Silent => {}
+        }
+        if self.script_output_after_close.is_none() && self.script_output.is_visible() {
+            let runs = self.runner.snapshots();
+            self.script_output.update(move |s, _| s.update(runs, None));
+        }
+    }
+
+    fn refresh_default(&mut self, tx: &mut Tx) {
         if self.session.command_id().as_str() == crate::commands::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
@@ -1261,7 +1487,6 @@ impl Ui {
                     self.action_screen = Some(ActionScreen {
                         key: id,
                         item: item.clone(),
-                        layout_key: self.session.layout_key(self.session.selected()),
                         selected: 0,
                         stage: ActionStage::List,
                     });
@@ -1298,10 +1523,41 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
-                Effect::ReplaceQuery(text) => self.query.replace_text(text),
+                Effect::ClearQuery => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.query.clear();
+                }
+                Effect::ReplaceQuery(text) => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.query.replace_text(text);
+                }
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
+                    dupin_core::Action::RunScript(command) => self.start_script(command, tx),
+                    dupin_core::Action::ScriptArguments(path) => {
+                        let script = self.scripts.read().unwrap().scripts.get(&path).cloned();
+                        if let Some(script) = script
+                            && self
+                                .session
+                                .selected_item()
+                                .and_then(|item| item.action(crate::scripts::provider::ARGUMENTS))
+                                == Some(&dupin_core::Action::ScriptArguments(path))
+                            && let Some(target) =
+                                self.session.followup_target(crate::scripts::provider::ARGUMENTS)
+                        {
+                            let mut query = TextEdit::new("");
+                            query.focused = true;
+                            self.script_card = None;
+                            self.script_entry = Some(crate::scripts::entry::Entry {
+                                target,
+                                script,
+                                query,
+                            });
+                            tx.focus("script-arguments", false);
+                        }
+                    }
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
@@ -1455,21 +1711,17 @@ impl Ui {
     fn fetch_icons(&mut self) {
         let Some(cache) = &self.icon_cache else { return };
         if self.icons.len() > ICON_CAP {
-            let current: std::collections::HashSet<String> = self
+            let current: std::collections::HashSet<_> = self
                 .session
                 .items()
                 .iter()
-                .enumerate()
-                .map(|(i, _)| self.session.layout_key(i))
+                .filter_map(|item| item.icon.as_ref())
                 .collect();
-            self.icons.retain(|id, _| current.contains(id.as_str()));
+            self.icons.retain(|path, _| current.contains(path));
         }
-        for (index, item) in self.session.items().iter().enumerate() {
-            if let Some(path) = &item.icon
-                && !self.icons.contains_key(&self.session.layout_key(index))
-            {
-                self.icons
-                    .insert(self.session.layout_key(index), cache.app_icon(path, ICON_SIZE));
+        for path in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
+            if !self.icons.contains_key(path) {
+                self.icons.insert(path.clone(), cache.app_icon(path, ICON_SIZE));
             }
         }
     }
@@ -1800,7 +2052,6 @@ mod action_screen_tests {
         session.intent(Intent::Actions);
         let screen = ActionScreen {
             key: session.result_key(0),
-            layout_key: session.layout_key(0),
             item: session.items()[0].clone(),
             selected: 0,
             stage: ActionStage::List,

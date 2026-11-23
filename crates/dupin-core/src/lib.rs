@@ -10,6 +10,7 @@ pub mod fuzzy;
 pub mod history;
 pub mod item;
 pub mod provider;
+pub mod script;
 pub mod searcher;
 pub mod session;
 

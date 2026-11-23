@@ -163,6 +163,7 @@ pub struct Prefs {
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
+    pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
 }
@@ -195,6 +196,7 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            scripts_notice: None,
         }
     }
 
@@ -476,6 +478,29 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 } else {
                     vec![card(k, hair, rows)]
                 })
+                .children(
+                    s.scripts_notice
+                        .as_ref()
+                        .filter(|_| s.page == Page::Search)
+                        .map(|notice| {
+                            col()
+                                .key("scripts-notice")
+                                .mx(ROW_PX)
+                                .gap(4.0)
+                                .child(
+                                    text("Script discovery")
+                                        .font(k.ty.body_medium)
+                                        .color(k.c.text_base),
+                                )
+                                .child(
+                                    text(notice)
+                                        .w_full()
+                                        .font(DESCRIPTION)
+                                        .color(k.c.text_muted)
+                                        .wrap(),
+                                )
+                        }),
+                )
                 .children(s.read_only.then(|| {
                     text("config.toml is read-only, so change these where it's managed.")
                         .font(DESCRIPTION)
@@ -691,7 +716,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::REFRESH,
             "Relaunch Dupin",
-            Some("Restart and reload configuration"),
+            Some("Restart, reload configuration and cancel running scripts"),
             relaunch,
         ),
     ]
@@ -1061,7 +1086,10 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
             .on_press(|s: &mut Prefs| s.updater.check_now()),
     }
     .build(k);
-    let line = status.text(s.config.auto_update, s.updater.download_only());
+    let mut line = status.text(s.config.auto_update, s.updater.download_only());
+    if matches!(status, Status::Ready(_)) {
+        line.push_str(". Restarting cancels running scripts.");
+    }
     vec![
         setting(
             k,

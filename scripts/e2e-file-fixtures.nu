@@ -1,4 +1,5 @@
 const registration = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+const fixtures = path self fixtures
 
 export def viewer-running []: nothing -> bool {
     let process = ^pgrep -f 'DupinE2EViewer.app/Contents/MacOS/viewer' | complete
@@ -23,8 +24,8 @@ export def prepare [out: path] {
     if ($root | path exists) { error make {msg: 'File-action fixtures already exist'} }
     let bundle = $root | path join DupinE2EViewer.app
     mkdir ($bundle | path join Contents MacOS)
-    cp ($env.FILE_PWD | path join fixtures FileViewer.plist) ($bundle | path join Contents Info.plist)
-    ^swiftc -framework AppKit ($env.FILE_PWD | path join fixtures FileViewer.swift) -o ($bundle | path join Contents MacOS viewer)
+    cp ($fixtures | path join FileViewer.plist) ($bundle | path join Contents Info.plist)
+    ^swiftc -framework AppKit ($fixtures | path join FileViewer.swift) -o ($bundle | path join Contents MacOS viewer)
     ^codesign --force --sign - $bundle
     ^$registration -f $bundle
     for name in [open-me.dupine2e trash-me.dupine2e] {

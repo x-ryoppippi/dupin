@@ -291,6 +291,106 @@ fn actions_run_the_named_result_even_after_selection_moves() {
 }
 
 #[test]
+fn followup_actions_keep_the_parent_target_and_use_their_own_disposition() {
+    for keep_open in [true, false] {
+        let mut s = session();
+        let generation = searched(&s.set_query("notes")).1;
+        let mut row = item("notes.md");
+        row.actions
+            .push(ItemAction::new("inspect", "Inspect", Action::Preview("/x/notes.md".into())).keep_open());
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![row],
+        });
+        let key = s.result_key(0);
+        assert_eq!(
+            s.run_key_action(&key, "inspect"),
+            [Effect::Run(Action::Preview("/x/notes.md".into()))]
+        );
+        let target = s.followup_target("inspect").unwrap();
+        let generation = searched(&s.refresh()).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("another.md")],
+        });
+        let mut followup = ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
+        if keep_open {
+            followup = followup.keep_open();
+        }
+        let effects = s.run_followup(target, followup);
+        assert_eq!(effects[0], Effect::Run(Action::Copy("value".into())));
+        assert_eq!(effects.contains(&Effect::SaveHistory), !keep_open);
+        assert_eq!(effects.contains(&Effect::Hide), !keep_open);
+        if keep_open {
+            assert_eq!(s.history(), &History::default());
+            assert_eq!(s.items()[0].id, item("another.md").id);
+            assert_eq!(s.query(), "notes");
+        } else {
+            assert_eq!(s.history().boost(&item("another.md").id, "notes", 0), 0);
+            assert!(s.history().boost(&item("notes.md").id, "notes", 0) > 0);
+        }
+    }
+}
+
+#[test]
+fn followup_targets_require_an_actionable_parent_and_the_original_query() {
+    for reset in [false, true] {
+        let mut s = session();
+        let generation = searched(&s.set_query("notes")).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("notes.md")],
+        });
+        assert!(s.followup_target("missing").is_none());
+        let target = s.followup_target("open").unwrap();
+        if reset {
+            s.reset();
+        } else {
+            s.set_query("other");
+        }
+        assert!(s.followup_target("open").is_none());
+        let followup = ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
+        assert!(s.run_followup(target, followup).is_empty());
+        assert_eq!(s.history(), &History::default());
+    }
+}
+
+#[test]
+fn running_an_inline_script_records_the_pick_and_query_before_dismissal() {
+    use crate::script::{OutputMode, ScriptRun};
+    let mut s = session();
+    let generation = searched(&s.set_query("fixture")).1;
+    let mut row = item("fixture");
+    row.primary = Some("run".into());
+    row.actions.push(
+        ItemAction::new(
+            "run",
+            "Run script",
+            Action::RunScript(ScriptRun {
+                path: "/fixture".into(),
+                title: "Fixture".into(),
+                args: vec![],
+                mode: OutputMode::Inline,
+            }),
+        )
+        .keep_open(),
+    );
+    let id = row.id.clone();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row],
+    });
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(matches!(
+        &effects[..],
+        [Effect::Run(Action::RunScript(_)), Effect::SaveHistory]
+    ));
+    assert_eq!(s.query(), "fixture");
+    assert!(s.history().boost(&id, "fixture", 0) > 0);
+    assert_eq!(s.queries, [(app_command(), "fixture".into())]);
+}
+
+#[test]
 fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
     for entry in 0..3 {
         let mut s = session();
