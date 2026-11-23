@@ -23,6 +23,9 @@ pub(super) const LIST_PAD: f32 = 6.0;
 pub(super) const SECTION_H: f32 = 30.0;
 
 pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
+    // Rows without icons only keep the icon column when another row in the list has one, so
+    // titles still line up.
+    let gutter = items.iter().any(|item| item.icon.is_some());
     let plain_rows = items
         .iter()
         .enumerate()
@@ -37,7 +40,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                     super::detail::detail_card(s, item, detail, index, on, t, accent)
                 } else {
                     match &item.view {
-                        View::Text { .. } => result_row(s, item, index, on, t, accent),
+                        View::Text { .. } => result_row(s, item, index, on, gutter, t, accent),
                         View::Detail { .. } | View::Pair { .. } => {
                             content_card(s, item, index, on, t, accent)
                         }
@@ -62,7 +65,10 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
     let rows: Vec<El> = items
         .iter()
         .enumerate()
-        .map(|(i, item)| sectioned(s, i, result_row(s, item, i, i == selected, t, accent), t))
+        .map(|(i, item)| {
+            let row = result_row(s, item, i, i == selected, gutter, t, accent);
+            sectioned(s, i, row, t)
+        })
         .collect();
     let headings = (0..items.len())
         .filter(|&index| s.session.section_start(index).is_some())
@@ -262,11 +268,19 @@ fn detail_body(id: &str, body: &str, t: &ResolvedTheme) -> El {
         }))
 }
 
-fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
+fn result_row(
+    s: &Ui,
+    item: &Item,
+    index: usize,
+    on: bool,
+    gutter: bool,
+    t: &ResolvedTheme,
+    accent: Color,
+) -> El {
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let icon = item_icon(s, item.icon.as_deref());
+    let icon = item_icon(s, item.icon.as_deref(), gutter);
     let id = s.session.result_key(index);
     text_row(
         t,
@@ -285,12 +299,17 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, ac
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
 }
 
-pub(super) fn item_icon(s: &Ui, path: Option<&std::path::Path>) -> El {
+/// The icon for `path`, an empty slot while it loads, or nothing when there is no icon and
+/// `gutter` is false.
+pub(super) fn item_icon(s: &Ui, path: Option<&std::path::Path>, gutter: bool) -> Option<El> {
+    if path.is_none() && !gutter {
+        return None;
+    }
     let icon = el().size(ICON_SIZE, ICON_SIZE);
-    match path.and_then(|path| s.icons.get(path)) {
+    Some(match path.and_then(|path| s.icons.get(path)) {
         Some(image) => icon.pixels(image.pixels()),
         None => icon,
-    }
+    })
 }
 
 pub(super) fn text_row(
@@ -298,7 +317,7 @@ pub(super) fn text_row(
     accent: Color,
     height: f32,
     on: bool,
-    icon: El,
+    icon: Option<El>,
     title: El,
     subtitle: &str,
 ) -> El {
@@ -312,7 +331,7 @@ pub(super) fn text_row(
             .center_y()
             .fill(if on { accent } else { Color::TRANSPARENT })
             .hover(if on { accent } else { t.hover })
-            .child(icon)
+            .children(icon)
             .child(
                 col().grow(1.0).min_w(0.0).gap(2.0).child(title).child(
                     text(subtitle)

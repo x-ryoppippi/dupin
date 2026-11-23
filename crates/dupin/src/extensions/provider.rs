@@ -324,8 +324,8 @@ mod tests {
     fn javascript(source: &str) -> (tempfile::TempDir, ExtensionProvider) {
         let folder = tempfile::tempdir().unwrap();
         std::fs::write(
-            folder.path().join(super::super::MANIFEST),
-            "id = \"word-count\"\nname = \"Word Count\"\nversion = \"0.1.0\"\nkeyword = \"wc\"\n",
+            folder.path().join(super::super::manifest::PACKAGE_JSON),
+            r#"{"name": "word-count", "version": "0.1.0", "dupin": {"title": "Word Count", "keyword": "wc"}}"#,
         )
         .unwrap();
         std::fs::write(folder.path().join("main.js"), source).unwrap();
