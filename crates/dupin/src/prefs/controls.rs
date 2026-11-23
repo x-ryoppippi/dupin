@@ -34,10 +34,9 @@ pub(super) fn choose(
     );
 }
 
-/// A row's current value and a chevron, which `open` turns into a menu of the others. Locked
-/// while config.toml is read-only.
+/// A row's current value and a chevron, which `open` turns into a menu of the others.
 pub(super) fn menu_value(
-    s: &Prefs,
+    locked: bool,
     k: &Kit,
     key: &str,
     name: &str,
@@ -48,11 +47,11 @@ pub(super) fn menu_value(
         .appearance(SelectAppearance::Inline)
         .label(name)
         .current(Some(value))
-        .disabled(s.read_only)
+        .disabled(locked)
         .trigger(k)
         .max_w(VALUE_MAX_W)
         .mr(-8.0);
-    if s.read_only {
+    if locked {
         trigger
     } else {
         trigger.on_press_tx(open)
@@ -124,6 +123,21 @@ pub(super) fn tilde(path: &str) -> String {
 
 /// A row: an icon, the setting's name and what it does, and its control at the trailing edge.
 pub(super) fn setting(k: &Kit, glyph: &'static Icon, label: &str, detail: Option<&str>, control: El) -> El {
+    setting_with_lock(k, glyph, label, detail, control, false)
+}
+
+pub(super) fn lock_note(k: &Kit) -> El {
+    text("Set in config.toml").font(DESCRIPTION).color(k.c.text_muted)
+}
+
+pub(super) fn setting_with_lock(
+    k: &Kit,
+    glyph: &'static Icon,
+    label: &str,
+    detail: Option<&str>,
+    control: El,
+    locked: bool,
+) -> El {
     let mut words = col()
         .grow(1.0)
         .min_w(100.0)
@@ -146,6 +160,6 @@ pub(super) fn setting(k: &Kit, glyph: &'static Icon, label: &str, detail: Option
         .center_y()
         .label(label)
         .child(icon(glyph, 16.0).color(k.c.icon_base))
-        .child(words)
+        .child(words.children(locked.then(|| lock_note(k))))
         .child(control)
 }

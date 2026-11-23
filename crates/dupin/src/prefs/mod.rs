@@ -20,7 +20,7 @@ use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, ShortcutRecorderState};
 
-use self::controls::{DESCRIPTION, ROW_PX, note};
+use self::controls::{DESCRIPTION, ROW_PX};
 use self::general::LoginPreference;
 use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
@@ -90,7 +90,7 @@ pub struct Prefs {
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
     updater: Updater,
-    read_only: bool,
+    locked_keys: crate::settings::LockedKeys,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
     login: Option<LoginPreference>,
@@ -109,7 +109,7 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn new(
-        current: Rc<RefCell<Config>>,
+        (current, locked_keys): (Rc<RefCell<Config>>, crate::settings::LockedKeys),
         binding: Arc<Binding>,
         panel: AppHandle<Ui>,
         updater: Updater,
@@ -138,7 +138,7 @@ impl Prefs {
             binding,
             panel,
             updater,
-            read_only: crate::settings::read_only(),
+            locked_keys,
             settings,
             config_problem: None,
             extensions: Default::default(),
@@ -171,15 +171,19 @@ impl Prefs {
         &mut self,
         revision: u64,
         config: Config,
-        read_only: bool,
+        locked_keys: crate::settings::LockedKeys,
         problem: Option<String>,
     ) {
         if revision != self.settings.revision() {
             return;
         }
         self.adopt(config);
-        self.read_only = read_only;
+        self.locked_keys = locked_keys;
         self.config_problem = problem;
+    }
+
+    fn locked(&self, key: &str) -> bool {
+        self.locked_keys.contains(key)
     }
 
     fn adopt(&mut self, config: Config) {
@@ -265,6 +269,11 @@ impl Prefs {
         let base = self.current.borrow().clone();
         self.adopt(base.clone());
         change(&mut self.config);
+        if let Err(error) = crate::settings::check_locked(&base, &self.config, &self.locked_keys) {
+            self.adopt(base);
+            self.set_problem(Some(error));
+            return;
+        }
         self.save(&base);
     }
 
@@ -296,10 +305,6 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (None, Page::Updates) => updates::page(s, k, hair),
     };
     let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
-    let shows_config = match s.welcome {
-        Some(step) => step == welcome::Step::Hotkey,
-        None => s.page != Page::Permissions,
-    };
     let panel = col()
         .key("panel")
         .role("main")
@@ -352,11 +357,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                             .wrap()
                     }),
                 )
-                .children(rows)
-                .children(
-                    (s.read_only && shows_config)
-                        .then(|| note(k, "config.toml is read-only, so change these where it's managed.")),
-                ),
+                .children(rows),
         )
         .children(s.welcome.map(|step| welcome::footer(k, step)));
     row()
@@ -488,7 +489,7 @@ mod tests {
         let binding = Arc::new(Binding::new(panel.clone()));
         let updater = Updater::start(false, panel.clone(), prefs);
         Prefs::new(
-            current,
+            (current, Default::default()),
             binding,
             panel,
             updater,
@@ -505,7 +506,7 @@ mod tests {
             ..Config::default()
         };
         let current = Rc::new(RefCell::new(config));
-        let settings = Arc::new(crate::settings::Service::new(None, |_| {}));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let mut state = state(current, settings, false);
         state.reflect_extensions(Vec::new(), vec!["fixture: invalid manifest".into()]);
         state.show(Page::Search);
@@ -528,7 +529,7 @@ mod tests {
     #[test]
     fn both_updates_footer_buttons_leave_the_welcome() {
         let current = Rc::new(RefCell::new(Config::default()));
-        let settings = Arc::new(crate::settings::Service::new(None, |_| {}));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let state = state(current, settings, true);
         let mut runtime = rune::Runtime::new(
             state,
@@ -565,9 +566,13 @@ mod tests {
                 .as_nanos(),
         ));
         let (sent, received) = mpsc::channel();
-        let settings = Arc::new(crate::settings::Service::new(Some(path.clone()), move |update| {
-            sent.send(update).unwrap();
-        }));
+        let settings = Arc::new(crate::settings::Service::new(
+            crate::settings::Paths {
+                base: Some(path.clone()),
+                overlay: None,
+            },
+            move |update| sent.send(update).unwrap(),
+        ));
         let current = Rc::new(RefCell::new(Config::default()));
         let mut state = state(current.clone(), settings.clone(), false);
         let external = Config {
@@ -592,7 +597,7 @@ mod tests {
         );
         let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(saved.result.as_ref().unwrap(), &expected);
-        state.reflect_config(saved.revision, expected.clone(), false, None);
+        state.reflect_config(saved.revision, expected.clone(), Default::default(), None);
         assert_eq!(
             state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()

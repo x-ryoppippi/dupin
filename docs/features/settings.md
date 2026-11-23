@@ -4,6 +4,8 @@ Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`,
 
 Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,.
 
+Settings saves to `config.toml` when it is writable. With a read-only file, such as one managed by Nix, rows marked **Set in config.toml** are locked. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
+
 ## First run
 
 The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, and see which keys switch modes. ⌘Space is Spotlight's shortcut too; to give it to Dupin, turn off Show Spotlight search in System Settings → Keyboard → Keyboard Shortcuts → Spotlight, or choose another hotkey. When another app holds the chord you press, Dupin names it.
@@ -14,4 +16,4 @@ The welcome appears once. It is skipped when `history.json` already exists in `~
 
 In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
 
-Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+Choose **Relaunch** in Settings → General to restart Dupin. If an update is already staged, relaunch installs it first.

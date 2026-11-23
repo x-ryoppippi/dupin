@@ -75,15 +75,15 @@ impl PathWatcher {
     }
 
     /// Watches directory entries without forwarding descendant events.
-    /// Reconciles the file's metadata to detect in-place writes when FSEvents is silent.
+    /// Reconciles the files' metadata to detect in-place writes when FSEvents is silent.
     /// The callback receives `true` when a watched root changes identity.
-    pub fn start_shallow_with_file(
+    pub fn start_shallow_with_files(
         roots: Vec<PathBuf>,
-        file: PathBuf,
+        files: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         let roots = roots.into_iter().map(|path| (path, Scope::Directory)).collect();
-        Self::start_with_scope(roots, move |_| vec![file.clone()], changed)
+        Self::start_with_scope(roots, move |_| files.clone(), changed)
     }
 
     fn start_with_scope(

@@ -23,7 +23,8 @@ pub(crate) fn run() {
         });
         rune::prewarm_gpu();
     }
-    let (config, config_problem) = settings::load();
+    let paths = settings::Paths::discover();
+    let (config, locked_keys, config_problem) = settings::load(&paths);
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
     let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
@@ -137,7 +138,7 @@ pub(crate) fn run() {
         let panel = handle.clone();
         move || scripts::output::Output::new(panel)
     });
-    let settings = Arc::new(settings::Service::new(settings::path(), {
+    let settings = Arc::new(settings::Service::new(paths, {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
     }));
@@ -146,6 +147,7 @@ pub(crate) fn run() {
     let welcome = prefs::welcome::first_run();
     let prefs = prefs.init({
         let calendar_access = calendar_access.clone();
+        let locked_keys = locked_keys.clone();
         let (config, binding, panel, updater, settings) = (
             current_config.clone(),
             binding.clone(),
@@ -155,7 +157,7 @@ pub(crate) fn run() {
         );
         move || {
             prefs::Prefs::new(
-                config,
+                (config, locked_keys),
                 binding,
                 panel,
                 updater,
@@ -179,6 +181,7 @@ pub(crate) fn run() {
             let quick_look = quick_look.clone();
             let configuration = ui::Configuration {
                 values: current_config,
+                locked_keys,
                 hotkey: binding.clone(),
                 files: settings.clone(),
             };

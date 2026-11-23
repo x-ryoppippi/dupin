@@ -5,7 +5,7 @@ use rune::{El, Shortcut, ShortcutError, Tx, col, text};
 use rune_kit::{Button, Kit, ShortcutRecorder, Switch, shortcut_error_message};
 
 use super::Prefs;
-use super::controls::{ROW_PX, card, choose, menu_value, setting, value_button};
+use super::controls::{ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button};
 use crate::hotkey::LauncherShortcut;
 use crate::icons;
 
@@ -31,7 +31,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     body
 }
 
-fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str) -> El {
+fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str, locked: bool) -> El {
     let i = kind as usize;
     let shortcut_problem = s.shortcut_problems[i].clone();
     let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
@@ -46,13 +46,14 @@ fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, labe
         .width(180.0)
         .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
         .error_message(refusal)
-        .disabled(s.read_only)
+        .disabled(locked)
         .build(k)
 }
 
 /// The panel hotkey's row, on General and in the welcome.
 pub(super) fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
     let kind = LauncherShortcut::Panel;
+    let locked = s.locked("hotkey");
     let shortcut = s.recorders[kind as usize].shortcut();
     let detail = match (s.binding.launch_problem(kind, shortcut), shortcut) {
         (Some(crate::hotkey::LaunchProblem::Occupied(owner)), Some(chord)) => format!(
@@ -65,17 +66,19 @@ pub(super) fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
         ),
         _ => "Shows the panel from any app".to_owned(),
     };
-    setting(
+    setting_with_lock(
         k,
         &icons::KEYBOARD,
         "Hotkey",
         Some(&detail),
-        shortcut_recorder(s, k, kind, "hotkey", "Show Dupin"),
+        shortcut_recorder(s, k, kind, "hotkey", "Show Dupin", locked),
+        locked,
     )
 }
 
 fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
-    setting(
+    let locked = s.locked("selection_hotkey");
+    setting_with_lock(
         k,
         &icons::KEYBOARD,
         "Selection hotkey",
@@ -86,20 +89,23 @@ fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
             LauncherShortcut::Selection,
             "selection-hotkey",
             "Search selected text",
+            locked,
         ),
+        locked,
     )
 }
 
 fn display_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("display");
     let display = menu_value(
-        s,
+        locked,
         k,
         DISPLAY,
         "Display",
         display_option(s.config.display).1,
         pick_display,
     );
-    setting(
+    setting_with_lock(
         k,
         &icons::PANEL,
         "Display",
@@ -109,6 +115,7 @@ fn display_setting(s: &Prefs, k: &Kit) -> El {
             "Which display the panel opens on"
         }),
         display,
+        locked,
     )
 }
 
@@ -145,20 +152,22 @@ fn display_option(display: DisplaySelection) -> (&'static str, &'static str) {
 }
 
 fn position_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("position");
     let position = menu_value(
-        s,
+        locked,
         k,
         POSITION,
         "Position",
         position_title(s.config.position),
         pick_position,
     );
-    setting(
+    setting_with_lock(
         k,
         &icons::PANEL,
         "Position",
         Some("Where on the display the panel opens"),
         position,
+        locked,
     )
 }
 
@@ -189,20 +198,22 @@ fn position_title(position: Position) -> &'static str {
 }
 
 fn input_source_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("input_source");
     let input_source = menu_value(
-        s,
+        locked,
         k,
         INPUT_SOURCE,
         "Input source",
         &input_source_title(&s.config.input_source),
         pick_input_source,
     );
-    setting(
+    setting_with_lock(
         k,
         &icons::LANGUAGES,
         "Input source",
         Some("ASCII switches an input method to Roman while the panel shows"),
         input_source,
+        locked,
     )
 }
 
@@ -335,19 +346,21 @@ pub(super) fn login_setting(s: &Prefs, k: &Kit) -> El {
 }
 
 fn automation_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("system_automation");
     let automation_enabled = s.config.system_automation;
     let automation = Switch::new(automation_enabled)
         .label("System Command Automation")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.system_automation = !automation_enabled))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &rune_theme_opencode::icons::SHIELD,
         "System Command Automation",
         Some("Show system commands that may ask for macOS Automation when confirmed"),
         automation,
+        locked,
     )
 }
 
@@ -378,12 +391,13 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 HotkeyTarget::Command { command } => ("Command", command),
                 HotkeyTarget::Script { script, .. } => ("Script", script),
             };
-            setting(
+            setting_with_lock(
                 k,
                 &icons::KEYBOARD,
                 kind,
                 Some(name),
                 text(keys).font(k.ty.ui).color(k.c.text_base),
+                s.locked("bindings"),
             )
             .key(chord)
         })

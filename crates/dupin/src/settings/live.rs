@@ -7,34 +7,38 @@ use std::thread::{self, JoinHandle};
 use dupin_core::Config;
 use dupin_mac::{PathWatcher, watcher::canonical_root};
 
+use super::layers::Layers;
+use super::{LockedKeys, Paths};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Update {
     pub revision: u64,
-    pub read_only: bool,
+    pub locked_keys: Option<LockedKeys>,
     pub result: Result<Config, String>,
     pub watch_problem: Option<String>,
     pub save_problem: Option<String>,
+    pub save_notice: Option<String>,
 }
 
 pub struct Service {
-    path: Option<PathBuf>,
+    has_base: bool,
     sender: Sender<Job>,
     next_revision: Mutex<u64>,
     worker: Option<JoinHandle<()>>,
 }
 
 impl Service {
-    pub fn new(path: Option<PathBuf>, callback: impl Fn(Update) + Send + 'static) -> Self {
+    pub fn new(paths: Paths, callback: impl Fn(Update) + Send + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
         let worker_sender = sender.clone();
-        let worker_path = path.clone();
+        let has_base = paths.base.is_some();
         let worker = thread::Builder::new()
             .name("dupin-config-watch".into())
-            .spawn(move || Worker::new(worker_path, receiver, worker_sender, callback).run())
+            .spawn(move || Worker::new(paths, receiver, worker_sender, callback).run())
             .expect("could not start settings worker");
 
         Service {
-            path,
+            has_base,
             sender,
             next_revision: Mutex::new(0),
             worker: Some(worker),
@@ -50,7 +54,7 @@ impl Service {
     }
 
     pub fn save(&self, base: &Config, desired: &Config) -> Result<u64, String> {
-        if self.path.is_none() {
+        if !self.has_base {
             return Err("config.toml has no path".into());
         }
 
@@ -130,7 +134,7 @@ impl Batch {
 }
 
 struct Worker<F> {
-    path: Option<PathBuf>,
+    paths: Paths,
     receiver: Receiver<Job>,
     sender: Sender<Job>,
     callback: F,
@@ -138,6 +142,7 @@ struct Worker<F> {
     watcher_roots: Option<Vec<PathBuf>>,
     watch_problem: Option<String>,
     save_problem: Option<String>,
+    save_notice: Option<String>,
     uncommitted: Option<(Config, Config)>,
     last_processed_revision: u64,
     last_emitted: Option<Emitted>,
@@ -148,9 +153,9 @@ impl<F> Worker<F>
 where
     F: Fn(Update),
 {
-    fn new(path: Option<PathBuf>, receiver: Receiver<Job>, sender: Sender<Job>, callback: F) -> Self {
+    fn new(paths: Paths, receiver: Receiver<Job>, sender: Sender<Job>, callback: F) -> Self {
         Worker {
-            path,
+            paths,
             receiver,
             sender,
             callback,
@@ -158,6 +163,7 @@ where
             watcher_roots: None,
             watch_problem: None,
             save_problem: None,
+            save_notice: None,
             uncommitted: None,
             last_processed_revision: 0,
             last_emitted: None,
@@ -204,61 +210,38 @@ where
             .filter(|(_, desired)| saves[0].base == *desired)
             .map(|(base, _)| base);
 
-        let Some(path) = &self.path else {
-            return;
-        };
-        let (original_source, current, _) = read(path);
-        let saved = current
-            .map_err(|error| format!("could not save config.toml: {error}"))
-            .and_then(|mut current| {
-                for (index, save) in saves.iter().enumerate() {
-                    current = merge(
-                        &save.base,
-                        &save.desired,
-                        &current,
-                        original_base.as_ref().filter(|_| index == 0),
-                    )?;
-                }
-                let source =
-                    toml::to_string(&current).map_err(|_| "could not encode config.toml".to_owned())?;
-                ensure_unchanged(path, original_source.as_deref())?;
-                super::write(path, &source).map_err(|error| format!("could not save config.toml: {error}"))
-            });
-
-        self.save_problem = saved.err();
-        if self.save_problem.is_some() {
-            self.uncommitted = Some((
-                original_base.unwrap_or_else(|| saves[0].base.clone()),
-                saves.last().unwrap().desired.clone(),
-            ));
+        match save_to_disk(&self.paths, &saves, original_base.as_ref()) {
+            Ok(notice) => {
+                self.save_problem = None;
+                self.save_notice = notice;
+            }
+            Err(error) => {
+                self.save_problem = Some(error);
+                self.uncommitted = Some((
+                    original_base.unwrap_or_else(|| saves[0].base.clone()),
+                    saves.last().unwrap().desired.clone(),
+                ));
+            }
         }
         self.emit_snapshot(latest_revision);
     }
 
     fn emit_snapshot(&mut self, revision: u64) {
-        let (source, result, read_only) = match &self.path {
-            Some(path) => read(path),
-            None => (None, Ok(Config::default()), false),
+        let layers = self.paths.read();
+        let (result, locked_keys) = match layers.as_ref().map_err(String::clone).and_then(Layers::effective) {
+            Ok(effective) => (Ok(effective.config), Some(effective.locked_keys)),
+            Err(error) => (Err(error), None),
         };
-        self.emit(source, result, read_only, revision);
-    }
-
-    fn emit(
-        &mut self,
-        source: Option<String>,
-        result: Result<Config, String>,
-        read_only: bool,
-        revision: u64,
-    ) {
         let update = Update {
             revision,
-            read_only,
+            locked_keys,
             result,
             watch_problem: self.watch_problem.clone(),
             save_problem: self.save_problem.clone(),
+            save_notice: self.save_notice.clone(),
         };
         let emitted = Emitted {
-            source,
+            layers,
             update: update.clone(),
         };
         if self.last_emitted.as_ref() == Some(&emitted) {
@@ -269,26 +252,31 @@ where
     }
 
     fn refresh_watcher(&mut self, rebuild: bool) {
-        let Some(path) = &self.path else {
+        let files = self.paths.base.iter().chain(&self.paths.overlay);
+        if files.clone().next().is_none() {
             self.watcher.take();
             self.watcher_roots = None;
             self.watch_problem = None;
             return;
-        };
+        }
 
-        let requested = roots(path);
+        let requested = roots(files.clone().map(PathBuf::as_path));
         if !rebuild && self.watcher.is_some() && self.watcher_roots.as_ref() == Some(&requested.paths) {
             self.watch_problem = requested.problem;
             return;
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow_with_file(requested.paths.clone(), path.clone(), move |rebuild| {
-            let _ = sender.send(Job::Changed { rebuild });
-        }) {
+        match PathWatcher::start_shallow_with_files(
+            requested.paths.clone(),
+            files.clone().cloned().collect(),
+            move |rebuild| {
+                let _ = sender.send(Job::Changed { rebuild });
+            },
+        ) {
             Ok(watcher) => {
                 self.watcher = Some(watcher);
-                if roots(path).paths != requested.paths {
+                if roots(files.map(PathBuf::as_path)).paths != requested.paths {
                     let _ = self.sender.send(Job::Changed { rebuild: true });
                 }
                 self.watcher_roots = Some(requested.paths);
@@ -297,8 +285,8 @@ where
             Err(error) => {
                 self.watcher_roots = None;
                 self.watch_problem = Some(match requested.problem {
-                    Some(problem) => format!("{problem}; could not watch config.toml: {error}"),
-                    None => format!("could not watch config.toml: {error}"),
+                    Some(problem) => format!("{problem}; could not watch settings files: {error}"),
+                    None => format!("could not watch settings files: {error}"),
                 });
             }
         }
@@ -307,7 +295,7 @@ where
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Emitted {
-    source: Option<String>,
+    layers: Result<Layers, String>,
     update: Update,
 }
 
@@ -316,20 +304,25 @@ struct WatchRoots {
     problem: Option<String>,
 }
 
-fn roots(path: &Path) -> WatchRoots {
+fn roots<'a>(files: impl IntoIterator<Item = &'a Path>) -> WatchRoots {
     let mut problem = None;
-    let configured = match absolute(path) {
-        Ok(path) => path,
-        Err(error) => {
-            problem = Some(format!("could not locate config.toml ({:?})", error.kind()));
-            path.to_owned()
-        }
-    };
     let mut paths = Vec::new();
-    if let Err(error) = super::resolve_with(&configured, |visited| {
-        add_parent(visited, &mut paths);
-    }) {
-        problem.get_or_insert_with(|| format!("could not resolve config.toml ({:?})", error.kind()));
+    for path in files {
+        let configured = match absolute(path) {
+            Ok(path) => path,
+            Err(error) => {
+                problem = Some(format!(
+                    "could not locate {} ({:?})",
+                    path.display(),
+                    error.kind()
+                ));
+                path.to_owned()
+            }
+        };
+        if let Err(error) = super::resolve_with(&configured, |visited| add_parent(visited, &mut paths)) {
+            problem
+                .get_or_insert_with(|| format!("could not resolve {} ({:?})", path.display(), error.kind()));
+        }
     }
 
     let mut paths: Vec<_> = paths.into_iter().map(|path| canonical_root(&path)).collect();
@@ -352,20 +345,87 @@ fn add_parent(path: &Path, roots: &mut Vec<PathBuf>) {
     }
 }
 
-fn read(path: &Path) -> (Option<String>, Result<Config, String>, bool) {
-    let read_only = !super::writable(path);
-    match super::read_source(path) {
-        Ok(source) => {
-            let result = Config::parse(&source).map_err(|error| parse_problem(&source, &error));
-            (Some(source), result, read_only)
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => (None, Ok(Config::default()), read_only),
-        Err(error) => (
-            None,
-            Err(format!("could not read config.toml ({:?})", error.kind())),
-            read_only,
-        ),
+fn save_to_disk(
+    paths: &Paths,
+    saves: &[Save],
+    original_base: Option<&Config>,
+) -> Result<Option<String>, String> {
+    let layers = paths.read()?;
+    let effective = layers.effective()?;
+    let mut current = effective.config.clone();
+    for (index, save) in saves.iter().enumerate() {
+        current = merge(
+            &save.base,
+            &save.desired,
+            &current,
+            original_base.filter(|_| index == 0),
+            &effective.locked_keys,
+        )?;
     }
+    let (path, source, notice) = if layers.base_read_only {
+        let path = paths.overlay.as_deref().ok_or("settings.toml has no path")?;
+        let mut overlay = effective.overlay;
+        let mut dropped = Vec::new();
+        for key in &effective.locked_keys {
+            if overlay.remove(key).is_some() {
+                dropped.push(key.as_str());
+            }
+        }
+        let before =
+            toml::Table::try_from(&effective.config).map_err(|_| "could not encode settings.toml")?;
+        let after = toml::Table::try_from(&current).map_err(|_| "could not encode settings.toml")?;
+        overlay.extend(
+            after
+                .into_iter()
+                .filter(|(key, value)| before.get(key) != Some(value)),
+        );
+        if overlay.is_empty() && dropped.is_empty() {
+            return Ok(None);
+        }
+        let source = toml::to_string(&overlay).map_err(|_| "could not encode settings.toml")?;
+        let notice = (!dropped.is_empty()).then(|| {
+            format!(
+                "Removed keys from settings.toml that are set in config.toml: {}.",
+                dropped.join(", ")
+            )
+        });
+        (path, source, notice)
+    } else {
+        let path = paths.base.as_deref().ok_or("config.toml has no path")?;
+        let source = toml::to_string(&current).map_err(|_| "could not encode config.toml")?;
+        (path, source, None)
+    };
+    if paths.read().as_ref() != Ok(&layers) {
+        return Err("configuration changed on disk while saving; no changes were written".into());
+    }
+    super::write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
+    Ok(notice)
+}
+
+pub fn check_locked(base: &Config, desired: &Config, locked: &LockedKeys) -> Result<(), String> {
+    if locked.is_empty() {
+        return Ok(());
+    }
+    let base = config_value(base)?;
+    let desired = config_value(desired)?;
+    reject_locked_changes(&base, &desired, locked)
+}
+
+fn config_value(config: &Config) -> Result<serde_json::Value, String> {
+    serde_json::to_value(config).map_err(|_| "could not compare config.toml".to_owned())
+}
+
+fn reject_locked_changes(
+    base: &serde_json::Value,
+    desired: &serde_json::Value,
+    locked: &LockedKeys,
+) -> Result<(), String> {
+    if let Some(key) = locked.iter().find(|key| base.get(*key) != desired.get(*key)) {
+        return Err(format!(
+            "'{key}' is set in read-only config.toml. Change it where config.toml is managed."
+        ));
+    }
+    Ok(())
 }
 
 fn merge(
@@ -373,14 +433,13 @@ fn merge(
     desired: &Config,
     current: &Config,
     original_base: Option<&Config>,
+    locked: &LockedKeys,
 ) -> Result<Config, String> {
-    let base = serde_json::to_value(base).map_err(|_| "could not compare config.toml".to_owned())?;
-    let desired = serde_json::to_value(desired).map_err(|_| "could not compare config.toml".to_owned())?;
-    let mut merged = serde_json::to_value(current).map_err(|_| "could not compare config.toml".to_owned())?;
-    let original_base = original_base
-        .map(serde_json::to_value)
-        .transpose()
-        .map_err(|_| "could not compare config.toml".to_owned())?;
+    let base = config_value(base)?;
+    let desired = config_value(desired)?;
+    reject_locked_changes(&base, &desired, locked)?;
+    let mut merged = config_value(current)?;
+    let original_base = original_base.map(config_value).transpose()?;
 
     let (Some(base), Some(desired), Some(merged)) =
         (base.as_object(), desired.as_object(), merged.as_object_mut())
@@ -389,6 +448,9 @@ fn merge(
     };
 
     for (key, desired_value) in desired {
+        if locked.contains(key) {
+            continue;
+        }
         let Some(base_value) = base.get(key) else {
             return Err("could not compare config.toml".into());
         };
@@ -404,7 +466,9 @@ fn merge(
             continue;
         }
         if current_value != base_value && current_value != desired_value {
-            return Err("config.toml changed on disk; resolve the conflicting setting before saving".into());
+            return Err(
+                "configuration changed on disk; resolve the conflicting setting before saving".into(),
+            );
         }
         merged.insert(key.clone(), desired_value.clone());
     }
@@ -413,25 +477,10 @@ fn merge(
         .map_err(|_| "could not merge config.toml".into())
 }
 
-fn ensure_unchanged(path: &Path, original: Option<&str>) -> Result<(), String> {
-    match super::read_source(path) {
-        Ok(source) if original == Some(source.as_str()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound && original.is_none() => Ok(()),
-        _ => Err("config.toml changed on disk while saving; no changes were written".into()),
-    }
-}
-
-fn parse_problem(source: &str, error: &toml::de::Error) -> String {
-    let Some(span) = error.span() else {
-        return "config.toml is invalid (location unavailable)".into();
-    };
-    let (line, column) = super::location(source, span.start);
-    format!("config.toml is invalid at line {line}, column {column}")
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::os::unix::fs::{PermissionsExt, symlink};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
@@ -464,6 +513,174 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn base_only(path: PathBuf) -> Paths {
+        Paths {
+            base: Some(path),
+            overlay: None,
+        }
+    }
+
+    fn linked_base(temp: &TempDir, source: &str) -> (Paths, PathBuf, PathBuf) {
+        let target = temp.path().join("managed.toml");
+        fs::write(&target, source).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o444)).unwrap();
+        let base = temp.path().join("config.toml");
+        symlink(&target, &base).unwrap();
+        let overlay = temp.path().join("data/settings.toml");
+        (
+            Paths {
+                base: Some(base),
+                overlay: Some(overlay.clone()),
+            },
+            target,
+            overlay,
+        )
+    }
+
+    #[test]
+    fn locked_keys_take_precedence_as_whole_values_and_only_unlocked_edits_are_saved() {
+        let temp = TempDir::new();
+        let base_source = "hotkey = \"alt+space\"\n[theme]\ncorner_radius = 28\n";
+        let (paths, target, overlay) = linked_base(&temp, base_source);
+        let link = paths.base.clone().unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let (base, locked, problem) = super::super::load(&paths);
+        assert_eq!(problem, None);
+        assert_eq!(locked, ["hotkey".into(), "theme".into()].into());
+        assert_eq!(base.theme.corner_radius, 28);
+        assert_eq!(base.file_limit, Config::default().file_limit);
+        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+
+        let edit = Config {
+            file_limit: 123,
+            ..base.clone()
+        };
+        let saved = receive_revision(&receiver, service.save(&base, &edit).unwrap());
+        assert_eq!(saved.result.unwrap(), edit);
+        assert!(saved.save_problem.is_none());
+        assert_eq!(fs::read_to_string(&overlay).unwrap(), "file_limit = 123\n");
+
+        let overlay_source = "file_limit = 123\nhotkey = \"ctrl+alt+k\"\n[theme]\npanel_width = 900\n";
+        fs::write(&overlay, overlay_source).unwrap();
+        let attempt = Config {
+            hotkey: "ctrl+alt+k".into(),
+            show_recent: false,
+            ..edit.clone()
+        };
+        let rejected = receive_revision(&receiver, service.save(&edit, &attempt).unwrap());
+        assert_eq!(rejected.result.unwrap(), edit);
+        assert!(
+            rejected
+                .save_problem
+                .unwrap()
+                .contains("'hotkey' is set in read-only config.toml")
+        );
+        assert_eq!(fs::read_to_string(&overlay).unwrap(), overlay_source);
+
+        let next = Config {
+            show_recent: false,
+            ..edit.clone()
+        };
+        let saved = receive_revision(&receiver, service.save(&edit, &next).unwrap());
+        assert_eq!(saved.result.unwrap(), next);
+        assert!(saved.save_problem.is_none());
+        assert!(saved.save_notice.unwrap().contains("hotkey, theme"));
+        let source = fs::read_to_string(overlay).unwrap();
+        let table = source.parse::<toml::Table>().unwrap();
+        assert_eq!(
+            table.keys().collect::<Vec<_>>(),
+            vec!["file_limit", "show_recent"]
+        );
+        assert_eq!(fs::read_to_string(target).unwrap(), base_source);
+        assert!(fs::symlink_metadata(link).unwrap().is_symlink());
+    }
+
+    #[test]
+    fn overlay_saves_merge_unrelated_external_changes_and_reject_conflicts() {
+        let temp = TempDir::new();
+        let (paths, _, overlay) = linked_base(&temp, "position = \"top\"");
+        fs::create_dir(overlay.parent().unwrap()).unwrap();
+        let (base, _, _) = super::super::load(&paths);
+        let external = "file_limit = 71";
+        fs::write(&overlay, external).unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+
+        let conflicting = Config {
+            file_limit: 123,
+            ..base.clone()
+        };
+        let rejected = receive_revision(&receiver, service.save(&base, &conflicting).unwrap());
+        assert!(rejected.save_problem.unwrap().contains("conflicting setting"));
+        assert_eq!(fs::read_to_string(&overlay).unwrap(), external);
+
+        let desired = Config {
+            show_recent: false,
+            ..base.clone()
+        };
+        let saved = receive_revision(&receiver, service.save(&base, &desired).unwrap());
+        assert!(saved.save_problem.is_none());
+        assert_eq!(
+            saved.result.unwrap(),
+            Config {
+                file_limit: 71,
+                ..desired
+            }
+        );
+    }
+
+    #[test]
+    fn writable_base_saves_through_its_link_without_creating_an_overlay() {
+        let temp = TempDir::new();
+        let (paths, target, overlay) = linked_base(&temp, "file_limit = 71");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).unwrap();
+        let (base, locked, _) = super::super::load(&paths);
+        assert!(locked.is_empty());
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+        let desired = Config {
+            file_limit: 123,
+            ..base.clone()
+        };
+        let saved = receive_revision(&receiver, service.save(&base, &desired).unwrap());
+        assert_eq!(saved.result.unwrap(), desired);
+        assert_eq!(
+            Config::parse(&fs::read_to_string(target).unwrap()).unwrap(),
+            desired
+        );
+        assert!(!overlay.exists());
+    }
+
+    #[test]
+    fn watcher_follows_overlay_edits_and_symlink_retargets() {
+        let temp = TempDir::new();
+        let (paths, _, overlay) = linked_base(&temp, "position = \"top\"");
+        fs::create_dir(overlay.parent().unwrap()).unwrap();
+        let first = temp.path().join("first.toml");
+        fs::write(&first, "file_limit = 71").unwrap();
+        symlink(&first, &overlay).unwrap();
+        let (updates, receiver) = mpsc::channel();
+        let service = Service::new(paths, move |update| updates.send(update).unwrap());
+        service.activate();
+        let next = || receiver.recv_timeout(Duration::from_secs(10)).unwrap().result;
+        assert_eq!(next().unwrap().file_limit, 71);
+
+        fs::write(first, "file_limit = 72").unwrap();
+        assert_eq!(next().unwrap().file_limit, 72);
+
+        let second = temp.path().join("second.toml");
+        fs::write(&second, "file_limit = \"private\"").unwrap();
+        let replacement = overlay.with_extension("next");
+        symlink(&second, &replacement).unwrap();
+        fs::rename(replacement, overlay).unwrap();
+        let error = next().unwrap_err();
+        assert!(error.contains("settings.toml is invalid"));
+        assert!(!error.contains("private"));
+
+        fs::write(second, "file_limit = 73").unwrap();
+        assert_eq!(next().unwrap().file_limit, 73);
     }
 
     fn send_changed(service: &Service) {
@@ -501,7 +718,7 @@ script = "missing.sh"
 "#;
         fs::write(&config_path, source).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(config_path.clone()), move |update| {
+        let service = Service::new(base_only(config_path.clone()), move |update| {
             updates.send(update).unwrap()
         });
         send_changed(&service);
@@ -565,12 +782,15 @@ script = "missing.sh"
         desired.theme.panel_width = 400;
         let mut disk = base.clone();
         disk.file_limit = 42;
-        let saved = merge(&base, &desired, &disk, None).unwrap();
+        let saved = merge(&base, &desired, &disk, None, &LockedKeys::new()).unwrap();
         assert_eq!(saved.theme.panel_width, 400);
         assert_eq!(saved.file_limit, 42);
         disk.theme.row_height = 72;
-        assert!(merge(&base, &desired, &disk, None).is_err());
-        assert_eq!(merge(&base, &base, &disk, None).unwrap(), disk);
+        assert!(merge(&base, &desired, &disk, None, &LockedKeys::new()).is_err());
+        assert_eq!(
+            merge(&base, &base, &disk, None, &LockedKeys::new()).unwrap(),
+            disk
+        );
     }
 
     #[test]
@@ -592,7 +812,7 @@ script = "missing.sh"
         sender.send(save_job(2, first, latest.clone())).unwrap();
         sender.send(Job::Stop).unwrap();
 
-        Worker::new(Some(path.clone()), receiver, sender, |_| {}).run();
+        Worker::new(base_only(path.clone()), receiver, sender, |_| {}).run();
 
         assert_eq!(Config::parse(&fs::read_to_string(path).unwrap()).unwrap(), latest);
     }
@@ -602,7 +822,9 @@ script = "missing.sh"
         let temp = TempDir::new();
         let path = temp.path().join("config.toml");
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
         let base = Config::default();
         let first = Config {
             file_limit: 50,
@@ -644,7 +866,7 @@ script = "missing.sh"
         sender.send(save_job(1, base, desired.clone())).unwrap();
         sender.send(Job::Stop).unwrap();
         let (updates, update_receiver) = mpsc::channel();
-        Worker::new(Some(path.clone()), receiver, sender, move |update| {
+        Worker::new(base_only(path.clone()), receiver, sender, move |update| {
             updates.send(update).unwrap();
         })
         .run();
@@ -676,7 +898,7 @@ script = "missing.sh"
         sender.send(save_job(1, base, desired)).unwrap();
         sender.send(Job::Stop).unwrap();
         let (updates, update_receiver) = mpsc::channel();
-        Worker::new(Some(path.clone()), receiver, sender, move |update| {
+        Worker::new(base_only(path.clone()), receiver, sender, move |update| {
             updates.send(update).unwrap();
         })
         .run();
@@ -705,7 +927,7 @@ script = "missing.sh"
         fs::create_dir(&blocked).unwrap();
         let (sender, receiver) = mpsc::channel();
         let (updates, received) = mpsc::channel();
-        let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+        let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
             updates.send(update).unwrap();
         });
         let first = Config {
@@ -755,7 +977,7 @@ script = "missing.sh"
             fs::create_dir(&blocked).unwrap();
             let (sender, receiver) = mpsc::channel();
             let (updates, received) = mpsc::channel();
-            let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+            let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
                 updates.send(update).unwrap();
             });
             let first = Config {
@@ -809,7 +1031,16 @@ script = "missing.sh"
             file_limit: 40,
             ..original.clone()
         };
-        assert!(merge(&pending, &original, &external, Some(&original)).is_err());
+        assert!(
+            merge(
+                &pending,
+                &original,
+                &external,
+                Some(&original),
+                &LockedKeys::new()
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -824,7 +1055,7 @@ script = "missing.sh"
         fs::write(&path, toml::to_string(&disk).unwrap()).unwrap();
         let (sender, receiver) = mpsc::channel();
         let (updates, received) = mpsc::channel();
-        let mut worker = Worker::new(Some(path.clone()), receiver, sender, move |update| {
+        let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
             updates.send(update).unwrap();
         });
         worker.process_saves(vec![Save {
@@ -867,7 +1098,9 @@ script = "missing.sh"
             ..base.clone()
         };
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
 
         let revision = service.save(&base, &desired).unwrap();
         let update = receive_revision(&receiver, revision);
@@ -883,7 +1116,9 @@ script = "missing.sh"
         let source = "hotkey = \"private-value\n";
         fs::write(&path, source).unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
 
         send_changed(&service);
         let invalid = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -908,7 +1143,9 @@ script = "missing.sh"
         let path = temp.path().join("config.toml");
         fs::write(&path, "file_limit = 50").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
 
         send_changed(&service);
         assert_eq!(
@@ -947,7 +1184,7 @@ script = "missing.sh"
         symlink(&generation_one, &config_dir).unwrap();
         let path = config_dir.join("dupin/config.toml");
 
-        let first = roots(&path);
+        let first = roots([path.as_path()]);
         assert!(first.paths.contains(&canonical_root(&home)));
         assert!(
             first
@@ -957,7 +1194,7 @@ script = "missing.sh"
 
         fs::remove_file(&config_dir).unwrap();
         symlink(&generation_two, &config_dir).unwrap();
-        let second = roots(&path);
+        let second = roots([path.as_path()]);
         assert!(second.paths.contains(&canonical_root(&home)));
         assert!(
             second
@@ -978,7 +1215,7 @@ script = "missing.sh"
         fs::write(&file_target, "").unwrap();
         let file_link = temp.path().join("linked.toml");
         symlink(&file_target, &file_link).unwrap();
-        let linked_roots = roots(&file_link);
+        let linked_roots = roots([file_link.as_path()]);
         assert!(linked_roots.paths.contains(&canonical_root(temp.path())));
         assert!(linked_roots.paths.contains(&canonical_root(&external_one)));
 
@@ -986,7 +1223,7 @@ script = "missing.sh"
         let next_target = external_two.join("config.toml");
         fs::write(&next_target, "").unwrap();
         symlink(&next_target, &file_link).unwrap();
-        let repointed_roots = roots(&file_link);
+        let repointed_roots = roots([file_link.as_path()]);
         assert!(repointed_roots.paths.contains(&canonical_root(&external_two)));
         assert!(!repointed_roots.paths.contains(&canonical_root(&external_one)));
     }
@@ -1005,13 +1242,13 @@ script = "missing.sh"
         symlink(&first, links.join("current")).unwrap();
         symlink(links.join("current"), home.join(".config")).unwrap();
         let config = home.join(".config/dupin/config.toml");
-        let initial = roots(&config).paths;
+        let initial = roots([config.as_path()]).paths;
         assert!(initial.contains(&canonical_root(&home)));
         assert!(initial.contains(&canonical_root(&links)));
         assert!(initial.contains(&canonical_root(&first.join("dupin"))));
         fs::remove_file(links.join("current")).unwrap();
         symlink(&second, links.join("current")).unwrap();
-        let retargeted = roots(&config).paths;
+        let retargeted = roots([config.as_path()]).paths;
         assert!(retargeted.contains(&canonical_root(&links)));
         assert!(retargeted.contains(&canonical_root(&second.join("dupin"))));
         assert!(!retargeted.contains(&canonical_root(&first.join("dupin"))));
@@ -1025,7 +1262,9 @@ script = "missing.sh"
         let path = directory.join("config.toml");
         fs::write(&path, "file_limit = 37").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
         service.activate();
         assert_eq!(
             receiver
@@ -1074,7 +1313,9 @@ script = "missing.sh"
         let path = temp.path().join("config.toml");
         fs::write(&path, "position = \"center\"").unwrap();
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
+        let service = Service::new(base_only(path.clone()), move |update| {
+            updates.send(update).unwrap()
+        });
 
         service.activate();
         let initial = receiver

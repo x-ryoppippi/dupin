@@ -62,6 +62,7 @@ pub struct Windows {
 
 pub struct Configuration {
     pub values: Rc<RefCell<Config>>,
+    pub locked_keys: crate::settings::LockedKeys,
     pub hotkey: Arc<crate::hotkey::Binding>,
     pub files: Arc<crate::settings::Service>,
 }

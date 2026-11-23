@@ -1,7 +1,7 @@
 use rune::{El, col};
 use rune_kit::{Button, Kit, Switch};
 
-use super::controls::{card, setting};
+use super::controls::{card, setting, setting_with_lock};
 use super::{Page, Prefs, footer_link};
 use crate::icons;
 use crate::update::Status;
@@ -9,11 +9,12 @@ use crate::update::Status;
 /// Whether to install updates by themselves, and where the updater is: the version, what it
 /// is doing, and the one thing to do next.
 pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+    let locked = s.locked("auto_update");
     let next_auto_update = !s.config.auto_update;
     let auto = Switch::new(s.config.auto_update)
         .label("Install updates automatically")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.auto_update = next_auto_update))
         .build(k);
     let status = s.updater.status();
@@ -34,12 +35,13 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         line.push_str(". Restarting cancels running scripts.");
     }
     let rows = vec![
-        setting(
+        setting_with_lock(
             k,
             &icons::REFRESH,
             "Install updates automatically",
             Some("New versions download in the background and install on restart"),
             auto,
+            locked,
         ),
         setting(
             k,

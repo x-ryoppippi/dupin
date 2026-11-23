@@ -1,5 +1,5 @@
 //! `dupin mcp`: the Model Context Protocol over stdio, one JSON-RPC message per line. Each tool
-//! is a client of the same local control socket as the `dupin` commands, or reads config.toml
+//! is a client of the same local control socket as the `dupin` commands, or reads configuration
 //! as the launcher does; none writes configuration, runs a script or opens a file.
 use crate::control::{self, Command};
 use serde_json::{Map, Value, json};
@@ -34,20 +34,42 @@ impl Host for Local {
         pending.wait()
     }
     fn config_file(&self) -> Result<Value, String> {
-        let path =
-            crate::settings::path().ok_or("no config path: neither XDG_CONFIG_HOME nor HOME is set")?;
-        let source = match crate::settings::read_source(&path) {
-            Ok(source) => Some(source),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(e) => return Err(format!("could not read {}: {e}", path.display())),
-        };
-        Ok(json!({
-            "path": path.display().to_string(),
-            "exists": source.is_some(),
-            "readOnly": crate::settings::read_only(),
-            "source": source,
-        }))
+        config_files(&crate::settings::Paths::discover())
     }
+}
+
+fn config_files(paths: &crate::settings::Paths) -> Result<Value, String> {
+    use crate::settings::{LockedKeys, read_layer, top_level, writable};
+
+    let base = paths
+        .base
+        .as_deref()
+        .ok_or("no config path: neither XDG_CONFIG_HOME nor HOME is set")?;
+    let source = read_layer(Some(base), "config.toml")?;
+    let read_only = !writable(base);
+    let locked_keys = if read_only {
+        top_level(source.as_deref().unwrap_or_default(), "config.toml")
+            .ok()
+            .map(|table| table.keys().cloned().collect::<LockedKeys>())
+    } else {
+        Some(LockedKeys::new())
+    };
+    let overlay = paths.overlay.as_deref();
+    let overlay_source = read_layer(overlay, "settings.toml")?;
+    Ok(json!({
+        "path": base.display().to_string(),
+        "exists": source.is_some(),
+        "readOnly": read_only,
+        "source": source,
+        "lockedKeys": locked_keys,
+        "overlay": {
+            "path": overlay.map(|path| path.display().to_string()),
+            "exists": overlay_source.is_some(),
+            "readOnly": overlay.is_some_and(|path| !writable(path)),
+            "source": overlay_source,
+            "active": read_only,
+        }
+    }))
 }
 
 pub fn run() -> io::Result<()> {
@@ -318,7 +340,7 @@ fn tools() -> Vec<Value> {
         json!({
             "name": "read_config",
             "title": "Read configuration",
-            "description": "Dupin's config.toml: its path, whether it exists, whether Dupin can save it, and its TOML source. Works whether or not Dupin is running.",
+            "description": "Reports config.toml and the settings.toml overlay, their paths and TOML sources, and which top-level keys are locked. Works whether or not Dupin is running.",
             "inputSchema": none,
             "annotations": read_only,
         }),

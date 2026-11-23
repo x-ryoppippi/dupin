@@ -91,6 +91,9 @@ impl Ui {
         if update.revision != self.configuration.files.revision() {
             return;
         }
+        if let Some(locked_keys) = update.locked_keys {
+            self.configuration.locked_keys = locked_keys;
+        }
         let previous = self.configuration.values.borrow().clone();
         let (snapshot, read_problem) = reconcile_snapshot(
             update.result,
@@ -98,8 +101,9 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            self.apply_hotkeys(&config, &previous)
-                .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
+            self.apply_hotkeys(&config, &previous).map_err(|error| {
+                format!("{error} Check the configuration files. Keeping the previous configuration.")
+            })?;
             Ok(config)
         });
         let problem = match accepted {
@@ -120,10 +124,16 @@ impl Ui {
             }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
-        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
-            .into_iter()
-            .flatten()
-            .collect();
+        let problems: Vec<_> = [
+            problem,
+            read_problem,
+            update.save_problem,
+            update.watch_problem,
+            update.save_notice,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let problem = (!problems.is_empty()).then(|| problems.join("; "));
         if self.config_problem != problem
             && let Some(problem) = &problem
@@ -144,8 +154,9 @@ impl Ui {
             });
         }
         let config = self.configuration.values.borrow().clone();
+        let locked_keys = self.configuration.locked_keys.clone();
         self.prefs.update(move |prefs, _| {
-            prefs.reflect_config(update.revision, config, update.read_only, problem);
+            prefs.reflect_config(update.revision, config, locked_keys, problem);
         });
     }
 }

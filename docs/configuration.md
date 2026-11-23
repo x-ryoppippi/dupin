@@ -1,10 +1,10 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkeys, where the panel opens, the input source, how many files a search shows, whether clipboard history is kept, whether Enter pastes snippets and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional. Settings (⌘, in the panel) and `dupin config set` write changes to a writable `config.toml`, replacing its comments. For a symlink, Dupin writes to the target and keeps the link.
 
-Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
+When `config.toml` is read-only, Dupin saves edits to `~/Library/Application Support/Dupin/settings.toml` (or `$XDG_DATA_HOME/dupin/settings.toml` when set). Explicit keys in `config.toml` are locked and take precedence. For each remaining top-level key, Dupin uses the value from `settings.toml` if present, then the default. A table such as `[theme]` is one top-level key. If the base later defines a key in the overlay, Dupin removes the shadowed entry on the next successful save and shows a notice. A writable base uses only `config.toml`.
 
-Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.toml` when `XDG_CONFIG_HOME` is unset. Every key is optional; a missing file means the defaults. File changes apply automatically while Dupin runs, including atomic replacements and changes to a linked file. The panel and Settings use the same configuration.
+Saves merge the edited keys into the latest valid configuration, preserving unrelated external edits. If the same key changed differently on disk, or an active file is invalid, Dupin reports the problem and leaves both files untouched. An editor that writes between the final source check and the atomic replacement can still have its edit overwritten. Dupin reloads changes while it runs, including atomic replacements and symlink retargets.
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"
@@ -39,7 +39,7 @@ The flake's home-manager module installs Dupin and writes `config.toml` from `se
 }
 ```
 
-With `settings` set, `config.toml` is a read-only link into the Nix store. Change it in Nix and activate the new generation; Dupin follows the updated link automatically. Leave `settings` empty to keep the file out of Nix and editable from Settings.
+With `settings` set, `config.toml` links into the Nix store. Settings marks those keys **Set in config.toml** and saves edits to the other keys locally. To change a locked key, edit its Nix value and activate the new generation. To manage it from Settings, remove the key from Nix and activate the new generation.
 
 ## Feature configuration
 

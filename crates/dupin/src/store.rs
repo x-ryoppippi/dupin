@@ -10,6 +10,13 @@ pub fn support_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/Dupin"))
 }
 
+pub fn data_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_DATA_HOME")
+        .filter(|value| !value.is_empty())
+        .map(|base| PathBuf::from(base).join("dupin"))
+        .or_else(support_dir)
+}
+
 pub const FILE: &str = "history.json";
 
 fn path() -> Option<PathBuf> {

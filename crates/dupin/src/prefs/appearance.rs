@@ -4,7 +4,9 @@ use rune::{El, PopupItem, PopupMenu, TextStyle, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, SegmentedControl, State};
 
 use super::Prefs;
-use super::controls::{ROW_PX, anchor, card, menu_value, setting, tilde, value_button};
+use super::controls::{
+    ROW_PX, anchor, card, lock_note, menu_value, setting, setting_with_lock, tilde, value_button,
+};
 use crate::icons;
 use crate::shader::EXAMPLES;
 
@@ -17,8 +19,9 @@ const FILE: &str = "file:";
 pub(super) fn page(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
     // The menu lists the shaders folder as it stands when it opens, so the trigger shows only
     // the current choice.
+    let locked = s.locked("backdrop");
     let backdrop = menu_value(
-        s,
+        locked,
         k,
         BACKDROP,
         "Backdrop",
@@ -32,24 +35,21 @@ pub(super) fn page(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
         "open-shaders",
         "Open",
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
-    );
-    let open = if !s.read_only || dir.is_dir() {
-        open.on_press(|_: &mut Prefs| open_shaders_folder())
-    } else {
-        open.disabled(true).layer_opacity(0.5)
-    };
+    )
+    .on_press(|_: &mut Prefs| open_shaders_folder());
     vec![
         theme_card(s, k, dark),
         card(
             k,
             1.0,
             vec![
-                setting(
+                setting_with_lock(
                     k,
                     &icons::SPARKLES,
                     "Backdrop",
                     Some("The shader that animates behind the panel"),
                     backdrop,
+                    locked,
                 ),
                 setting(
                     k,
@@ -126,21 +126,14 @@ fn pick_backdrop(s: &mut Prefs, tx: &mut Tx) {
     );
 }
 
-/// Open the shaders folder in Finder, for a user to drop a file in. Settings makes it first
-/// only while it may write beside config.toml, checked now: something else may have taken the
-/// file over since the window opened.
 fn open_shaders_folder() {
     std::thread::spawn(|| {
         let dir = crate::shader::shaders_dir();
-        if !crate::settings::read_only()
-            && let Err(e) = std::fs::create_dir_all(&dir)
-        {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
             crate::log::warn(&format!("couldn't create {}: {e}", dir.display()));
             return;
         }
-        if dir.is_dir() {
-            _ = dupin_mac::workspace::open(&dir);
-        }
+        _ = dupin_mac::workspace::open(&dir);
     });
 }
 
@@ -212,7 +205,7 @@ fn set_rows(t: &mut Theme, height: u16) {
 }
 
 fn segments(
-    s: &Prefs,
+    locked: bool,
     k: &Kit,
     key: &'static str,
     label: &'static str,
@@ -221,7 +214,7 @@ fn segments(
     apply: impl Fn(&mut Theme, usize) + Clone + 'static,
 ) -> El {
     let mut control = SegmentedControl::new(labels, selected).label(label).fit();
-    if s.read_only {
+    if locked {
         for i in 0..labels.len() {
             control = control.segment_state(i, State::Disabled);
         }
@@ -234,7 +227,7 @@ fn segments(
     control.build(k).key(key)
 }
 
-fn theme_row(k: &Kit, name: &str, controls: El) -> El {
+fn theme_row(k: &Kit, name: &str, controls: El, locked: bool) -> El {
     row()
         .w_full()
         .h(40.0)
@@ -242,10 +235,12 @@ fn theme_row(k: &Kit, name: &str, controls: El) -> El {
         .center_y()
         .gap(12.0)
         .child(text(name).font(k.ty.small).color(k.c.text_base).grow(1.0))
+        .children(locked.then(|| lock_note(k)))
         .child(controls)
 }
 
 fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
+    let locked = s.locked("theme");
     let t = &s.config.theme;
     let selected = color_preset(t);
     let mut swatches = row()
@@ -266,7 +261,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
             .key(format!("color-{i}"))
             .label(*name)
             .role("radio")
-            .focusable(!s.read_only)
+            .focusable(!locked)
             .focus_selected(selected == Some(i))
             .checked(selected == Some(i))
             .position_in_set(i + 1, PRESETS.len())
@@ -288,7 +283,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                     .center()
                     .child(el().size(9.0, 9.0).radius(4.5).fill(palette.accent)),
             );
-        if s.read_only {
+        if locked {
             swatch = swatch.disabled(true).layer_opacity(0.5);
         } else {
             swatch = swatch
@@ -350,7 +345,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
             414.0,
         )));
     let mut reset = value_button(k, "reset-theme", "Reset", &icons::REFRESH);
-    if s.read_only || *t == Theme::default() {
+    if locked || *t == Theme::default() {
         reset = reset.disabled(true).layer_opacity(0.5);
     } else {
         reset = reset.on_press(|s: &mut Prefs| s.set(|c| c.theme = Theme::default()));
@@ -364,7 +359,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
         );
     }
     corners = corners.child(segments(
-        s,
+        locked,
         k,
         "theme-corners",
         "Corners",
@@ -385,14 +380,14 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 .child(icon(&icons::SPARKLES, 16.0).color(k.c.text_muted))
                 .child(text("Theme").font(k.ty.small).color(k.c.text_base).grow(1.0)),
             el().w_full().px(ROW_PX).mb(4.0).child(well),
-            theme_row(k, "Palette", swatches),
+            theme_row(k, "Palette", swatches, locked),
             theme_row(
                 k,
                 "Font",
                 row()
                     .gap(8.0)
                     .child(segments(
-                        s,
+                        locked,
                         k,
                         "theme-font",
                         "Font",
@@ -401,7 +396,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                         |t, i| t.font_family = [FontFamily::System, FontFamily::Monospace][i],
                     ))
                     .child(segments(
-                        s,
+                        locked,
                         k,
                         "theme-size",
                         "Font size",
@@ -409,12 +404,13 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                         [15, 18].iter().position(|&v| v == t.font_size),
                         |t, i| set_font(t, [15, 18][i]),
                     )),
+                locked,
             ),
             theme_row(
                 k,
                 "Width",
                 segments(
-                    s,
+                    locked,
                     k,
                     "theme-width",
                     "Width",
@@ -422,12 +418,13 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                     [400, 680, 900].iter().position(|&v| v == t.panel_width),
                     |t, i| t.panel_width = [400, 680, 900][i],
                 ),
+                locked,
             ),
             theme_row(
                 k,
                 "Rows",
                 segments(
-                    s,
+                    locked,
                     k,
                     "theme-rows",
                     "Rows",
@@ -435,8 +432,9 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                     [52, 72, 100].iter().position(|&v| v == t.row_height),
                     |t, i| set_rows(t, [52, 72, 100][i]),
                 ),
+                locked,
             ),
-            theme_row(k, "Corners", corners),
+            theme_row(k, "Corners", corners, locked),
         ],
     )
     .child(reset.pin(None, Some(6.0), Some(ROW_PX), None))

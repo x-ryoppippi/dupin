@@ -1,11 +1,13 @@
-//! Where `config.toml` lives and what happens when it's missing or broken.
+//! Configuration files and their live settings service.
 
 use std::path::{Path, PathBuf};
 
 use dupin_core::Config;
 
+mod layers;
 mod live;
-pub use live::{Service, Update};
+pub use layers::{LockedKeys, Paths, load, read_layer, top_level};
+pub use live::{Service, Update, check_locked};
 
 /// `$XDG_CONFIG_HOME/dupin/config.toml`, else `~/.config/dupin/config.toml`.
 pub fn path() -> Option<PathBuf> {
@@ -16,15 +18,9 @@ pub fn path() -> Option<PathBuf> {
     Some(base.join("dupin/config.toml"))
 }
 
-/// Whether Dupin can't save config.toml, as when home-manager links it into the Nix store.
-/// Settings then shows the values without offering to change them.
-pub fn read_only() -> bool {
-    path().is_some_and(|path| !writable(&path))
-}
-
 /// Whether `write` can replace the file `path` resolves to: the file itself, if it exists,
 /// and the directory the new file is renamed in, or the nearest one that exists to make it in.
-fn writable(path: &Path) -> bool {
+pub fn writable(path: &Path) -> bool {
     let Ok(target) = resolve(path) else {
         return false;
     };
@@ -89,35 +85,7 @@ pub(super) fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io
     )))
 }
 
-/// The config, or the defaults with a message saying why the file wasn't used.
-pub fn load() -> (Config, Option<String>) {
-    path().map_or_else(|| (Config::default(), None), |path| load_from(&path))
-}
-
-fn load_from(path: &Path) -> (Config, Option<String>) {
-    let src = match read_source(path) {
-        Ok(src) => src,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return (Config::default(), None);
-        }
-        Err(e) => {
-            return problem(format!(
-                "couldn't read {}: {e}; using the defaults",
-                path.display()
-            ));
-        }
-    };
-    match Config::parse(&src) {
-        Ok(config) => (config, None),
-        Err(error) => problem(format!(
-            "{} is invalid, using the defaults: {}",
-            path.display(),
-            error.message()
-        )),
-    }
-}
-
-pub fn read_source(path: &Path) -> std::io::Result<String> {
+fn read_source(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -128,7 +96,7 @@ pub fn read_source(path: &Path) -> std::io::Result<String> {
     if !file.metadata()?.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "config.toml must be a regular file",
+            "configuration must be a regular file",
         ));
     }
     let mut source = String::new();
@@ -165,11 +133,6 @@ fn location(source: &str, offset: usize) -> (usize, usize) {
         .next()
         .map_or(1, |line| line.chars().count() + 1);
     (line, column)
-}
-
-fn problem(message: String) -> (Config, Option<String>) {
-    crate::log::warn(&message);
-    (Config::default(), Some(message))
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
@@ -213,7 +176,12 @@ script = "missing.sh"
 "#;
         std::fs::write(&path, source).unwrap();
 
-        assert_eq!(load_from(&path), (Config::parse(source).unwrap(), None));
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::parse(source).unwrap());
+        assert_eq!(problem, None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

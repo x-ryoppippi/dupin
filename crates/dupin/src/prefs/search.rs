@@ -2,7 +2,9 @@ use rune::{El, Tx, col, text};
 use rune_kit::{Kit, Switch};
 
 use super::Prefs;
-use super::controls::{DESCRIPTION, ROW_PX, card, choose, menu_value, setting, tilde, value_button};
+use super::controls::{
+    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button,
+};
 use crate::icons;
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
@@ -32,71 +34,79 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
 }
 
 fn calculator_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("calculator");
     let next_calculator = !s.config.calculator;
     let calculator = Switch::new(s.config.calculator)
         .label("Calculator")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator = next_calculator))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::CALCULATOR,
         "Calculator",
         Some("Show calculations and unit conversions in app search"),
         calculator,
+        locked,
     )
 }
 
 fn currency_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("calculator_currency");
     let next_currency = !s.config.calculator_currency;
     let currency = Switch::new(s.config.calculator_currency)
         .label("Currency conversion")
         .hide_label()
-        .disabled(s.read_only || !s.config.calculator)
+        .disabled(locked || !s.config.calculator)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator_currency = next_currency))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::CALCULATOR,
         "Currency conversion",
         Some("Fetch European Central Bank rates in the background"),
         currency,
+        locked,
     )
 }
 
 fn recent_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("show_recent");
     let show_recent = !s.config.show_recent;
     let recent = Switch::new(s.config.show_recent)
         .label("Show recent items")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.show_recent = show_recent))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::PANEL,
         "Show recent items",
         Some("Show recently and frequently used apps and files when the search is empty"),
         recent,
+        locked,
     )
 }
 
 fn file_limit_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("file_limit");
     let limit = menu_value(
-        s,
+        locked,
         k,
         FILE_LIMIT,
         "Files shown",
         &s.config.file_limit.to_string(),
         pick_file_limit,
     );
-    setting(
+    setting_with_lock(
         k,
         &icons::FILES,
         "Files shown",
         Some("The most files a Spotlight search lists"),
         limit,
+        locked,
     )
 }
 
@@ -114,79 +124,88 @@ fn pick_file_limit(s: &mut Prefs, tx: &mut Tx) {
 }
 
 fn calendar_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("calendar");
     let calendar_enabled = !s.config.calendar.enabled;
     let calendar = Switch::new(s.config.calendar.enabled)
         .label("Calendar search")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar.enabled = calendar_enabled))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::SEARCH,
         "Calendar search",
         Some("Type cal then Space to search events"),
         calendar,
+        locked,
     )
 }
 
 fn clipboard_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("clipboard");
     let next_clipboard = !s.config.clipboard.enabled;
     let clipboard = Switch::new(s.config.clipboard.enabled)
         .label("Clipboard history")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.enabled = next_clipboard))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::CLIPBOARD,
         "Clipboard history",
         Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
         clipboard,
+        locked,
     )
 }
 
 fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("snippet_paste");
     let next_paste = !s.config.snippet_paste;
     let paste = Switch::new(s.config.snippet_paste)
         .label("Paste snippets")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.snippet_paste = next_paste))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::KEYBOARD,
         "Paste snippets",
         Some("Enter pastes a snippet into the front app instead of only copying it"),
         paste,
+        locked,
     )
 }
 
 fn window_management_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("window_management");
     let enabled = s.config.window_management;
     let window_management = Switch::new(enabled)
         .label("Window Management")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
         .build(k);
-    setting(
+    setting_with_lock(
         k,
         &icons::PANEL,
         "Window Management",
         Some("Show commands to move and resize windows. Requires Accessibility on first use."),
         window_management,
+        locked,
     )
 }
 
 fn extensions_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("extensions");
     let enabled = s.config.extensions;
     let switch = Switch::new(enabled)
         .label("Extensions")
         .hide_label()
-        .disabled(s.read_only)
+        .disabled(locked)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
         .build(k);
     let folder = crate::extensions::directory()
@@ -202,7 +221,7 @@ fn extensions_setting(s: &Prefs, k: &Kit) -> El {
     } else {
         format!("Loaded from {folder}: {}", loaded.join(", "))
     };
-    setting(k, &icons::PUZZLE, "Extensions", Some(&status), switch)
+    setting_with_lock(k, &icons::PUZZLE, "Extensions", Some(&status), switch, locked)
 }
 
 fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {

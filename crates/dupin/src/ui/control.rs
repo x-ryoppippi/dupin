@@ -91,8 +91,10 @@ impl Ui {
                     call.finish(Err("Busy: settings save pending".into()));
                     return;
                 }
-                if crate::settings::read_only() {
-                    call.finish(Err("settings are read-only".into()));
+                if let Err(error) =
+                    crate::settings::check_locked(base, desired, &self.configuration.locked_keys)
+                {
+                    call.finish(Err(error));
                     return;
                 }
                 let previous = self.configuration.values.borrow();
