@@ -369,7 +369,6 @@ def system-pane [out: path, focused: closure, found: closure] {
     if $cleanup_failure != null { error make $cleanup_failure }
 }
 
-# Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
 def snapshot-stage [out: path, found: closure] {
     let log = $out | path join dupin.log
     let archive = $out | path join data dupin snapshots archive.json
@@ -543,6 +542,9 @@ def snapshot-stage [out: path, found: closure] {
             --first
         ) | ignore
         snap $out snapshots-confirm
+        if not (open --raw ($out | path join snapshots-confirm-snapshot.json) | str contains $prompt) {
+            error make {msg: 'Snapshot tree omitted the visible delete confirmation'}
+        }
         let cancel = (poll
             $out
             snapshots-cancel
@@ -639,6 +641,7 @@ def log-count [log: path, text: string]: nothing -> int {
     open --raw $log | lines | where {|line| $line | str contains $text } | length
 }
 
+# Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
 def --wrapped ad [out: path, name: string, ...args: string]: nothing -> record {
     let result = ^agent-desktop ...$args | complete
     $result.stdout | save --force ($out | path join $'($name).json')
