@@ -20,6 +20,7 @@ pub struct Registration {
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
+    pub system_provider: Arc<crate::system_commands::SystemProvider>,
 }
 
 pub struct ConfiguredCommands {
@@ -199,12 +200,12 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
+    let system_provider = Arc::new(crate::system_commands::SystemProvider::new(
+        config.system_automation,
+    ));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
-        (
-            id(SYSTEM),
-            Arc::new(crate::system_commands::SystemProvider) as Arc<dyn Provider>,
-        ),
+        (id(SYSTEM), system_provider.clone() as Arc<dyn Provider>),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -241,6 +242,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         notice,
         web,
         file_demotions,
+        system_provider,
     })
 }
 

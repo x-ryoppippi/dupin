@@ -261,6 +261,7 @@ pub struct Ui {
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
+    system_provider: Arc<crate::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
@@ -456,6 +457,7 @@ impl Ui {
             searchers,
             web: registration.web,
             file_demotions: registration.file_demotions,
+            system_provider: registration.system_provider,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
@@ -507,9 +509,14 @@ impl Ui {
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        let automation_changed = self
+            .system_provider
+            .set_automation_enabled(config.system_automation);
+        let command = self.session.command_id().as_str();
         if self.session.command().result_limit != previous_limit
-            || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
-            || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
+            || (web_changed && command == crate::commands::APPS)
+            || (automation_changed && matches!(command, crate::commands::APPS | crate::commands::SYSTEM))
+            || (ranking_changed && command == crate::commands::FILES)
         {
             let effects = self.session.refresh();
             self.apply(effects, tx);

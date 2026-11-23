@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, SystemCommand, View, fuzzy};
 
 mod native;
@@ -62,7 +64,21 @@ pub fn execute(
     runner(command).map_err(|error| format!("{} failed. {error}", labels(command).0))
 }
 
-pub struct SystemProvider;
+pub struct SystemProvider {
+    automation_enabled: AtomicBool,
+}
+
+impl SystemProvider {
+    pub fn new(automation_enabled: bool) -> Self {
+        Self {
+            automation_enabled: AtomicBool::new(automation_enabled),
+        }
+    }
+
+    pub fn set_automation_enabled(&self, enabled: bool) -> bool {
+        self.automation_enabled.swap(enabled, Ordering::Relaxed) != enabled
+    }
+}
 
 impl Provider for SystemProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
@@ -70,8 +86,10 @@ impl Provider for SystemProvider {
         if request.is_cancelled() || request.limit == 0 || query.chars().count() < 2 {
             return Ok(());
         }
+        let automation_enabled = self.automation_enabled.load(Ordering::Relaxed);
         let mut items: Vec<_> = COMMANDS
             .into_iter()
+            .filter(|command| automation_enabled || !needs_automation(*command))
             .filter_map(|command| {
                 let (title, subtitle, prompt) = labels(command);
                 let found = fuzzy::score(query, title)?;
@@ -112,10 +130,15 @@ mod tests {
 
     #[test]
     fn normal_search_dispatches_each_command_through_its_expected_activation() {
+        let config = Config {
+            system_automation: true,
+            ..Config::default()
+        };
+        let provider = SystemProvider::new(config.system_automation);
         for command in COMMANDS {
-            let config = crate::commands::configured(&Config::default()).unwrap();
+            let configured = crate::commands::configured(&config).unwrap();
             let origin = CommandId::new(crate::commands::SYSTEM).unwrap();
-            let mut session = Session::new(History::default(), config.registry).unwrap();
+            let mut session = Session::new(History::default(), configured.registry).unwrap();
             let (title, _, confirmation) = labels(command);
             let generation = session
                 .set_query(title)
@@ -127,7 +150,7 @@ mod tests {
                     _ => None,
                 })
                 .unwrap();
-            SystemProvider
+            provider
                 .search(&Request::detached(title, COMMANDS.len()), &mut |items| {
                     session.deliver_from(origin.clone(), Delivery::Batch { generation, items });
                 })
@@ -164,15 +187,16 @@ mod tests {
 
     #[test]
     fn machine_sleep_precedes_display_sleep_and_short_queries_stay_quiet() {
+        let provider = SystemProvider::new(false);
         for query in ["", " ", "s"] {
-            SystemProvider
+            provider
                 .search(&Request::detached(query, COMMANDS.len()), &mut |_| {
                     panic!("unexpected system command for {query:?}");
                 })
                 .unwrap();
         }
         let mut results = Vec::new();
-        SystemProvider
+        provider
             .search(&Request::detached("sleep", COMMANDS.len()), &mut |items| {
                 results.extend(items);
             })
@@ -181,6 +205,28 @@ mod tests {
             results.iter().map(Item::display_title).collect::<Vec<_>>(),
             ["Sleep", "Sleep Displays"]
         );
+    }
+
+    #[test]
+    fn search_tracks_the_automation_setting() {
+        let provider = SystemProvider::new(Config::default().system_automation);
+        for (enabled, changed) in [(false, false), (true, true), (false, true)] {
+            assert_eq!(provider.set_automation_enabled(enabled), changed);
+            for command in COMMANDS {
+                let mut found = false;
+                provider
+                    .search(
+                        &Request::detached(labels(command).0, COMMANDS.len()),
+                        &mut |items| {
+                            found = items
+                                .iter()
+                                .any(|item| item.action("run") == Some(&Action::System(command)));
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(found, enabled || !needs_automation(command), "{command:?}");
+            }
+        }
     }
 
     #[test]

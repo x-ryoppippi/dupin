@@ -694,7 +694,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::REFRESH,
             "System Command Automation",
-            Some("Allow Dupin to request macOS Automation when you confirm a system command"),
+            Some("Show system commands that may ask for macOS Automation when confirmed"),
             automation,
         ),
         setting(
