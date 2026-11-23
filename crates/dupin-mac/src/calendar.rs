@@ -4,7 +4,7 @@ use objc2::{Message, msg_send};
 use objc2_event_kit::{EKAuthorizationStatus, EKEvent, EKEventStatus, EKEventStore};
 use objc2_foundation::{
     NSArray, NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSDateFormatter, NSDateIntervalFormatter,
-    NSDateIntervalFormatterStyle, NSLocale, NSString, NSTimeZone,
+    NSLocale, NSString, NSTimeZone,
 };
 
 use crate::privacy::{Access, CalendarAccess, Permission, PermissionStatus, calendar_authorization};
@@ -229,8 +229,8 @@ impl<'a> Days<'a> {
         }
     }
 
-    fn title(&self, date: &NSDate) -> String {
-        match day_number(self.calendar, date).checked_sub(self.today) {
+    fn title(&self, day: usize, date: &NSDate) -> String {
+        match day.checked_sub(self.today) {
             Some(0) => "Today".into(),
             Some(1) => "Tomorrow".into(),
             _ if self.calendar.component_fromDate(NSCalendarUnit::Year, date) == self.year => {
@@ -282,27 +282,29 @@ fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Win
             .then_with(|| a_start.total_cmp(&b_start))
             .then_with(|| a.id.cmp(&b.id))
     });
-    let formatter = NSDateIntervalFormatter::new();
-    formatter.setDateStyle(NSDateIntervalFormatterStyle::MediumStyle);
-    formatter.setTimeZone(Some(zone));
+    let times = Times::new(window);
     let mut batches: Vec<Batch> = Vec::new();
     for event in events.into_iter().take(limit) {
         let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
         let id = format!("{}:{}", event.id, occurrence.timeIntervalSince1970());
         let url = event_url(&event, zone);
-        let subtitle = format!("{} · {}", event_time(&event, &formatter), event.calendar);
         let title = if event.title.trim().is_empty() {
             "Untitled event"
         } else {
             &event.title
         };
-        let section = if chronological_key(&event).0 {
-            ENDED.to_owned()
-        } else if event.start.timeIntervalSince1970() < now {
-            days.title(now_date)
+        let (section, day) = if chronological_key(&event).0 {
+            (ENDED.to_owned(), None)
         } else {
-            days.title(&event.start)
+            let date = if event.start.timeIntervalSince1970() < now {
+                now_date
+            } else {
+                &event.start
+            };
+            let day = day_number(window.calendar, date);
+            (days.title(day, date), Some(day))
         };
+        let subtitle = format!("{} · {}", times.text(&event, day), event.calendar);
         let row = row(&id, title, subtitle, Some(("Open in Calendar", url)));
         match batches.last_mut() {
             Some(batch) if batch.section.as_deref() == Some(section.as_str()) => batch.items.push(row),
@@ -312,21 +314,58 @@ fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Win
     batches
 }
 
-fn event_time(event: &Event, formatter: &NSDateIntervalFormatter) -> String {
-    let start = event.start.timeIntervalSince1970();
-    let end = event.end.timeIntervalSince1970();
-    if event.all_day {
-        formatter.setTimeStyle(NSDateIntervalFormatterStyle::NoStyle);
-        // All-day events end at the start of the next day.
-        let inclusive_end = NSDate::dateWithTimeIntervalSince1970((end - 1.0).max(start));
-        format!(
-            "{} · All day",
-            formatter.stringFromDate_toDate(&event.start, &inclusive_end)
-        )
-    } else {
-        formatter.setTimeStyle(NSDateIntervalFormatterStyle::ShortStyle);
-        let end = if end < start { &event.start } else { &event.end };
-        formatter.stringFromDate_toDate(&event.start, end).to_string()
+/// Formats when an event happens, leaving out what its section heading already says.
+struct Times<'a> {
+    calendar: &'a NSCalendar,
+    year: isize,
+    formatter: Retained<NSDateIntervalFormatter>,
+}
+
+impl<'a> Times<'a> {
+    fn new(window: &Window<'a>) -> Self {
+        let formatter = NSDateIntervalFormatter::new();
+        formatter.setTimeZone(Some(window.zone));
+        formatter.setCalendar(Some(window.calendar));
+        Self {
+            calendar: window.calendar,
+            year: window
+                .calendar
+                .component_fromDate(NSCalendarUnit::Year, window.now),
+            formatter,
+        }
+    }
+
+    /// Only the time when the event falls within `heading_day`, the day its section names;
+    /// otherwise the dates too, with the year when it is not the current one.
+    fn text(&self, event: &Event, heading_day: Option<usize>) -> String {
+        let start = event.start.timeIntervalSince1970();
+        let end = NSDate::dateWithTimeIntervalSince1970(event.end.timeIntervalSince1970().max(start));
+        // All-day events end at the start of the next day, and a timed event that ends at
+        // midnight belongs to the day before.
+        let last = NSDate::dateWithTimeIntervalSince1970((end.timeIntervalSince1970() - 1.0).max(start));
+        let first_day = day_number(self.calendar, &event.start);
+        let one_day = first_day == day_number(self.calendar, &last);
+        let range = |template: &str, to: &NSDate| {
+            self.formatter
+                .setDateTemplate(Some(&NSString::from_str(template)));
+            self.formatter.stringFromDate_toDate(&event.start, to).to_string()
+        };
+        if one_day && heading_day == Some(first_day) {
+            return if event.all_day {
+                "All day".into()
+            } else {
+                range("jmm", &end)
+            };
+        }
+        let other_year = [&*event.start, &*last]
+            .into_iter()
+            .any(|date| self.calendar.component_fromDate(NSCalendarUnit::Year, date) != self.year);
+        let date = if other_year { "dMMMy" } else { "dMMM" };
+        if event.all_day {
+            format!("{} · All day", range(date, &last))
+        } else {
+            range(&format!("{date}jmm"), &end)
+        }
     }
 }
 
@@ -540,25 +579,108 @@ mod tests {
         assert_eq!(rows.into_iter().map(|row| row.id).collect::<Vec<_>>(), expected);
     }
 
-    #[test]
-    fn date_ranges_use_the_output_zone_and_exclude_the_all_day_end_date() {
+    /// Runs `check` with fixture events and an en_GB `Times` whose zone is `offset` from GMT.
+    fn with_times(offset: isize, check: impl FnOnce(&Times, &NSDate, Vec<Event>)) {
         let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
-        let mut events = fixture_events(&now);
-        let formatter = NSDateIntervalFormatter::new();
-        formatter.setLocale(Some(&NSLocale::localeWithLocaleIdentifier(&NSString::from_str(
-            "en_GB",
-        ))));
-        formatter.setDateStyle(NSDateIntervalFormatterStyle::MediumStyle);
-        formatter.setTimeZone(Some(&NSTimeZone::timeZoneForSecondsFromGMT(-8 * 3600)));
-        let timed = event_time(&events[0], &formatter);
-        assert!(timed.contains("02:00") && timed.contains("03:00"), "{timed}");
+        let zone = NSTimeZone::timeZoneForSecondsFromGMT(offset);
+        let calendar = NSCalendar::currentCalendar();
+        calendar.setTimeZone(&zone);
+        let window = Window {
+            now: &now,
+            start: &now,
+            end: &now,
+            zone: &zone,
+            calendar: &calendar,
+        };
+        let times = Times::new(&window);
+        times
+            .formatter
+            .setLocale(Some(&NSLocale::localeWithLocaleIdentifier(&NSString::from_str(
+                "en_GB",
+            ))));
+        check(&times, &now, fixture_events(&now));
+    }
 
-        formatter.setTimeZone(Some(&NSTimeZone::timeZoneForSecondsFromGMT(0)));
-        let all_day = event_time(&events[2], &formatter);
-        assert!(all_day.contains("24 Nov") && !all_day.contains("25"), "{all_day}");
-        assert!(all_day.ends_with("All day"));
-        events[2].end = events[2].end.dateByAddingTimeInterval(86_400.0);
-        assert!(event_time(&events[2], &formatter).contains("25"));
+    fn day_of(times: &Times, event: &Event) -> Option<usize> {
+        Some(day_number(times.calendar, &event.start))
+    }
+
+    #[test]
+    fn times_use_the_output_zone() {
+        with_times(-8 * 3600, |times, _, events| {
+            let timed = times.text(&events[0], None);
+            assert!(timed.contains("02:00") && timed.contains("03:00"), "{timed}");
+        });
+    }
+
+    #[test]
+    fn rows_under_their_own_day_show_only_the_time() {
+        with_times(0, |times, now, mut events| {
+            let timed = times.text(&events[0], day_of(times, &events[0]));
+            assert!(timed.contains("10:00") && timed.contains("11:00"), "{timed}");
+            assert!(!timed.contains("Nov") && !timed.contains("2026"), "{timed}");
+            assert_eq!(times.text(&events[2], day_of(times, &events[2])), "All day");
+
+            events[1].end = now.dateByAddingTimeInterval(16.0 * 3600.0);
+            let until_midnight = times.text(&events[1], day_of(times, &events[1]));
+            assert!(
+                until_midnight.contains("16:00") && !until_midnight.contains("Nov"),
+                "{until_midnight}"
+            );
+        });
+    }
+
+    #[test]
+    fn rows_without_their_day_as_heading_show_the_dates() {
+        with_times(0, |times, now, mut events| {
+            let today = day_of(times, &events[0]);
+            let earlier = times.text(&events[0], None);
+            assert!(
+                earlier.contains("23 Nov") && earlier.contains("10:00"),
+                "{earlier}"
+            );
+            assert!(!earlier.contains("2026"), "{earlier}");
+
+            let all_day = times.text(&events[2], None);
+            assert!(all_day.contains("24 Nov") && !all_day.contains("25"), "{all_day}");
+            assert!(all_day.ends_with(" · All day"), "{all_day}");
+
+            let tomorrow = day_of(times, &events[2]);
+            events[2].end = events[2].end.dateByAddingTimeInterval(86_400.0);
+            let days = times.text(&events[2], tomorrow);
+            assert!(days.contains("24") && days.contains("25 Nov"), "{days}");
+            assert!(days.ends_with(" · All day"), "{days}");
+
+            events[1].start = now.dateByAddingTimeInterval(14.0 * 3600.0);
+            events[1].end = now.dateByAddingTimeInterval(18.0 * 3600.0);
+            let overnight = times.text(&events[1], today);
+            assert!(
+                overnight.contains("23 Nov") && overnight.contains("24 Nov"),
+                "{overnight}"
+            );
+
+            events[3].start = now.dateByAddingTimeInterval(365.0 * 86_400.0);
+            events[3].end = events[3].start.dateByAddingTimeInterval(1800.0);
+            let next_year = times.text(&events[3], None);
+            assert!(next_year.contains("2027"), "{next_year}");
+        });
+    }
+
+    #[test]
+    fn upcoming_rows_leave_the_date_to_their_heading() {
+        let mut batches = Vec::new();
+        CalendarProvider::fixtures()
+            .search_batches(&Request::detached("", 30), &mut |batch| batches.push(batch))
+            .unwrap();
+        for item in batches.iter().flat_map(|batch| &batch.items) {
+            let View::Text { subtitle, .. } = &item.view else {
+                panic!("expected a text row")
+            };
+            assert!(
+                !subtitle.contains("Nov") && !subtitle.contains("2026"),
+                "{subtitle}"
+            );
+        }
     }
 
     #[test]
