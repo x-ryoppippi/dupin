@@ -25,11 +25,11 @@ Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and 
 
 ## Output and cancellation
 
-| Mode     | Result                                                                                                                                                          |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `silent` | Hide the panel. A failed start or non-zero exit opens Script Output with the error.                                                                             |
-| `inline` | Keep the panel open. After completion, Enter copies the last non-empty stdout line. Command-O shows full output; typing a new search or hiding clears the card. |
-| `full`   | Open Script Output and stream stdout and stderr.                                                                                                                |
+| Mode     | Result                                                                                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `silent` | Hide the panel. A failed start or non-zero exit opens Script Output with the error.                                                                                                  |
+| `inline` | Keep the panel open. After completion, Enter copies the last non-empty stdout line and closes the panel. Command-O shows full output; typing a new search or hiding clears the card. |
+| `full`   | Open Script Output and stream stdout and stderr.                                                                                                                                     |
 
 Command-Period cancels a running script. Script Output offers Cancel, Run again (Command-R) and Copy output (Shift-Command-C). It retains this session's last 20 runs. Output is bounded to 1 MiB per run and 8 KiB per line; old lines are dropped with a line-count marker in the window and copied output, and terminal SGR sequences are removed. Non-zero exits retain the exit status and stderr.
 
@@ -40,5 +40,50 @@ At most eight scripts run concurrently, with no execution timeout. Cancellation 
 Scripts run directly using their shebang, with your home directory as the working directory and stdin closed. Dupin inherits its process environment; it does not run login-shell setup to discover PATH. Use an absolute interpreter path or set PATH explicitly when a tool is unavailable to a launched application.
 
 Any installed interpreter can be used, including Nushell, Python and Bun. A script can also invoke a long-running tool such as `claude -p`; choose `full` to follow its output. These commands execute only on activation, with the same user access as Dupin.
+
+The following examples use `env` to find installed tools. Replace the interpreter in the shebang, or the CLI command, with its absolute path if the application environment cannot find it. Save each example as its own executable file in the scripts directory.
+
+### Nushell
+
+```nu
+#!/usr/bin/env nu
+# @dupin.title Uppercase a message
+# @dupin.argument message
+def main [message: string] {
+    $message | str upcase
+}
+```
+
+### Python
+
+```python
+#!/usr/bin/env python3
+# @dupin.title Count characters
+# @dupin.argument message
+import sys
+
+print(len(sys.argv[1]))
+```
+
+### Bun
+
+```javascript
+#!/usr/bin/env bun
+// @dupin.title Join words
+// @dupin.argument words+
+console.log(process.argv.slice(2).join(' '));
+```
+
+### Stream an AI command
+
+```sh
+#!/bin/sh
+# @dupin.title Ask Claude
+# @dupin.output full
+# @dupin.argument prompt
+exec claude -p "$1"
+```
+
+The prompt is one argument: quote a multiword prompt in the argument field. The command runs with your installed CLI's own configuration and access; Dupin supplies no credentials or additional permissions.
 
 Scripts are trusted, unsandboxed native programs, separate from the extension permission system. Installing a script gives its code your user authority when you run it. Script discovery and enabling do not request macOS permissions.
