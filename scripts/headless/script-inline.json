@@ -1,0 +1,29 @@
+{
+	"events": [
+		{
+			"t": 0.1,
+			"type": "type",
+			"text": "Dupin fixture echo"
+		},
+		{
+			"t": 1.0,
+			"type": "key",
+			"name": "Tab"
+		},
+		{
+			"t": 1.2,
+			"type": "type",
+			"text": "'hello world' 'from script'"
+		},
+		{
+			"t": 2.4,
+			"type": "key",
+			"name": "Enter"
+		},
+		{
+			"t": 4.0,
+			"type": "mark",
+			"name": "end"
+		}
+	]
+}

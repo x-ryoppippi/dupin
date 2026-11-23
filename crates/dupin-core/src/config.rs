@@ -4,12 +4,18 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub const MAPS_SEARCH_TEMPLATE: &str = "maps://?q={query}";
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// The global shortcut that shows and hides the panel, as Rune parses accelerators:
     /// modifiers (`cmd`, `alt`, `ctrl`, `shift`) and a key joined by `+`.
     pub hotkey: String,
+    /// Optional shortcut to search text selected in another app.
+    pub selection_hotkey: String,
+    pub bindings: BTreeMap<String, HotkeyTarget>,
+    pub show_recent: bool,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
     /// Directories to rank lower in file search. Relative names match directory components;
@@ -17,23 +23,61 @@ pub struct Config {
     pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
+    pub window_management: bool,
+    pub calculator: bool,
+    pub calculator_currency: bool,
     /// Web search keywords and their URL templates. `{query}` is replaced when selected.
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
-    /// Where the panel opens on the display under the pointer.
+    /// Text snippets by keyword. Placeholders in the text are filled in when one is used.
+    pub snippets: BTreeMap<String, Snippet>,
+    /// Keywords followed by Space that enter snippet search.
+    pub snippet_keywords: Vec<String>,
+    /// Whether Enter on a snippet also pastes it into the frontmost app, which needs
+    /// Accessibility access. Off, it only copies.
+    pub snippet_paste: bool,
+    pub display: DisplaySelection,
+    /// Where the panel opens on the selected display.
     pub position: Position,
     /// The keyboard input source to type with while the panel shows.
     pub input_source: InputSource,
     /// Whether a signed release build installs its channel's updates by itself. Builds
     /// without an update feed (Nix, `cargo run`) never update.
     pub auto_update: bool,
+    pub system_automation: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     /// Load Wasm extensions from the `extensions` folder beside config.toml. Off by default
     /// because they are third-party code.
     pub extensions: bool,
     pub theme: Theme,
+    pub calendar: Calendar,
+    pub clipboard: Clipboard,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Calendar {
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "target", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HotkeyTarget {
+    App {
+        bundle_id: String,
+        #[serde(default)]
+        hide_if_frontmost: bool,
+    },
+    Command {
+        command: String,
+    },
+    Script {
+        script: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -41,6 +85,15 @@ pub struct Config {
 pub struct WebSearch {
     pub name: String,
     pub url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Snippet {
+    /// Shown in results instead of the keyword.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub text: String,
 }
 
 /// What animates behind the query field. In config.toml: `"flow"`, `"off"`, or the path to a
@@ -124,10 +177,22 @@ pub enum Position {
     Top,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DisplaySelection {
+    #[default]
+    Mouse,
+    Main,
+    Active,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Config {
             hotkey: "cmd+space".into(),
+            selection_hotkey: String::new(),
+            bindings: BTreeMap::new(),
+            show_recent: true,
             file_limit: 200,
             file_demotions: [
                 "~/Library",
@@ -142,6 +207,10 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
+            display: DisplaySelection::default(),
+            window_management: false,
+            calculator: true,
+            calculator_currency: false,
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
@@ -158,6 +227,13 @@ impl Default for Config {
                     },
                 ),
                 (
+                    "maps".into(),
+                    WebSearch {
+                        name: "Apple Maps".into(),
+                        url: MAPS_SEARCH_TEMPLATE.into(),
+                    },
+                ),
+                (
                     "yt".into(),
                     WebSearch {
                         name: "YouTube".into(),
@@ -166,12 +242,18 @@ impl Default for Config {
                 ),
             ]),
             web_fallbacks: Vec::new(),
+            snippets: BTreeMap::new(),
+            snippet_keywords: vec!["snip".into()],
+            snippet_paste: false,
             position: Position::Center,
             input_source: InputSource::Ascii,
             auto_update: true,
+            system_automation: false,
             backdrop: Backdrop::Off,
             extensions: false,
             theme: Theme::default(),
+            calendar: Calendar::default(),
+            clipboard: Clipboard::default(),
         }
     }
 }
@@ -187,17 +269,72 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_command_space() {
-        assert_eq!(Config::parse("").unwrap(), Config::default());
-        assert_eq!(Config::default().hotkey, "cmd+space");
+    fn reads_the_display_selection() {
+        assert_eq!(Config::default().display, DisplaySelection::Mouse);
+        for (name, expected) in [
+            ("mouse", DisplaySelection::Mouse),
+            ("main", DisplaySelection::Main),
+            ("active", DisplaySelection::Active),
+        ] {
+            let config = Config::parse(&format!("display = \"{name}\"")).unwrap();
+            assert_eq!(config.display, expected);
+            assert_eq!(serde_json::to_value(&config).unwrap()["display"], name);
+        }
+        assert!(Config::parse("display = \"other\"").is_err());
     }
 
     #[test]
-    fn reads_the_hotkey() {
+    fn defaults_to_command_space() {
+        assert_eq!(Config::parse("").unwrap(), Config::default());
+        assert_eq!(Config::default().hotkey, "cmd+space");
+        assert!(Config::default().selection_hotkey.is_empty());
+    }
+
+    #[test]
+    fn reads_the_hotkeys() {
+        let config = Config::parse("hotkey = \"alt+space\"\nselection_hotkey = \"ctrl+alt+k\"").unwrap();
+        assert_eq!(config.hotkey, "alt+space");
+        assert_eq!(config.selection_hotkey, "ctrl+alt+k");
+    }
+
+    #[test]
+    fn app_bindings_round_trip_with_hiding_opt_in() {
+        let config = Config::parse(
+            r#"
+[bindings."ctrl+alt+c"]
+target = "app"
+bundle_id = "com.apple.calculator"
+"#,
+        )
+        .unwrap();
+        assert!(Config::default().bindings.is_empty());
         assert_eq!(
-            Config::parse("hotkey = \"alt+space\"").unwrap().hotkey,
-            "alt+space"
+            config.bindings["ctrl+alt+c"],
+            HotkeyTarget::App {
+                bundle_id: "com.apple.calculator".into(),
+                hide_if_frontmost: false,
+            }
         );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+    }
+
+    #[test]
+    fn command_bindings_round_trip_without_changing_the_command_line() {
+        let config = Config::parse(
+            r#"
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.bindings["alt+cmd+g"],
+            HotkeyTarget::Command {
+                command: "dupin open --query 'gh '".into(),
+            }
+        );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
     }
 
     #[test]
@@ -243,6 +380,13 @@ web_fallbacks = ["docs", "g"]
         )
         .unwrap();
         assert_eq!(config.web_searches["docs"].name, "Docs");
+        assert_eq!(config.web_searches.len(), 1);
+        assert!(
+            Config::parse("web_searches = {}")
+                .unwrap()
+                .web_searches
+                .is_empty()
+        );
         assert_eq!(config.web_fallbacks, ["docs", "g"]);
 
         assert!(
@@ -259,6 +403,40 @@ unexpected = true
 
         let encoded = serde_json::to_string(&config).unwrap();
         assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+    }
+
+    #[test]
+    fn snippets_default_to_none_and_round_trip() {
+        let defaults = Config::default();
+        assert!(defaults.snippets.is_empty());
+        assert_eq!(defaults.snippet_keywords, ["snip"]);
+        assert!(!defaults.snippet_paste);
+
+        let config = Config::parse(
+            r#"
+snippet_keywords = ["s"]
+snippet_paste = true
+
+[snippets.sig]
+name = "Signature"
+text = "Best wishes,\nDupin"
+
+[snippets.today]
+text = "{date}"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.snippet_keywords, ["s"]);
+        assert!(config.snippet_paste);
+        assert_eq!(config.snippets["sig"].name.as_deref(), Some("Signature"));
+        assert_eq!(config.snippets["sig"].text, "Best wishes,\nDupin");
+        assert_eq!(config.snippets["today"].name, None);
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+
+        assert!(Config::parse("[snippets.sig]\nname = \"Signature\"").is_err());
+        assert!(Config::parse("[snippets.sig]\ntext = \"x\"\nkeyword = \"y\"").is_err());
     }
 
     #[test]
@@ -428,6 +606,137 @@ impl TryFrom<ThemeValues> for Theme {
             light: v.light,
             dark: v.dark,
         })
+    }
+}
+
+/// The clipboard history kept in memory while Dupin runs. Off by default: it records what
+/// you copy, which can be private.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields, try_from = "ClipboardValues")]
+pub struct Clipboard {
+    pub enabled: bool,
+    pub max_entries: usize,
+    /// Larger copies are skipped rather than truncated, so a copied-back entry is never partial.
+    pub(crate) max_entry_bytes: usize,
+    /// Bundle identifiers of apps whose copies are never recorded.
+    pub(crate) ignored_apps: Vec<String>,
+}
+
+const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=1000;
+const CLIPBOARD_ENTRY_BYTES: std::ops::RangeInclusive<usize> = 1024..=1024 * 1024;
+
+impl Default for Clipboard {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_entries: 200,
+            max_entry_bytes: 64 * 1024,
+            ignored_apps: [
+                "com.apple.keychainaccess",
+                "com.apple.Passwords",
+                "com.1password.1password",
+                "com.agilebits.onepassword7",
+                "com.bitwarden.desktop",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ClipboardValues {
+    enabled: bool,
+    max_entries: usize,
+    max_entry_bytes: usize,
+    ignored_apps: Vec<String>,
+}
+
+impl Default for ClipboardValues {
+    fn default() -> Self {
+        let Clipboard {
+            enabled,
+            max_entries,
+            max_entry_bytes,
+            ignored_apps,
+        } = Clipboard::default();
+        Self {
+            enabled,
+            max_entries,
+            max_entry_bytes,
+            ignored_apps,
+        }
+    }
+}
+
+impl TryFrom<ClipboardValues> for Clipboard {
+    type Error = String;
+    fn try_from(v: ClipboardValues) -> Result<Self, String> {
+        if !CLIPBOARD_ENTRIES.contains(&v.max_entries) || !CLIPBOARD_ENTRY_BYTES.contains(&v.max_entry_bytes)
+        {
+            return Err(format!(
+                "clipboard limits out of range: max_entries {}..={}, max_entry_bytes {}..={}",
+                CLIPBOARD_ENTRIES.start(),
+                CLIPBOARD_ENTRIES.end(),
+                CLIPBOARD_ENTRY_BYTES.start(),
+                CLIPBOARD_ENTRY_BYTES.end(),
+            ));
+        }
+        Ok(Self {
+            enabled: v.enabled,
+            max_entries: v.max_entries,
+            max_entry_bytes: v.max_entry_bytes,
+            ignored_apps: v.ignored_apps,
+        })
+    }
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use super::*;
+
+    #[test]
+    fn clipboard_history_is_off_by_default_and_round_trips() {
+        let defaults = Config::parse("").unwrap().clipboard;
+        assert!(!defaults.enabled);
+        assert_eq!(defaults, Clipboard::default());
+        assert!(
+            defaults
+                .ignored_apps
+                .iter()
+                .any(|id| id == "com.apple.keychainaccess")
+        );
+
+        let config = Config::parse(
+            "[clipboard]\nenabled = true\nmax_entries = 50\nmax_entry_bytes = 4096\nignored_apps = [\"com.example.vault\"]",
+        )
+        .unwrap();
+        assert!(config.clipboard.enabled);
+        assert_eq!(config.clipboard.max_entries, 50);
+        assert_eq!(config.clipboard.max_entry_bytes, 4096);
+        assert_eq!(config.clipboard.ignored_apps, ["com.example.vault"]);
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+        let encoded = serde_json::to_string(&config).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+    }
+
+    #[test]
+    fn clipboard_limits_and_unknown_keys_are_rejected() {
+        for field in [
+            "max_entries = 0",
+            "max_entries = 1001",
+            "max_entry_bytes = 1023",
+            "max_entry_bytes = 1048577",
+            "max_entries = -1",
+            "history = true",
+        ] {
+            assert!(
+                Config::parse(&format!("[clipboard]\n{field}")).is_err(),
+                "{field}"
+            );
+        }
     }
 }
 

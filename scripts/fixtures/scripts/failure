@@ -1,0 +1,5 @@
+#!/bin/sh
+# @dupin.title E2E script failure
+# @dupin.output silent
+printf '%s\n' 'E2E script failed deliberately' >&2
+exit 3

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View, fuzzy};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View, fuzzy};
 use objc2::rc::autoreleasepool;
 use objc2_foundation::{NSBundle, NSDictionary, NSNumber, NSString};
 
@@ -128,6 +128,7 @@ fn item(
 ) -> Item {
     Item {
         id,
+        payload: Payload::text(title),
         view: View::Text {
             title: title.into(),
             subtitle: subtitle.into(),

@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -68,6 +68,7 @@ fn full_range(text: &CFString) -> CFRange {
 fn item(term: &str, definition: String) -> Item {
     Item {
         id: format!("dictionary:{term}"),
+        payload: Payload::text(definition.clone()),
         view: View::Detail {
             title: term.to_owned(),
             body: definition,
@@ -88,16 +89,7 @@ fn item(term: &str, definition: String) -> Item {
 }
 
 fn dictionary_url(term: &str) -> String {
-    let mut url = String::from("dict://");
-    for byte in term.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            url.push(char::from(byte));
-        } else {
-            use std::fmt::Write;
-            write!(url, "%{byte:02X}").expect("writing to a String cannot fail");
-        }
-    }
-    url
+    format!("dict://{}", crate::workspace::encode_url_component(term))
 }
 
 #[cfg(test)]

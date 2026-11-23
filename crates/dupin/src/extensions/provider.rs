@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{HostError, QueryControl};
 
@@ -28,6 +28,7 @@ impl ExtensionProvider {
     fn problem(&self, message: String) -> Item {
         Item {
             id: "extension-error".into(),
+            payload: Payload::default(),
             view: View::Text {
                 title: format!("{} failed", self.extension.name),
                 subtitle: message,
@@ -45,6 +46,14 @@ impl ExtensionProvider {
 }
 
 fn item(item: protocol::PluginItem) -> Item {
+    let payload = item
+        .actions
+        .iter()
+        .find_map(|action| match &action.effect {
+            protocol::Effect::Copy { text } => Some(Payload::text(text.clone())),
+            _ => None,
+        })
+        .unwrap_or_default();
     let actions: Vec<_> = item
         .actions
         .into_iter()
@@ -58,6 +67,7 @@ fn item(item: protocol::PluginItem) -> Item {
         .collect();
     Item {
         id: item.id,
+        payload,
         view: item.view,
         record_usage: false,
         icon: None,
@@ -155,6 +165,7 @@ mod tests {
         );
         assert_eq!(rows[0].primary.as_deref(), Some("copy"));
         assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
+        assert_eq!(rows[0].payload, Payload::text("2"));
         assert_eq!(
             rows[0].action("web"),
             Some(&Action::OpenUrl("https://example.com/?q=2".into()))
