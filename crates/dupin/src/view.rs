@@ -433,7 +433,16 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
 
 fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
-    let placeholder = presentation.placeholder.as_str();
+    let page = s.session.page();
+    let placeholder = page.map_or(presentation.placeholder.as_str(), |_| "Filter");
+    let chip = match (
+        page.map(|page| shortened(&page.title, 40)),
+        presentation.chip.as_deref(),
+    ) {
+        (Some(title), Some(chip)) => Some(format!("{chip} › {title}")),
+        (Some(title), None) => Some(title),
+        (None, chip) => chip.map(str::to_owned),
+    };
     let field = text_input(&s.query_display(), t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
         .key("query")
         .label(placeholder)
@@ -452,7 +461,7 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if let Some(chip) = presentation.chip.as_deref() {
+    bar = if let Some(chip) = chip {
         bar.child(
             row()
                 .key("mode")
@@ -481,12 +490,22 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     bar
 }
 
+fn shortened(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut short: String = text.chars().take(max - 1).collect();
+    short.push('…');
+    short
+}
+
 fn hint(s: &Ui) -> Option<&str> {
     if let Some(problem) = crate::commands::query_problem(s.session.command_id(), s.session.query()) {
         return Some(problem);
     }
     let presentation = &s.session.command().presentation;
-    if s.session.query().trim().is_empty() {
+    // A view searches with an empty filter too, so the command's prompt to type doesn't apply.
+    if s.session.query().trim().is_empty() && s.session.page().is_none() {
         presentation.empty_hint.as_deref()
     } else if s.session.results() == Results::Done && s.session.failures().next().is_none() {
         presentation.no_results_hint.as_deref()

@@ -5,9 +5,11 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use crate::searcher::Delivery;
-use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
+use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction, Page};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
+/// The most views a provider can push on top of one another.
+const MAX_PAGE_DEPTH: usize = 8;
 
 /// Keys the session gives meaning to. The UI maps raw keys onto these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,6 +36,8 @@ pub enum Effect {
         command: CommandId,
         generation: u64,
         query: String,
+        /// The pushed view to search, if any.
+        page: Option<Page>,
     },
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
@@ -94,6 +98,17 @@ pub struct Session {
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+    pages: Vec<Visit>,
+}
+
+/// A view pushed by a result, and the search to return to when it is popped.
+#[derive(Debug)]
+struct Visit {
+    page: Page,
+    command: CommandId,
+    explicit: bool,
+    query: String,
+    selected: Option<(CommandId, String)>,
 }
 
 #[derive(Debug)]
@@ -146,13 +161,18 @@ impl Session {
             recalled: None,
             deleting: false,
             before_deletion: None,
+            pages: Vec::new(),
         })
     }
 
     pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
         commands.validate()?;
-        if !commands.contains(&self.command) {
-            return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
+        // A pop restores each visit's command, so all of them must survive, not just the current.
+        if let Some(missing) = std::iter::once(&self.command)
+            .chain(self.pages.iter().map(|visit| &visit.command))
+            .find(|command| !commands.contains(command))
+        {
+            return Err(crate::CommandError::ActiveCommandRemoved(missing.clone()));
         }
         self.commands = commands;
         Ok(())
@@ -175,6 +195,9 @@ impl Session {
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
         if self.results != Results::Done || self.items.is_empty() {
             return Err("Wait for the current search to finish before saving.".into());
+        }
+        if !self.pages.is_empty() {
+            return Err("A view opened from a result can't be saved yet.".into());
         }
         let snapshot = crate::snapshots::Snapshot {
             saved_at: 0,
@@ -202,6 +225,7 @@ impl Session {
         if !self.commands.contains(&command) {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
+        self.pages.clear();
         self.clear_results();
         self.command = command;
         self.explicit = saved.explicit || self.command != *self.commands.default();
@@ -230,6 +254,11 @@ impl Session {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// The view pushed last, if the session is inside one.
+    pub fn page(&self) -> Option<&Page> {
+        self.pages.last().map(|visit| &visit.page)
     }
 
     pub fn items(&self) -> &[Item] {
@@ -274,6 +303,9 @@ impl Session {
     fn activate(&mut self, item: &Item, action: ItemAction) -> Vec<Effect> {
         if action.confirmation().is_some() || matches!(action.action, Action::ChooseApplication(_)) {
             return Vec::new();
+        }
+        if let Action::Push(page) = action.action {
+            return self.push(page);
         }
         if action.disposition == ActionDisposition::Consume {
             return vec![Effect::RunConsuming {
@@ -322,6 +354,7 @@ impl Session {
         }
         self.recalled = None;
         if self.command == *self.commands.default()
+            && self.pages.is_empty()
             && let Some((command, term)) = self.keyword_query(text)
         {
             self.deleting = false;
@@ -380,6 +413,7 @@ impl Session {
                 }
                 effects
             }
+            Intent::Space if empty && !self.pages.is_empty() => return None,
             Intent::Space if empty => self
                 .commands
                 .space_on_empty(&self.command)
@@ -392,6 +426,7 @@ impl Session {
                 effects.extend(self.switch(command));
                 effects
             }
+            Intent::Backspace if empty && !self.pages.is_empty() => self.pop(),
             Intent::Backspace if empty && self.command != *self.commands.default() => {
                 let effects = self.switch(self.commands.default().clone());
                 self.explicit = false;
@@ -399,7 +434,7 @@ impl Session {
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if empty || self.recalled.is_some() => self.recall(true),
+            Intent::Up if (empty && self.pages.is_empty()) || self.recalled.is_some() => self.recall(true),
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 self.refresh_selection = None;
@@ -437,8 +472,60 @@ impl Session {
                 let item = item.clone();
                 self.activate(&item, action)
             }
+            Intent::Dismiss if !self.pages.is_empty() => self.pop(),
             Intent::Dismiss => self.dismiss(),
         })
+    }
+
+    /// Open `page` over the current results; its searches go to the selected row's command.
+    fn push(&mut self, page: Page) -> Vec<Effect> {
+        if self.pages.len() >= MAX_PAGE_DEPTH {
+            return Vec::new();
+        }
+        let Some(origin) = self.origins.get(self.selected).cloned() else {
+            return Vec::new();
+        };
+        let selected = self.selected_item().map(|item| (origin.clone(), item.id.clone()));
+        self.remember_query(true);
+        self.pages.push(Visit {
+            page,
+            command: std::mem::replace(&mut self.command, origin),
+            explicit: std::mem::replace(&mut self.explicit, true),
+            query: std::mem::take(&mut self.query),
+            selected,
+        });
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.replace_search());
+        effects
+    }
+
+    /// Back to the results the top view was pushed from, with their query and selection.
+    fn pop(&mut self) -> Vec<Effect> {
+        let visit = self.pages.pop().expect("popping a pushed view");
+        self.command = visit.command;
+        self.explicit = visit.explicit;
+        self.query = visit.query;
+        let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+        effects.extend(self.replace_search());
+        self.selection_held = visit.selected.is_some();
+        self.refresh_selection = visit.selected;
+        effects
+    }
+
+    /// Search afresh in another view, without showing the previous view's rows. Clearing bumps
+    /// the generation, so a late answer for the view being left is dropped.
+    fn replace_search(&mut self) -> Vec<Effect> {
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
+        let was_searching = matches!(self.results, Results::Searching { .. });
+        self.clear_results();
+        let effects = self.search();
+        if effects.is_empty() && was_searching {
+            vec![Effect::CancelSearch]
+        } else {
+            effects
+        }
     }
 
     pub fn provider_spec(&self, id: &CommandId) -> Option<&crate::CommandSpec> {
@@ -699,6 +786,7 @@ impl Session {
         self.deleting = false;
         self.before_deletion = None;
         let was_searching = matches!(self.results, Results::Searching { .. });
+        self.pages.clear();
         self.command = self.commands.default().clone();
         self.explicit = false;
         self.query.clear();
@@ -717,6 +805,10 @@ impl Session {
     }
 
     fn remember_query(&mut self, activated: bool) {
+        // Recall belongs to a command's own queries; a view's filter would come back without it.
+        if !self.pages.is_empty() {
+            return;
+        }
         if activated {
             self.deleting = false;
             self.before_deletion = None;
@@ -778,7 +870,7 @@ impl Session {
         self.refresh_selection = None;
         self.selection_held = false;
         let query = self.query.trim();
-        if query.is_empty() {
+        if query.is_empty() && self.pages.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -788,6 +880,7 @@ impl Session {
             };
         }
         let query = self.query.clone();
+        let page = self.page().cloned();
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
@@ -817,6 +910,7 @@ impl Session {
                 command,
                 generation: self.generation,
                 query: query.clone(),
+                page: page.clone(),
             })
             .collect()
     }

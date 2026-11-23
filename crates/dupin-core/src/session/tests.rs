@@ -226,6 +226,7 @@ fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
                 command,
                 generation,
                 query,
+                ..
             },
         ] => (command.clone(), *generation, query),
         other => panic!("expected one search, got {other:?}"),
@@ -1462,4 +1463,207 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     assert!(changed.explicit);
     assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
     assert_eq!(searched(&effects[1..]).0, app_command());
+}
+
+fn page(view: &str) -> Page {
+    Page {
+        view: view.into(),
+        title: format!("{view} view"),
+        context: Some(serde_json::json!({ "from": view })),
+    }
+}
+
+fn pushing_row(name: &str, view: &str) -> Item {
+    let mut row = item(name);
+    row.actions = vec![ItemAction::new("push", "Open", Action::Push(page(view)))];
+    row.primary = Some("push".into());
+    row
+}
+
+fn view_search(effects: &[Effect]) -> (CommandId, u64, String, Option<Page>) {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::Search {
+                command,
+                generation,
+                query,
+                page,
+            } => Some((command.clone(), *generation, query.clone(), page.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a search, got {effects:?}"))
+}
+
+/// A dictionary search showing two rows, the second of which pushes `view`, selected.
+fn pushable_session(view: &str) -> (Session, u64) {
+    let mut s = session();
+    let generation = searched(&s.set_query("define word")[1..]).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation,
+            items: vec![item("first"), pushing_row("second", view)],
+        },
+    );
+    s.deliver_from(dictionary_command(), Delivery::Done { generation });
+    s.intent(Intent::Down);
+    (s, generation)
+}
+
+#[test]
+fn a_pushed_view_searches_the_rows_command_and_popping_restores_query_and_selection() {
+    let (mut s, root) = pushable_session("stats");
+    let effects = s.intent(Intent::Open).unwrap();
+    assert_eq!(effects[0], Effect::ClearQuery);
+    let (origin, generation, query, pushed) = view_search(&effects);
+    assert_eq!(
+        (origin, query.as_str(), pushed.as_ref()),
+        (dictionary_command(), "", Some(&page("stats")))
+    );
+    assert!(!effects.contains(&Effect::Hide));
+    assert_eq!(s.page(), Some(&page("stats")));
+    assert_eq!(s.query(), "");
+    assert!(s.items().is_empty(), "the root rows are not shown in the view");
+    assert!(!s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation: root,
+            items: vec![item("late")]
+        }
+    ));
+
+    let typed = view_search(&s.set_query("filter"));
+    assert_eq!((typed.2.as_str(), typed.3), ("filter", Some(page("stats"))));
+    assert!(typed.1 > generation);
+    assert_eq!(s.intent(Intent::Backspace), None, "⌫ edits a non-empty filter");
+    s.set_query("");
+    assert!(s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation: typed.1 + 1,
+            items: vec![item("in-view")]
+        }
+    ));
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("word".into()));
+    let (origin, generation, query, pushed) = view_search(&effects);
+    assert_eq!(
+        (origin, query.as_str(), pushed),
+        (dictionary_command(), "word", None)
+    );
+    assert_eq!(s.page(), None);
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation,
+            items: vec![item("first"), pushing_row("second", "stats")],
+        },
+    );
+    assert_eq!(s.selected(), 1, "the row that pushed the view is selected again");
+    assert!(s.intent(Intent::Dismiss).unwrap().contains(&Effect::Hide));
+}
+
+#[test]
+fn esc_pops_one_view_and_drops_late_answers_from_it() {
+    let (mut s, _) = pushable_session("outer");
+    let outer = view_search(&s.intent(Intent::Open).unwrap()).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation: outer,
+            items: vec![pushing_row("deeper", "inner")],
+        },
+    );
+    s.set_query("typed");
+    let filtered = view_search(&s.set_query("typed more")).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation: filtered,
+            items: vec![pushing_row("deeper", "inner")],
+        },
+    );
+    let inner = view_search(&s.intent(Intent::Open).unwrap()).1;
+    assert_eq!(s.page(), Some(&page("inner")));
+
+    let effects = s.intent(Intent::Dismiss).unwrap();
+    assert!(!effects.contains(&Effect::Hide));
+    assert_eq!(effects[0], Effect::ReplaceQuery("typed more".into()));
+    assert_eq!(view_search(&effects).3, Some(page("outer")));
+    assert!(!s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation: inner,
+            items: vec![item("late")]
+        }
+    ));
+    s.intent(Intent::Dismiss);
+    assert_eq!((s.page(), s.query()), (None, "word"));
+    assert!(s.intent(Intent::Dismiss).unwrap().contains(&Effect::Hide));
+    assert_eq!(s.command_id(), &app_command());
+}
+
+#[test]
+fn views_stop_nesting_at_the_depth_limit() {
+    let (mut s, _) = pushable_session("level");
+    for depth in 1..=MAX_PAGE_DEPTH {
+        let generation = view_search(&s.intent(Intent::Open).unwrap()).1;
+        assert!(s.page().is_some(), "depth {depth}");
+        s.deliver_from(
+            dictionary_command(),
+            Delivery::Batch {
+                generation,
+                items: vec![pushing_row("deeper", "level")],
+            },
+        );
+    }
+    assert!(s.intent(Intent::Open).unwrap().is_empty());
+    for _ in 0..MAX_PAGE_DEPTH {
+        assert!(!s.intent(Intent::Dismiss).unwrap().contains(&Effect::Hide));
+    }
+    assert_eq!(s.page(), None);
+}
+
+#[test]
+fn views_keep_recall_space_and_snapshots_out_and_hiding_leaves_them() {
+    let (mut s, _) = pushable_session("stats");
+    let generation = view_search(&s.intent(Intent::Open).unwrap()).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Batch {
+            generation,
+            items: vec![item("a"), item("b")],
+        },
+    );
+    s.deliver_from(dictionary_command(), Delivery::Done { generation });
+    assert_eq!(s.intent(Intent::Up), Some(vec![Effect::RevealSelection]));
+    assert_eq!(s.selected(), 1);
+    assert_eq!(s.intent(Intent::Space), None);
+    assert!(s.capture().is_err());
+
+    let mut without = CommandRegistry::new(app_command(), None);
+    without
+        .register(CommandSpec::new(
+            app_command(),
+            10,
+            QueryPresentation::new("Search"),
+        ))
+        .unwrap();
+    assert_eq!(
+        s.set_commands(without),
+        Err(crate::CommandError::ActiveCommandRemoved(dictionary_command()))
+    );
+    assert!(s.set_commands(command_registry(vec!["define".into()])).is_ok());
+
+    s.set_query("in view");
+    s.reset();
+    assert_eq!(s.page(), None);
+    assert_eq!(s.command_id(), &app_command());
+    assert_eq!(
+        Vec::from(s.queries.clone()),
+        [(dictionary_command(), "word".to_owned())],
+        "the query a view was pushed from is remembered, the view's filter is not"
+    );
 }

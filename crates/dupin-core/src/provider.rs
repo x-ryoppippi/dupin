@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::Item;
+use crate::{Item, Page};
 
 /// A source of candidates. Apps, files and (later) extensions all take this shape.
 ///
@@ -15,6 +15,8 @@ pub trait Provider: Send + Sync + 'static {
 pub struct Request {
     /// Raw field text after keyword routing: whitespace may be part of the provider's syntax.
     pub query: String,
+    /// The view of the command being searched, if one was pushed.
+    pub page: Option<Page>,
     /// The most candidates the provider should emit in total, before the display limit.
     pub limit: usize,
     generation: u64,
@@ -22,9 +24,16 @@ pub struct Request {
 }
 
 impl Request {
-    pub(crate) fn new(query: String, limit: usize, generation: u64, current: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(
+        query: String,
+        page: Option<Page>,
+        limit: usize,
+        generation: u64,
+        current: Arc<AtomicU64>,
+    ) -> Self {
         Request {
             query,
+            page,
             limit,
             generation,
             current,
@@ -33,10 +42,15 @@ impl Request {
 
     /// A request for tests and direct calls, never cancelled.
     pub fn detached(query: impl Into<String>, limit: usize) -> Self {
-        Request::new(query.into(), limit, 1, Arc::new(AtomicU64::new(1)))
+        Request::new(query.into(), None, limit, 1, Arc::new(AtomicU64::new(1)))
     }
 
     /// A newer search or a cancel has superseded this one.
+    /// The same, searching a pushed view.
+    pub fn detached_page(query: impl Into<String>, page: Page, limit: usize) -> Self {
+        Request::new(query.into(), Some(page), limit, 1, Arc::new(AtomicU64::new(1)))
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.current.load(Ordering::Acquire) != self.generation
     }
