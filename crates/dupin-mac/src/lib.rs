@@ -1,6 +1,7 @@
 //! The macOS side of Dupin: the providers that need the system (installed apps, Spotlight)
 //! and the actions that hand results to it (NSWorkspace).
 
+pub mod accessibility;
 pub mod apps;
 pub mod bundle;
 mod bundle_names;

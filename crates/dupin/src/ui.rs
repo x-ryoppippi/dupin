@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer, selection::Selection};
+use dupin_mac::{AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, selection::Selection};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -690,7 +690,9 @@ impl Ui {
         if std::thread::Builder::new()
             .name("selected-text".into())
             .spawn(move || {
-                let result = dupin_mac::selection::read();
+                let result = dupin_mac::selection::read(|| {
+                    accessibility::request_once();
+                });
                 panel.update(move |s, tx| s.apply_selection(result, tx));
             })
             .is_err()
@@ -711,14 +713,16 @@ impl Ui {
                 self.apply(effects, tx);
             }
             Selection::Empty => {}
-            Selection::PermissionRequired => self.selection_permission_required = true,
+            Selection::PermissionRequired => {
+                self.selection_permission_required = !accessibility::is_trusted();
+            }
         }
         self.show(tx);
         tx.focus_when_shown("query", false);
     }
 
     pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
-        let url = dupin_mac::selection::ACCESSIBILITY_SETTINGS_URL;
+        let url = accessibility::SETTINGS_URL;
         self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url.into()));
         self.dismiss(tx);
     }
