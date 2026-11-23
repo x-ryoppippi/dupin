@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
+    Session,
 };
 use dupin_mac::{AppsProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target};
 
@@ -16,7 +17,7 @@ const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub struct Registration {
-    pub registry: CommandRegistry,
+    pub session: Session,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
@@ -194,13 +195,14 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
 pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
-    history: Arc<RwLock<History>>,
+    history: History,
 ) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
         web,
     } = configured(config)?;
+    let session = Session::new(history, registry)?;
     let web = Arc::new(RwLock::new(web));
     let apps_id = id(APPS);
     let files_id = id(FILES);
@@ -211,7 +213,7 @@ pub fn register(
         (apps_id, apps.clone() as Arc<dyn Provider>),
         (
             recent_id(),
-            Arc::new(RecentProvider::new(apps, history)) as Arc<dyn Provider>,
+            Arc::new(RecentProvider::new(apps, session.recent_history())) as Arc<dyn Provider>,
         ),
         (
             id(SETTINGS),
@@ -244,7 +246,7 @@ pub fn register(
     .into();
 
     Ok(Registration {
-        registry,
+        session,
         providers,
         notice,
         web,
