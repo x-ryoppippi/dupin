@@ -472,48 +472,62 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, ac
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let (ink, sub) = if on {
-        (t.selected_text, t.selected_text.alpha(0.78))
-    } else {
-        (t.text, t.text_secondary)
-    };
     let icon = match s.icons.get(&s.session.layout_key(index)) {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
         None => el().size(ICON_SIZE, ICON_SIZE),
     };
     let id = s.session.result_key(index);
-    // Rows of a virtual list keep their padding inside, not in gaps between them.
-    row()
-        .key(row_key(&s.session.layout_key(index)))
-        .w_full()
-        .h(s.theme.row_height as f32)
-        .px(LIST_PAD)
-        .child(
-            row()
-                .w_full()
-                .h_full()
-                .px(10.0)
-                .gap(12.0)
-                .radius(8.0)
-                .center_y()
-                .fill(if on { accent } else { Color::TRANSPARENT })
-                .hover(if on { accent } else { t.hover })
-                .child(icon)
-                .child(
-                    col()
-                        .grow(1.0)
-                        .min_w(0.0)
-                        .gap(2.0)
-                        .child(title(item, ink, if on { t.selected_text } else { accent }, t))
-                        .child(
-                            text(subtitle.as_str())
-                                .font(t.font(type_::LABEL))
-                                .color(sub)
-                                .truncate(),
-                        ),
-                )
-                .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
-        )
+    text_row(
+        t,
+        accent,
+        s.theme.row_height as f32,
+        on,
+        icon,
+        title(
+            item,
+            if on { t.selected_text } else { t.text },
+            if on { t.selected_text } else { accent },
+            t,
+        ),
+        subtitle,
+    )
+    .key(row_key(&s.session.layout_key(index)))
+    .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
+}
+
+fn text_row(
+    t: &ResolvedTheme,
+    accent: Color,
+    height: f32,
+    on: bool,
+    icon: El,
+    title: El,
+    subtitle: &str,
+) -> El {
+    row().w_full().h(height).px(LIST_PAD).child(
+        row()
+            .w_full()
+            .h_full()
+            .px(10.0)
+            .gap(12.0)
+            .radius(8.0)
+            .center_y()
+            .fill(if on { accent } else { Color::TRANSPARENT })
+            .hover(if on { accent } else { t.hover })
+            .child(icon)
+            .child(
+                col().grow(1.0).min_w(0.0).gap(2.0).child(title).child(
+                    text(subtitle)
+                        .font(t.font(type_::LABEL))
+                        .color(if on {
+                            t.selected_text.alpha(0.78)
+                        } else {
+                            t.text_secondary
+                        })
+                        .truncate(),
+                ),
+            ),
+    )
 }
 
 /// The title with the characters the query matched in bold.
@@ -595,59 +609,94 @@ impl ResolvedTheme {
     }
 }
 
-pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool) -> El {
+fn preview_geometry(theme: &dupin_core::config::Theme, avail_w: f32) -> (f32, f32, f32, usize) {
+    let n = if theme.row_height <= 72 { 3 } else { 2 };
+    let h = HEADER_H + 1.0 + 2.0 * LIST_PAD + n as f32 * theme.row_height as f32;
+    let w = theme.panel_width as f32;
+    // Reserve room for the view toggle and exact-value caption in the well.
+    let scale = (avail_w / w).min(104.0 / h).min(0.5);
+    (w, h, scale, n)
+}
+
+pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32) -> El {
     let t = ResolvedTheme::new(theme, dark);
+    let (w, h, scale, n) = preview_geometry(theme, avail_w);
     let radius = theme.corner_radius as f32;
-    col().w_full().scroll_x().child(
-        col()
-            .w(theme.panel_width as f32)
-            .radius(radius)
-            .clip_rounded(radius)
-            .fill(t.card)
-            .system_material(SystemMaterial::Glass)
-            .child(
-                row().h(HEADER_H).px(18.0).center_y().child(
-                    text(if dark {
-                        "Dark appearance"
-                    } else {
-                        "Light appearance"
-                    })
-                    .font(t.font(TextStyle::new(22.0, 400.0)))
-                    .color(t.text),
-                ),
+    let panel = col()
+        .w(w)
+        .h(h)
+        .radius(radius)
+        .continuous_corners()
+        .clip_rounded(radius)
+        .fill(t.card)
+        .border(1.0, t.text.alpha(0.08))
+        .child(
+            row()
+                .w_full()
+                .h(HEADER_H)
+                .px(18.0)
+                .gap(12.0)
+                .center_y()
+                .child(
+                    text("⌕")
+                        .font(t.font(TextStyle::new(24.0, 400.0).lh(30.0)))
+                        .color(t.text_secondary),
+                )
+                .child(
+                    text("gh dupin")
+                        .font(t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
+                        .color(t.text),
+                )
+                .child(el().size(2.0, 26.0).fill(t.accent)),
+        )
+        .child(divider(&t))
+        .child(col().w_full().py(LIST_PAD).children((0..n).map(|i| {
+            let on = i == 0;
+            text_row(
+                &t,
+                t.accent,
+                theme.row_height as f32,
+                on,
+                el().size(ICON_SIZE, ICON_SIZE)
+                    .radius(4.0)
+                    .fill(t.text_secondary.alpha(0.25)),
+                text(["dupin", "dupin-core", "dupin-mac"][i])
+                    .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
+                    .color(if on { t.selected_text } else { t.text })
+                    .truncate(),
+                "Repository · → Actions",
             )
-            .child(divider(&t))
-            .children([false, true].into_iter().map(|selected| {
-                row()
-                    .h(theme.row_height as f32)
-                    .px(16.0)
-                    .center_y()
-                    .fill(if selected { t.accent } else { Color::TRANSPARENT })
-                    .child(
-                        col()
-                            .gap(2.0)
-                            .child(
-                                text("Example result")
-                                    .font(t.font(TextStyle::new(15.0, 500.0)))
-                                    .color(if selected { t.selected_text } else { t.text }),
-                            )
-                            .child(
-                                text("Preview subtitle · → Actions")
-                                    .font(t.font(type_::LABEL))
-                                    .color(if selected {
-                                        t.selected_text.alpha(0.78)
-                                    } else {
-                                        t.text_secondary
-                                    }),
-                            ),
-                    )
-            })),
-    )
+        })));
+    el().size((w * scale).round(), (h * scale).round())
+        .a11y_hidden()
+        .child(panel.scale(scale).pin(
+            Some((w * scale - w) / 2.0),
+            Some((h * scale - h) / 2.0),
+            None,
+            None,
+        ))
 }
 
 #[cfg(test)]
 mod theme_tests {
     use super::*;
+    #[test]
+    fn miniature_fits_both_axes_for_custom_geometry() {
+        for width in [400, 680, 900, 1200] {
+            for height in [52, 72, 100] {
+                let theme = dupin_core::config::Theme {
+                    panel_width: width,
+                    row_height: height,
+                    ..Default::default()
+                };
+                let (w, h, scale, n) = preview_geometry(&theme, 414.0);
+                assert!(w * scale <= 414.01);
+                assert!(h * scale <= 104.01);
+                assert!(scale <= 0.5);
+                assert_eq!(n, if height <= 72 { 3 } else { 2 });
+            }
+        }
+    }
     #[test]
     fn themed_lists_keep_the_original_height_budget() {
         assert_eq!(visible_rows(52.0), 8);
