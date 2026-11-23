@@ -1,0 +1,16 @@
+[package]
+name = "dupin-extension-http"
+description = "The host side of the extension `http` capability: scoped, bounded HTTPS fetches."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

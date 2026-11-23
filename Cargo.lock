@@ -782,6 +782,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-extension-http"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dupin-js-runtime"
 version = "0.0.0"
 dependencies = [
