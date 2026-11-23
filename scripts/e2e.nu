@@ -152,6 +152,9 @@ def cli-stage [out: path, binary: path] {
             textfield
             --first
         ) | ignore
+        poll $out cli-picker-window {|r| $r.ok and (
+            $r.data? | default [] | any {|w| $w.is_focused and $w.visible and $w.bounds.height >= 168 }
+        ) } list-windows --app Dupin | ignore
         snap $out cli-pick
         ^osascript -e 'tell application "System Events"
             key code 125
