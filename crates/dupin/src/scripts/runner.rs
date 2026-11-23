@@ -2,13 +2,13 @@ use dupin_core::script::{LineDecoder, OutputBuffer, ScriptRun, Stream};
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, Read},
+    os::fd::{AsRawFd, RawFd},
     os::unix::process::CommandExt,
     path::PathBuf,
     process::{Command, Stdio},
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        mpsc,
     },
     thread,
     time::{Duration, Instant},
@@ -17,6 +17,9 @@ use std::{
 pub type RunId = u64;
 type Notify = Arc<dyn Fn(RunId) + Send + Sync>;
 type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
+const EXIT_DRAIN: Duration = Duration::from_millis(100);
+const CANCEL_GRACE: Duration = Duration::from_secs(2);
+const POLL_INTERVAL: i32 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -292,41 +295,68 @@ fn finish(inner: &Inner, run: &Run, status: Status) {
         let mut data = lock(&run.data);
         data.status = status;
         data.elapsed = Some(run.started.elapsed());
+        inner.running.fetch_sub(1, Ordering::AcqRel);
     }
     (inner.notify)(run.id);
-    inner.running.fetch_sub(1, Ordering::AcqRel);
 }
 
-enum Output {
-    Bytes(Stream, Vec<u8>),
-    End(Stream, io::Result<()>),
-}
-
-fn reader(
-    mut pipe: impl Read + Send + 'static,
+struct Pipe<R> {
+    reader: Option<R>,
     stream: Stream,
-    tx: mpsc::SyncSender<Output>,
-) -> io::Result<()> {
-    thread::Builder::new()
-        .name("dupin-script-output".into())
-        .spawn(move || {
-            let result = loop {
-                let mut bytes = vec![0; 8192];
-                match pipe.read(&mut bytes) {
-                    Ok(0) => break Ok(()),
-                    Ok(count) => {
-                        bytes.truncate(count);
-                        if tx.send(Output::Bytes(stream, bytes)).is_err() {
-                            return;
-                        }
-                    }
-                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                    Err(error) => break Err(error),
-                }
-            };
-            let _ = tx.send(Output::End(stream, result));
+    decoder: LineDecoder,
+}
+
+impl<R: Read + AsRawFd> Pipe<R> {
+    fn new(reader: R, stream: Stream) -> io::Result<Self> {
+        let fd = reader.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            reader: Some(reader),
+            stream,
+            decoder: LineDecoder::default(),
         })
-        .map(|_| ())
+    }
+
+    fn fd(&self) -> RawFd {
+        self.reader.as_ref().map_or(-1, AsRawFd::as_raw_fd)
+    }
+
+    fn read(&mut self, bytes: &mut [u8], output: &mut OutputBuffer) -> io::Result<bool> {
+        let Some(reader) = &mut self.reader else {
+            return Ok(false);
+        };
+        match reader.read(bytes) {
+            Ok(0) => Ok(self.close(output)),
+            Ok(count) => {
+                self.decoder.feed(&bytes[..count], self.stream, output);
+                Ok(true)
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(error) => {
+                self.close(output);
+                Err(error)
+            }
+        }
+    }
+
+    fn close(&mut self, output: &mut OutputBuffer) -> bool {
+        self.reader = None;
+        if self.decoder.has_pending() {
+            self.decoder.finish(self.stream, output);
+            return true;
+        }
+        false
+    }
 }
 
 fn execute(inner: &Inner, run: &Run) -> Status {
@@ -348,72 +378,92 @@ fn execute(inner: &Inner, run: &Run) -> Status {
         Ok(None) => return Status::Cancelled,
         Err(error) => return Status::Failed(error.to_string()),
     };
-    let (tx, rx) = mpsc::sync_channel(16);
-    let readers = reader(child.stdout.take().unwrap(), Stream::Stdout, tx.clone())
-        .and_then(|()| reader(child.stderr.take().unwrap(), Stream::Stderr, tx));
-    if let Err(error) = readers {
-        inner.lifecycle.cancel(run.id, true);
-        let _ = child.wait();
-        inner.lifecycle.reaped(run.id);
-        return Status::Failed(error.to_string());
-    }
-    let mut decoders = [LineDecoder::default(), LineDecoder::default()];
-    let mut ended = 0;
+    let pipes = Pipe::new(child.stdout.take().unwrap(), Stream::Stdout).and_then(|stdout| {
+        Pipe::new(child.stderr.take().unwrap(), Stream::Stderr).map(|stderr| (stdout, stderr))
+    });
+    let (mut stdout, mut stderr) = match pipes {
+        Ok(pipes) => pipes,
+        Err(error) => {
+            inner.lifecycle.cancel(run.id, true);
+            let _ = child.wait();
+            inner.lifecycle.reaped(run.id);
+            return Status::Failed(error.to_string());
+        }
+    };
+    let mut bytes = [0; 8192];
     let mut problem = None;
     let mut cancel_at = None;
+    let mut exited = None;
     let mut dirty = false;
     let mut notified = Instant::now();
     loop {
-        if run.cancelled.load(Ordering::Acquire) {
-            let started = cancel_at.get_or_insert_with(Instant::now);
-            inner
-                .lifecycle
-                .cancel(run.id, started.elapsed() >= Duration::from_secs(2));
+        if exited.is_none() {
+            if run.cancelled.load(Ordering::Acquire) {
+                let started = cancel_at.get_or_insert_with(Instant::now);
+                let force = started.elapsed() >= CANCEL_GRACE;
+                inner.lifecycle.cancel(run.id, force);
+            }
+            // Keep the leader's PID reserved through cancellation so KILL still reaches its group.
+            if cancel_at.is_none() || inner.lifecycle.killed(run.id) {
+                match inner.lifecycle.reap(run.id, || child.try_wait()) {
+                    Ok(Some(status)) => {
+                        exited = Some((status, Instant::now()));
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        inner.lifecycle.cancel(run.id, true);
+                        let _ = child.wait();
+                        inner.lifecycle.reaped(run.id);
+                        return Status::Failed(error.to_string());
+                    }
+                }
+            }
         }
-        match rx.recv_timeout(Duration::from_millis(20)) {
-            Ok(Output::Bytes(stream, bytes)) => {
-                let index = usize::from(stream == Stream::Stderr);
-                decoders[index].feed(&bytes, stream, &mut lock(&run.data).output);
-                dirty = true;
+        if let Some((status, at)) = exited
+            && ((stdout.fd() == -1 && stderr.fd() == -1) || at.elapsed() >= EXIT_DRAIN)
+        {
+            let mut data = lock(&run.data);
+            stdout.close(&mut data.output);
+            stderr.close(&mut data.output);
+            return if cancel_at.is_some() {
+                Status::Cancelled
+            } else if let Some(error) = problem {
+                Status::Failed(error)
+            } else {
+                Status::Exited(status.code())
+            };
+        }
+        let mut fds = [stdout.fd(), stderr.fd()].map(|fd| libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        });
+        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL) } == -1 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                inner.lifecycle.cancel(run.id, true);
+                let _ = child.wait();
+                inner.lifecycle.reaped(run.id);
+                return Status::Failed(error.to_string());
             }
-            Ok(Output::End(stream, result)) => {
-                let decoder = &mut decoders[usize::from(stream == Stream::Stderr)];
-                if decoder.has_pending() {
-                    decoder.finish(stream, &mut lock(&run.data).output);
+        }
+        if fds.iter().any(|fd| fd.revents != 0) {
+            let mut data = lock(&run.data);
+            let reads = [
+                stdout.read(&mut bytes, &mut data.output),
+                stderr.read(&mut bytes, &mut data.output),
+            ];
+            for result in reads {
+                match result {
+                    Ok(changed) => dirty |= changed,
+                    Err(error) => problem = Some(error.to_string()),
                 }
-                if let Err(error) = result {
-                    problem = Some(error.to_string());
-                }
-                ended += 1;
-                dirty = true;
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => thread::sleep(Duration::from_millis(20)),
         }
         if dirty && notified.elapsed() >= Duration::from_millis(50) {
             (inner.notify)(run.id);
             notified = Instant::now();
             dirty = false;
-        }
-        if ended == 2 || inner.lifecycle.killed(run.id) {
-            match inner.lifecycle.reap(run.id, || child.try_wait()) {
-                Ok(Some(status)) => {
-                    return if run.cancelled.load(Ordering::Acquire) {
-                        Status::Cancelled
-                    } else if let Some(error) = problem {
-                        Status::Failed(error)
-                    } else {
-                        Status::Exited(status.code())
-                    };
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    inner.lifecycle.cancel(run.id, true);
-                    let _ = child.wait();
-                    inner.lifecycle.reaped(run.id);
-                    return Status::Failed(error.to_string());
-                }
-            }
         }
     }
 }
@@ -422,7 +472,11 @@ fn execute(inner: &Inner, run: &Run) -> Status {
 mod tests {
     use super::*;
     use dupin_core::script::OutputMode;
-    use std::{fs, os::unix::fs::PermissionsExt, sync::Barrier};
+    use std::{
+        fs,
+        os::unix::fs::PermissionsExt,
+        sync::{Barrier, mpsc},
+    };
 
     type RecordedSignals = Arc<Mutex<Vec<(i32, i32)>>>;
     fn lifecycle() -> (Arc<Lifecycle>, RecordedSignals) {
@@ -609,6 +663,23 @@ mod tests {
             .collect();
         assert_eq!(stdout, [fixture.0.to_str().unwrap(), "$HOME * ~", "a b"]);
         assert_eq!(result.output.stderr_tail(), "fixture error\n");
+        assert_eq!(running.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn leader_exit_finishes_even_with_inherited_pipes() {
+        let fixture = Fixture::new(
+            "(for _ in 1 2 3 4 5 6 7 8; do [ ! -f stop ] || exit; sleep 0.25; done; touch timed-out) &\nprintf 'last stdout'\nprintf 'last stderr' >&2\nexit 7\n",
+        );
+        let running = Arc::new(AtomicUsize::new(0));
+        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let id = runner.start(fixture.command(&[])).unwrap();
+        let result = wait(&runner, id);
+        fs::write(fixture.0.join("stop"), "").unwrap();
+        assert!(!fixture.0.join("timed-out").exists());
+        assert_eq!(result.status, Status::Exited(Some(7)));
+        assert_eq!(result.output.last_stdout(), Some("last stdout"));
+        assert_eq!(result.output.stderr_tail(), "last stderr\n");
         assert_eq!(running.load(Ordering::Acquire), 0);
     }
 

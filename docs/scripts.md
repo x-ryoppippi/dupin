@@ -33,7 +33,9 @@ Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and 
 
 Command-Period cancels a running script. Script Output offers Cancel, Run again (Command-R) and Copy output (Shift-Command-C). It retains this session's last 20 runs. Output is bounded to 1 MiB per run and 8 KiB per line; old lines are dropped with a line-count marker in the window and copied output, and terminal SGR sequences are removed. Non-zero exits retain the exit status and stderr.
 
-At most eight scripts run concurrently, with no execution timeout. Cancellation sends TERM to the owned process group, then KILL after two seconds if needed. Quitting Dupin immediately kills its owned groups; an update relaunch waits for active work instead. Processes that leave their group, or survive a crash of Dupin, are outside that cleanup boundary.
+At most eight scripts run concurrently, with no execution timeout. When the script process exits, Dupin collects remaining output for up to 100 milliseconds, closes its end of the output pipes and releases the run slot. Background processes can continue on their own. Redirect their output within the script if they need to write after it exits.
+
+Cancellation sends TERM to the owned process group, then KILL after two seconds. Quitting Dupin immediately kills its owned groups; an update relaunch waits for active work instead. Dupin owns a group until it reaps the script process. Processes that leave their group, outlive a normally completed script or survive a crash of Dupin are outside that cleanup boundary.
 
 ## Interpreters and environment
 
