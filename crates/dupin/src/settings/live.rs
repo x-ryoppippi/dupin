@@ -283,7 +283,7 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow(requested.paths.clone(), move |rebuild| {
+        match PathWatcher::start_shallow_with_file(requested.paths.clone(), path.clone(), move |rebuild| {
             let _ = sender.send(Job::Changed { rebuild });
         }) {
             Ok(watcher) => {
@@ -425,16 +425,7 @@ fn parse_problem(source: &str, error: &toml::de::Error) -> String {
     let Some(span) = error.span() else {
         return "config.toml is invalid (location unavailable)".into();
     };
-    let mut start = span.start.min(source.len());
-    while !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let prefix = &source[..start];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let column = prefix
-        .rsplit('\n')
-        .next()
-        .map_or(1, |line| line.chars().count() + 1);
+    let (line, column) = super::location(source, span.start);
     format!("config.toml is invalid at line {line}, column {column}")
 }
 
@@ -1086,14 +1077,19 @@ script = "missing.sh"
         let service = Service::new(Some(path.clone()), move |update| updates.send(update).unwrap());
 
         service.activate();
-        let initial = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        let initial = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not start");
+        assert!(initial.watch_problem.is_none(), "{:?}", initial.watch_problem);
         assert_eq!(initial.result.unwrap().position, dupin_core::Position::Center);
 
         fs::write(&path, "position = \"top\"").unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let changed = loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
-            let update = receiver.recv_timeout(remaining).unwrap();
+            let update = receiver
+                .recv_timeout(remaining)
+                .expect("settings watcher did not reload");
             if update
                 .result
                 .as_ref()
@@ -1109,6 +1105,8 @@ script = "missing.sh"
             drop(service);
             let _ = done.send(());
         });
-        stopped.recv_timeout(Duration::from_secs(5)).unwrap();
+        stopped
+            .recv_timeout(Duration::from_secs(5))
+            .expect("settings watcher did not shut down");
     }
 }

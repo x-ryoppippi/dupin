@@ -41,46 +41,21 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     let dark = cx.system_dark();
     let t = ResolvedTheme::new(&s.theme, dark);
     let content = if let Some(picker) = &s.picker {
-        let mut list = col().w_full().fill(Color::BLACK).on_key(Ui::key);
-        list = list.child(
-            text_input(&s.query, TextStyle::new(22.0, 400.0))
-                .key("pick-query")
-                .single_line()
-                .color(Color::WHITE)
-                .on_edit(|s: &mut Ui| &mut s.query)
-                .on_input_key(Ui::key)
-                .on_input_change(Ui::edited),
-        );
-        for (index, original) in crate::ui::pick_indices(&picker.values, &s.query.text)
-            .into_iter()
-            .enumerate()
-            .skip(picker.selected.saturating_sub(7))
-            .take(8)
-        {
-            let value = &picker.values[original];
-            let label = value
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_else(|| value.to_string());
-            list = list.child(
-                row()
-                    .w_full()
-                    .px(16.0)
-                    .py(8.0)
-                    .fill(if index == picker.selected {
-                        Color {
-                            r: 0.2,
-                            g: 0.27,
-                            b: 0.4,
-                            a: 1.0,
-                        }
-                    } else {
-                        Color::BLACK
-                    })
-                    .child(text(label).color(Color::WHITE)),
-            );
-        }
-        list
+        let field = text_input(&s.query, TextStyle::new(22.0, 400.0))
+            .key("pick-query")
+            .single_line()
+            .color(Color::WHITE)
+            .on_edit(|s: &mut Ui| &mut s.query)
+            .on_input_key(Ui::key)
+            .on_input_change(Ui::edited);
+        picker_view(
+            field,
+            &picker.values,
+            &s.query.text,
+            picker.selected,
+            s.theme.row_height as f32,
+        )
+        .on_key(Ui::key)
     } else {
         launcher(s, &t, dark)
     };
@@ -144,6 +119,71 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
             ),
         );
     }
+    use dupin_mac::window::DisplayNotice;
+    if let Some(notice) = s.display_notice {
+        let message = match notice {
+            DisplayNotice::AccessibilityRequired => {
+                "Dupin needs Accessibility access to find the focused window. Using the main display."
+            }
+            DisplayNotice::FocusedWindowUnavailable => {
+                "Couldn't find the focused window's display. Using the main display."
+            }
+        };
+        panel = panel.child(divider(t)).child(
+            col()
+                .key("display-notice")
+                .w_full()
+                .px(18.0)
+                .py(12.0)
+                .gap(8.0)
+                .fill(WARNING)
+                .child(
+                    text(message)
+                        .font(t.font(type_::BODY.lh(18.0)))
+                        .color(t.text)
+                        .wrap()
+                        .w_full(),
+                )
+                .children((notice == DisplayNotice::AccessibilityRequired).then(|| {
+                    text("Set Up Accessibility")
+                        .font(t.font(type_::BODY))
+                        .color(accent)
+                        .key("open-accessibility-settings")
+                        .role("button")
+                        .focusable(true)
+                        .on_press_tx(Ui::open_accessibility_settings)
+                })),
+        );
+    }
+    if s.selection_permission_required {
+        panel = panel.child(divider(t)).child(
+            col()
+                .key("selection-permission")
+                .w_full()
+                .px(18.0)
+                .py(12.0)
+                .gap(8.0)
+                .fill(WARNING)
+                .child(
+                    text("Dupin needs Accessibility access to read selected text from other apps.")
+                        .font(t.font(type_::BODY.lh(18.0)))
+                        .color(t.text)
+                        .wrap()
+                        .w_full(),
+                )
+                .children(
+                    (s.display_notice != Some(DisplayNotice::AccessibilityRequired)).then(|| {
+                        text("Open System Settings")
+                            .key("selection-settings")
+                            .role("button")
+                            .focusable(true)
+                            .font(t.font(type_::TITLE))
+                            .color(accent)
+                            .on_press_tx(Ui::open_accessibility_settings)
+                    }),
+                ),
+        );
+    }
     if let Some(card) = &s.script_card {
         return panel.child(divider(t)).child(script_inline(card, t));
     }
@@ -174,11 +214,11 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
         );
     }
     let items = s.session.items();
-    if s.action_screen.is_some() {
+    if let Some(renaming) = s.session.renaming() {
+        panel = panel.child(divider(t)).child(rename_status(s, renaming, t));
+    } else if s.action_screen.is_some() {
         panel = panel.child(divider(t)).child(action_list(s, t, accent));
-    } else if !items.is_empty()
-        && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
-    {
+    } else if !items.is_empty() && query_problem(s).is_none() {
         panel = panel.child(divider(t)).child(results(s, items, t, accent));
     } else if let Some(hint) = hint(s) {
         panel = panel.child(divider(t)).child(
@@ -189,6 +229,15 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
                 .px(20.0)
                 .center_y()
                 .child(text(hint).font(t.font(type_::BODY)).color(t.text_secondary)),
+        );
+    }
+    if s.session.destination().is_some() {
+        panel = panel.child(divider(t)).child(
+            row().w_full().px(20.0).py(8.0).child(
+                text("↩ Choose folder · esc Cancel")
+                    .font(t.font(type_::LABEL))
+                    .color(t.text_secondary),
+            ),
         );
     }
     panel
@@ -357,6 +406,50 @@ fn script_excerpt(body: &str, t: &ResolvedTheme) -> El {
         .child(text(body).w_full().font(t.font(type_::BODY)).color(t.text).wrap())
 }
 
+fn picker_view(field: El, values: &[serde_json::Value], query: &str, selected: usize, row_height: f32) -> El {
+    let shown = visible_rows(row_height);
+    let mut list = col().key("picker").w_full().fill(Color::BLACK).child(
+        row()
+            .w_full()
+            .h(HEADER_H)
+            .px(16.0)
+            .center_y()
+            .child(field.grow(1.0)),
+    );
+    for (index, original) in crate::ui::pick_indices(values, query)
+        .into_iter()
+        .enumerate()
+        .skip(selected.saturating_sub(shown - 1))
+        .take(shown)
+    {
+        let value = &values[original];
+        let label = value
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| value.to_string());
+        list = list.child(
+            row()
+                .key(format!("pick-item-{original}"))
+                .w_full()
+                .h(row_height)
+                .px(16.0)
+                .center_y()
+                .fill(if index == selected {
+                    Color {
+                        r: 0.2,
+                        g: 0.27,
+                        b: 0.4,
+                        a: 1.0,
+                    }
+                } else {
+                    Color::BLACK
+                })
+                .child(text(label).color(Color::WHITE)),
+        );
+    }
+    list
+}
+
 fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
     let screen = s.action_screen.as_ref().unwrap();
     let icon = item_icon(s, screen.item.icon.as_deref());
@@ -518,12 +611,12 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                 .color(t.text)
                                 .wrap(),
                         )
-                        .child(
+                        .children((!path.is_empty()).then(|| {
                             text(path.as_ref())
                                 .font(t.font(type_::LABEL))
                                 .color(t.text_secondary)
-                                .wrap(),
-                        ),
+                                .wrap()
+                        })),
                 )
                 .children(
                     ["Cancel", confirmation.button.as_str()]
@@ -606,12 +699,21 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
 
 fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
-    let placeholder = presentation.placeholder.as_str();
+    let renaming = s.session.renaming().is_some();
+    let destination = s.session.destination();
+    let placeholder = if renaming {
+        "Name"
+    } else if destination.is_some() {
+        "Search folders"
+    } else {
+        presentation.placeholder.as_str()
+    };
     let field = text_input(&s.query_display(), t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
         .key("query")
         .label(placeholder)
         .single_line()
         .grow(1.0)
+        .min_w(0.0)
         .color(t.text)
         .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
@@ -625,16 +727,32 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if let Some(chip) = presentation.chip.as_deref() {
+    let destination_chip = destination.map(|picker| {
+        let operation = match picker.transfer() {
+            dupin_core::item::Transfer::Move => "Move to",
+            dupin_core::item::Transfer::Copy => "Copy to",
+        };
+        let name = picker.path().file_name().unwrap_or(picker.path().as_os_str());
+        format!("{operation} · {}", name.to_string_lossy())
+    });
+    let chip = if let Some(chip) = destination_chip.as_deref() {
+        Some(chip)
+    } else if renaming {
+        Some("Rename")
+    } else {
+        presentation.chip.as_deref()
+    };
+    bar = if let Some(chip) = chip {
         bar.child(
             row()
                 .key("mode")
+                .max_w(280.0)
                 .h(28.0)
                 .px(10.0)
                 .radius(7.0)
                 .center_y()
                 .fill(accent.alpha(0.16))
-                .child(text(chip).font(t.font(type_::TITLE)).color(accent)),
+                .child(text(chip).font(t.font(type_::TITLE)).color(accent).truncate()),
         )
     } else {
         bar.child(
@@ -644,7 +762,7 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         )
     };
     bar = bar.child(field);
-    if presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
+    if !renaming && presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
         bar = bar.child(
             text("Searching…")
                 .font(t.font(type_::LABEL))
@@ -654,17 +772,84 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     bar
 }
 
+/// What is being renamed, and what Enter will do with the name typed so far.
+fn rename_status(s: &Ui, renaming: &dupin_core::session::Renaming, t: &ResolvedTheme) -> El {
+    let icon = match s.icons.get(renaming.path()) {
+        Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
+        None => el().size(ICON_SIZE, ICON_SIZE),
+    };
+    let folder = renaming
+        .path()
+        .parent()
+        .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy()))
+        .unwrap_or_default();
+    let (status, color) = match renaming.problem() {
+        Some(problem) => (problem, t.destructive),
+        None => ("↩ Rename · esc Cancel", t.text_secondary),
+    };
+    row()
+        .key("rename")
+        .w_full()
+        .h(s.theme.row_height as f32)
+        .px(18.0)
+        .gap(12.0)
+        .center_y()
+        .child(icon)
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    text(renaming.path().file_name().unwrap_or_default().to_string_lossy())
+                        .font(t.font(type_::BODY))
+                        .color(t.text)
+                        .truncate(),
+                )
+                .child(
+                    text(folder)
+                        .font(t.font(type_::LABEL))
+                        .color(t.text_secondary)
+                        .truncate(),
+                ),
+        )
+        .child(text(status).font(t.font(type_::LABEL)).color(color))
+}
+
+fn query_problem(s: &Ui) -> Option<&'static str> {
+    let query = s.session.query();
+    if s.session.destination().is_some()
+        && dupin_core::file_query::FileQuery::parse(query).is_ok_and(|query| {
+            query
+                .kind
+                .is_some_and(|kind| kind != dupin_core::file_query::FileKind::Folder)
+        })
+    {
+        return Some("Choose a folder. Use kind:folder or remove the kind filter.");
+    }
+    crate::commands::query_problem(s.session.command_id(), query)
+}
+
 fn hint(s: &Ui) -> Option<&str> {
-    if let Some(problem) = crate::commands::query_problem(s.session.command_id(), s.session.query()) {
+    if let Some(problem) = query_problem(s) {
         return Some(problem);
     }
+    if s.session.destination().is_some() {
+        return (s.session.results() == Results::Done && s.session.failures().next().is_none())
+            .then_some("No matching folders");
+    }
     let presentation = &s.session.command().presentation;
-    if s.session.query().trim().is_empty() {
-        presentation.empty_hint.as_deref()
-    } else if s.session.results() == Results::Done && s.session.failures().next().is_none() {
-        presentation.no_results_hint.as_deref()
-    } else {
-        None
+    let empty = s.session.query().trim().is_empty();
+    match s.session.results() {
+        Results::Idle if empty => presentation.empty_hint.as_deref(),
+        Results::Done if s.session.failures().next().is_none() => {
+            if empty {
+                presentation.empty_hint.as_deref()
+            } else {
+                presentation.no_results_hint.as_deref()
+            }
+        }
+        _ => None,
     }
 }
 
@@ -1140,5 +1325,65 @@ mod theme_tests {
         assert_eq!(font.size, 18.0);
         assert_eq!(font.line_height, 24.0);
         assert_eq!(font.family, tok::Family::SystemMono);
+    }
+}
+
+#[cfg(test)]
+mod picker_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "offscreen picker layout, run explicitly"]
+    fn picker_rows_have_space_for_every_visible_value() {
+        struct Preview {
+            values: Vec<serde_json::Value>,
+            edit: rune::TextEdit,
+        }
+        let app = rune::App::new(rune::AppSpec::new(
+            "Picker layout",
+            (680.0, 168.0),
+            || Preview {
+                values: vec![serde_json::json!("red"), serde_json::json!("blue")],
+                edit: rune::TextEdit::new(""),
+            },
+            |s: &Preview, _| {
+                picker_view(
+                    text_input(&s.edit, TextStyle::new(22.0, 400.0)),
+                    &s.values,
+                    "",
+                    0,
+                    52.0,
+                )
+            },
+        ));
+        let root = std::env::temp_dir().join("dupin165-picker-layout");
+        let tree = root.with_extension("json");
+        let image = root.with_extension("png");
+        rune::tooling::run_windows_with_args(
+            Default::default(),
+            [
+                "render",
+                "--tree",
+                tree.to_str().unwrap(),
+                "--snap",
+                image.to_str().unwrap(),
+                "--size",
+                "680x168",
+            ]
+            .map(str::to_owned),
+            move |_| [rune::WindowSpec::from_app("picker", app)],
+        );
+        let tree: serde_json::Value = serde_json::from_slice(&std::fs::read(tree).unwrap()).unwrap();
+        let elements = tree["elements"].as_array().unwrap();
+        for (index, y) in [(0, 64.0), (1, 116.0)] {
+            let row = elements
+                .iter()
+                .find(|element| element["key"] == format!("pick-item-{index}"))
+                .unwrap();
+            assert_eq!(row["rect"][1].as_f64().unwrap(), y);
+            assert_eq!(row["rect"][3].as_f64().unwrap(), 52.0);
+            assert!(row["rect"][1].as_f64().unwrap() + row["rect"][3].as_f64().unwrap() <= 168.0);
+        }
+        println!("{}", image.display());
     }
 }

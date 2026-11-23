@@ -59,14 +59,36 @@ impl QueryPresentation {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QueryEligibility {
+    /// The command is eligible when the query contains non-whitespace text.
+    #[default]
+    NonEmpty,
+    /// The command is eligible only when the query is empty or whitespace.
+    EmptyOnly,
+    Any,
+}
+
+impl QueryEligibility {
+    pub(crate) fn allows(self, query: &str) -> bool {
+        match self {
+            Self::NonEmpty => !query.trim().is_empty(),
+            Self::EmptyOnly => query.trim().is_empty(),
+            Self::Any => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandSpec {
     id: CommandId,
     pub result_limit: usize,
     candidate_limit: Option<usize>,
     fallback: bool,
+    pub private_results: bool,
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
+    pub(crate) query_eligibility: QueryEligibility,
 }
 
 impl CommandSpec {
@@ -76,9 +98,16 @@ impl CommandSpec {
             result_limit,
             candidate_limit: None,
             fallback: false,
+            private_results: false,
             presentation,
             deadline: std::time::Duration::from_secs(30),
+            query_eligibility: QueryEligibility::NonEmpty,
         }
+    }
+
+    pub fn with_query_eligibility(mut self, eligibility: QueryEligibility) -> Self {
+        self.query_eligibility = eligibility;
+        self
     }
 
     pub fn with_candidate_limit(mut self, limit: usize) -> Self {
@@ -113,7 +142,6 @@ pub enum CommandError {
     KeywordConflict { keyword: String, command: CommandId },
     MissingDefault(CommandId),
     MissingSpaceTarget(CommandId),
-    ActiveCommandRemoved(CommandId),
 }
 
 impl fmt::Display for CommandError {
@@ -134,9 +162,6 @@ impl fmt::Display for CommandError {
             ),
             Self::MissingDefault(id) => write!(f, "default command `{id}` is not registered"),
             Self::MissingSpaceTarget(id) => write!(f, "Space target `{id}` is not registered"),
-            Self::ActiveCommandRemoved(id) => {
-                write!(f, "active command `{id}` cannot be removed")
-            }
         }
     }
 }
@@ -147,6 +172,7 @@ impl std::error::Error for CommandError {}
 pub struct CommandRegistry {
     default: CommandId,
     space_on_empty: Option<CommandId>,
+    destination_search: Option<CommandId>,
     commands: HashMap<CommandId, CommandSpec>,
     keywords: HashMap<String, CommandId>,
     defaults: Vec<CommandId>,
@@ -160,9 +186,23 @@ impl CommandRegistry {
             pinned: None,
             default,
             space_on_empty,
+            destination_search: None,
             commands: HashMap::new(),
             keywords: HashMap::new(),
         }
+    }
+
+    /// Use this file-name search provider for the destination picker.
+    pub fn set_destination_search(&mut self, command: CommandId) -> Result<(), CommandError> {
+        if !self.contains(&command) {
+            return Err(CommandError::UnknownCommand(command));
+        }
+        self.destination_search = Some(command);
+        Ok(())
+    }
+
+    pub(crate) fn destination_search(&self) -> Option<&CommandId> {
+        self.destination_search.as_ref()
     }
 
     pub fn set_default_providers(
@@ -329,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn session_rejects_a_registry_that_removes_its_active_command() {
+    fn session_returns_to_the_default_when_its_active_command_is_removed() {
         let active = id("sample.lookup");
         let mut initial = CommandRegistry::new(id("sample.search"), None);
         for command in [id("sample.search"), active.clone()] {
@@ -348,22 +388,33 @@ mod tests {
         };
 
         let default = id("sample.search");
+        let recent = id("sample.recent");
         let mut replacement = CommandRegistry::new(default.clone(), None);
         replacement
-            .register(CommandSpec::new(default, 10, QueryPresentation::new("Search")))
+            .register(CommandSpec::new(
+                default.clone(),
+                10,
+                QueryPresentation::new("Search"),
+            ))
             .unwrap();
-        assert_eq!(
-            session.set_commands(replacement),
-            Err(CommandError::ActiveCommandRemoved(active.clone()))
-        );
-        assert_eq!(session.command_id(), &active);
-        assert_eq!(session.query(), "term");
-        assert_eq!(
-            session.results(),
-            crate::session::Results::Searching { replaced: false }
-        );
-        assert!(session.deliver(crate::searcher::Delivery::Done { generation }));
-        assert_eq!(session.results(), crate::session::Results::Done);
+        replacement
+            .register(
+                CommandSpec::new(recent.clone(), 10, QueryPresentation::new("Recent"))
+                    .with_query_eligibility(QueryEligibility::EmptyOnly),
+            )
+            .unwrap();
+        replacement
+            .set_default_providers(vec![default.clone(), recent.clone()], None)
+            .unwrap();
+        let effects = session.set_commands(replacement).unwrap();
+        assert!(matches!(
+            effects.as_slice(),
+            [crate::Effect::ClearQuery, crate::Effect::Search { command, query, .. }]
+                if *command == recent && query.is_empty()
+        ));
+        assert_eq!(session.command_id(), &default);
+        assert!(session.query().is_empty());
+        assert!(!session.deliver_from(active, crate::searcher::Delivery::Done { generation }));
     }
 
     #[test]
