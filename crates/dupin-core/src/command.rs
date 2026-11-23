@@ -151,6 +151,7 @@ pub struct CommandRegistry {
     keywords: HashMap<String, CommandId>,
     defaults: Vec<CommandId>,
     pinned: Option<CommandId>,
+    browser: Option<CommandId>,
 }
 
 impl CommandRegistry {
@@ -158,6 +159,7 @@ impl CommandRegistry {
         Self {
             defaults: vec![default.clone()],
             pinned: None,
+            browser: None,
             default,
             space_on_empty,
             commands: HashMap::new(),
@@ -197,6 +199,19 @@ impl CommandRegistry {
 
     pub(crate) fn pinned(&self) -> Option<&CommandId> {
         self.pinned.as_ref()
+    }
+
+    /// The command that lists a folder entered from a result.
+    pub fn set_browser(&mut self, command: CommandId) -> Result<(), CommandError> {
+        if !self.contains(&command) {
+            return Err(CommandError::UnknownCommand(command));
+        }
+        self.browser = Some(command);
+        Ok(())
+    }
+
+    pub(crate) fn browser(&self) -> Option<&CommandId> {
+        self.browser.as_ref()
     }
 
     pub fn register(&mut self, command: CommandSpec) -> Result<(), CommandError> {

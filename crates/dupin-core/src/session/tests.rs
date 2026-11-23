@@ -169,6 +169,10 @@ fn dictionary_command() -> CommandId {
     command("sample.lookup")
 }
 
+fn browse_command() -> CommandId {
+    command("sample.browse")
+}
+
 fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
     let app = app_command();
     let files = files_command();
@@ -185,6 +189,14 @@ fn command_registry(dictionary_keywords: Vec<String>) -> CommandRegistry {
             .register(CommandSpec::new(id, 10, QueryPresentation::new(label)))
             .unwrap();
     }
+    registry
+        .register(CommandSpec::new(
+            browse_command(),
+            10,
+            QueryPresentation::new("Folder"),
+        ))
+        .unwrap();
+    registry.set_browser(browse_command()).unwrap();
     registry.add_keyword(&contents, "in").unwrap();
     for keyword in dictionary_keywords {
         registry.add_keyword(&dictionary, keyword).unwrap();
@@ -226,6 +238,7 @@ fn searched(effects: &[Effect]) -> (CommandId, u64, &str) {
                 command,
                 generation,
                 query,
+                ..
             },
         ] => (command.clone(), *generation, query),
         other => panic!("expected one search, got {other:?}"),
@@ -1462,4 +1475,134 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     assert!(changed.explicit);
     assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
     assert_eq!(searched(&effects[1..]).0, app_command());
+}
+
+fn folder_item(path: &str) -> Item {
+    let mut item = Item::path(path.into(), path.rsplit('/').next().unwrap().into(), vec![]);
+    item.actions
+        .push(ItemAction::new("browse", "Browse", Action::Browse(path.into())));
+    item
+}
+
+fn listed(effects: &[Effect]) -> (u64, String, Option<PathBuf>) {
+    match effects
+        .iter()
+        .find(|effect| matches!(effect, Effect::Search { .. }))
+    {
+        Some(Effect::Search {
+            command,
+            generation,
+            query,
+            folder,
+        }) if *command == browse_command() => (*generation, query.clone(), folder.clone()),
+        other => panic!("expected a folder listing, got {other:?}"),
+    }
+}
+
+/// File search for "doc", with the folder `/x/docs` selected below a file.
+fn searching_docs() -> Session {
+    let mut s = session();
+    s.intent(Intent::Space);
+    let generation = searched(&s.set_query("doc")).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("doc.txt"), folder_item("/x/docs")],
+    });
+    s.intent(Intent::Down);
+    s
+}
+
+#[test]
+fn tab_on_a_folder_lists_it_and_backspace_restores_the_search_and_selection() {
+    let mut s = searching_docs();
+    let effects = s.intent(Intent::Complete).unwrap();
+    assert_eq!(effects[0], Effect::ClearQuery);
+    let (generation, query, folder) = listed(&effects);
+    assert_eq!((query.as_str(), folder), ("", Some("/x/docs".into())));
+    assert_eq!(s.folder(), Some(std::path::Path::new("/x/docs")));
+    assert!(
+        s.items().is_empty(),
+        "the search's rows never show as the folder's"
+    );
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("a"), item("b")],
+    });
+    assert_eq!(s.intent(Intent::Up), Some(vec![Effect::RevealSelection]));
+    assert_eq!(s.selected_item().unwrap().display_title(), "b");
+
+    let (_, query, folder) = listed(&s.set_query("a"));
+    assert_eq!((query.as_str(), folder), ("a", Some("/x/docs".into())));
+    assert_eq!(
+        s.intent(Intent::Backspace),
+        None,
+        "a filter is edited in the field"
+    );
+    listed(&s.set_query(""));
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("doc".into()));
+    let (command, generation, query) = searched(&effects[1..]);
+    assert_eq!((command, query), (files_command(), "doc"));
+    assert_eq!(s.folder(), None);
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("other"), folder_item("/x/docs"), item("doc.txt")],
+    });
+    assert_eq!(s.selected_item().unwrap().id, "/x/docs");
+    assert_eq!(s.command_id(), &files_command());
+}
+
+#[test]
+fn nested_folders_return_to_their_parent_filter_and_selection() {
+    let mut s = searching_docs();
+    let generation = listed(&s.intent(Intent::Complete).unwrap()).0;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![folder_item("/x/docs/sub")],
+    });
+    let generation = listed(&s.set_query("su")).0;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![folder_item("/x/docs/sub")],
+    });
+    let (_, query, folder) = listed(&s.intent(Intent::Complete).unwrap());
+    assert_eq!((query.as_str(), folder), ("", Some("/x/docs/sub".into())));
+
+    let effects = s.intent(Intent::Backspace).unwrap();
+    assert_eq!(effects[0], Effect::ReplaceQuery("su".into()));
+    let (generation, query, folder) = listed(&effects);
+    assert_eq!((query.as_str(), folder), ("su", Some("/x/docs".into())));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("summary"), folder_item("/x/docs/sub")],
+    });
+    assert_eq!(s.selected_item().unwrap().id, "/x/docs/sub");
+}
+
+#[test]
+fn the_browse_action_enters_a_folder_and_dismissing_forgets_it() {
+    let mut s = searching_docs();
+    let key = s.result_key(1);
+    let generation = listed(&s.run_key_action(&key, "browse")).0;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("a")],
+    });
+    s.deliver(Delivery::Done { generation });
+    let saved = s.capture().unwrap();
+    assert!(
+        s.restore(&saved).is_err(),
+        "a listing needs the folder it came from"
+    );
+    assert_eq!(s.folder(), Some(std::path::Path::new("/x/docs")));
+
+    s.intent(Intent::Dismiss);
+    assert_eq!(s.folder(), None);
+    assert_eq!(s.command_id(), &app_command());
+    assert_eq!(
+        s.intent(Intent::Up),
+        Some(Vec::new()),
+        "browsing records no queries"
+    );
 }

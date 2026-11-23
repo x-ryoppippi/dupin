@@ -1197,6 +1197,7 @@ impl Ui {
                     command,
                     generation,
                     query,
+                    folder,
                 } => {
                     self.action_screen = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
@@ -1215,7 +1216,7 @@ impl Ui {
                         }
                     }
                     if let Some(searcher) = self.searchers.get(&command) {
-                        searcher.search(generation, query, limit);
+                        searcher.search(generation, query, folder, limit);
                         self.deadlines.insert(command, (generation, due));
                         tx.wake_at(due);
                     }
@@ -1241,7 +1242,9 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
-                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::ChooseApplication(_)
+                    | dupin_core::Action::Trash(_)
+                    | dupin_core::Action::Browse(_) => {}
                     dupin_core::Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {

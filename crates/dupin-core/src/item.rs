@@ -22,6 +22,8 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    /// List the folder's entries in the launcher.
+    Browse(PathBuf),
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

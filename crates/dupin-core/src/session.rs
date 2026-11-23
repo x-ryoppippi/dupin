@@ -3,6 +3,7 @@
 //! effects for the UI and platform layers to carry out.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 
 use crate::searcher::Delivery;
 use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
@@ -34,6 +35,7 @@ pub enum Effect {
         command: CommandId,
         generation: u64,
         query: String,
+        folder: Option<PathBuf>,
     },
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
@@ -94,6 +96,17 @@ pub struct Session {
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+    browsing: Vec<Visit>,
+}
+
+/// A folder entered from a result, and the search to return to when leaving it.
+#[derive(Debug)]
+struct Visit {
+    folder: PathBuf,
+    command: CommandId,
+    explicit: bool,
+    query: String,
+    selected: Option<(CommandId, String)>,
 }
 
 #[derive(Debug)]
@@ -146,6 +159,7 @@ impl Session {
             recalled: None,
             deleting: false,
             before_deletion: None,
+            browsing: Vec::new(),
         })
     }
 
@@ -202,6 +216,10 @@ impl Session {
         if !self.commands.contains(&command) {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
+        if self.commands.browser() == Some(&command) {
+            return Err("A browsed folder can't be resumed. Saved content remains readable.".into());
+        }
+        self.browsing.clear();
         self.clear_results();
         self.command = command;
         self.explicit = saved.explicit || self.command != *self.commands.default();
@@ -230,6 +248,11 @@ impl Session {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    /// The folder being browsed, if any.
+    pub fn folder(&self) -> Option<&Path> {
+        self.browsing.last().map(|visit| visit.folder.as_path())
     }
 
     pub fn items(&self) -> &[Item] {
@@ -274,6 +297,9 @@ impl Session {
     fn activate(&mut self, item: &Item, action: ItemAction) -> Vec<Effect> {
         if action.confirmation().is_some() || matches!(action.action, Action::ChooseApplication(_)) {
             return Vec::new();
+        }
+        if let Action::Browse(folder) = action.action {
+            return self.browse(folder);
         }
         if action.disposition == ActionDisposition::Consume {
             return vec![Effect::RunConsuming {
@@ -368,17 +394,16 @@ impl Session {
         Some(match intent {
             Intent::Actions => self.actions(),
             Intent::Complete => {
-                let completion = self.actionable_items().get(self.selected)?.completion.clone()?;
-                let mut effects = self.set_query(&completion);
-                if let Some(Effect::ReplaceQuery(text)) = effects
-                    .iter_mut()
-                    .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
-                {
-                    *text = self.query.clone();
+                let item = self.actionable_items().get(self.selected)?;
+                if let Some(completion) = item.completion.clone() {
+                    self.complete(&completion)
                 } else {
-                    effects.insert(0, Effect::ReplaceQuery(self.query.clone()));
+                    let folder = item.actions.iter().find_map(|action| match &action.action {
+                        Action::Browse(folder) => Some(folder.clone()),
+                        _ => None,
+                    })?;
+                    self.browse(folder)
                 }
-                effects
             }
             Intent::Space if empty => self
                 .commands
@@ -392,6 +417,7 @@ impl Session {
                 effects.extend(self.switch(command));
                 effects
             }
+            Intent::Backspace if empty && !self.browsing.is_empty() => self.leave(),
             Intent::Backspace if empty && self.command != *self.commands.default() => {
                 let effects = self.switch(self.commands.default().clone());
                 self.explicit = false;
@@ -399,7 +425,7 @@ impl Session {
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if empty || self.recalled.is_some() => self.recall(true),
+            Intent::Up if (empty && self.browsing.is_empty()) || self.recalled.is_some() => self.recall(true),
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 self.refresh_selection = None;
@@ -439,6 +465,59 @@ impl Session {
             }
             Intent::Dismiss => self.dismiss(),
         })
+    }
+
+    fn complete(&mut self, completion: &str) -> Vec<Effect> {
+        let mut effects = self.set_query(completion);
+        if let Some(Effect::ReplaceQuery(text)) = effects
+            .iter_mut()
+            .find(|effect| matches!(effect, Effect::ReplaceQuery(_)))
+        {
+            *text = self.query.clone();
+        } else {
+            effects.insert(0, Effect::ReplaceQuery(self.query.clone()));
+        }
+        effects
+    }
+
+    fn browse(&mut self, folder: PathBuf) -> Vec<Effect> {
+        let Some(browser) = self.commands.browser().cloned() else {
+            return Vec::new();
+        };
+        let selected = self
+            .selected_item()
+            .map(|item| (self.origins[self.selected].clone(), item.id.clone()));
+        self.browsing.push(Visit {
+            folder,
+            command: std::mem::replace(&mut self.command, browser),
+            explicit: std::mem::replace(&mut self.explicit, true),
+            query: std::mem::take(&mut self.query),
+            selected,
+        });
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.replace_search());
+        effects
+    }
+
+    fn leave(&mut self) -> Vec<Effect> {
+        let visit = self.browsing.pop().expect("leaving a browsed folder");
+        self.command = visit.command;
+        self.explicit = visit.explicit;
+        self.query = visit.query;
+        let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+        effects.extend(self.replace_search());
+        self.selection_held = visit.selected.is_some();
+        self.refresh_selection = visit.selected;
+        effects
+    }
+
+    /// Search afresh after the folder changed, without showing the previous folder's rows.
+    fn replace_search(&mut self) -> Vec<Effect> {
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
+        self.clear_results();
+        self.search()
     }
 
     pub fn provider_spec(&self, id: &CommandId) -> Option<&crate::CommandSpec> {
@@ -699,6 +778,7 @@ impl Session {
         self.deleting = false;
         self.before_deletion = None;
         let was_searching = matches!(self.results, Results::Searching { .. });
+        self.browsing.clear();
         self.command = self.commands.default().clone();
         self.explicit = false;
         self.query.clear();
@@ -717,6 +797,9 @@ impl Session {
     }
 
     fn remember_query(&mut self, activated: bool) {
+        if !self.browsing.is_empty() {
+            return;
+        }
         if activated {
             self.deleting = false;
             self.before_deletion = None;
@@ -778,7 +861,7 @@ impl Session {
         self.refresh_selection = None;
         self.selection_held = false;
         let query = self.query.trim();
-        if query.is_empty() {
+        if query.is_empty() && self.browsing.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -788,6 +871,7 @@ impl Session {
             };
         }
         let query = self.query.clone();
+        let folder = self.folder().map(Path::to_path_buf);
         self.generation += 1;
         // A command change clears the previous command's rows before starting a search.
         self.results = Results::Searching { replaced: false };
@@ -817,6 +901,7 @@ impl Session {
                 command,
                 generation: self.generation,
                 query: query.clone(),
+                folder: folder.clone(),
             })
             .collect()
     }

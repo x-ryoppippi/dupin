@@ -20,7 +20,7 @@ Candidate budgets and display limits are separate. The worker enforces each requ
 
 ## The session
 
-`Session` is the launcher's state machine. The host registers commands and their routes; the UI hands the active session query edits and key intents, and it answers with effects: start or cancel a search, run an action, clear the field, hide the panel, keep the selection on screen. It applies registered keyword and empty-query routes, returns to the registered default on Backspace, and drops answers from earlier searches by generation.
+`Session` is the launcher's state machine. The host registers commands and their routes; the UI hands the active session query edits and key intents, and it answers with effects: start or cancel a search, run an action, clear the field, hide the panel, keep the selection on screen. It applies registered keyword and empty-query routes, returns to the registered default on Backspace, and drops answers from earlier searches by generation. Browsing a folder pushes the current command, query and selection onto a stack and searches the registered browser command with that folder; Backspace on an empty query pops it.
 
 Switching commands clears the previous rows. Generation checks reject late answers from the old command.
 
