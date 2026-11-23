@@ -7,10 +7,6 @@ use objc2::rc::autoreleasepool;
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 use objc2_foundation::NSString;
 
-/// System Settings › Privacy & Security › Accessibility.
-pub const ACCESSIBILITY_SETTINGS: &str =
-    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-
 type CGEventRef = *mut c_void;
 
 const HID_EVENT_TAP: u32 = 0;

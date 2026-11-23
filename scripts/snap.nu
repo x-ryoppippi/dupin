@@ -1,5 +1,7 @@
 #!/usr/bin/env nu
 
+use headless-config.nu scenario-env
+
 # Render each headless scenario in scripts/headless to <out>/<name>.png.
 #
 # A scenario with a `<name>.toml` beside it runs with that file as its config.toml, from a
@@ -10,26 +12,21 @@
 # on worker threads (Spotlight, the app scan, icon rasterisation), which Rune's virtual
 # headless clock would outrun. The panel fits its content height, which `--snap` doesn't
 # follow, so each run first reads the panel's height from the element tree.
+# The clipboard history never reads this Mac's clipboard headless; it shows the synthetic
+# entries in scripts/fixtures/clipboard.json instead.
 def main [
     --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
     --out: path = "target/screenshots"
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
+    $env.DUPIN_HEADLESS_CLIPBOARD = $root | path join scripts/fixtures/clipboard.json
     mkdir $out
     let tmp = mktemp --directory
     let shots = glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
         let tree = $tmp | path join $"($name).json"
-        let fixture = $script | path parse | update extension toml | path join
-        let config = if ($fixture | path exists) {
-            let home = $tmp | path join $"($name)-config"
-            mkdir ($home | path join dupin)
-            cp $fixture ($home | path join dupin config.toml)
-            {XDG_CONFIG_HOME: $home}
-        } else {
-            {}
-        }
+        let config = scenario-env $script $tmp
         with-env $config {
             headless $bin --script $script --realtime --tree $tree --at mark:end
         }
