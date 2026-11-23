@@ -2,14 +2,15 @@
 
 use std::path::{Path, PathBuf};
 
+use objc2_app_kit::NSWorkspace;
+use objc2_foundation::{NSArray, NSString, NSURL};
+
 #[derive(Debug)]
 pub enum Action {
     Open(PathBuf),
     Reveal(PathBuf),
     OpenUrl(String),
 }
-use objc2_app_kit::NSWorkspace;
-use objc2_foundation::{NSArray, NSString, NSURL};
 
 /// Carry out `action`. Returns false when the system refused (a vanished file, say).
 pub fn run(action: &Action) -> bool {

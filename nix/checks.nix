@@ -25,6 +25,7 @@ in
               nu scripts/tests/e2e-assets.nu
               nu scripts/tests/e2e-comment.nu
               nu scripts/tests/e2e-recording.nu
+              nu scripts/tests/e2e-state.nu
             '';
         hawk = pkgs.rustPlatform.buildRustPackage (
           dupin.passthru.commonArgs

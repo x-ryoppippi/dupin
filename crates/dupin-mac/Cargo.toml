@@ -19,6 +19,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSDictionary",
 	"NSEnumerator",
 	"NSFileManager",
+	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
 	"NSCompoundPredicate",
@@ -33,12 +34,14 @@ objc2-foundation = { workspace = true, features = [
 objc2-app-kit = { workspace = true, features = [
 	"std",
 	"NSEvent",
+	"NSApplication",
 	"NSResponder",
 	"NSScreen",
 	"NSView",
 	"NSWindow",
 	"NSWorkspace",
 ] }
+objc2-quick-look-ui = { workspace = true }
 
 objc2-core-foundation = { workspace = true, features = ["std", "CFString", "CFURL"] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }

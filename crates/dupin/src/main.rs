@@ -99,9 +99,11 @@ fn main() {
 
     let hotkey = config.hotkey.clone();
     let mut registered = false;
+    let quick_look = Rc::new(RefCell::new(None));
     let app = app
         .init({
             let handle = handle.clone();
+            let quick_look = quick_look.clone();
             let configuration = ui::Configuration {
                 values: current_config,
                 hotkey: binding.clone(),
@@ -115,11 +117,13 @@ fn main() {
                     configuration,
                     history,
                     config_problem,
+                    quick_look,
                 )
             }
         })
         .on_ready(move |window| {
             appear_instantly(window);
+            install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
                 binding.register_at_launch(&hotkey);
@@ -129,7 +133,7 @@ fn main() {
         .on_frame_encoded(trace::frame)
         .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
-            if !focused {
+            if !focused && !s.preview_focus_is_active() {
                 s.dismiss(tx);
             }
         });
@@ -148,6 +152,35 @@ fn main() {
             .into();
         [panel, prefs]
     });
+}
+
+fn install_quick_look(
+    window: &rune::WindowHandle,
+    app: &rune::AppHandle<ui::Ui>,
+    slot: &Rc<RefCell<Option<dupin_mac::quick_look::Previewer>>>,
+) {
+    if rune::tooling::headless_run().is_some() {
+        return;
+    }
+    use rune::raw_window_handle::RawWindowHandle;
+    let app = app.clone();
+    let attached = window.with_raw_handle(|handle| match handle.as_raw() {
+        RawWindowHandle::AppKit(appkit) => {
+            // SAFETY: Rune lends this NSView only for the duration of `with_raw_handle`; attach
+            // retains it before adding the responder proxy.
+            unsafe {
+                dupin_mac::quick_look::Previewer::attach(appkit.ns_view, move || {
+                    app.update(|state, tx| state.preview_panel_resigned(tx));
+                })
+            }
+        }
+        _ => None,
+    });
+    match attached {
+        Ok(Some(previewer)) => *slot.borrow_mut() = Some(previewer),
+        Ok(None) => crate::log::warn("couldn't attach the Quick Look responder"),
+        Err(error) => crate::log::warn(&format!("couldn't access the panel's native view: {error}")),
+    }
 }
 
 /// Turn off AppKit's ordering animation on the panel. `on_ready` runs once the panel exists
