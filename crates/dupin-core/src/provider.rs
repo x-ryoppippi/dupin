@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -15,6 +16,8 @@ pub trait Provider: Send + Sync + 'static {
 pub struct Request {
     /// Raw field text after keyword routing: whitespace may be part of the provider's syntax.
     pub query: String,
+    /// The folder being browsed, for a command that lists one.
+    pub folder: Option<PathBuf>,
     /// The most candidates the provider should emit in total, before the display limit.
     pub limit: usize,
     generation: u64,
@@ -22,9 +25,16 @@ pub struct Request {
 }
 
 impl Request {
-    pub(crate) fn new(query: String, limit: usize, generation: u64, current: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(
+        query: String,
+        folder: Option<PathBuf>,
+        limit: usize,
+        generation: u64,
+        current: Arc<AtomicU64>,
+    ) -> Self {
         Request {
             query,
+            folder,
             limit,
             generation,
             current,
@@ -33,7 +43,7 @@ impl Request {
 
     /// A request for tests and direct calls, never cancelled.
     pub fn detached(query: impl Into<String>, limit: usize) -> Self {
-        Request::new(query.into(), limit, 1, Arc::new(AtomicU64::new(1)))
+        Request::new(query.into(), None, limit, 1, Arc::new(AtomicU64::new(1)))
     }
 
     /// A newer search or a cancel has superseded this one.

@@ -428,9 +428,9 @@ fn app_is_visible_while_other_worker_is_blocked() {
     });
     let mut s = Session::new(History::default(), registry(false)).unwrap();
     let g = start(&mut s, "query");
-    slow.search(g, "query".into(), 3);
+    slow.search(g, "query".into(), None, 3);
     waiting.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-    fast.search(g, "query".into(), 3);
+    fast.search(g, "query".into(), None, 3);
     for _ in 0..2 {
         let (origin, d) = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert_eq!(origin, id("apps.search"));
@@ -516,7 +516,7 @@ fn provider_error_is_terminal_and_worker_closes_when_dropped() {
     let worker = Searcher::spawn("broken", Arc::new(Broken), move |d| {
         tx.send(d).unwrap();
     });
-    worker.search(1, "query".into(), 2);
+    worker.search(1, "query".into(), None, 2);
     assert_eq!(
         rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
         Delivery::Failed { generation: 1 }
@@ -659,7 +659,7 @@ fn the_worker_candidate_budget_is_cumulative_across_batches() {
     let worker = Searcher::spawn("candidate-budget", Arc::new(Verbose), move |delivery| {
         sender.send(delivery).unwrap()
     });
-    worker.search(1, "term".into(), 3);
+    worker.search(1, "term".into(), None, 3);
     let mut total = 0;
     loop {
         match receiver.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {

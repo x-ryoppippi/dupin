@@ -5,6 +5,10 @@ extend-ignore-re = [
 	"(?Rm)^.*#\\s*spellchecker:disable-line$",
 ]
 
+[default.extend-words]
+centre = "centre"
+maximise = "maximise"
+
 [files]
 ignore-hidden = false
 extend-exclude = [

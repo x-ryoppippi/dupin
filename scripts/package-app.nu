@@ -57,7 +57,7 @@ def main [
         ^/usr/bin/plutil -replace CFBundleIconFile -string dupin-nightly $plist
     }
 
-    ^/usr/bin/codesign --force --options runtime --entitlements ($root | path join packaging/entitlements.plist) --timestamp --sign $identity $bundle
+    ^/usr/bin/codesign --force --options runtime --timestamp --entitlements packaging/Entitlements.plist --sign $identity $bundle
     ^/usr/bin/codesign --verify --strict --verbose=2 $bundle
 
     let zip = $out | path join Dupin.zip

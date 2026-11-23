@@ -4,6 +4,8 @@ Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96.
 
 ## Product boundary
 
+[Script commands](./scripts.md) are a separate trusted native path. They are not sandboxed extensions and give guest plugins no grants or access to process execution.
+
 Dupin provides an input field, input routing, result selection, host-rendered views,
 actions and plugin execution. App search, file search, dictionary, calculator,
 currency and calendar are feature plugins. First-party distribution does not give

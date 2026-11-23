@@ -4,25 +4,48 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use dupin_core::item::Transfer;
+use dupin_core::window_management::Layout as WindowLayout;
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
+    Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::window_management::{self, Error as WindowError};
+use dupin_mac::{
+    AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, selection::Selection,
+    window::DisplayNotice,
+};
+use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
 };
 
+use crate::scripts::catalog::Catalog;
+
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
-/// The panel's top edge below the display's for `position = "top"`: about where Spotlight
-/// puts its field.
+const PASTE_ACCESS_NOTICE: &str = "Copied the snippet. To paste it into the front app as well, allow Dupin in System Settings › Privacy & Security › Accessibility, or turn off Paste snippets in Settings › Search.";
+// Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
+
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+    let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
+    let top = frame.max().y - visible.max().y;
+    // Use the query field's height so results can grow below it.
+    let room = (visible.size.height - f64::from(crate::HEADER_HEIGHT)).max(0.0);
+    let offset = match position {
+        Position::Center => room / 2.0,
+        Position::Top => f64::from(TOP_MARGIN).min(room),
+    };
+    (inset as f32, (top + offset) as f32)
+}
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -54,10 +77,20 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     }
 }
 
+/// A proposed file name is plain text: qualifiers only mean something in a search.
+fn mark_session_query(edit: &mut TextEdit, session: &Session) {
+    if session.renaming().is_none() {
+        mark_query_qualifiers(edit, session.command_id());
+    } else if !edit.marks().is_empty() {
+        edit.set_marks(Vec::new());
+    }
+}
+
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
     pub snapshots: AppHandle<crate::snapshots::Snapshots>,
+    pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
 pub struct Configuration {
@@ -72,10 +105,32 @@ enum Restart {
     Requested,
 }
 
+impl Restart {
+    fn waiting_for_work(self, actions: &AtomicUsize, scripts: &AtomicUsize) -> bool {
+        actions.load(Ordering::Acquire) > 0 || (self == Self::Update && scripts.load(Ordering::Acquire) > 0)
+    }
+}
+
+#[test]
+fn only_automatic_restart_waits_for_scripts() {
+    let actions = AtomicUsize::new(0);
+    let scripts = AtomicUsize::new(1);
+    assert!(Restart::Update.waiting_for_work(&actions, &scripts));
+    assert!(!Restart::Requested.waiting_for_work(&actions, &scripts));
+
+    actions.store(1, Ordering::Release);
+    assert!(Restart::Requested.waiting_for_work(&actions, &scripts));
+}
+
+/// A snippet's text as Enter found it, with the time its placeholders show.
+struct SnippetRun {
+    text: String,
+    now: dupin_core::snippets::LocalTime,
+}
+
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
-    pub layout_key: String,
     pub selected: usize,
     pub stage: ActionStage,
 }
@@ -236,11 +291,25 @@ pub struct Picker {
     call: crate::control::Call,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum SelectionRequest {
+    #[default]
+    Idle,
+    Reading,
+    Superseded,
+}
+
 pub struct Ui {
     pub picker: Option<Picker>,
     control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
+    pub script_entry: Option<crate::scripts::entry::Entry>,
+    pub script_card: Option<Arc<crate::scripts::runner::Snapshot>>,
+    scripts: Arc<RwLock<Catalog>>,
+    scripts_catalog_ready: bool,
+    runner: crate::scripts::runner::Runner,
+    _scripts_watcher: Option<crate::scripts::CatalogWatch>,
     pub action_screen: Option<ActionScreen>,
     next_lookup: u64,
     notice_until: Option<f64>,
@@ -250,11 +319,15 @@ pub struct Ui {
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
     pub config_problem: Option<String>,
+    pub hotkey_problem: Option<String>,
     pub registration_notice: Option<String>,
+    pub selection_permission_required: bool,
+    selection_request: SelectionRequest,
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
-    pub icons: HashMap<String, Image>,
+    bindings_applied: bool,
+    pub icons: HashMap<PathBuf, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -264,13 +337,24 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    currency: crate::calculator::Currency,
     web: Arc<RwLock<crate::web::WebCatalog>>,
+    snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
+    /// A snippet to paste once the panel has closed and the front app has its keys back.
+    paste_after_close: Option<SnippetRun>,
+    /// Why a snippet wasn't pasted, to show once the panel has closed.
+    notice_after_close: Option<String>,
+    /// Pasting has asked macOS for access once since launch; later attempts explain instead.
+    paste_access_asked: bool,
     file_demotions: Arc<RwLock<Vec<String>>>,
     system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
+    clipboard: crate::clipboard::Clipboard,
     saver: crate::store::Saver,
     position: Position,
+    display: DisplaySelection,
+    pub display_notice: Option<DisplayNotice>,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -278,13 +362,22 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
+    accessibility_after_close: bool,
+    window_management_enabled: bool,
+    frontmost_pid: Option<i32>,
+    window_action_after_close: Option<(WindowLayout, Option<i32>, Busy)>,
+    window_action_running: bool,
+    pub window_permission_required: bool,
     system_runner: dupin_mac::system_commands::Runner,
     /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    file_transfers: dupin_mac::file_ops::FileTransfers,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
     snapshots: AppHandle<crate::snapshots::Snapshots>,
+    script_output: AppHandle<crate::scripts::output::Output>,
+    script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
 
 impl Ui {
@@ -294,12 +387,29 @@ impl Ui {
             return;
         }
         match &call.request.command {
+            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
+                call.finish(Err("Busy: picker active".into()));
+            }
+            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } => {
+                self.snapshots.update_if(move |s, _| {
+                    s.control(call);
+                    false
+                });
+            }
+            Command::SnapshotsClose {} => {
+                self.snapshots_after_close = false;
+                self.snapshots.update(move |s, _| s.control_close(call));
+            }
             Command::Open { query } => {
                 if self.picker.is_some() {
                     call.finish(Err("Busy: picker active".into()));
                     return;
                 }
                 if let Some(query) = query {
+                    if self.session.renaming().is_some() || self.session.destination().is_some() {
+                        let effects = self.session.intent(Intent::Dismiss).unwrap_or_default();
+                        self.apply(effects, tx);
+                    }
                     self.query = TextEdit::new(query);
                     self.edited(tx);
                 }
@@ -337,45 +447,54 @@ impl Ui {
                     call.finish(Err("settings are read-only".into()));
                     return;
                 }
-                let checked = accept_config(
-                    (**desired).clone(),
-                    &self.configuration.values.borrow(),
-                    |shortcut| {
-                        if self.configuration.hotkey.is_installed(shortcut) {
-                            Ok(())
-                        } else {
-                            self.configuration.hotkey.replace(shortcut)
-                        }
-                    },
-                );
-                match checked.and_then(|desired| self.configuration.files.save(base, &desired)) {
+                let previous = self.configuration.values.borrow();
+                {
+                    let scripts = self.scripts.read().unwrap();
+                    if let Err(error) = self.configuration.hotkey.reserve_for_save(
+                        desired,
+                        &previous,
+                        self.scripts_catalog_ready.then_some(&*scripts),
+                    ) {
+                        call.finish(Err(error));
+                        return;
+                    }
+                }
+                match self.configuration.files.save(base, desired) {
                     Ok(revision) => self.control_save = Some((revision, call)),
-                    Err(error) => call.finish(Err(error)),
+                    Err(error) => {
+                        self.configuration.hotkey.discard_reservations();
+                        call.finish(Err(error));
+                    }
                 }
             }
         }
     }
     fn finish_pick(&mut self, value: Option<serde_json::Value>, tx: &mut Tx) {
-        if let Some(picker) = self.picker.take() {
-            self.query = picker.original;
-            self.shown = picker.original_shown;
-            if !picker.original_shown {
+        if let Some(call) = self.restore_picker() {
+            if !self.shown {
                 self.hide(tx);
             }
             tx.instant();
-            picker.call.finish(value.ok_or_else(|| "Cancelled".into()));
+            call.finish(value.ok_or_else(|| "Cancelled".into()));
         }
+    }
+
+    fn restore_picker(&mut self) -> Option<crate::control::Call> {
+        let picker = self.picker.take()?;
+        self.query = picker.original;
+        self.shown = picker.original_shown;
+        Some(picker.call)
     }
 
     /// Cursor-only redraws do not emit Rune input-change callbacks.
     pub fn query_display(&self) -> TextEdit {
         let mut query = self.query.clone();
-        mark_query_qualifiers(&mut query, self.session.command_id());
+        mark_session_query(&mut query, &self.session);
         query
     }
 
     pub fn query_edit(&mut self) -> &mut TextEdit {
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
         &mut self.query
     }
 
@@ -384,7 +503,7 @@ impl Ui {
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
-        notice: Option<String>,
+        config_problem: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
         running: Arc<AtomicUsize>,
     ) -> Ui {
@@ -392,14 +511,57 @@ impl Ui {
             panel: me,
             prefs,
             snapshots,
+            scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
-            .expect("built-in command registration is valid");
+        let currency = crate::calculator::Currency::start({
+            let me = me.clone();
+            move || {
+                me.update(|s, tx| {
+                    if s.currency.enabled() && !s.session.query().trim().is_empty() {
+                        s.refresh_default(tx);
+                    }
+                })
+            }
+        });
+        currency.set_enabled(config.calculator && config.calculator_currency);
+        let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
+        let calendar = if rune::tooling::is_headless() {
+            dupin_mac::CalendarProvider::fixtures()
+        } else {
+            let panel = me.clone();
+            dupin_mac::CalendarProvider::new(move || {
+                panel.update(|ui, tx| {
+                    if ui.session.command_id().as_str() == crate::commands::CALENDAR {
+                        let effects = ui.session.refresh();
+                        ui.apply(effects, tx);
+                    }
+                });
+            })
+        };
+        let registration = crate::commands::register(
+            &config,
+            apps_provider.clone(),
+            history,
+            calendar,
+            clipboard.history(),
+            currency.calculator(),
+        )
+        .expect("built-in command registration is valid");
+        let runner = crate::scripts::runner::Runner::new(
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default(),
+            Arc::new({
+                let me = me.clone();
+                move |id, finished| me.update_if(move |s, tx| s.script_changed(id, finished, tx))
+            }),
+        );
+        let scripts_watcher = crate::scripts::watch(me.clone());
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
-            move || me.update(|s, tx| s.refresh_apps(tx))
+            move || me.update(|s, tx| s.refresh_default(tx))
         });
         let apps_watcher = match apps_watcher {
             Ok(watcher) => Some(watcher),
@@ -432,11 +594,20 @@ impl Ui {
                 )
             })
             .collect();
-        let sources = registration.registry.ids();
+        let sources = registration.session.command_ids();
         snapshots.update(move |s, _| s.set_sources(sources));
+        me.update(|s, tx| s.refresh_default(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            script_output,
+            script_output_after_close: None,
+            script_entry: None,
+            script_card: None,
+            scripts: registration.scripts,
+            scripts_catalog_ready: scripts_watcher.is_none(),
+            runner,
+            _scripts_watcher: scripts_watcher,
             picker: None,
             control_save: None,
             theme: config.theme.clone(),
@@ -445,13 +616,16 @@ impl Ui {
             next_lookup: 0,
             notice_until: None,
             acknowledged_config: config.clone(),
-            session: Session::new(history, registration.registry)
-                .expect("built-in command registration is valid"),
+            bindings_applied: false,
+            session: registration.session,
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
-            config_problem: notice,
+            config_problem,
+            hotkey_problem: None,
             registration_notice: registration.notice,
+            selection_permission_required: false,
+            selection_request: SelectionRequest::Idle,
             icons: HashMap::new(),
             shown: false,
             shown_at: 0.0,
@@ -460,24 +634,39 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            currency,
             web: registration.web,
+            snippets: registration.snippets,
+            paste_after_close: None,
+            notice_after_close: None,
+            paste_access_asked: false,
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
+            clipboard,
             position: config.position,
+            display: config.display,
+            display_notice: None,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
+            accessibility_after_close: false,
+            window_management_enabled: config.window_management,
+            frontmost_pid: None,
+            window_action_after_close: None,
+            window_action_running: false,
+            window_permission_required: false,
             system_runner: if cfg!(test) || rune::tooling::is_headless() {
                 |_| Err("System commands are unavailable in headless runs.".into())
             } else {
                 dupin_mac::system_commands::run
             },
             running,
+            file_transfers: dupin_mac::file_ops::FileTransfers::default(),
             updater,
             quick_look,
             me,
@@ -500,6 +689,7 @@ impl Ui {
             }
             changed
         };
+        let clipboard_changed = self.clipboard.apply(&config.clipboard);
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         let web_changed = {
@@ -508,30 +698,83 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        let snippets_changed = {
+            let mut snippets = self.snippets.write().unwrap();
+            let changed = *snippets != registration.snippets;
+            *snippets = registration.snippets;
+            changed
+        };
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        self.window_management_enabled = config.window_management;
+        if !config.window_management {
+            self.window_permission_required = false;
+        }
+        let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
+        let empty = self.session.query().trim().is_empty();
+        let currency_changed = self
+            .currency
+            .set_enabled(config.calculator && config.calculator_currency);
         let automation_changed = self
             .system_provider
             .set_automation_enabled(config.system_automation);
-        let command = self.session.command_id().as_str();
-        if self.session.command().result_limit != previous_limit
-            || (web_changed && command == crate::commands::APPS)
-            || (automation_changed && matches!(command, crate::commands::APPS | crate::commands::SYSTEM))
-            || (ranking_changed && command == crate::commands::FILES)
+        if !effects.is_empty() {
+            self.apply(effects, tx);
+        } else if self.session.command().result_limit != previous_limit
+            || ((web_changed || currency_changed || automation_changed) && is_apps && !empty)
+            || (automation_changed && self.session.command_id().as_str() == crate::commands::SYSTEM)
+            || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
+            || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
+            || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)
         {
+            self.action_screen = None;
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.display = config.display;
+        if self.display != DisplaySelection::Active {
+            self.display_notice = None;
+        }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
             self.backdrop = backdrop_source(&config.backdrop);
             self.backdrop_pick = config.backdrop.clone();
+        }
+    }
+
+    fn apply_hotkeys(&mut self, config: &Config, previous: &Config) -> Result<(), String> {
+        let problem = {
+            let scripts = self.scripts.read().unwrap();
+            self.configuration.hotkey.apply_config(
+                config,
+                previous,
+                self.scripts_catalog_ready.then_some(&*scripts),
+            )?
+        };
+        self.bindings_applied = true;
+        if self.hotkey_problem != problem {
+            if let Some(problem) = &problem {
+                crate::log::warn(problem);
+            }
+            self.hotkey_problem = problem.clone();
+            self.prefs.update(move |prefs, _| prefs.hotkey_problem = problem);
+        }
+        Ok(())
+    }
+
+    fn refresh_hotkeys(&mut self) {
+        if self.bindings_applied {
+            let config = self.configuration.values.borrow().clone();
+            if let Err(error) = self.apply_hotkeys(&config, &config) {
+                crate::log::warn(&error);
+            }
         }
     }
 
@@ -546,13 +789,9 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            accept_config(config, &previous, |shortcut| {
-                if self.configuration.hotkey.is_installed(shortcut) {
-                    Ok(())
-                } else {
-                    self.configuration.hotkey.replace(shortcut)
-                }
-            })
+            self.apply_hotkeys(&config, &previous)
+                .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
+            Ok(config)
         });
         let problem = match accepted {
             Ok(config) => {
@@ -563,7 +802,13 @@ impl Ui {
                 }
                 None
             }
-            Err(error) => Some(error),
+            Err(error) => {
+                if self.control_save.is_some() {
+                    self.configuration.hotkey.discard_reservations();
+                    self.refresh_hotkeys();
+                }
+                Some(error)
+            }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
         let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
@@ -612,18 +857,24 @@ impl Ui {
     }
 
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
-    /// Automatic updates wait for both windows to hide; an explicit request closes them.
+    /// Automatic updates wait so a restart does not interrupt work in a visible window.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
-            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+            && (self.me.is_visible()
+                || self.prefs.is_visible()
+                || self.snapshots.is_visible()
+                || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
-        } else if self.running.load(Ordering::Acquire) > 0 {
+        } else if request.waiting_for_work(&self.running, self.runner.activity()) {
             self.relaunch_when_idle(request);
         } else {
             match self.updater.install_staged() {
                 Ok(installed) => {
                     if installed || request == Restart::Requested {
+                        if request == Restart::Requested {
+                            self.stop_child_processes(tx);
+                        }
                         tx.relaunch();
                     }
                 }
@@ -642,9 +893,10 @@ impl Ui {
     /// summoned meanwhile, so automatic updates check visibility again.
     fn relaunch_when_idle(&self, request: Restart) {
         let running = self.running.clone();
+        let scripts = self.runner.activity().clone();
         let me = self.me.clone();
         std::thread::spawn(move || {
-            while running.load(Ordering::Acquire) > 0 {
+            while request.waiting_for_work(&running, &scripts) {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             me.update(move |s, tx| s.restart(request, tx));
@@ -653,6 +905,135 @@ impl Ui {
 
     pub fn setup(s: &mut Ui, waker: Waker) {
         s.icon_cache = Some(ImageCache::new(waker));
+    }
+
+    pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
+        use crate::hotkey::{LauncherShortcut, Target};
+        use dupin_core::config::HotkeyTarget;
+
+        match self.configuration.hotkey.target(shortcut) {
+            Some(Target::Launcher(LauncherShortcut::Panel)) => self.toggle(tx),
+            Some(Target::Launcher(LauncherShortcut::Selection)) => self.read_selection(tx),
+            Some(Target::Configured(HotkeyTarget::App {
+                bundle_id,
+                hide_if_frontmost,
+            })) => {
+                if self.shown {
+                    self.dismiss(tx);
+                }
+                self.run_workspace_action(dupin_mac::workspace::Action::OpenApp {
+                    bundle_id,
+                    hide_if_frontmost,
+                });
+            }
+            Some(Target::Configured(HotkeyTarget::Command { command })) => {
+                self.run_hotkey_command(shortcut, command, tx);
+            }
+            Some(Target::Configured(HotkeyTarget::Script { script, args })) => {
+                self.run_hotkey_script(&script, args, tx);
+            }
+            None => (),
+        }
+    }
+
+    fn run_hotkey_command(&mut self, shortcut: &rune::Shortcut, command: String, tx: &mut Tx) {
+        let panel = self.me.clone();
+        let keys = shortcut.keycaps().join("");
+        if let Err(error) = self.runner.start_shell(&command, move |result| {
+            if let Err(error) = result {
+                panel.update(move |ui, tx| {
+                    ui.show_notice(format!("The {keys} command failed: {error}"), tx);
+                });
+            }
+        }) {
+            self.show_notice(
+                format!(
+                    "Couldn't start the {} command: {error}",
+                    shortcut.keycaps().join("")
+                ),
+                tx,
+            );
+        }
+    }
+
+    fn run_hotkey_script(&mut self, name: &str, args: Vec<String>, tx: &mut Tx) {
+        use dupin_core::script::OutputMode;
+
+        let command = self
+            .scripts
+            .read()
+            .unwrap()
+            .bound_script(name, &args)
+            .map(|script| script.run(args));
+        let command = match command {
+            Ok(command) => command,
+            Err(problem) => {
+                self.show_notice(format!("Couldn't run {name:?}. {problem}."), tx);
+                return;
+            }
+        };
+        let mode = command.mode;
+        let start = self.runner.start(command);
+        let visible = self.me.is_visible();
+        let picker = self.restore_picker();
+        if mode == OutputMode::Inline {
+            self.action_screen = None;
+            self.script_entry = None;
+            if !self.shown {
+                self.show(tx);
+            }
+        }
+        self.present_script(mode, start, tx);
+        if mode != OutputMode::Inline && visible {
+            self.dismiss(tx);
+        }
+        if let Some(picker) = picker {
+            picker.finish(Err("Cancelled".into()));
+        }
+    }
+
+    fn read_selection(&mut self, tx: &mut Tx) {
+        if rune::tooling::is_headless()
+            || self.shown
+            || self.picker.is_some()
+            || self.selection_request != SelectionRequest::Idle
+        {
+            return;
+        }
+        self.selection_request = SelectionRequest::Reading;
+        let panel = self.me.clone();
+        if std::thread::Builder::new()
+            .name("selected-text".into())
+            .spawn(move || {
+                let result = dupin_mac::selection::read(|| {
+                    accessibility::request_once();
+                });
+                panel.update(move |s, tx| s.apply_selection(result, tx));
+            })
+            .is_err()
+        {
+            self.apply_selection(Selection::Empty, tx);
+        }
+    }
+
+    fn apply_selection(&mut self, result: Selection, tx: &mut Tx) {
+        if std::mem::take(&mut self.selection_request) != SelectionRequest::Reading {
+            return;
+        }
+        match result {
+            Selection::Text(text) => {
+                self.query = selection_query(&text);
+                self.typed_at = tx.clock();
+                let effects = self.session.set_literal_query(&self.query.text);
+                self.apply(effects, tx);
+            }
+            Selection::Empty => {}
+            Selection::PermissionRequired => {
+                self.selection_permission_required = !accessibility::is_trusted();
+            }
+        }
+        self.show(tx);
+        tx.focus_when_shown("query", false);
     }
 
     /// The hotkey: show the panel, or hide it when it already shows.
@@ -670,36 +1051,79 @@ impl Ui {
         }
     }
 
-    /// The panel's top edge below the display's, for the configured position. Centering puts
-    /// the field (not the whole panel, which grows with results) at the display's middle.
-    fn top_margin(&self) -> f32 {
-        match self.position {
-            Position::Top => TOP_MARGIN,
-            Position::Center => dupin_mac::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
-                ((h as f32 - crate::view::HEADER_H) / 2.0).max(0.0)
-            }),
-        }
-    }
-
     fn show(&mut self, tx: &mut Tx) {
+        if self.selection_request == SelectionRequest::Reading {
+            self.selection_request = SelectionRequest::Superseded;
+        }
         crate::trace::summoned();
+        if self.window_permission_required && accessibility::is_trusted() {
+            self.window_permission_required = false;
+        }
+        if !self.shown && !rune::tooling::is_headless() {
+            self.frontmost_pid = window_management::frontmost_pid();
+        }
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
         self.query.focused = true;
-        self.me.place(
-            DisplayTarget::UnderPointer,
-            OverlayPlacement::Edge {
-                edge: ScreenEdge::Top,
-                margin: self.top_margin(),
-                align: Align::Center,
-                inset: 0.0,
-            },
-        );
+        if !self.shown {
+            self.place_panel();
+        }
         self.shown = true;
         self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
+        if self.session.query().is_empty() {
+            self.refresh_default(tx);
+        }
+    }
+
+    fn place_panel(&mut self) {
+        self.display_notice = None;
+        let (display, align, inset, margin) = if !rune::tooling::is_headless()
+            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
+        {
+            self.display_notice = screen.notice;
+            let (inset, margin) = panel_offsets(
+                screen.frame,
+                screen.visible_frame,
+                self.theme.panel_width,
+                self.position,
+            );
+            (
+                DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+                Align::Start,
+                inset,
+                margin,
+            )
+        } else {
+            let display = match self.display {
+                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
+                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
+            };
+            (display, Align::Center, 0.0, TOP_MARGIN)
+        };
+        self.me.place(
+            display,
+            OverlayPlacement::Edge {
+                edge: ScreenEdge::Top,
+                margin,
+                align,
+                inset,
+            },
+        );
+    }
+
+    pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
+        if rune::tooling::is_headless()
+            || (!self.selection_permission_required
+                && !self.window_permission_required
+                && self.display_notice != Some(DisplayNotice::AccessibilityRequired))
+        {
+            return;
+        }
+        self.accessibility_after_close = true;
+        self.dismiss(tx);
     }
 
     fn force_input_source(&mut self) {
@@ -721,9 +1145,12 @@ impl Ui {
             self.finish_pick(None, tx);
             return;
         }
+        if !self.shown {
+            return;
+        }
         let effects = self.session.reset();
-        self.apply(effects, tx);
         self.hide(tx);
+        self.apply(effects, tx);
     }
 
     fn prepare_settings(&mut self) {
@@ -731,18 +1158,52 @@ impl Ui {
         self.settings_after_close = true;
     }
 
-    pub fn closed(&mut self, _: &mut Tx) {
+    pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
-        if std::mem::take(&mut self.snapshots_after_close) {
-            self.snapshots.open();
+        if let Some((layout, pid, busy)) = self.window_action_after_close.take()
+            && self.window_management_enabled
+        {
+            self.arrange_window(layout, pid, busy);
         }
-        if std::mem::take(&mut self.settings_after_close) {
+        let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
+        let show_settings = std::mem::take(&mut self.settings_after_close);
+        if std::mem::take(&mut self.accessibility_after_close) {
+            let me = self.me.clone();
+            std::thread::spawn(move || {
+                if !accessibility::is_trusted() && accessibility::request_once() {
+                    return;
+                }
+                let settings = dupin_mac::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&settings) {
+                    me.update(move |ui, tx| ui.show_notice(error, tx));
+                }
+            });
+        }
+        if let Some(snippet) = self.paste_after_close.take() {
+            self.deliver_snippet(snippet, true, tx);
+        }
+        if let Some(notice) = self.notice_after_close.take() {
+            self.show_notice(notice, tx);
+        }
+        if let Some(id) = self.script_output_after_close.take() {
+            self.show_script_output(id);
+        }
+        if show_snapshots {
+            self.snapshots.update(|s, _| s.show());
+        }
+        if show_settings {
             crate::trace::settings("panel closed");
             self.prefs.open();
+        }
+        if !show_snapshots && !show_settings && self.relaunch.is_some() {
+            // Rune clears the panel's visibility after this callback.
+            self.me.update(Self::resume_restart);
         }
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        self.script_entry = None;
+        self.script_card = None;
         crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
         if let Some(preview) = self.quick_look.borrow().as_ref() {
@@ -754,10 +1215,12 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.selection_permission_required = false;
         self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
+            && self.script_output_after_close.is_none()
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -773,15 +1236,19 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        self.script_card = None;
+        self.script_entry = None;
         if let Some(picker) = &mut self.picker {
             picker.selected = 0;
             tx.instant();
             return;
         }
         self.action_screen = None;
-        crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
         let effects = self.session.set_query(&self.query.text);
+        if !self.session.command().private_results {
+            crate::trace::edited(&self.query.text);
+        }
         self.apply(effects, tx);
     }
 
@@ -817,8 +1284,25 @@ impl Ui {
         self.timed_notice(message, tx);
     }
 
-    pub fn open_snapshots(&mut self) {
-        self.snapshots.open();
+    pub fn show_snapshots(&mut self, tx: &mut Tx) {
+        if self.me.is_visible() {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+        } else {
+            self.snapshots.update(|s, _| s.show());
+        }
+    }
+
+    pub fn control_snapshots_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.picker.is_some() {
+            call.finish(Err("Busy: picker active".into()));
+        } else {
+            self.snapshots.update(move |s, _| s.accept_open(call));
+            self.show_snapshots(tx);
+        }
     }
 
     pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
@@ -863,6 +1347,29 @@ impl Ui {
             tx.instant();
             return true;
         }
+        if self.script_entry.is_some() {
+            return self.script_entry_key(ev, tx);
+        }
+        if let Some(card) = &self.script_card {
+            if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
+                self.show_script_output(card.id);
+                return true;
+            }
+            if matches!(ev.key, Key::Enter) {
+                if card.status != crate::scripts::runner::Status::Exited(Some(0)) {
+                    return true;
+                }
+                if let Some(text) = card.output.last_stdout() {
+                    tx.copy(text.to_owned());
+                }
+                self.dismiss(tx);
+                return true;
+            }
+            if ev.mods.cmd && matches!(ev.key, Key::Command('.')) {
+                self.cancel_script(card.id);
+                return true;
+            }
+        }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
             match self.session.capture() {
                 Ok(saved) => {
@@ -879,11 +1386,12 @@ impl Ui {
             return true;
         }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
-            self.snapshots_after_close = true;
-            self.dismiss(tx);
+            self.show_snapshots(tx);
             return true;
         }
-        crate::trace::key(ev);
+        if !self.session.command().private_results {
+            crate::trace::key(ev);
+        }
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
         }
@@ -916,7 +1424,11 @@ impl Ui {
         if self.query.is_composing() {
             return false;
         }
-        if is_quick_look_shortcut(&ev.key) {
+        // Held Enter must not confirm an operation whose prompt it just opened.
+        if ev.key == Key::Enter && tx.key_repeat() {
+            return true;
+        }
+        if self.session.destination().is_none() && is_quick_look_shortcut(&ev.key) {
             if !self
                 .session
                 .selected_item()
@@ -933,6 +1445,23 @@ impl Ui {
         }
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
+        if plain
+            && !m.shift
+            && matches!(ev.key, Key::Tab | Key::Right)
+            && self.query.anchor == self.query.focus
+            && self.query.focus == self.query.text.len()
+            && self
+                .session
+                .selected_item()
+                .is_some_and(|item| item.action(crate::scripts::provider::ARGUMENTS).is_some())
+        {
+            let key = self.session.result_key(self.session.selected());
+            let effects = self
+                .session
+                .run_key_action(&key, crate::scripts::provider::ARGUMENTS);
+            self.apply(effects, tx);
+            return true;
+        }
         let intent = match &ev.key {
             Key::Tab
                 if plain
@@ -942,7 +1471,9 @@ impl Ui {
             {
                 Intent::Complete
             }
-            Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
+            Key::Text(t) if t == " " && plain && !m.shift && self.query.anchor == self.query.focus => {
+                Intent::Space
+            }
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,
             Key::Down => Intent::Down,
@@ -973,10 +1504,13 @@ impl Ui {
         if self.picker.is_some() {
             return;
         }
-        if self.session.select_key(id)
-            && let Some(effects) = self.session.intent(Intent::Open)
-        {
-            self.apply(effects, tx);
+        if self.session.select_key(id) {
+            if self.session.destination().is_some() {
+                tx.focus("query", false);
+                self.apply(vec![Effect::RevealSelection], tx);
+            } else if let Some(effects) = self.session.intent(Intent::Open) {
+                self.apply(effects, tx);
+            }
         }
     }
 
@@ -1084,10 +1618,9 @@ impl Ui {
         ) = (&screen.stage, &self.icon_cache)
         {
             for app in apps {
-                self.icons.insert(
-                    format!("choice-{}", app.path.display()),
-                    cache.app_icon(&app.path, ICON_SIZE),
-                );
+                self.icons
+                    .entry(app.path.clone())
+                    .or_insert_with(|| cache.app_icon(&app.path, ICON_SIZE));
             }
         }
         crate::trace::action_screen(
@@ -1161,7 +1694,9 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
-            if self.session.results() == dupin_core::session::Results::Done {
+            if self.session.results() == dupin_core::session::Results::Done
+                && !self.session.command().private_results
+            {
                 crate::trace::results_done(&self.query.text, self.session.items().len());
             }
             if self
@@ -1182,7 +1717,158 @@ impl Ui {
         }
     }
 
-    fn refresh_apps(&mut self, tx: &mut Tx) {
+    pub(crate) fn scripts_catalog(&mut self, mut catalog: Catalog, tx: &mut Tx) {
+        let notice = catalog.notice.take();
+        self.prefs.update(move |prefs, _| prefs.scripts_notice = notice);
+        let changed = {
+            let mut current = self.scripts.write().unwrap();
+            let changed = current.scripts != catalog.scripts;
+            if changed {
+                *current = catalog;
+            }
+            changed
+        };
+        let first = !std::mem::replace(&mut self.scripts_catalog_ready, true);
+        // The save acknowledgement applies the latest catalogue without releasing reserved chords early.
+        if (first || changed) && self.control_save.is_none() {
+            self.refresh_hotkeys();
+        }
+        if changed {
+            self.refresh_default(tx);
+        }
+    }
+
+    fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let Some(entry) = &self.script_entry else {
+            return false;
+        };
+        if entry.query.is_composing() {
+            return false;
+        }
+        if matches!(ev.key, Key::Escape) || (matches!(ev.key, Key::Backspace) && entry.query.text.is_empty())
+        {
+            self.script_entry = None;
+            tx.focus("query", false);
+            return true;
+        }
+        if matches!(ev.key, Key::Enter) {
+            let effects = crate::scripts::entry::Entry::submit(
+                &mut self.script_entry,
+                &mut self.session,
+                &self.scripts.read().unwrap(),
+            );
+            self.apply(effects, tx);
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn script_entry_current(&self, entry: &crate::scripts::entry::Entry) -> bool {
+        entry.is_current(&self.session, &self.scripts.read().unwrap())
+    }
+
+    pub fn stop_child_processes(&mut self, _: &mut Tx) {
+        self.runner.kill_all_now();
+    }
+
+    pub(crate) fn cancel_script(&mut self, id: crate::scripts::runner::RunId) {
+        self.runner.cancel(id);
+    }
+
+    fn show_script_output(&self, id: crate::scripts::runner::RunId) {
+        let runs = self.runner.snapshots();
+        self.script_output.update(move |s, _| s.update(runs, Some(id)));
+        self.script_output.open();
+    }
+
+    fn script_changed(&mut self, id: crate::scripts::runner::RunId, finished: bool, tx: &mut Tx) -> bool {
+        let Some(snapshot) = self.runner.snapshot(id) else {
+            return false;
+        };
+        if !finished && snapshot.status != crate::scripts::runner::Status::Running {
+            return false;
+        }
+        let changed = self
+            .script_card
+            .as_ref()
+            .is_some_and(|card| card.id == id && !Arc::ptr_eq(card, &snapshot));
+        if changed {
+            self.script_card = Some(snapshot.clone());
+            tx.instant();
+        }
+        let inline_card = self
+            .script_card
+            .as_ref()
+            .filter(|_| self.picker.is_none())
+            .map(|card| card.id);
+        if crate::scripts::output::show_failure(&snapshot, inline_card, self.me.is_visible()) {
+            self.show_script_output(id);
+        } else {
+            self.script_output.update_if(move |s, _| s.replace_run(snapshot));
+        }
+        changed
+    }
+
+    fn launch_script(&self, command: dupin_core::script::ScriptRun) -> crate::scripts::runner::Start {
+        let valid = self
+            .scripts
+            .read()
+            .unwrap()
+            .scripts
+            .get(&command.path)
+            .is_some_and(|s| {
+                s.header.title == command.title
+                    && s.header.mode == command.mode
+                    && s.header.bind_args(&command.args).is_ok()
+            });
+        if valid {
+            self.runner.start(command)
+        } else {
+            self.runner
+                .refuse(command, "Script changed. Search again before running it.".into())
+        }
+    }
+
+    pub(crate) fn repeat_script(&self, command: dupin_core::script::ScriptRun) {
+        let start = self.launch_script(command);
+        self.show_script_output(start.id);
+    }
+
+    fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        let mode = command.mode;
+        let start = self.launch_script(command);
+        self.present_script(mode, start, tx);
+    }
+
+    fn present_script(
+        &mut self,
+        mode: dupin_core::script::OutputMode,
+        start: crate::scripts::runner::Start,
+        tx: &mut Tx,
+    ) {
+        use dupin_core::script::OutputMode;
+        match mode {
+            OutputMode::Inline => {
+                self.script_card = self.runner.snapshot(start.id);
+                tx.focus("query", false);
+            }
+            OutputMode::Silent if !start.refused => {}
+            OutputMode::Full | OutputMode::Silent => {
+                if self.me.is_visible() {
+                    self.script_output_after_close = Some(start.id);
+                } else {
+                    self.show_script_output(start.id);
+                    return;
+                }
+            }
+        }
+        if self.script_output_after_close.is_none() && self.script_output.is_visible() {
+            let runs = self.runner.snapshots();
+            self.script_output.update(move |s, _| s.update(runs, None));
+        }
+    }
+
+    fn refresh_default(&mut self, tx: &mut Tx) {
         if self.session.command_id().as_str() == crate::commands::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
@@ -1222,7 +1908,6 @@ impl Ui {
                     self.action_screen = Some(ActionScreen {
                         key: id,
                         item: item.clone(),
-                        layout_key: self.session.layout_key(self.session.selected()),
                         selected,
                         stage,
                     });
@@ -1231,6 +1916,7 @@ impl Ui {
                     command,
                     generation,
                     query,
+                    folder,
                 } => {
                     self.action_screen = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
@@ -1249,7 +1935,7 @@ impl Ui {
                         }
                     }
                     if let Some(searcher) = self.searchers.get(&command) {
-                        searcher.search(generation, query, limit);
+                        searcher.search(generation, query, folder, limit);
                         self.deadlines.insert(command, (generation, due));
                         tx.wake_at(due);
                     }
@@ -1259,12 +1945,136 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
-                Effect::ReplaceQuery(text) => self.query.replace_text(text),
-                Effect::SaveHistory => self.saver.save(self.session.history()),
+                Effect::ClearQuery => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.action_screen = None;
+                    if let Some(picker) = &mut self.picker {
+                        picker.original.clear();
+                    } else {
+                        self.query.clear();
+                    }
+                }
+                Effect::ReplaceQuery(text) => {
+                    self.script_card = None;
+                    self.script_entry = None;
+                    self.query.replace_text(text);
+                }
+                Effect::SelectQuery(range) => {
+                    tx.focus("query", false);
+                    self.query.set_selection(range.start, range.end);
+                }
+                Effect::SelectRenameStem(path) => {
+                    let extension = dupin_mac::file_ops::has_extension(&path);
+                    let end = dupin_core::file_name::stem_len(&self.query.text, extension);
+                    tx.focus("query", false);
+                    self.query.set_selection(0, end);
+                }
+                Effect::Rename { row, path, name } => {
+                    let old = file_name(&path);
+                    self.on_worker(
+                        move || {
+                            dupin_mac::file_ops::rename(&path, &name).map(|renamed| {
+                                dupin_mac::file_actions::item(renamed, name.clone(), Vec::new())
+                            })
+                        },
+                        move |ui, result, tx| match result {
+                            Ok(item) => {
+                                let notice = format!("Renamed to “{}”", item.display_title());
+                                ui.session.replace(&row, item);
+                                if ui
+                                    .action_screen
+                                    .as_ref()
+                                    .is_some_and(|screen| !screen.is_current(&ui.session))
+                                {
+                                    ui.action_screen = None;
+                                }
+                                ui.fetch_icons();
+                                ui.timed_notice(notice, tx);
+                            }
+                            Err(error) => ui.show_notice(format!("Couldn't rename “{old}”: {error}"), tx),
+                        },
+                    );
+                }
+                Effect::Transfer {
+                    transfer,
+                    path,
+                    folder,
+                } => {
+                    let name = file_name(&path);
+                    let destination = file_name(&folder);
+                    let files = self.file_transfers.clone();
+                    self.on_worker(
+                        move || {
+                            let result = match transfer {
+                                Transfer::Move => files.move_to(&path, &folder),
+                                Transfer::Copy => files.copy_to(&path, &folder),
+                            };
+                            (path, result)
+                        },
+                        move |ui, (path, result), tx| {
+                            let (done, verb) = match transfer {
+                                Transfer::Move => ("Moved", "move"),
+                                Transfer::Copy => ("Copied", "copy"),
+                            };
+                            match result {
+                                Ok(output) => {
+                                    if transfer == Transfer::Move {
+                                        ui.session.forget_path(&path);
+                                        if ui
+                                            .action_screen
+                                            .as_ref()
+                                            .is_some_and(|screen| !screen.is_current(&ui.session))
+                                        {
+                                            ui.action_screen = None;
+                                        }
+                                    }
+                                    ui.timed_notice(
+                                        format!("{done} “{}” to “{destination}”", file_name(&output)),
+                                        tx,
+                                    );
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't {verb} “{name}”: {error}"), tx)
+                                }
+                            }
+                        },
+                    );
+                }
+                Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
+                    dupin_core::Action::RunScript(command) => self.start_script(command, tx),
+                    dupin_core::Action::ScriptArguments(path) => {
+                        let script = self.scripts.read().unwrap().scripts.get(&path).cloned();
+                        if let Some(script) = script
+                            && self
+                                .session
+                                .selected_item()
+                                .and_then(|item| item.action(crate::scripts::provider::ARGUMENTS))
+                                == Some(&dupin_core::Action::ScriptArguments(path))
+                            && let Some(target) =
+                                self.session.followup_target(crate::scripts::provider::ARGUMENTS)
+                        {
+                            let mut query = TextEdit::new("");
+                            query.focused = true;
+                            self.script_card = None;
+                            self.script_entry = Some(crate::scripts::entry::Entry {
+                                target,
+                                script,
+                                query,
+                            });
+                            tx.focus("script-arguments", false);
+                        }
+                    }
                     dupin_core::Action::Copy(text) => tx.copy(text),
+                    dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
+                    dupin_core::Action::ArrangeWindow(layout) => {
+                        if self.window_management_enabled && !rune::tooling::is_headless() {
+                            self.window_action_after_close =
+                                Some((layout, self.frontmost_pid, Busy::new(self.running.clone())));
+                        }
+                    }
                     dupin_core::Action::System(command) => {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;
@@ -1282,7 +2092,54 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
-                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::CopyFiles(paths) => {
+                        if let Err(error) = dupin_mac::clipboard::copy_files(&paths) {
+                            self.show_notice(error, tx);
+                        }
+                    }
+                    dupin_core::Action::ChooseApplication(_)
+                    | dupin_core::Action::Trash(_)
+                    | dupin_core::Action::Browse(_)
+                    | dupin_core::Action::Rename(_)
+                    | dupin_core::Action::ChooseDestination { .. }
+                    | dupin_core::Action::DeleteClipboardEntry(_)
+                    | dupin_core::Action::ClearClipboardHistory => {}
+                    dupin_core::Action::RequestClipboardAccess => {
+                        let busy = Busy::new(self.running.clone());
+                        std::thread::spawn(move || {
+                            dupin_mac::clipboard::request_access();
+                            drop(busy);
+                        });
+                    }
+                    dupin_core::Action::Duplicate(path) => {
+                        let name = file_name(&path);
+                        let files = self.file_transfers.clone();
+                        self.on_worker(
+                            move || files.duplicate(&path),
+                            move |ui, result, tx| match result {
+                                Ok(copy) => {
+                                    ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't duplicate “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
+                    dupin_core::Action::Compress(path) => {
+                        let name = file_name(&path);
+                        self.on_worker(
+                            move || dupin_mac::file_ops::compress(&path),
+                            move |ui, result, tx| match result {
+                                Ok(archive) => {
+                                    ui.timed_notice(format!("Compressed to “{}”", file_name(&archive)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't compress “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
                     dupin_core::Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {
@@ -1300,17 +2157,10 @@ impl Ui {
                     action: dupin_core::Action::Trash(path),
                 } => {
                     self.action_screen = None;
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let me = self.me.clone();
-                    let running = self.running.clone();
-                    running.fetch_add(1, Ordering::AcqRel);
-                    std::thread::spawn(move || {
-                        let result = dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path));
-                        me.update(move |ui, tx| match result {
+                    let name = file_name(&path);
+                    self.on_worker(
+                        move || dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path)),
+                        move |ui, result, tx| match result {
                             Ok(()) => {
                                 ui.session.forget(&id);
                                 ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
@@ -1318,9 +2168,26 @@ impl Ui {
                             Err(error) => {
                                 ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
                             }
-                        });
-                        running.fetch_sub(1, Ordering::AcqRel);
-                    });
+                        },
+                    );
+                }
+                Effect::RunConsuming {
+                    id,
+                    action: dupin_core::Action::DeleteClipboardEntry(entry),
+                } => {
+                    self.action_screen = None;
+                    self.clipboard.delete(entry);
+                    self.session.forget(&id);
+                }
+                Effect::RunConsuming {
+                    action: dupin_core::Action::ClearClipboardHistory,
+                    ..
+                } => {
+                    self.action_screen = None;
+                    self.clipboard.clear();
+                    let effects = self.session.refresh();
+                    self.apply(effects, tx);
+                    self.timed_notice("Cleared the clipboard history".into(), tx);
                 }
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
@@ -1333,7 +2200,65 @@ impl Ui {
                 }
             }
         }
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
+    }
+
+    /// Copy the snippet now, or, to paste it, once the panel closes. Pasting needs
+    /// Accessibility access: the first attempt without it asks macOS, and later ones explain.
+    fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
+        let snippet = SnippetRun {
+            text,
+            now: dupin_mac::clock::now(),
+        };
+        if paste && !rune::tooling::is_headless() && self.may_paste() {
+            self.paste_after_close = Some(snippet);
+        } else {
+            self.deliver_snippet(snippet, false, tx);
+        }
+    }
+
+    fn may_paste(&mut self) -> bool {
+        if dupin_mac::paste::allowed() {
+            return true;
+        }
+        if std::mem::replace(&mut self.paste_access_asked, true) {
+            self.notice_after_close = Some(PASTE_ACCESS_NOTICE.into());
+        } else {
+            dupin_mac::paste::request();
+        }
+        false
+    }
+
+    fn deliver_snippet(&self, snippet: SnippetRun, paste: bool, tx: &mut Tx) {
+        use dupin_core::snippets::{expand, needs_clipboard};
+
+        if needs_clipboard(&snippet.text) {
+            let busy = Busy::new(self.running.clone());
+            tx.read_clipboard(move |ui: &mut Self, content, tx| {
+                let text = expand(&snippet.text, snippet.now, content.text());
+                ui.finish_snippet(text, paste, tx);
+                drop(busy);
+            });
+        } else {
+            let text = expand(&snippet.text, snippet.now, "");
+            self.finish_snippet(text, paste, tx);
+        }
+    }
+
+    fn finish_snippet(&self, text: String, paste: bool, tx: &mut Tx) {
+        if !paste {
+            tx.copy(text);
+            return;
+        }
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        let key = dupin_mac::paste::key_code();
+        std::thread::spawn(move || {
+            if let Err(error) = dupin_mac::paste::paste(key, &text) {
+                me.update(move |ui, tx| ui.show_notice(error, tx));
+            }
+            drop(busy);
+        });
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
@@ -1347,6 +2272,56 @@ impl Ui {
             if let Err(error) = run() {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
+            drop(busy);
+        });
+    }
+
+    fn arrange_window(&mut self, layout: WindowLayout, pid: Option<i32>, busy: Busy) {
+        let me = self.me.clone();
+        if self.window_action_running {
+            me.update(|ui, tx| ui.show_notice("A window command is already running.".into(), tx));
+            return;
+        }
+        self.window_action_running = true;
+        let displays = window_management::displays();
+        std::thread::spawn(move || {
+            let result = pid
+                .ok_or(WindowError::NoWindow)
+                .and_then(|pid| window_management::arrange(pid, layout, &displays));
+            me.update(move |ui, tx| {
+                ui.window_action_running = false;
+                ui.window_permission_required = ui.window_management_enabled
+                    && matches!(
+                        result,
+                        Err(WindowError::PermissionRequested | WindowError::PermissionRequired)
+                    )
+                    && !accessibility::is_trusted();
+                if !ui.window_management_enabled || ui.picker.is_some() {
+                    return;
+                }
+                match result {
+                    Err(WindowError::PermissionRequired) if ui.window_permission_required => ui.show(tx),
+                    Err(WindowError::PermissionRequested | WindowError::PermissionRequired) => {}
+                    Err(error) => ui.show_notice(error.message().into(), tx),
+                    Ok(()) => {}
+                }
+            });
+            drop(busy);
+        });
+    }
+
+    /// Run a file operation off the main thread and report its result back on it. A relaunch
+    /// waits until it has finished.
+    fn on_worker<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Ui, T, &mut Tx) + Send + 'static,
+    ) {
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        std::thread::spawn(move || {
+            let result = work();
+            me.update(move |ui, tx| done(ui, result, tx));
             drop(busy);
         });
     }
@@ -1406,7 +2381,10 @@ impl Ui {
                 }
                 let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
                 changed |= delivered;
-                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                if delivered
+                    && self.session.results() == dupin_core::session::Results::Done
+                    && !self.session.command().private_results
+                {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
             }
@@ -1427,21 +2405,17 @@ impl Ui {
     fn fetch_icons(&mut self) {
         let Some(cache) = &self.icon_cache else { return };
         if self.icons.len() > ICON_CAP {
-            let current: std::collections::HashSet<String> = self
+            let current: std::collections::HashSet<_> = self
                 .session
                 .items()
                 .iter()
-                .enumerate()
-                .map(|(i, _)| self.session.layout_key(i))
+                .filter_map(|item| item.icon.as_ref())
                 .collect();
-            self.icons.retain(|id, _| current.contains(id.as_str()));
+            self.icons.retain(|path, _| current.contains(path));
         }
-        for (index, item) in self.session.items().iter().enumerate() {
-            if let Some(path) = &item.icon
-                && !self.icons.contains_key(&self.session.layout_key(index))
-            {
-                self.icons
-                    .insert(self.session.layout_key(index), cache.app_icon(path, ICON_SIZE));
+        for path in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
+            if !self.icons.contains_key(path) {
+                self.icons.insert(path.clone(), cache.app_icon(path, ICON_SIZE));
             }
         }
     }
@@ -1467,26 +2441,37 @@ fn reconcile_snapshot(
     }
 }
 
-fn accept_config(
-    config: Config,
-    previous: &Config,
-    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
-) -> Result<Config, String> {
-    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
-        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
-    })?;
-    if let Err(error) = install(shortcut.as_ref())
-        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
-    {
-        return Err(format!(
-            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
-        ));
-    }
-    Ok(config)
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn is_quick_look_shortcut(key: &Key) -> bool {
     matches!(key, Key::Command('y'))
+}
+
+fn selection_query(text: &str) -> TextEdit {
+    const MAX_QUERY_CHARS: usize = 500;
+    let mut chars = text.trim().chars().peekable();
+    let query: String = std::iter::from_fn(|| {
+        let next = chars.next()?;
+        if next == '\r' {
+            chars.next_if_eq(&'\n');
+        }
+        Some(match next {
+            '\r' | '\n' | '\t' | '\u{2028}' | '\u{2029}' => ' ',
+            other => other,
+        })
+    })
+    .take(MAX_QUERY_CHARS)
+    .collect();
+    let mut edit = TextEdit::new("");
+    edit.set_single_line(true);
+    edit.insert(query.trim_end());
+    edit.set_selection(0, edit.text.len());
+    edit
 }
 
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
@@ -1530,6 +2515,33 @@ mod ui_helper_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+    use objc2_foundation::{NSPoint, NSSize};
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    #[test]
+    fn places_the_query_inside_the_selected_screens_visible_frame() {
+        let frame = rect(100.0, -900.0, 1440.0, 900.0);
+        let visible = rect(160.0, -850.0, 1380.0, 820.0);
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Center),
+            (410.0, 408.0)
+        );
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 400, Position::Center),
+            (550.0, 408.0)
+        );
+    }
+
+    #[test]
+    fn top_spacing_cannot_push_the_query_below_the_visible_area() {
+        let frame = rect(-800.0, 200.0, 800.0, 150.0);
+        let visible = rect(-800.0, 200.0, 800.0, 120.0);
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+    }
 
     #[test]
     fn cosmetic_configuration_retains_query_selection_history_and_pending_search() {
@@ -1597,25 +2609,20 @@ mod config_tests {
     }
 
     #[test]
-    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
-        let previous = Config::default();
-        let changed = Config {
-            file_limit: 50,
-            ..previous.clone()
-        };
-        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
-        assert_eq!(accepted, Ok(changed));
+    fn typing_replaces_the_entire_selected_query() {
+        let mut edit = selection_query("\t 日本語\r\nsecond line\u{2029} ");
+        assert_eq!(edit.text, "日本語 second line");
+        assert_eq!(edit.range(), (0, edit.text.len()));
+        edit.insert("calculator");
+        assert_eq!(edit.text, "calculator");
     }
 
     #[test]
-    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
-        let previous = Config::default();
-        let changed = Config {
-            hotkey: "ctrl+alt+k".into(),
-            file_limit: 50,
-            ..previous.clone()
-        };
-        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
+    fn a_document_selection_becomes_a_bounded_unicode_query() {
+        let text = format!("{}\r\n続き", "猫".repeat(500));
+        let edit = selection_query(&text);
+        assert_eq!(edit.text, "猫".repeat(500));
+        assert_eq!(edit.range(), (0, edit.text.len()));
     }
 }
 
@@ -1815,7 +2822,6 @@ mod action_screen_tests {
         session.intent(Intent::Actions);
         let screen = ActionScreen {
             key: session.result_key(0),
-            layout_key: session.layout_key(0),
             item: session.items()[0].clone(),
             selected: 0,
             stage: ActionStage::List,

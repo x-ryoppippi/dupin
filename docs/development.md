@@ -11,6 +11,18 @@ nix flake check                    # treefmt, clippy, tests and the app bundle
 nix fmt                            # format everything (see Formatting)
 ```
 
+In the development shell, `just` runs every build; `just` alone lists the recipes:
+
+```sh
+just build-all   # the app bundle, the debug binary and the website
+just build       # nix build .#dupin
+just build-debug # cargo build -p dupin
+just run         # build the bundle, then open it
+just package     # a signed dist/Dupin.zip; see releasing
+just snap        # headless renders (see Headless renders)
+just footprint   # the peak-footprint budget (see Peak memory)
+```
+
 `direnv allow` (or `nix develop`) gives a shell with cargo, clippy, rustfmt, rust-analyzer, nushell and the formatters:
 
 ```sh
