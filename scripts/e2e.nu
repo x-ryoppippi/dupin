@@ -55,7 +55,7 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: the panel opened Calculator, and Settings showed its pages'
+    print 'e2e: the panel opened Calculator, Dupin Settings and the Bluetooth pane'
 }
 
 def scenario [out: path] {
@@ -250,6 +250,83 @@ def scenario [out: path] {
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app Dupin
     snap $out settings-from-result
+
+    system-pane $out $focused $found
+}
+
+def system-pane [out: path, focused: closure, found: closure] {
+    let before = poll $out bluetooth-evidence-before-apps {|r| $r.ok } list-apps
+    if (mentions $before 'System Settings') {
+        error make {
+            msg: 'System Settings was already running; a stale pane could falsely pass'
+        }
+    }
+    ad $out bluetooth-evidence-close-preferences press cmd+w | ignore
+    ad $out bluetooth-evidence-hotkey press alt+space | ignore
+    (poll
+        $out
+        bluetooth-evidence-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "bluetooth"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out bluetooth-evidence-query
+        {|r| $r.ok and $r.data?.match?.value? == 'bluetooth' }
+        find --app Dupin --role textfield --first
+    )
+    let result = (poll
+        $out bluetooth-evidence-selected-result $found
+        find --app Dupin --name 'Bluetooth System Settings' --exact --first
+    )
+    if $result.data?.match?.ref_id? == null {
+        error make {msg: 'Bluetooth result has no actionable accessibility reference'}
+    }
+    snap $out bluetooth-evidence-before
+    let log = $out | path join dupin.log
+    cp $log ($out | path join bluetooth-evidence-before-trace.log)
+    let failure = try {
+        let activated = (ad
+            $out
+            bluetooth-evidence-activate-result
+            click
+            $result.data.match.ref_id
+        )
+        if not $activated.ok {
+            error make {msg: 'Could not activate the exact Bluetooth launcher result'}
+        }
+        wait-frontmost 'System Settings'
+        let destination = {|r| $r.ok and (
+            $r.data | any {|window| $window.title == 'Bluetooth' and $window.is_focused }
+        ) }
+        (poll
+            $out
+            bluetooth-evidence-destination
+            $destination
+            list-windows
+            --app
+            'System Settings'
+        )
+        snap --app 'System Settings' $out bluetooth-evidence-after
+        null
+    } catch {|error|
+        snap --app 'System Settings' $out bluetooth-evidence-failure
+        $error
+    }
+    cp $log ($out | path join bluetooth-evidence-after-trace.log)
+    # The absence check above establishes ownership of this CI-launched app.
+    ^osascript -e 'tell application "System Settings" to quit'
+    if $failure != null { error make $failure }
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
@@ -298,8 +375,8 @@ def mentions [reply: record, name: string]: nothing -> bool {
     $reply.data? | to json --raw | str contains $'"($name)"'
 }
 
-def snap [out: path, name: string] {
-    ad $out $'($name)-snapshot' snapshot --app Dupin | ignore
+def snap [out: path, name: string, --app: string = 'Dupin'] {
+    ad $out $'($name)-snapshot' snapshot --app $app | ignore
     let shot = ^screencapture -x ($out | path join $'($name).png') | complete
     if $shot.exit_code != 0 {
         error make {msg: $"screencapture failed for ($name): ($shot.stderr)"}
