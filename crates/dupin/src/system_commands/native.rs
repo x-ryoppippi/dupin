@@ -4,6 +4,8 @@ use std::ptr::{self, NonNull};
 use dupin_core::SystemCommand;
 
 const TYPE_APPLICATION_BUNDLE_ID: u32 = 0x6275_6e64;
+// Finder replies after it empties the Trash. Large deletions can outlast the default timeout.
+const EMPTY_TRASH_REPLY_TIMEOUT_TICKS: c_long = 5 * 60 * 60;
 
 pub fn run(command: SystemCommand) -> Result<(), String> {
     use SystemCommand::*;
@@ -16,7 +18,13 @@ pub fn run(command: SystemCommand) -> Result<(), String> {
         LogOut => loginwindow(*b"rlgo"),
         EmptyTrash => {
             let finder = Descriptor::address(TYPE_APPLICATION_BUNDLE_ID, b"com.apple.finder")?;
-            send_event(&finder, "Finder", *b"fndr", *b"empt", true)
+            send_event(
+                &finder,
+                "Finder",
+                *b"fndr",
+                *b"empt",
+                Some(EMPTY_TRASH_REPLY_TIMEOUT_TICKS),
+            )
         }
         ToggleDarkMode => toggle_dark_mode(),
     }
@@ -174,7 +182,7 @@ fn loginwindow(id: [u8; 4]) -> Result<(), String> {
     let mut psn = [0u8; 8];
     psn[4..].copy_from_slice(&1u32.to_ne_bytes());
     let target = Descriptor::address(u32::from_be_bytes(*b"psn "), &psn)?;
-    send_event(&target, "loginwindow", *b"aevt", id, false)
+    send_event(&target, "loginwindow", *b"aevt", id, None)
 }
 
 fn send_event(
@@ -182,7 +190,7 @@ fn send_event(
     name: &str,
     class: [u8; 4],
     id: [u8; 4],
-    wait_for_reply: bool,
+    reply_timeout_ticks: Option<c_long>,
 ) -> Result<(), String> {
     const CAN_INTERACT: i32 = 0x20;
     const NO_REPLY: i32 = 1;
@@ -201,15 +209,15 @@ fn send_event(
             &mut event,
         );
         event_status(name, i32::from(status))?;
-        if !wait_for_reply {
+        let Some(timeout) = reply_timeout_ticks else {
             // The session can end before loginwindow could send a reply.
             return event_status(
                 name,
                 AESendMessage(&event, ptr::null_mut(), NO_REPLY | CAN_INTERACT, DEFAULT_TIMEOUT),
             );
-        }
+        };
         let mut reply = Descriptor::empty();
-        let status = AESendMessage(&event, &mut reply, WAIT_REPLY | CAN_INTERACT, DEFAULT_TIMEOUT);
+        let status = AESendMessage(&event, &mut reply, WAIT_REPLY | CAN_INTERACT, timeout);
         if status != 0 {
             // Apple Event Manager only transfers reply ownership on a successful send.
             std::mem::forget(reply);
