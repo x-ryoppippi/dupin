@@ -107,8 +107,4 @@ is never replaced; an owner-only socket with no listener is recovered on restart
 Picker and settings contention return Busy. Disconnecting cancels a pending picker.
 Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
 [--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
-The list includes only id, saved time, command, title and query; it reports archive
-problems and marks truncated replies. These commands never save, delete, resume a
-query, activate a result or write usage-ranking history. Opening uses normal panel
-dismissal, which may retain a completed query in memory for query recall. Opening is
-refused while a picker is active.
+See the [Snapshots usage guide](docs/usage.md#snapshots) for details.
