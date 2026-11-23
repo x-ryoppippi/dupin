@@ -149,7 +149,7 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
-            display: DisplaySelection::Mouse,
+            display: DisplaySelection::default(),
             web_searches: BTreeMap::from([
                 (
                     "g".into(),

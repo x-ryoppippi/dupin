@@ -100,11 +100,11 @@ fn position_title(position: Position) -> &'static str {
     }
 }
 
-fn display_title(display: DisplaySelection) -> &'static str {
+fn display_option(display: DisplaySelection) -> (&'static str, &'static str) {
     match display {
-        DisplaySelection::Mouse => "Mouse pointer",
-        DisplaySelection::Main => "Main display",
-        DisplaySelection::Active => "Focused window",
+        DisplaySelection::Mouse => ("mouse", "Mouse pointer"),
+        DisplaySelection::Main => ("main", "Main display"),
+        DisplaySelection::Active => ("active", "Focused window"),
     }
 }
 
@@ -355,24 +355,27 @@ impl Prefs {
     }
 
     fn pick_display(&mut self, tx: &mut Tx) {
-        let choices = [
-            (DisplaySelection::Mouse, "mouse"),
-            (DisplaySelection::Main, "main"),
-            (DisplaySelection::Active, "active"),
+        const CHOICES: [DisplaySelection; 3] = [
+            DisplaySelection::Mouse,
+            DisplaySelection::Main,
+            DisplaySelection::Active,
         ];
-        let selected = choices
-            .iter()
-            .find(|(value, _)| *value == self.config.display)
-            .unwrap()
-            .1;
-        let options = choices
-            .map(|(value, id)| (id.to_owned(), display_title(value).to_owned()))
-            .to_vec();
-        Prefs::choose(tx, DISPLAY, options, selected, move |s, id| {
-            if let Some((value, _)) = choices.iter().find(|(_, name)| *name == id) {
-                s.set(|config| config.display = *value);
-            }
-        });
+        let options = CHOICES
+            .into_iter()
+            .map(display_option)
+            .map(|(id, label)| (id.to_owned(), label.to_owned()))
+            .collect();
+        Prefs::choose(
+            tx,
+            DISPLAY,
+            options,
+            display_option(self.config.display).0,
+            |s, id| {
+                if let Some(value) = CHOICES.into_iter().find(|value| display_option(*value).0 == id) {
+                    s.set(|config| config.display = value);
+                }
+            },
+        );
     }
 
     fn pick_position(&mut self, tx: &mut Tx) {
@@ -677,7 +680,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
         k,
         DISPLAY,
         "Display",
-        display_title(s.config.display),
+        display_option(s.config.display).1,
         Prefs::pick_display,
     );
     let position = menu_value(
@@ -711,7 +714,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::PANEL,
             "Display",
-            Some("Focused window needs Accessibility access"),
+            Some("Focused window requires Accessibility access"),
             display,
         ),
         setting(

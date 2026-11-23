@@ -26,9 +26,7 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 
-## Display selection
-
-Settings → General → Display chooses the screen afresh whenever the panel opens. `"mouse"` follows the pointer, `"main"` uses the primary display configured in System Settings → Displays, and `"active"` uses the screen holding most of the focused window. Active mode reads the system-wide focused window through Accessibility; it never requests access automatically. If access or a focused window is unavailable, the panel uses the main display and reports the fallback. The query field is positioned within the selected screen’s visible area, avoiding its menu bar and Dock; results retain their existing downward growth.
+In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses the main display when Accessibility access or a focused window is unavailable.
 
 ## Web searches
 
