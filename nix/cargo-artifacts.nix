@@ -70,6 +70,8 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
+      # The extension SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [ pkgs.esbuild ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';

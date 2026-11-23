@@ -12,6 +12,8 @@
             rust-analyzer
             nushell
             nodejs
+            # `dupin ext build` bundles TypeScript extensions with Bun or esbuild from PATH.
+            esbuild
             config.packages.pnpm
             config.packages.blacksmith
             just

@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -19,6 +19,9 @@ enum Action {
     ExtCheck(String),
     /// Ask an extension folder for a query.
     ExtRun(String, String),
+    ExtNew(String, dupin_ext_sdk::Template),
+    ExtBuild(String, dupin_ext_sdk::BuildOptions),
+    ExtDev(String, dupin_ext_sdk::BuildOptions),
     Mcp,
 }
 
@@ -58,12 +61,31 @@ impl From<dupin_js_runtime::RunError> for Failure {
 fn parse(args: &[String]) -> Result<Action, String> {
     let mut parser = pico_args::Arguments::from_vec(args.iter().map(std::ffi::OsString::from).collect());
     let json = parser.contains("--json");
+    let typescript = parser.contains("--ts");
+    let options = dupin_ext_sdk::BuildOptions {
+        sourcemap: parser.contains("--sourcemap"),
+    };
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
         .map(|s| s.to_str().ok_or_else(|| "arguments must be UTF-8".to_owned()))
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
+        ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap => {
+            let template = if typescript {
+                dupin_ext_sdk::Template::TypeScript
+            } else {
+                dupin_ext_sdk::Template::JavaScript
+            };
+            Ok(Action::ExtNew(folder.to_string(), template))
+        }
+        ["ext", "build", folder] if !folder.starts_with('-') && !typescript => {
+            Ok(Action::ExtBuild(folder.to_string(), options))
+        }
+        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript => {
+            Ok(Action::ExtDev(folder.to_string(), options))
+        }
+        _ if typescript || options.sourcemap => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
@@ -359,9 +381,98 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             print!("{}", describe_outcome(&outcome));
             Ok(Value::Null)
         }
+        Action::ExtNew(folder, template) => {
+            let files = dupin_ext_sdk::scaffold(std::path::Path::new(&folder), template)?;
+            let files: Vec<String> = files.iter().map(|file| file.display().to_string()).collect();
+            if json {
+                return Ok(serde_json::json!({ "created": files }));
+            }
+            println!("Created {folder}:");
+            for file in files {
+                println!("  {file}");
+            }
+            Ok(Value::Null)
+        }
+        Action::ExtBuild(folder, options) => {
+            let built = dupin_ext_sdk::build(
+                std::path::Path::new(&folder),
+                dupin_ext_sdk::Bundler::find().as_ref(),
+                options,
+                &check_package,
+            )?;
+            let bundler = built.bundler.map(dupin_ext_sdk::BundlerKind::name);
+            if json {
+                return Ok(serde_json::json!({
+                    "name": built.package.name,
+                    "output": built.output,
+                    "bundler": bundler,
+                    "sourcemap": built.sourcemap,
+                }));
+            }
+            match bundler {
+                Some(bundler) => println!("Built {} with {bundler}", built.output),
+                None => println!(
+                    "{} is plain JavaScript, needs no build and passes the check",
+                    built.output
+                ),
+            }
+            Ok(Value::Null)
+        }
+        Action::ExtDev(folder, options) => {
+            let extensions = crate::extensions::directory()
+                .ok_or("couldn't find the extensions folder beside config.toml")?;
+            let bundler = dupin_ext_sdk::Bundler::find();
+            let copy = dupin_ext_sdk::dev::DevCopy {
+                package_dir: std::path::Path::new(&folder),
+                extensions: &extensions,
+                bundler: bundler.as_ref(),
+                options,
+                validate: &check_package,
+            };
+            copy.watch(std::time::Duration::from_millis(250), &|| true, &mut |outcome| {
+                report_dev(outcome, json)
+            });
+            Ok(Value::Null)
+        }
         Action::Mcp => crate::mcp::run()
             .map(|()| Value::Null)
             .map_err(|e| e.to_string().into()),
+    }
+}
+
+fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagnostic> {
+    dupin_ext_sdk::check(folder).map(drop)
+}
+
+/// `dupin ext dev` keeps running, so each revision is reported as it happens: a JSON line with
+/// `--json`, otherwise a line on stdout or a diagnostic on stderr.
+fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::Diagnostic>, json: bool) {
+    match (outcome, json) {
+        (Ok(published), true) => println!(
+            "{}",
+            serde_json::json!({
+                "published": published.name,
+                "revision": published.revision,
+                "path": published.link,
+            })
+        ),
+        (Ok(published), false) => println!(
+            "Published {} revision {} to {}",
+            published.name,
+            published.revision,
+            published.link.display()
+        ),
+        (Err(diagnostic), true) => println!(
+            "{}",
+            serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
+        ),
+        (Err(diagnostic), false) => {
+            eprintln!("dupin: {diagnostic}");
+            if let Some(hint) = &diagnostic.hint {
+                eprintln!("hint: {hint}");
+            }
+            eprintln!("Waiting for the next change.");
+        }
     }
 }
 
@@ -597,6 +708,31 @@ mod tests {
             Action::Ext("guest.wasm".into(), "request.json".into(), None)
         );
         assert!(parse(&args(&["ext", "run", "word-count"])).is_err());
+        assert_eq!(
+            parse(&args(&["ext", "new", "--ts", "greeter"])).unwrap(),
+            Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::TypeScript)
+        );
+        assert_eq!(
+            parse(&args(&["ext", "new", "greeter"])).unwrap(),
+            Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::JavaScript)
+        );
+        let sourcemap = dupin_ext_sdk::BuildOptions { sourcemap: true };
+        assert_eq!(
+            parse(&args(&["ext", "build", "greeter", "--sourcemap", "--json"])).unwrap(),
+            Action::ExtBuild("greeter".into(), sourcemap)
+        );
+        assert_eq!(
+            parse(&args(&["ext", "dev", "greeter"])).unwrap(),
+            Action::ExtDev("greeter".into(), dupin_ext_sdk::BuildOptions::default())
+        );
+        for invalid in [
+            &["ext", "new", "greeter", "--sourcemap"][..],
+            &["ext", "build", "greeter", "--ts"],
+            &["ext", "check", "greeter", "--ts"],
+            &["ext", "dev"],
+        ] {
+            assert!(parse(&args(invalid)).is_err(), "{invalid:?}");
+        }
         assert!(parse(&args(&["ext", "check", "--query"])).is_err());
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
