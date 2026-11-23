@@ -2,6 +2,7 @@
 //! and the actions that hand results to it (NSWorkspace).
 
 pub mod accessibility;
+mod accessibility_window;
 pub mod apps;
 pub mod bundle;
 mod bundle_names;
