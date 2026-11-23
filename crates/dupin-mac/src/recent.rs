@@ -1,19 +1,18 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
 
-use dupin_core::{History, Item, Provider, ProviderError, Request};
+use dupin_core::{Item, Provider, ProviderError, Request, session::RecentHistory};
 
 use crate::AppsProvider;
 
 pub struct RecentProvider {
     apps: Arc<AppsProvider>,
-    history: Arc<RwLock<History>>,
+    history: RecentHistory,
 }
 
 impl RecentProvider {
-    pub fn new(apps: Arc<AppsProvider>, history: Arc<RwLock<History>>) -> Self {
+    pub fn new(apps: Arc<AppsProvider>, history: RecentHistory) -> Self {
         Self { apps, history }
     }
 }
@@ -23,14 +22,7 @@ impl Provider for RecentProvider {
         if !request.query.trim().is_empty() || request.limit == 0 || request.is_cancelled() {
             return Ok(());
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let ids = self
-            .history
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .ranked_ids(usize::MAX, now);
+        let ids = self.history.ranked_ids();
         if ids.is_empty() {
             return Ok(());
         }

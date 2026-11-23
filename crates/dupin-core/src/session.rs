@@ -3,6 +3,7 @@
 //! effects for the UI and platform layers to carry out.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::searcher::Delivery;
 use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
@@ -87,13 +88,29 @@ pub struct Session {
     generation: u64,
     results: Results,
     refresh_selection: Option<(CommandId, String)>,
-    history: History,
+    history: Arc<RwLock<History>>,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
     queries: VecDeque<(CommandId, String)>,
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+}
+
+/// Read access to the session's ranked history for the recent-items provider.
+#[derive(Debug)]
+pub struct RecentHistory {
+    history: Arc<RwLock<History>>,
+    clock: fn() -> u64,
+}
+
+impl RecentHistory {
+    pub fn ranked_ids(&self) -> Vec<String> {
+        self.history
+            .read()
+            .unwrap()
+            .ranked_ids(usize::MAX, (self.clock)())
+    }
 }
 
 #[derive(Debug)]
@@ -140,7 +157,7 @@ impl Session {
             generation: 0,
             results: Results::Idle,
             refresh_selection: None,
-            history,
+            history: Arc::new(RwLock::new(history)),
             clock: unix_now,
             queries: VecDeque::new(),
             recalled: None,
@@ -214,12 +231,23 @@ impl Session {
         Ok(effects)
     }
 
-    pub fn history(&self) -> &History {
-        &self.history
+    pub fn history(&self) -> RwLockReadGuard<'_, History> {
+        self.history.read().unwrap()
+    }
+
+    pub fn recent_history(&self) -> RecentHistory {
+        RecentHistory {
+            history: self.history.clone(),
+            clock: self.clock,
+        }
     }
 
     pub fn command_id(&self) -> &CommandId {
         &self.command
+    }
+
+    pub fn command_ids(&self) -> Vec<String> {
+        self.commands.ids()
     }
 
     pub fn command(&self) -> &crate::CommandSpec {
@@ -284,7 +312,10 @@ impl Session {
         let mut effects = vec![Effect::Run(action.action)];
         if action.disposition == ActionDisposition::Dismiss {
             if item.record_usage {
-                self.history.record(&item.id, &self.query, (self.clock)());
+                self.history
+                    .write()
+                    .unwrap()
+                    .record(&item.id, &self.query, (self.clock)());
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);
@@ -592,7 +623,10 @@ impl Session {
                         state.items.push(item);
                     }
                 }
-                self.history.rerank(&mut state.items, &self.query, (self.clock)());
+                self.history
+                    .read()
+                    .unwrap()
+                    .rerank(&mut state.items, &self.query, (self.clock)());
             }
             Delivery::Done { .. } => state.phase = ProviderPhase::Done,
             Delivery::Failed { .. } => {
@@ -716,16 +750,17 @@ impl Session {
         self.explicit = false;
         self.query.clear();
         self.clear_results();
-        if was_searching {
+        let effects = self.search();
+        if effects.is_empty() && was_searching {
             vec![Effect::CancelSearch]
         } else {
-            Vec::new()
+            effects
         }
     }
 
     fn dismiss(&mut self) -> Vec<Effect> {
-        let mut effects = self.reset();
-        effects.push(Effect::Hide);
+        let mut effects = vec![Effect::Hide];
+        effects.extend(self.reset());
         effects
     }
 
