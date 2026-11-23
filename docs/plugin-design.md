@@ -104,9 +104,11 @@ messages, versions, correlation and per-request guest-memory ownership with a
 real calculator guest. Its runtime-independent Text/Detail/Pair view type is
 shared by launcher items. [User extensions](extensions.md) run it in the
 launcher: an opt-in folder of manifests, one keyword command each, guest
-cancellation and deadlines, and copy/web-URL actions. They have no host imports,
-so they need no grants. Plugin grants, capability brokerage, state and transport
-streaming still need implementation and review before guests get host access.
+cancellation and deadlines, copy/web-URL actions, and views the guest pushes
+onto a host-owned navigation stack and describes as lists or detail pages. They
+have no host imports, so they need no grants. Plugin grants, capability
+brokerage, state and transport streaming still need implementation and review
+before guests get host access.
 
 The [in-memory permission policy](plugin-permissions.md) implements separate
 plugin grants, OS consent and revocable operation permits. It is not yet wired
@@ -115,9 +117,11 @@ to a broker or the launcher.
 ## Views, actions and saved state
 
 The launcher currently renders the shared Text, Detail and Pair data model per
-item. Forms remain planned. Plugins supply content and stable action IDs, not
-native UI objects or arbitrary code inside the view. Text selection and keyboard
-focus belong to the host renderer.
+item. A `push` action opens a guest-described list or detail view; the session
+keeps the stack and its context, and Esc or Backspace returns. Forms remain
+planned. Plugins supply content and stable action IDs, not native UI objects or
+arbitrary code inside the view. Text selection and keyboard focus belong to the
+host renderer.
 
 Enter invokes a declared primary action. Right Arrow and Cmd+K open the shared
 action menu. Dictionary's external-open operation already uses that menu. Privileged host actions are checked when invoked, not trusted

@@ -14,7 +14,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## What an extension can do
 
-A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text or open an `http` or `https` URL.
+A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).
 
 Nothing else is reachable. A module that imports anything, including WASI, is rejected, so it cannot read files, use the network, start processes, read the clipboard or see the time. Each query runs in a fresh instance, on its own thread, with no memory of earlier queries.
 
@@ -29,6 +29,45 @@ Nothing else is reachable. A module that imports anything, including WASI, is re
 | Extensions read          | 64 folders            |
 
 Typing again cancels the running query. A trap, an exhausted budget or an invalid response becomes a "_Name_ failed" row with the reason; it never affects Dupin or other extensions. [The protocol](plugin-protocol.md) has the full message format and field limits.
+
+## Views
+
+An action whose effect is `push` opens a view of the extension inside the panel. The view is data the extension describes and Dupin draws, as with any other row:
+
+- The chip shows the extension and the view's title, such as **Word Count › Statistics**, and the query field becomes the view's filter, starting empty.
+- Dupin asks the same module again, with the view's `view` ID, the filter as `query`, and the `context` the push carried. Typing re-asks it; a newer filter cancels the older query.
+- The module answers with a list (`results`, the same rows as at the top) or a `detail`: a title, a long body and up to eight actions.
+- Esc, or ⌫ on an empty filter, goes back to what was on screen before the push, with its query and selected row. Esc at the top hides the panel as before.
+- A view's actions can push further views, up to eight deep; a push beyond that does nothing.
+- A failing query shows a "_Name_ failed" row inside the view. An answer that arrives after its view was left is dropped.
+
+The module keeps nothing between queries, so `context` is how a view knows what it is about: any JSON value up to 4 KiB, nested at most 16 deep. Dupin holds it unchanged and does not read it. A view's filters are not added to query recall, and a view can't be saved as a snapshot yet. Forms are not supported.
+
+```json
+{
+	"id": "stats",
+	"title": "Show statistics",
+	"effect": {
+		"kind": "push",
+		"view": "stats",
+		"title": "Statistics",
+		"context": { "text": "two words" }
+	}
+}
+```
+
+```json
+{
+	"kind": "detail",
+	"title": "2 words",
+	"body": "Words: 2\nCharacters: 9",
+	"actions": [
+		{ "id": "copy", "title": "Copy statistics", "effect": { "kind": "copy", "text": "Words: 2" } }
+	]
+}
+```
+
+The word counter offers both: **List words** opens a list of the query's words that typing filters, and **Show statistics** opens a detail page.
 
 ## Installing one
 
@@ -78,7 +117,7 @@ dupin ext check word_count.wasm request.json --json
 dupin ext snap word_count.wasm request.json view.png
 ```
 
-The `command` field carries the extension's `id`. `request_id` and `generation` must be echoed in the response.
+The `command` field carries the extension's `id`. `request_id` and `generation` must be echoed in the response. To test a view, add `"view":"stats","context":{"text":"two words"}` to the request.
 
 ## Cost
 

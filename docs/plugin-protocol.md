@@ -16,19 +16,26 @@ and error codes are rejected. Request IDs and generations are opaque strings,
 so authors do not need JSON numbers to represent a host's full-width counters.
 
 A request contains `request_id`, `generation`, `command`, `query`, `limit` and
-optional versioned opaque `state`. A response echoes both correlation tags and
-contains an `outcome` tagged by `kind`:
+optional versioned opaque `state`. A request for a pushed view also has `view`,
+the view ID, and the `context` its push carried; `context` without `view` is
+rejected. Both are omitted outside a view, so those requests are unchanged from
+the first version of this protocol and guests built against it keep working. A
+response echoes both correlation tags and contains an `outcome` tagged by `kind`:
 
 - `results`: keyed items and optional state;
+- `detail`: a title, a body and action descriptors, the whole of a pushed view.
+  Only a request with `view` may be answered this way;
 - `error`: a defined error code and display message.
 
 Items have a stable ID, a view and action descriptors. View kinds are `text`
 (title and subtitle), `detail` (title and body), and `pair` (source and result).
 A text subtitle may be empty. An action descriptor has an ID, a title and an
-`effect` tagged by `kind`: `copy` with non-empty `text`, or `open_url` with an
-`http` or `https` `url` that has a host and no whitespace or control characters.
-There is no other effect, so actions cannot carry executable code, native UI
-objects or arbitrary OS operations. The calculator fixture emits no actions.
+`effect` tagged by `kind`: `copy` with non-empty `text`; `open_url` with an
+`http` or `https` `url` that has a host and no whitespace or control characters;
+or `push` with a `view` ID, a non-empty `title` and optional JSON `context`,
+which asks the host to query the same guest for that view. There is no other
+effect, so actions cannot carry executable code, native UI objects or arbitrary
+OS operations. The calculator fixture emits no actions.
 
 The host checks request/response correlation and result count after decoding.
 Item IDs must be unique within a response; action IDs must be unique within an
@@ -53,6 +60,8 @@ current-generation checks.
 | Copy text                    |               16 KiB |
 | URL                          |    2,048 UTF-8 bytes |
 | Encoded opaque state data    |      8 KiB, depth 64 |
+| Encoded view context         |      4 KiB, depth 16 |
+| View ID                      |      128 UTF-8 bytes |
 
 State schema versions must be positive; the feature owns their meaning. Depth
 counts nested arrays and objects, with at most 64 containers on a path. State
