@@ -8,7 +8,7 @@ mod package;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -59,7 +59,6 @@ impl From<Diagnostic> for RunError {
 pub struct Package {
     entry: String,
     modules: Arc<HashMap<String, Box<[u8]>>>,
-    files: Vec<PathBuf>,
 }
 
 impl std::fmt::Debug for Package {
@@ -88,13 +87,7 @@ impl Package {
         Ok(Self {
             entry,
             modules: Arc::new(modules),
-            files: files.into_iter().map(|(_, path)| path).collect(),
         })
-    }
-
-    /// The canonical paths of the files the package was compiled from.
-    pub fn files(&self) -> &[PathBuf] {
-        &self.files
     }
 
     /// Links and evaluates the entry module, and checks that it exports `search`.

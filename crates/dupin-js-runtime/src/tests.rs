@@ -1,5 +1,6 @@
 use std::fs;
 use std::os::unix::fs::symlink;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -92,7 +93,13 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
         ("notes.txt", "not JavaScript"),
     ]);
     let package = loaded.unwrap();
-    assert_eq!(package.files().len(), 3);
+    let mut names: Vec<_> = package
+        .modules
+        .keys()
+        .filter(|name| *name != HOST_MODULE)
+        .collect();
+    names.sort();
+    assert_eq!(names, ["lib/rows.js", "main.js", "site.mjs"]);
     let rows = package.search("a b", 7, timeout(DEADLINE)).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "docs");
