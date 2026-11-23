@@ -283,7 +283,7 @@ where
         }
 
         let sender = self.sender.clone();
-        match PathWatcher::start_shallow(requested.paths.clone(), path.clone(), move |rebuild| {
+        match PathWatcher::start_shallow_with_file(requested.paths.clone(), path.clone(), move |rebuild| {
             let _ = sender.send(Job::Changed { rebuild });
         }) {
             Ok(watcher) => {
