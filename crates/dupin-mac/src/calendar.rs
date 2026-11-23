@@ -345,16 +345,21 @@ impl<'a> Times<'a> {
         let last = NSDate::dateWithTimeIntervalSince1970((end.timeIntervalSince1970() - 1.0).max(start));
         let first_day = day_number(self.calendar, &event.start);
         let one_day = first_day == day_number(self.calendar, &last);
-        let range = |template: &str, to: &NSDate| {
+        let between = |template: &str, from: &NSDate, to: &NSDate| {
             self.formatter
                 .setDateTemplate(Some(&NSString::from_str(template)));
-            self.formatter.stringFromDate_toDate(&event.start, to).to_string()
+            self.formatter.stringFromDate_toDate(from, to).to_string()
         };
+        let range = |template: &str, to: &NSDate| between(template, &event.start, to);
         if one_day && heading_day == Some(first_day) {
             return if event.all_day {
                 "All day".into()
-            } else {
+            } else if day_number(self.calendar, &end) == first_day {
                 range("jmm", &end)
+            } else {
+                // The formatter spells out both dates whenever the range crosses midnight.
+                let time = |date: &NSDate| between("jmm", date, date);
+                format!("{}\u{2009}–\u{2009}{}", time(&event.start), time(&end))
             };
         }
         let other_year = [&*event.start, &*last]
@@ -617,16 +622,12 @@ mod tests {
     fn rows_under_their_own_day_show_only_the_time() {
         with_times(0, |times, now, mut events| {
             let timed = times.text(&events[0], day_of(times, &events[0]));
-            assert!(timed.contains("10:00") && timed.contains("11:00"), "{timed}");
-            assert!(!timed.contains("Nov") && !timed.contains("2026"), "{timed}");
+            assert_eq!(timed, "10:00\u{2009}–\u{2009}11:00");
             assert_eq!(times.text(&events[2], day_of(times, &events[2])), "All day");
 
             events[1].end = now.dateByAddingTimeInterval(16.0 * 3600.0);
             let until_midnight = times.text(&events[1], day_of(times, &events[1]));
-            assert!(
-                until_midnight.contains("16:00") && !until_midnight.contains("Nov"),
-                "{until_midnight}"
-            );
+            assert_eq!(until_midnight, "16:00\u{2009}–\u{2009}00:00");
         });
     }
 

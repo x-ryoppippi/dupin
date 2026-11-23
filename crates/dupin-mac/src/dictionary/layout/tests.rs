@@ -243,3 +243,78 @@ fn words_that_only_look_like_structure_stay_in_the_text() {
         ]
     );
 }
+
+fn outline_of(term: &str, definition: &str) -> Vec<String> {
+    outline(&detail(term, definition).body.blocks)
+}
+
+#[test]
+fn numbers_in_examples_do_not_start_senses() {
+    assert_eq!(
+        outline_of(
+            "run",
+            "run | rʌn | verb 1 move fast: she ran 2 miles today. 2 be in charge of: he runs a shop."
+        ),
+        [
+            "###Verb",
+            "1. move fast: _she ran 2 miles today._",
+            "2. be in charge of: _he runs a shop._",
+        ]
+    );
+    assert_eq!(
+        outline_of(
+            "two",
+            "two | tuː | cardinal number 1 equivalent to the sum of one and one: 2 plus 2 is 4. 2 a \
+             group of two."
+        ),
+        [
+            "###Cardinal number",
+            "1. equivalent to the sum of one and one: _2 plus 2 is 4._",
+            "2. a group of two.",
+        ]
+    );
+    assert_eq!(
+        outline_of(
+            "x",
+            "x | ɛks | noun 1 the letter. 2 denoting an unknown: x = 3 * y."
+        ),
+        [
+            "###Noun",
+            "1. the letter.",
+            "2. denoting an unknown: _x = 3 * y._"
+        ]
+    );
+}
+
+#[test]
+fn an_unclosed_bracket_hides_numbers_only_until_the_sentence_ends() {
+    assert_eq!(
+        outline_of(
+            "cat",
+            "cat | kat | noun 1 a mammal: the cat (a tabby. 2 a man: a cool cat."
+        ),
+        [
+            "###Noun",
+            "1. a mammal: _the cat (a tabby._",
+            "2. a man: _a cool cat._",
+        ]
+    );
+}
+
+/// macOS's Oxford entries can end a sense with a cross-reference and no full stop, as in
+/// `• short for catboat 2 informal, …`.
+#[test]
+fn a_sense_that_ends_without_a_full_stop_is_still_followed_by_the_next() {
+    assert_eq!(
+        outline_of(
+            "cat",
+            "cat | kat | noun 1 a small mammal: a cat. • short for catboat 2 informal a man: a cool cat."
+        ),
+        [
+            "###Noun",
+            "1. a small mammal: _a cat._",
+            "  - short for catboat",
+            "2. informal a man: _a cool cat._",
+        ]
+    );
+}

@@ -259,8 +259,8 @@ fn bullets(text: &str) -> Vec<&str> {
 }
 
 /// Where each numbered sense's marker and text start. Senses count up from one: circled
-/// numbers when the text has `①`, otherwise numbers standing as words of their own, so a
-/// number inside an example is only taken for a sense when it is exactly the next one.
+/// numbers when the text has `①`, otherwise the next number standing as a word of its own
+/// outside an example or a bracket.
 fn sense_numbers(text: &str) -> Vec<(usize, usize)> {
     if text.contains(CIRCLED[0]) {
         let mut found = Vec::new();
@@ -273,16 +273,34 @@ fn sense_numbers(text: &str) -> Vec<(usize, usize)> {
     }
     let mut found: Vec<(usize, usize)> = Vec::new();
     let mut next = String::from("1");
-    // A number in brackets is a cross-reference, such as `(→ quite 2 第3例)`.
+    // A number in brackets is a cross-reference, such as `(→ quite 2 第3例)`, and one after a
+    // colon or `▸` is part of an example, such as `: 2 plus 2 is 4.`. Both end with the
+    // sentence, so an unclosed bracket does not hide the senses after it.
     let mut depth = 0usize;
+    let mut example = false;
     for (at, c) in text.char_indices() {
+        let ends_sentence = match c {
+            '.' => !is_decimal_point(text, at),
+            '!' | '?' | '。' | '．' => true,
+            '•' => text[..at].chars().next_back().is_none_or(char::is_whitespace),
+            _ => false,
+        };
         match c {
+            _ if ends_sentence => {
+                depth = 0;
+                example = false;
+            }
             '(' | '[' | '（' | '［' => depth += 1,
             ')' | ']' | '）' | '］' => depth = depth.saturating_sub(1),
+            ':' | '：' | '▸' => example = true,
             _ => {}
         }
         let after = at + next.len();
-        if depth > 0 || !text[at..].starts_with(&next) || !text[after..].starts_with(char::is_whitespace) {
+        if depth > 0
+            || example
+            || !text[at..].starts_with(&next)
+            || !text[after..].starts_with(char::is_whitespace)
+        {
             continue;
         }
         let mut before = text[..at].chars().rev();
@@ -299,6 +317,11 @@ fn sense_numbers(text: &str) -> Vec<(usize, usize)> {
         }
     }
     found
+}
+
+fn is_decimal_point(text: &str, at: usize) -> bool {
+    text[..at].chars().next_back().is_some_and(|c| c.is_ascii_digit())
+        && text[at + 1..].starts_with(|c: char| c.is_ascii_digit())
 }
 
 /// A sense as Markdown and the examples marked with `▸` after it. With `examples`, the text after
