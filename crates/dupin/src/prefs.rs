@@ -9,12 +9,12 @@ use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
 use rune::{
-    AppHandle, Cx, El, Icon, PopupItem, PopupMenu, Shortcut, ShortcutError, TextStyle, Tx, col, el, icon,
-    row, text,
+    AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
+    el, icon, row, text,
 };
 use rune_kit::{
-    Button, Kit, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, Switch,
-    shortcut_error_message,
+    Button, Kit, SegmentedControl, Select, SelectAppearance, ShortcutRecorder, ShortcutRecorderState, State,
+    Switch, shortcut_error_message,
 };
 
 use crate::hotkey::Binding;
@@ -164,6 +164,8 @@ pub struct Prefs {
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
+    preview_dark: Option<bool>,
+    active_radius: u16,
 }
 
 impl Prefs {
@@ -179,7 +181,10 @@ impl Prefs {
         if binding.failed_at_launch() {
             recorder.mark_unregistered();
         }
+        let active_radius = config.theme.corner_radius;
         Prefs {
+            preview_dark: None,
+            active_radius,
             config,
             current,
             page: Page::General,
@@ -416,7 +421,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let rows = match s.page {
         Page::General => general(s, k),
         Page::Search => search(s, k),
-        Page::Appearance => appearance(s, k),
+        Page::Appearance => appearance(s, k, cx.system_dark()),
         Page::Updates => updates(s, k),
     };
     let panel = col()
@@ -448,7 +453,11 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         )
         .child(
             col()
+                .key("page-body")
                 .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .scroll(ScrollSpec { stick_bottom: false })
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
                 .children(s.config_problem.as_ref().map(|problem| {
@@ -459,7 +468,11 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                         .color(k.c.text_base)
                         .wrap()
                 }))
-                .child(card(k, hair, rows))
+                .children(if s.page == Page::Appearance {
+                    rows
+                } else {
+                    vec![card(k, hair, rows)]
+                })
                 .children(s.read_only.then(|| {
                     text("config.toml is read-only, so change these where it's managed.")
                         .font(DESCRIPTION)
@@ -698,7 +711,281 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
     )]
 }
 
-fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
+use dupin_core::config::{Colors, FontFamily, Theme};
+
+type Palette = (&'static str, &'static str, &'static str);
+
+const PRESETS: [(&str, Option<Palette>); 3] = [
+    ("Default", None),
+    ("Ocean", Some(("#E9F4FA", "#142734", "#176EA6"))),
+    ("Rose", Some(("#FFF0F5", "#30202A", "#A52D61"))),
+];
+
+fn preset_colors(i: usize) -> (Colors, Colors) {
+    let Some((light, dark, accent)) = PRESETS[i].1 else {
+        return (Colors::default(), Colors::default());
+    };
+    let colors = |bg: &str| Colors {
+        background: Some(bg.into()),
+        accent: Some(accent.into()),
+        ..Colors::default()
+    };
+    (colors(light), colors(dark))
+}
+
+fn color_preset(t: &Theme) -> Option<usize> {
+    (0..PRESETS.len()).find(|&i| {
+        let (light, dark) = preset_colors(i);
+        t.light == light && t.dark == dark
+    })
+}
+
+fn set_font(t: &mut Theme, size: u16) {
+    t.font_size = size;
+    if size == 18 {
+        t.row_height = t.row_height.max(61);
+    }
+}
+
+fn set_rows(t: &mut Theme, height: u16) {
+    t.row_height = height;
+    if height == 52 {
+        t.font_size = t.font_size.min(15);
+    }
+}
+
+fn segments(
+    s: &Prefs,
+    k: &Kit,
+    key: &'static str,
+    label: &'static str,
+    labels: &[&str],
+    selected: Option<usize>,
+    apply: impl Fn(&mut Theme, usize) + Clone + 'static,
+) -> El {
+    let mut control = SegmentedControl::new(labels, selected).label(label).fit();
+    if s.read_only {
+        for i in 0..labels.len() {
+            control = control.segment_state(i, State::Disabled);
+        }
+    } else {
+        control = control.on_pick(move |s: &mut Prefs, i, _| {
+            let apply = apply.clone();
+            s.set(move |c| apply(&mut c.theme, i));
+        });
+    }
+    control.build(k).key(key)
+}
+
+fn theme_row(k: &Kit, name: &str, controls: El) -> El {
+    row()
+        .w_full()
+        .h(40.0)
+        .px(ROW_PX)
+        .center_y()
+        .gap(12.0)
+        .child(text(name).font(k.ty.small).color(k.c.text_base).grow(1.0))
+        .child(controls)
+}
+
+fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
+    let t = &s.config.theme;
+    let selected = color_preset(t);
+    let mut swatches = row()
+        .role("radiogroup")
+        .label("Palette")
+        .focus_group()
+        .gap(12.0)
+        .center_y();
+    for (i, (name, _)) in PRESETS.iter().enumerate() {
+        let (light, dark) = preset_colors(i);
+        let sample = Theme {
+            light,
+            dark,
+            ..Theme::default()
+        };
+        let palette = crate::view::ResolvedTheme::new(&sample, false);
+        let mut swatch = el()
+            .key(format!("color-{i}"))
+            .label(*name)
+            .role("radio")
+            .focusable(!s.read_only)
+            .focus_selected(selected == Some(i))
+            .checked(selected == Some(i))
+            .position_in_set(i + 1, PRESETS.len())
+            .size(26.0, 26.0)
+            .radius(13.0)
+            .padding(3.0)
+            .border(
+                2.0,
+                if selected == Some(i) {
+                    k.c.border_focus
+                } else {
+                    rune::Color::TRANSPARENT
+                },
+            )
+            .child(
+                el().size(20.0, 20.0)
+                    .radius(10.0)
+                    .fill(palette.card)
+                    .center()
+                    .child(el().size(9.0, 9.0).radius(4.5).fill(palette.accent)),
+            );
+        if s.read_only {
+            swatch = swatch.disabled(true).layer_opacity(0.5);
+        } else {
+            swatch = swatch
+                .focus_ring(2.0, 2.0, k.c.border_focus)
+                .on_press(move |s: &mut Prefs| {
+                    s.set(|c| {
+                        (c.theme.light, c.theme.dark) = preset_colors(i);
+                    })
+                });
+        }
+        swatches = swatches.child(swatch);
+    }
+    if selected.is_none() {
+        swatches = swatches.child(
+            text("Custom")
+                .font(k.ty.small)
+                .color(k.c.text_muted)
+                .px(8.0)
+                .py(4.0)
+                .radius(6.0)
+                .border(1.0, k.c.border_muted),
+        );
+    }
+    let toggle = SegmentedControl::new(
+        &["Light", "Dark"],
+        Some(usize::from(s.preview_dark.unwrap_or(dark))),
+    )
+    .label("Preview appearance")
+    .fit()
+    .on_pick(|s: &mut Prefs, i, _| s.preview_dark = Some(i == 1))
+    .build(k)
+    .key("preview-appearance");
+    let well = col()
+        .w_full()
+        .h(156.0)
+        .padding(10.0)
+        .gap(6.0)
+        .radius(k.radius.md)
+        .fill(k.c.layer_01)
+        .child(
+            row()
+                .w_full()
+                .h(28.0)
+                .center_y()
+                .child(
+                    text(format!(
+                        "{} × {} · {} pt · {} pt corners",
+                        t.panel_width, t.row_height, t.font_size, t.corner_radius
+                    ))
+                    .font(k.ty.small)
+                    .color(k.c.text_muted)
+                    .grow(1.0),
+                )
+                .child(toggle),
+        )
+        .child(el().w_full().grow(1.0).center().child(crate::view::theme_preview(
+            t,
+            s.preview_dark.unwrap_or(dark),
+            414.0,
+        )));
+    let mut reset = value_button(k, "reset-theme", "Reset", &icons::REFRESH);
+    if s.read_only || *t == Theme::default() {
+        reset = reset.disabled(true).layer_opacity(0.5);
+    } else {
+        reset = reset.on_press(|s: &mut Prefs| s.set(|c| c.theme = Theme::default()));
+    }
+    let mut corners = row().gap(10.0).center_y();
+    if t.corner_radius != s.active_radius {
+        corners = corners.child(
+            text("Relaunch to apply")
+                .font(TextStyle::new(11.0, 440.0))
+                .color(k.c.text_muted),
+        );
+    }
+    corners = corners.child(segments(
+        s,
+        k,
+        "theme-corners",
+        "Corners",
+        &["Square", "14", "28"],
+        [0, 14, 28].iter().position(|&v| v == t.corner_radius),
+        |t, i| t.corner_radius = [0, 14, 28][i],
+    ));
+    card(
+        k,
+        1.0,
+        vec![
+            row()
+                .w_full()
+                .h(40.0)
+                .px(ROW_PX)
+                .gap(8.0)
+                .center_y()
+                .child(icon(&icons::SPARKLES, 16.0).color(k.c.text_muted))
+                .child(text("Theme").font(k.ty.small).color(k.c.text_base).grow(1.0)),
+            el().w_full().px(ROW_PX).mb(4.0).child(well),
+            theme_row(k, "Palette", swatches),
+            theme_row(
+                k,
+                "Font",
+                row()
+                    .gap(8.0)
+                    .child(segments(
+                        s,
+                        k,
+                        "theme-font",
+                        "Font",
+                        &["System", "Mono"],
+                        Some(usize::from(t.font_family == FontFamily::Monospace)),
+                        |t, i| t.font_family = [FontFamily::System, FontFamily::Monospace][i],
+                    ))
+                    .child(segments(
+                        s,
+                        k,
+                        "theme-size",
+                        "Font size",
+                        &["15", "18"],
+                        [15, 18].iter().position(|&v| v == t.font_size),
+                        |t, i| set_font(t, [15, 18][i]),
+                    )),
+            ),
+            theme_row(
+                k,
+                "Width",
+                segments(
+                    s,
+                    k,
+                    "theme-width",
+                    "Width",
+                    &["Narrow", "Regular", "Wide"],
+                    [400, 680, 900].iter().position(|&v| v == t.panel_width),
+                    |t, i| t.panel_width = [400, 680, 900][i],
+                ),
+            ),
+            theme_row(
+                k,
+                "Rows",
+                segments(
+                    s,
+                    k,
+                    "theme-rows",
+                    "Rows",
+                    &["Compact", "Comfy", "Spacious"],
+                    [52, 72, 100].iter().position(|&v| v == t.row_height),
+                    |t, i| set_rows(t, [52, 72, 100][i]),
+                ),
+            ),
+            theme_row(k, "Corners", corners),
+        ],
+    )
+    .child(reset.pin(None, Some(6.0), Some(ROW_PX), None))
+}
+
+fn appearance(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
     // The menu lists the shaders folder as it stands when it opens, so the trigger shows only
     // the current choice.
     let backdrop = menu_value(
@@ -723,19 +1010,26 @@ fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
         open.disabled(true).layer_opacity(0.5)
     };
     vec![
-        setting(
+        theme_card(s, k, dark),
+        card(
             k,
-            &icons::SPARKLES,
-            "Backdrop",
-            Some("The shader that animates behind the panel"),
-            backdrop,
-        ),
-        setting(
-            k,
-            &icons::FOLDER,
-            "Shaders folder",
-            Some(&format!("Put .wgsl files in {folder} to pick them above")),
-            open,
+            1.0,
+            vec![
+                setting(
+                    k,
+                    &icons::SPARKLES,
+                    "Backdrop",
+                    Some("The shader that animates behind the panel"),
+                    backdrop,
+                ),
+                setting(
+                    k,
+                    &icons::FOLDER,
+                    "Shaders folder",
+                    Some(&format!("Put .wgsl files in {folder} to pick them above")),
+                    open,
+                ),
+            ],
         ),
     ]
 }
@@ -950,5 +1244,36 @@ mod tests {
         drop(state);
         drop(settings);
         std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod theme_control_tests {
+    use super::*;
+
+    #[test]
+    fn presets_match_only_complete_color_overrides() {
+        let mut theme = Theme::default();
+        assert_eq!(color_preset(&theme), Some(0));
+        (theme.light, theme.dark) = preset_colors(1);
+        theme.panel_width = 1200;
+        assert_eq!(color_preset(&theme), Some(1));
+        theme.dark.text = Some("#FFFFFF".into());
+        assert_eq!(color_preset(&theme), None);
+        theme = Theme::default();
+        theme.light.background = Some("#123456".into());
+        assert_eq!(color_preset(&theme), None);
+    }
+
+    #[test]
+    fn compact_rows_and_large_fonts_remain_compatible() {
+        let mut theme = Theme::default();
+        set_font(&mut theme, 18);
+        assert_eq!(theme.row_height, 61);
+        set_rows(&mut theme, 52);
+        assert_eq!(theme.font_size, 15);
+        theme.row_height = 100;
+        set_font(&mut theme, 18);
+        assert_eq!(theme.row_height, 100);
     }
 }

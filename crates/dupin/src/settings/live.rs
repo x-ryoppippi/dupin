@@ -535,6 +535,21 @@ mod tests {
     }
 
     #[test]
+    fn theme_saves_preserve_other_settings_and_detect_conflicting_themes() {
+        let base = Config::default();
+        let mut desired = base.clone();
+        desired.theme.panel_width = 400;
+        let mut disk = base.clone();
+        disk.file_limit = 42;
+        let saved = merge(&base, &desired, &disk, None).unwrap();
+        assert_eq!(saved.theme.panel_width, 400);
+        assert_eq!(saved.file_limit, 42);
+        disk.theme.row_height = 72;
+        assert!(merge(&base, &desired, &disk, None).is_err());
+        assert_eq!(merge(&base, &base, &disk, None).unwrap(), disk);
+    }
+
+    #[test]
     fn worker_persists_the_latest_queued_save_before_stopping() {
         let temp = TempDir::new();
         let path = temp.path().join("config.toml");

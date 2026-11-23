@@ -97,6 +97,8 @@ impl ActionScreen {
 }
 
 pub struct Ui {
+    pub theme: dupin_core::config::Theme,
+    pub active_radius: f32,
     pub action_screen: Option<ActionScreen>,
     pub session: Session,
     pub query: TextEdit,
@@ -210,6 +212,8 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            theme: config.theme.clone(),
+            active_radius: config.theme.corner_radius as f32,
             action_screen: None,
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
@@ -249,6 +253,10 @@ impl Ui {
     }
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
+        if self.theme.panel_width != config.theme.panel_width {
+            tx.resize_window_instant((config.theme.panel_width as f32, crate::HEADER_HEIGHT));
+        }
+        self.theme = config.theme.clone();
         let previous_limit = self.session.command().result_limit;
         let ranking_changed = {
             let mut rules = self.file_demotions.write().unwrap();
@@ -976,6 +984,50 @@ mod ui_helper_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+
+    #[test]
+    fn cosmetic_configuration_retains_query_selection_history_and_pending_search() {
+        let base = Config::default();
+        let mut session = Session::new(
+            History::default(),
+            crate::commands::configured(&base).unwrap().registry,
+        )
+        .unwrap();
+        let effects = session.set_query("example");
+        let (origin, generation) = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } => Some((command.clone(), *generation)),
+                _ => None,
+            })
+            .unwrap();
+        let before = (
+            session.query().to_owned(),
+            session.selected(),
+            session.history().clone(),
+        );
+        let mut themed = base;
+        themed.theme.row_height = 100;
+        themed.theme.light.accent = Some("#123456".into());
+        session
+            .set_commands(crate::commands::configured(&themed).unwrap().registry)
+            .unwrap();
+        assert_eq!(
+            (
+                session.query().to_owned(),
+                session.selected(),
+                session.history().clone()
+            ),
+            before
+        );
+        assert!(session.pending(&origin, generation));
+        let invalid = Config::parse("[theme]\npanel_width = nan").map_err(|e| e.to_string());
+        let (retained, problem) = reconcile_snapshot(invalid, &themed, true);
+        assert_eq!(retained.unwrap(), themed);
+        assert!(problem.is_some());
+    }
 
     #[test]
     fn a_failed_save_and_invalid_snapshot_restore_acknowledged_values() {
