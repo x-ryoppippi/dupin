@@ -241,7 +241,6 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
             render(response, &output);
             Ok(serde_json::json!({"png": output}))
         }
-        #[cfg(feature = "extension-tools")]
         Action::Ext(module, request, output) => {
             let request = protocol::Request::decode(&file(&request, protocol::MAX_REQUEST_BYTES)?)
                 .map_err(|e| e.to_string())?;
@@ -257,10 +256,6 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
             } else {
                 serde_json::to_value(response).map_err(|_| "could not encode response".into())
             }
-        }
-        #[cfg(not(feature = "extension-tools"))]
-        Action::Ext(_, _, _) => {
-            Err("extension tools require a build with the extension-tools feature".into())
         }
     }
 }

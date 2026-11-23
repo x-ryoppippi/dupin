@@ -231,6 +231,18 @@ pub struct Picker {
     call: crate::control::Call,
 }
 
+/// The extensions folder's latest catalogue while `extensions = true`, and which of its
+/// extensions own a command and searcher now.
+#[derive(Default)]
+struct Extensions {
+    watch: Option<crate::extensions::Watch>,
+    /// Identifies the current watch, so a scan from a stopped one is ignored.
+    epoch: u64,
+    catalog: Vec<Arc<crate::extensions::Extension>>,
+    scan_problems: Vec<String>,
+    registered: HashMap<CommandId, Arc<crate::extensions::Extension>>,
+}
+
 pub struct Ui {
     pub picker: Option<Picker>,
     control_save: Option<(u64, crate::control::Call)>,
@@ -262,6 +274,7 @@ pub struct Ui {
     web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
+    extensions: Extensions,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
@@ -429,7 +442,7 @@ impl Ui {
         snapshots.update(move |s, _| s.set_sources(sources));
         let mut query = TextEdit::new("");
         query.focused = true;
-        Ui {
+        let mut ui = Ui {
             picker: None,
             control_save: None,
             theme: config.theme.clone(),
@@ -456,6 +469,7 @@ impl Ui {
             web: registration.web,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
+            extensions: Extensions::default(),
             _apps_watcher: apps_watcher,
             position: config.position,
             input_source: config.input_source.clone(),
@@ -470,7 +484,120 @@ impl Ui {
             me,
             prefs,
             snapshots,
+        };
+        ui.watch_extensions(config.extensions);
+        ui
+    }
+
+    /// Start or stop reading the extensions folder. Stopping drops their commands at the next
+    /// registry install, so no guest runs once the switch is off.
+    fn watch_extensions(&mut self, enabled: bool) {
+        if enabled == self.extensions.watch.is_some() {
+            return;
         }
+        self.extensions.epoch += 1;
+        self.extensions.catalog.clear();
+        self.extensions.scan_problems.clear();
+        self.extensions.watch = None;
+        if !enabled {
+            return;
+        }
+        let Some(directory) = crate::extensions::directory() else {
+            self.extensions
+                .scan_problems
+                .push("Couldn't find the configuration folder.".into());
+            return;
+        };
+        let (me, epoch) = (self.me.clone(), self.extensions.epoch);
+        self.extensions.watch = Some(crate::extensions::watch(directory, move |catalog| {
+            me.update(move |s, tx| s.extensions_scanned(epoch, catalog, tx));
+        }));
+    }
+
+    fn extensions_scanned(&mut self, epoch: u64, catalog: crate::extensions::Catalog, tx: &mut Tx) {
+        if epoch != self.extensions.epoch || self.extensions.watch.is_none() {
+            return;
+        }
+        self.extensions.catalog = catalog.extensions;
+        self.extensions.scan_problems = catalog.problems;
+        let config = self.configuration.values.borrow().clone();
+        self.install_commands(&config, tx);
+        if self.session.command_id().as_str().starts_with("extension.") {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
+    }
+
+    /// Build the registry from configuration and the current extensions, and swap it in with
+    /// their searchers. Returns whether the web keyword catalogue changed.
+    fn install_commands(&mut self, config: &Config, tx: &mut Tx) -> bool {
+        let mut registration =
+            crate::commands::configured(config).expect("built-in command registration is valid");
+        let added = crate::commands::add_extensions(&mut registration, &self.extensions.catalog);
+        let web_changed = {
+            let mut web = self.web.write().unwrap();
+            let changed = *web != registration.web;
+            *web = registration.web;
+            changed
+        };
+        let registered: HashMap<_, _> = added.registered.into_iter().collect();
+        self.extensions.registered.retain(|id, extension| {
+            let keep = registered
+                .get(id)
+                .is_some_and(|next| Arc::ptr_eq(next, extension));
+            if !keep {
+                self.searchers.remove(id);
+                self.deadlines.remove(id);
+            }
+            keep
+        });
+        for (id, extension) in registered {
+            if self.extensions.registered.contains_key(&id) {
+                continue;
+            }
+            let me = self.me.clone();
+            let origin = id.clone();
+            let provider = Arc::new(crate::extensions::ExtensionProvider::new(extension.clone()));
+            let searcher = Searcher::spawn(&id.as_str().replace('.', "-"), provider, move |d| {
+                let origin = origin.clone();
+                me.update(move |s, tx| {
+                    s.poll(tx.clock(), tx);
+                    s.deliver(origin, d);
+                });
+            });
+            self.searchers.insert(id.clone(), searcher);
+            self.extensions.registered.insert(id, extension);
+        }
+        let sources = registration.registry.ids();
+        self.snapshots.update(move |s, _| s.set_sources(sources));
+        if let Err(dupin_core::CommandError::ActiveCommandRemoved(_)) =
+            self.session.set_commands(registration.registry.clone())
+        {
+            let effects = self.session.reset();
+            self.query.clear();
+            self.apply(effects, tx);
+            self.session
+                .set_commands(registration.registry)
+                .expect("built-in command registration is valid");
+        }
+        self.registration_notice = registration.notice;
+        let mut loaded: Vec<_> = self
+            .extensions
+            .registered
+            .values()
+            .map(|extension| format!("{} ({})", extension.name, extension.keyword))
+            .collect();
+        loaded.sort();
+        let problems: Vec<_> = self
+            .extensions
+            .scan_problems
+            .iter()
+            .cloned()
+            .chain(added.problems)
+            .collect();
+        self.prefs
+            .update(move |prefs, _| prefs.reflect_extensions(loaded, problems));
+        web_changed
     }
 
     pub fn apply_config(&mut self, config: &Config, tx: &mut Tx) {
@@ -487,20 +614,8 @@ impl Ui {
             }
             changed
         };
-        let registration =
-            crate::commands::configured(config).expect("built-in command registration is valid");
-        let web_changed = {
-            let mut web = self.web.write().unwrap();
-            let changed = *web != registration.web;
-            *web = registration.web;
-            changed
-        };
-        let sources = registration.registry.ids();
-        self.snapshots.update(move |s, _| s.set_sources(sources));
-        self.session
-            .set_commands(registration.registry)
-            .expect("built-in command registration is valid");
-        self.registration_notice = registration.notice;
+        self.watch_extensions(config.extensions);
+        let web_changed = self.install_commands(config, tx);
         if self.session.command().result_limit != previous_limit
             || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)

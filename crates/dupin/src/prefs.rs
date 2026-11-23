@@ -166,6 +166,8 @@ pub struct Prefs {
     config_problem: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
+    /// Loaded extensions as "Name (keyword)", and why others were skipped.
+    extensions: (Vec<String>, Vec<String>),
 }
 
 impl Prefs {
@@ -196,7 +198,12 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            extensions: Default::default(),
         }
+    }
+
+    pub fn reflect_extensions(&mut self, loaded: Vec<String>, problems: Vec<String>) {
+        self.extensions = (loaded, problems);
     }
 
     pub fn reflect_config(
@@ -702,13 +709,55 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
-    vec![setting(
-        k,
-        &icons::FILES,
-        "Files shown",
-        Some("The most files a Spotlight search lists"),
-        limit,
-    )]
+    let enabled = s.config.extensions;
+    let switch = Switch::new(enabled)
+        .label("Extensions")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
+        .build(k);
+    let folder = crate::extensions::directory()
+        .map(|path| tilde(&path.to_string_lossy()))
+        .unwrap_or_else(|| "the extensions folder".into());
+    let (loaded, problems) = &s.extensions;
+    let status = if !enabled {
+        format!(
+            "Off. Extensions are third-party code; when on, Wasm extensions in {folder} answer their keywords"
+        )
+    } else if loaded.is_empty() {
+        format!("No extensions loaded from {folder}")
+    } else {
+        format!("Loaded from {folder}: {}", loaded.join(", "))
+    };
+    let mut rows = vec![
+        setting(
+            k,
+            &icons::FILES,
+            "Files shown",
+            Some("The most files a Spotlight search lists"),
+            limit,
+        ),
+        setting(k, &icons::PUZZLE, "Extensions", Some(&status), switch),
+    ];
+    if enabled && !problems.is_empty() {
+        rows.push(
+            col()
+                .key("extension-problems")
+                .w_full()
+                .px(ROW_PX)
+                .py(10.0)
+                .gap(4.0)
+                .child(text("Skipped extensions").font(k.ty.ui).color(k.c.text_base))
+                .children(problems.iter().map(|problem| {
+                    text(problem.clone())
+                        .font(DESCRIPTION)
+                        .color(k.c.text_muted)
+                        .wrap()
+                        .w_full()
+                })),
+        );
+    }
+    rows
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};

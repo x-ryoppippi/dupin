@@ -15,6 +15,7 @@ position = "center" # "center" puts the field at the middle of the display; "top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
 backdrop = "off" # "off", "flow", or the path to a WGSL shader
+extensions = false # run Wasm extensions from the extensions folder beside config.toml
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the global shortcut.
@@ -24,6 +25,8 @@ Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaul
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+`extensions` turns on [extensions](extensions.md): third-party Wasm modules in `extensions/` beside `config.toml`, each answering its own keyword. It is off by default; Settings → Search has the same switch.
 
 ## Web searches
 

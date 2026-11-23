@@ -101,12 +101,12 @@ limits, with an explicit host import if an evaluator also needs cooperative chec
 
 The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
 messages, versions, correlation and per-request guest-memory ownership with a
-real calculator guest. Its runtime-independent Text/Detail/Pair view type is now
-shared by launcher items; its guest transport is not yet used by the launcher.
-Internal command registration and routes are implemented. External
-manifest/package registration, runtime integration, plugin grants, capability
-brokerage, guest execution cancellation/deadlines, guest action invocation and transport streaming
-still need implementation and review before external plugins run.
+real calculator guest. Its runtime-independent Text/Detail/Pair view type is
+shared by launcher items. [User extensions](extensions.md) run it in the
+launcher: an opt-in folder of manifests, one keyword command each, guest
+cancellation and deadlines, and copy/web-URL actions. They have no host imports,
+so they need no grants. Plugin grants, capability brokerage, state and transport
+streaming still need implementation and review before guests get host access.
 
 The [in-memory permission policy](plugin-permissions.md) implements separate
 plugin grants, OS consent and revocable operation permits. It is not yet wired

@@ -5,6 +5,7 @@ mod backdrop;
 mod cli;
 mod commands;
 mod control;
+mod extensions;
 mod hotkey;
 mod icons;
 mod log;

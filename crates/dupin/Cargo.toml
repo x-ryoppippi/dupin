@@ -8,13 +8,10 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
-[features]
-extension-tools = ["dep:dupin-plugin-runtime"]
-
 [dependencies]
 pico-args = "0.5"
 dupin-plugin-protocol = { workspace = true }
-dupin-plugin-runtime = { path = "../dupin-plugin-runtime", optional = true }
+dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }
@@ -44,6 +41,9 @@ objc2-metal = { workspace = true, features = [
 	"MTLPixelFormat",
 	"MTLRenderPipeline",
 ] }
+
+[dev-dependencies]
+wat = "1"
 
 [lints]
 workspace = true

@@ -74,6 +74,10 @@ impl WebCatalog {
         });
         (catalog, notice)
     }
+
+    pub fn has_keyword(&self, keyword: &str) -> bool {
+        self.searches.contains_key(keyword)
+    }
 }
 
 pub struct WebProvider {

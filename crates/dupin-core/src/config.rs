@@ -30,6 +30,9 @@ pub struct Config {
     pub auto_update: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
+    /// Load Wasm extensions from the `extensions` folder beside config.toml. Off by default
+    /// because they are third-party code.
+    pub extensions: bool,
     pub theme: Theme,
 }
 
@@ -167,6 +170,7 @@ impl Default for Config {
             input_source: InputSource::Ascii,
             auto_update: true,
             backdrop: Backdrop::Off,
+            extensions: false,
             theme: Theme::default(),
         }
     }

@@ -1,9 +1,9 @@
 # Experimental query protocol
 
 This is the first executable part of [the plugin proposal](plugin-design.md),
-tracked by #6, #7 and #96. It is not a stable SDK or an external-plugin loader.
-The launcher does not yet use it. Registration, capability brokerage, action
-invocation, streaming, forms and production scheduling remain separate work.
+tracked by #6, #7 and #96. It is not a stable SDK. The launcher runs it for
+[user extensions](extensions.md), which have no host imports. Capability
+brokerage, streaming, forms and state persistence remain separate work.
 
 `dupin-plugin-protocol` has only Serde dependencies and is shared by hosts and
 guests. The calculator fixture in `experiments/plugin-protocol` exercises it
@@ -24,10 +24,11 @@ contains an `outcome` tagged by `kind`:
 
 Items have a stable ID, a view and action descriptors. View kinds are `text`
 (title and subtitle), `detail` (title and body), and `pair` (source and result).
-A text subtitle may be empty. Action descriptors contain only an ID and title;
-they cannot carry executable code, native UI objects or arbitrary OS operations.
-This first query fixture emits no actions because action invocation is not yet
-implemented.
+A text subtitle may be empty. An action descriptor has an ID, a title and an
+`effect` tagged by `kind`: `copy` with non-empty `text`, or `open_url` with an
+`http` or `https` `url` that has a host and no whitespace or control characters.
+There is no other effect, so actions cannot carry executable code, native UI
+objects or arbitrary OS operations. The calculator fixture emits no actions.
 
 The host checks request/response correlation and result count after decoding.
 Item IDs must be unique within a response; action IDs must be unique within an
@@ -49,6 +50,8 @@ current-generation checks.
 | Detail body                  |               64 KiB |
 | Pair result                  |               16 KiB |
 | Actions per item             |                    8 |
+| Copy text                    |               16 KiB |
+| URL                          |    2,048 UTF-8 bytes |
 | Encoded opaque state data    |      8 KiB, depth 64 |
 
 State schema versions must be positive; the feature owns their meaning. Depth

@@ -175,6 +175,55 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     })
 }
 
+/// Extensions whose commands were registered, and why the others were not. Built-in and
+/// configured keywords always win: an extension never replaces another command's keyword.
+pub struct Extensions {
+    pub registered: Vec<(CommandId, Arc<crate::extensions::Extension>)>,
+    pub problems: Vec<String>,
+}
+
+pub fn add_extensions(
+    configured: &mut ConfiguredCommands,
+    extensions: &[Arc<crate::extensions::Extension>],
+) -> Extensions {
+    let mut added = Extensions {
+        registered: Vec::new(),
+        problems: Vec::new(),
+    };
+    for extension in extensions {
+        let keyword = &extension.keyword;
+        if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
+            added.problems.push(format!(
+                "{}: keyword `{keyword}` is already used by another command",
+                extension.id
+            ));
+            continue;
+        }
+        let Ok(command) = CommandId::new(format!("extension.{}", extension.id)) else {
+            continue;
+        };
+        let mut spec = CommandSpec::new(
+            command.clone(),
+            50,
+            presentation(
+                &format!("Ask {}", extension.name),
+                Some(&extension.name),
+                Some(&format!("Type for {}  ·  ⌫ back to apps", extension.name)),
+                Some("No results"),
+                true,
+                0.0,
+            ),
+        );
+        spec.deadline = crate::extensions::QUERY_DEADLINE + std::time::Duration::from_secs(1);
+        if configured.registry.register(spec).is_ok()
+            && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
+        {
+            added.registered.push((command, extension.clone()));
+        }
+    }
+    added
+}
+
 pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
@@ -286,6 +335,54 @@ mod tests {
             "https://github.com/search?q=dupin%20%26%20Rust".into(),
         ))));
         assert!(!activation.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn extensions_get_keyword_routes_without_taking_existing_keywords() {
+        use crate::extensions::tests::{extension, module};
+
+        let config = Config {
+            dictionary_keywords: vec!["define".into()],
+            ..Config::default()
+        };
+        let mut configured = configured(&config).unwrap();
+        let extensions: Vec<_> = [
+            ("Word Count", "wc"),
+            ("Dictionary Clash", "define"),
+            ("Contents Clash", "in"),
+            ("Web Clash", "gh"),
+            ("Second Count", "wc"),
+        ]
+        .into_iter()
+        .map(|(name, keyword)| Arc::new(extension(name, keyword, module("{}"))))
+        .collect();
+        let added = add_extensions(&mut configured, &extensions);
+
+        let words = id("extension.word-count");
+        assert_eq!(added.registered.len(), 1);
+        assert_eq!(added.registered[0].0, words);
+        assert_eq!(configured.registry.keyword("wc"), Some(&words));
+        assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert!(configured.web.has_keyword("gh"));
+        assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
+        for (problem, id) in
+            added
+                .problems
+                .iter()
+                .zip(["dictionary-clash", "contents-clash", "web-clash", "second-count"])
+        {
+            assert!(
+                problem.starts_with(id) && problem.contains("already used"),
+                "{problem}"
+            );
+        }
+
+        let mut session =
+            dupin_core::Session::new(dupin_core::History::default(), configured.registry).unwrap();
+        session.set_query("wc two words");
+        assert_eq!(session.command_id(), &words);
+        assert_eq!(session.query(), "two words");
     }
 
     #[test]
