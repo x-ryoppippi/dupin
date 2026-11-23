@@ -1,0 +1,13 @@
+hotkey = ""
+auto_update = false
+input_source = "keep"
+[theme]
+panel_width = 900
+row_height = 72
+corner_radius = 0
+[theme.light]
+accent = "#A52D61"
+background = "#FFF0F5"
+[theme.dark]
+accent = "#A52D61"
+background = "#30202A"
