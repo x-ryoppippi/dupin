@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use dupin_core::{Backdrop, Config, InputSource, Position};
+use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
 use rune::{
     AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
     el, icon, row, text,
@@ -164,10 +165,30 @@ pub struct Prefs {
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
-    login_status: Option<dupin_mac::login_item::Status>,
-    login_error: Option<String>,
+    login: Option<LoginPreference>,
     preview_dark: Option<bool>,
     active_radius: u16,
+}
+
+struct LoginPreference {
+    item: LoginItem,
+    status: LoginStatus,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoginAction {
+    SetEnabled(bool),
+    OpenSettings,
+}
+
+fn login_action(status: LoginStatus) -> Option<LoginAction> {
+    match status {
+        LoginStatus::NotRegistered | LoginStatus::NotFound => Some(LoginAction::SetEnabled(true)),
+        LoginStatus::Enabled => Some(LoginAction::SetEnabled(false)),
+        LoginStatus::RequiresApproval => Some(LoginAction::OpenSettings),
+        _ => None,
+    }
 }
 
 impl Prefs {
@@ -198,32 +219,38 @@ impl Prefs {
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
-            login_status: None,
-            login_error: None,
+            login: objc2::MainThreadMarker::new()
+                .and_then(LoginItem::for_current_app)
+                .map(|item| LoginPreference {
+                    status: item.status(),
+                    item,
+                    error: None,
+                }),
         }
     }
 
     pub fn refresh_login_item(&mut self) {
-        if let Some(mtm) = objc2::MainThreadMarker::new() {
-            self.login_status = Some(dupin_mac::login_item::status(mtm));
-            self.login_error = None;
+        if let Some(login) = &mut self.login {
+            login.status = login.item.status();
+            login.error = None;
         }
     }
 
-    fn change_login_item(&mut self) {
-        let Some(mtm) = objc2::MainThreadMarker::new() else {
+    fn change_login_item(&mut self, action: LoginAction) {
+        self.refresh_login_item();
+        let Some(login) = &mut self.login else {
             return;
         };
-        // Re-read before selecting the action in case System Settings changed since focus.
-        let expected = self.login_status.as_ref().and_then(|status| status.action());
-        let status = dupin_mac::login_item::status(mtm);
-        if let Some(action) = status.action().filter(|action| Some(*action) == expected) {
-            let (status, error) = dupin_mac::login_item::perform(action, mtm);
-            self.login_status = Some(status);
-            self.login_error = error;
-        } else {
-            self.login_status = Some(status);
-            self.login_error = None;
+        // System Settings can change the item between rendering the button and pressing it.
+        if login_action(login.status) != Some(action) {
+            return;
+        }
+        match action {
+            LoginAction::SetEnabled(enabled) => {
+                login.error = login.item.set_enabled(enabled).err();
+                login.status = login.item.status();
+            }
+            LoginAction::OpenSettings => login.item.open_settings(),
         }
     }
 
@@ -689,27 +716,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     let relaunch = value_button(k, "relaunch", "Relaunch", &icons::REFRESH).on_press(|s: &mut Prefs| {
         s.panel.update(|ui, tx| ui.relaunch(tx));
     });
-    let login_action = s.login_status.as_ref().and_then(|status| status.action());
-    let login_control = Button::new(login_action.map_or("Unavailable", |action| action.label()))
-        .disabled(login_action.is_none())
-        .on_press(Prefs::change_login_item)
-        .build(k);
-    let login_detail = s
-        .login_status
-        .as_ref()
-        .map_or("Status unavailable", |status| status.text());
-    let login_detail = match &s.login_error {
-        Some(error) => format!("{login_detail}. {error}"),
-        None => login_detail.to_owned(),
-    };
     vec![
-        setting(
-            k,
-            &icons::REFRESH,
-            "Launch at login",
-            Some(&login_detail),
-            login_control,
-        ),
         setting(
             k,
             &icons::KEYBOARD,
@@ -731,6 +738,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             Some("ASCII switches an input method to Roman while the panel shows"),
             input_source,
         ),
+        login_setting(s.login.as_ref(), k),
         setting(
             k,
             &icons::REFRESH,
@@ -739,6 +747,38 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             relaunch,
         ),
     ]
+}
+
+fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
+    let status = login.map(|login| login.status);
+    let detail = match status {
+        Some(LoginStatus::NotRegistered) => "Off",
+        Some(LoginStatus::Enabled) => "On",
+        Some(LoginStatus::RequiresApproval) => "Approval required in System Settings",
+        Some(LoginStatus::NotFound) => "Login item not found",
+        Some(_) => "macOS returned an unknown login item status",
+        None => "Requires a signed Dupin.app outside the Nix store",
+    };
+    let detail = match login.and_then(|login| login.error.as_deref()) {
+        Some(error) => format!("{detail}. {error}"),
+        None => detail.to_owned(),
+    };
+    let control = match status.and_then(login_action) {
+        Some(action) => Button::new(match action {
+            LoginAction::SetEnabled(true) => "Enable",
+            LoginAction::SetEnabled(false) => "Disable",
+            LoginAction::OpenSettings => "Open Login Items",
+        })
+        .on_press(move |s: &mut Prefs| s.change_login_item(action)),
+        None => Button::new("Unavailable").disabled(true),
+    };
+    setting(
+        k,
+        &icons::LOGIN,
+        "Launch at login",
+        Some(&detail),
+        control.build(k).key("launch-at-login"),
+    )
 }
 
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {
