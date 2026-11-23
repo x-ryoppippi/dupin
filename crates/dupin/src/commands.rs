@@ -182,7 +182,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 Some("No upcoming events"),
                 Some("No matching events"),
                 true,
-                0.0,
+                5.0,
             ),
         )
         .with_query_eligibility(QueryEligibility::Any);
