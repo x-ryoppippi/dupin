@@ -23,7 +23,7 @@ pub fn is_trusted() -> bool {
 }
 
 /// Requests the macOS prompt at most once per user. Returns whether this call requested it.
-pub fn request_once() -> bool {
+pub(crate) fn request_once() -> bool {
     static REQUEST: Once = Once::new();
     let mut requested = false;
     REQUEST.call_once(|| {
