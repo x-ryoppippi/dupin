@@ -746,6 +746,7 @@ version = "0.0.0"
 dependencies = [
  "dupin-core",
  "dupin-extension-install",
+ "dupin-host-services",
  "dupin-js-runtime",
  "dupin-mac",
  "dupin-plugin-protocol",
@@ -792,6 +793,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "dupin-host-services"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
