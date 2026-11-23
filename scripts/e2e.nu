@@ -454,10 +454,26 @@ def scripts-stage [out: path] {
         ) | ignore
         let argv = open ($out | path join script-fixtures argv.json)
         if $argv != [first '$HOME' '*.rs'] { error make {msg: 'Script arguments were expanded or changed'} }
+        (poll
+            $out
+            scripts-inline-finished
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'Finished · Enter to copy'
+            --exact
+            --first
+        ) | ignore
         snap $out scripts-inline
         let closed = log-count $log 'dupin-trace: panel closed '
-        ad $out scripts-inline-close press escape | ignore
+        'Dupin E2E clipboard baseline' | ^pbcopy
+        ad $out scripts-inline-copy press return | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
+        let copied = ^pbpaste
+        $copied | save ($out | path join scripts-inline-copied.txt)
+        if $copied != 'first | $HOME | *.rs' { error make {msg: 'Inline Enter did not copy the script result'} }
 
         script-query $out 'E2E script stream'
         ad $out scripts-stream-start press return | ignore

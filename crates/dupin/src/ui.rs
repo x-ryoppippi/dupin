@@ -899,6 +899,7 @@ impl Ui {
                 if let Some(text) = card.output.last_stdout() {
                     tx.copy(text.to_owned());
                 }
+                self.dismiss(tx);
                 return true;
             }
             if ev.mods.cmd && matches!(ev.key, Key::Command('.')) {
