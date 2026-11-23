@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,6 +12,7 @@ const XML_FILE: &str = "eurofxref-daily.xml";
 const ATTEMPT_FILE: &str = "last-attempt";
 const MAX_XML_BYTES: usize = 64 * 1024;
 const INTERVAL: Duration = Duration::from_hours(12);
+const FIRST_RETRY: Duration = Duration::from_mins(5);
 
 #[derive(Debug, PartialEq)]
 pub(super) struct Rates {
@@ -152,20 +153,18 @@ impl Worker {
                         .as_deref()
                         .filter(|_| shared.enabled())
                         .and_then(|directory| {
-                            if let Some(snapshot) = read_cache(directory)
-                                && shared.publish(snapshot)
-                            {
-                                notify();
+                            if online {
+                                Some(refresh(directory, &shared, &fetch, &notify).unwrap_or_else(|_| {
+                                    publish_cache(directory, &shared, &notify);
+                                    FIRST_RETRY
+                                }))
+                            } else {
+                                publish_cache(directory, &shared, &notify);
+                                None
                             }
-                            online.then(|| refresh(directory, &shared, &fetch, &notify).unwrap_or(INTERVAL))
                         });
-                    match delay {
-                        Some(delay) => match changes.recv_timeout(delay) {
-                            Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => {}
-                            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                        },
-                        None if changes.recv().is_err() => break,
-                        None => {}
+                    if !wait_for_change(&changes, delay) {
+                        break;
                     }
                 }
             })
@@ -180,6 +179,33 @@ impl Worker {
         }
         changed
     }
+}
+
+fn wait_for_change(changes: &mpsc::Receiver<()>, delay: Option<Duration>) -> bool {
+    let Some(delay) = delay else {
+        return changes.recv().is_ok();
+    };
+    let deadline = SystemTime::now() + delay;
+    loop {
+        let wait = crate::wall_clock::wait_slice(deadline, SystemTime::now());
+        if wait.is_zero() {
+            return true;
+        }
+        match changes.recv_timeout(wait) {
+            Ok(()) => return true,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+        }
+    }
+}
+
+fn publish_cache(directory: &Path, state: &State, notify: &impl Fn()) -> Option<SystemTime> {
+    let snapshot = read_cache(directory)?;
+    let refreshed = snapshot.refreshed;
+    if state.publish(snapshot) {
+        notify();
+    }
+    Some(refreshed)
 }
 
 fn read_cache(directory: &Path) -> Option<Snapshot> {
@@ -214,6 +240,7 @@ fn refresh(
     }
     fs::create_dir_all(directory)?;
     let mut marker = OpenOptions::new()
+        .read(true)
         .write(true)
         .create(true)
         .truncate(false)
@@ -221,23 +248,45 @@ fn refresh(
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(directory.join(ATTEMPT_FILE))?;
     if marker.try_lock().is_err() {
-        return Ok(INTERVAL);
+        publish_cache(directory, state, notify);
+        return Ok(Duration::from_secs(15));
     }
     let metadata = marker.metadata()?;
     if !metadata.is_file() {
-        return Ok(INTERVAL);
+        return Err(io::Error::other("the exchange-rate marker is not a file"));
     }
-    if metadata.len() != 0 {
-        let age = metadata.modified()?.elapsed().unwrap_or_default();
-        if age < INTERVAL {
-            return Ok(INTERVAL - age);
+    // Read under the lock so a successful refresh by another instance also resets our schedule.
+    if let Some(refreshed) = publish_cache(directory, state, notify) {
+        let remaining = INTERVAL.saturating_sub(refreshed.elapsed().unwrap_or_default());
+        if !remaining.is_zero() {
+            return Ok(remaining);
         }
+    }
+    let mut retry = FIRST_RETRY;
+    if metadata.len() != 0 {
+        let mut stored = Vec::new();
+        (&mut marker).take(16).read_to_end(&mut stored)?;
+        let previous = std::str::from_utf8(&stored)
+            .ok()
+            .and_then(|text| text.trim().parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .filter(|delay| (FIRST_RETRY..=INTERVAL).contains(delay));
+        // Older builds left a one-byte marker, so give it only the initial cooldown.
+        let delay = previous.unwrap_or(FIRST_RETRY);
+        let age = metadata.modified()?.elapsed().unwrap_or_default();
+        if age < delay {
+            return Ok(delay - age);
+        }
+        retry = previous.map_or(FIRST_RETRY, |delay| (delay * 2).min(INTERVAL));
     }
     if !state.enabled() {
         return Ok(INTERVAL);
     }
-    // Record attempts before contacting ECB so failures and restarts share the same limit.
-    marker.write_all(b"1")?;
+    // Record the retry before contacting the ECB so a restart cannot bypass the backoff.
+    let recorded = format!("{}\n", retry.as_secs());
+    marker.rewind()?;
+    marker.write_all(recorded.as_bytes())?;
+    marker.set_len(recorded.len() as u64)?;
     marker.sync_data()?;
     if state.enabled()
         && let Some(xml) = fetch()
@@ -246,8 +295,8 @@ fn refresh(
             .snapshot()
             .is_none_or(|previous| previous.rates.date <= rates.date)
     {
-        let refreshed = SystemTime::now();
         let saved = write_cache(directory, &xml);
+        let refreshed = saved.as_ref().copied().unwrap_or_else(|_| SystemTime::now());
         if state.publish(Snapshot {
             rates: Arc::new(rates),
             refreshed,
@@ -255,17 +304,38 @@ fn refresh(
             notify();
         }
         saved?;
+        marker.set_len(0)?;
+        return Ok(INTERVAL);
     } else if state.snapshot().is_some_and(|snapshot| snapshot.is_stale()) {
         notify();
     }
-    Ok(INTERVAL)
+    Ok(retry)
 }
 
-fn write_cache(directory: &Path, xml: &str) -> io::Result<()> {
-    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-    temporary.write_all(xml.as_bytes())?;
-    temporary.persist(directory.join(XML_FILE))?;
-    Ok(())
+fn write_cache(directory: &Path, xml: &str) -> io::Result<SystemTime> {
+    let destination = directory.join(XML_FILE);
+    let temporary = destination.with_extension("xml.tmp");
+    // The refresh lock gives this writer exclusive access, including to a previous crash's file.
+    match fs::remove_file(&temporary) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temporary)?;
+    let result = (|| {
+        file.write_all(xml.as_bytes())?;
+        let refreshed = file.metadata()?.modified()?;
+        fs::rename(&temporary, destination)?;
+        Ok(refreshed)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    result
 }
 
 fn download() -> Option<String> {
@@ -329,14 +399,36 @@ mod tests {
         assert!(!path.join(ATTEMPT_FILE).exists());
 
         state.enabled.store(true, Ordering::Release);
-        refresh(path, &state, &fetch, &|| {}).unwrap();
+        assert_eq!(refresh(path, &state, &fetch, &|| {}).unwrap(), FIRST_RETRY);
         assert_eq!(attempts.get(), 1);
         let restarted = State {
             enabled: AtomicBool::new(true),
             ..State::default()
         };
-        refresh(path, &restarted, &fetch, &|| {}).unwrap();
+        let wait = refresh(path, &restarted, &fetch, &|| {}).unwrap();
+        assert!(wait > Duration::ZERO && wait <= FIRST_RETRY);
         assert_eq!(attempts.get(), 1);
+        let marker = fs::OpenOptions::new()
+            .write(true)
+            .open(path.join(ATTEMPT_FILE))
+            .unwrap();
+        for retry in [FIRST_RETRY * 2, FIRST_RETRY * 4, INTERVAL] {
+            if retry == INTERVAL {
+                fs::write(path.join(ATTEMPT_FILE), format!("{}\n", INTERVAL.as_secs())).unwrap();
+            }
+            marker.set_modified(SystemTime::now() - INTERVAL).unwrap();
+            assert_eq!(refresh(path, &restarted, &fetch, &|| {}).unwrap(), retry);
+        }
+        assert_eq!(attempts.get(), 4);
+        marker.set_modified(SystemTime::now() - INTERVAL).unwrap();
+        assert_eq!(
+            refresh(path, &restarted, &|| Some(FIXTURE.into()), &|| {}).unwrap(),
+            INTERVAL
+        );
+        assert_eq!(marker.metadata().unwrap().len(), 0);
+        let remaining = refresh(path, &state, &|| panic!("fresh cache"), &|| {}).unwrap();
+        assert!(remaining > INTERVAL - FIRST_RETRY && remaining <= INTERVAL);
+        assert_eq!(state.snapshot().unwrap().rates.date, "2026-11-20");
     }
 
     #[test]
@@ -349,16 +441,46 @@ mod tests {
         };
         refresh(path, &state, &|| Some(FIXTURE.into()), &|| {}).unwrap();
         assert_eq!(fs::read_to_string(path.join(XML_FILE)).unwrap(), FIXTURE);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path.join(XML_FILE))
+            .unwrap()
+            .set_modified(SystemTime::now() - INTERVAL)
+            .unwrap();
         for bad in ["<html/>".into(), FIXTURE.replace("2026-11-20", "2026-11-19")] {
             let marker = fs::OpenOptions::new()
                 .write(true)
                 .open(path.join(ATTEMPT_FILE))
                 .unwrap();
             marker.set_modified(SystemTime::now() - INTERVAL).unwrap();
-            refresh(path, &state, &|| Some(bad.clone()), &|| {}).unwrap();
+            let attempts = std::cell::Cell::new(0);
+            refresh(
+                path,
+                &state,
+                &|| {
+                    attempts.set(attempts.get() + 1);
+                    Some(bad.clone())
+                },
+                &|| {},
+            )
+            .unwrap();
+            assert_eq!(attempts.get(), 1);
             assert_eq!(fs::read_to_string(path.join(XML_FILE)).unwrap(), FIXTURE);
         }
         assert_eq!(read_cache(path).unwrap().rates.date, "2026-11-20");
+    }
+
+    #[test]
+    fn cache_writer_replaces_an_abandoned_temporary_symlink_without_following_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("other");
+        fs::write(&other, "original").unwrap();
+        let temporary = dir.path().join(XML_FILE).with_extension("xml.tmp");
+        std::os::unix::fs::symlink(&other, &temporary).unwrap();
+        write_cache(dir.path(), FIXTURE).unwrap();
+        assert!(!temporary.exists());
+        assert_eq!(fs::read_to_string(other).unwrap(), "original");
+        assert_eq!(fs::read_to_string(dir.path().join(XML_FILE)).unwrap(), FIXTURE);
     }
 
     #[test]

@@ -15,7 +15,6 @@ extension-tools = ["dep:dupin-plugin-runtime"]
 fend-core = "1.5.9"
 pico-args = "0.5"
 roxmltree = "0.21.2"
-tempfile = "3"
 dupin-plugin-protocol = { workspace = true }
 dupin-plugin-runtime = { path = "../dupin-plugin-runtime", optional = true }
 dupin-core = { workspace = true }
@@ -47,6 +46,9 @@ objc2-metal = { workspace = true, features = [
 	"MTLPixelFormat",
 	"MTLRenderPipeline",
 ] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

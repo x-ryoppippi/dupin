@@ -19,6 +19,7 @@ mod trace;
 mod ui;
 mod update;
 mod view;
+mod wall_clock;
 mod web;
 
 use std::cell::RefCell;

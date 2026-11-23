@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use rune::AppHandle;
 use serde::Deserialize;
@@ -349,16 +349,16 @@ impl Shared {
 
     /// Wait `delay` or until "Check for Updates"; true when asked.
     fn wait(&self, delay: Duration) -> bool {
-        let deadline = Instant::now() + delay;
+        let deadline = SystemTime::now() + delay;
         let mut asked = self.wake.lock().unwrap_or_else(|e| e.into_inner());
         while !*asked {
-            let now = Instant::now();
-            if now >= deadline {
+            let wait = crate::wall_clock::wait_slice(deadline, SystemTime::now());
+            if wait.is_zero() {
                 break;
             }
             asked = self
                 .signal
-                .wait_timeout(asked, deadline - now)
+                .wait_timeout(asked, wait)
                 .unwrap_or_else(|e| e.into_inner())
                 .0;
         }
