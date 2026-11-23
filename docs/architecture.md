@@ -4,7 +4,7 @@ The search and ranking model must remain independent of UI frameworks and operat
 
 ## Providers
 
-Every source of results is a `Provider`: given a `Request` (query and candidate budget), it streams batches of `Item`s and stops when the request is superseded. Apps, file names and file contents each have one, and so does each loaded [extension](extensions.md): its provider runs the Wasm guest through `dupin-plugin-runtime` and turns the returned views and actions into items.
+Every source of results is a `Provider` that streams batches of `Item`s and stops when its request is superseded. A `Request` carries the query, candidate budget and an optional `page` for a pushed view. Apps, file names and file contents each have a provider. Each loaded [extension](extensions.md) has a provider that runs the Wasm guest through `dupin-plugin-runtime` and turns the returned views and actions into items.
 
 An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (title/subtitle), Detail (title/body), or Pair (source/result). It also carries its stable ID, icon path, matched title characters, optional score, action list and primary/alternate action IDs. `display_title()` returns the Text/Detail title or Pair source. Explicit `record_usage` metadata controls history recording; apps/files opt in and dictionary results opt out, independently of view.
 
@@ -20,7 +20,9 @@ Candidate budgets and display limits are separate. The worker enforces each requ
 
 ## The session
 
-`Session` is the launcher's state machine. The host registers commands and their routes; the UI hands the active session query edits and key intents, and it answers with effects: start or cancel a search, run an action, clear the field, hide the panel, keep the selection on screen. It applies registered keyword and empty-query routes, returns to the registered default on Backspace, and drops answers from earlier searches by generation.
+`Session` is the launcher's state machine. The host registers commands and their routes. The UI hands the active session query edits and key intents. The session answers with effects such as starting or cancelling a search, running an action, clearing the field, hiding the panel or keeping the selection on screen. It applies registered keyword and empty-query routes and drops answers from earlier searches by generation.
+
+`Action::Push` opens a view of the selected item's command with a fresh query. The session owns the navigation stack and saves the previous query and selection. Esc pops a view and restores that saved state. Backspace (⌫) does the same when the query is empty. At the base of the stack, Backspace on an empty query returns to the registered default command.
 
 Switching commands clears the previous rows. Generation checks reject late answers from the old command.
 

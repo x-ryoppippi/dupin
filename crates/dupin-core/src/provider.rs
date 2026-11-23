@@ -45,12 +45,12 @@ impl Request {
         Request::new(query.into(), None, limit, 1, Arc::new(AtomicU64::new(1)))
     }
 
-    /// A newer search or a cancel has superseded this one.
-    /// The same, searching a pushed view.
+    /// A request for a pushed view, never cancelled.
     pub fn detached_page(query: impl Into<String>, page: Page, limit: usize) -> Self {
         Request::new(query.into(), Some(page), limit, 1, Arc::new(AtomicU64::new(1)))
     }
 
+    /// A newer search or a cancel has superseded this one.
     pub fn is_cancelled(&self) -> bool {
         self.current.load(Ordering::Acquire) != self.generation
     }
