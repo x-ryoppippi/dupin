@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -199,6 +199,23 @@ impl SourceSnapshot {
 }
 
 fn rename_exclusive(source: &Path, destination: &Path) -> io::Result<()> {
+    rename_with_fallback(source, destination, rename_no_replace)
+}
+
+fn rename_with_fallback(
+    source: &Path,
+    destination: &Path,
+    rename_no_replace: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    match rename_no_replace(source, destination) {
+        Err(error) if error.raw_os_error() == Some(libc::ENOTSUP) => {
+            rename_into_reservation(source, destination)
+        }
+        result => result,
+    }
+}
+
+fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     let source = CString::new(source.as_os_str().as_encoded_bytes())?;
     let destination = CString::new(destination.as_os_str().as_encoded_bytes())?;
     // SAFETY: Both paths are NUL-terminated and live through the call.
@@ -208,6 +225,43 @@ fn rename_exclusive(source: &Path, destination: &Path) -> io::Result<()> {
     } else {
         Err(io::Error::last_os_error())
     }
+}
+
+fn rename_into_reservation(source: &Path, destination: &Path) -> io::Result<()> {
+    // FAT volumes lack exclusive rename and hard links. Claim the destination before renaming.
+    let directory = source.symlink_metadata()?.is_dir();
+    let reservation = if directory {
+        DirBuilder::new().mode(0o700).create(destination)?;
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(destination)?
+    } else {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(destination)?
+    };
+    let identity = file_identity(&reservation.metadata()?);
+    let still_reserved = || {
+        destination
+            .symlink_metadata()
+            .is_ok_and(|metadata| file_identity(&metadata) == identity)
+    };
+    if !still_reserved() {
+        return Err(io::ErrorKind::AlreadyExists.into());
+    }
+
+    let result = fs::rename(source, destination);
+    if result.is_err() && still_reserved() {
+        let _ = if directory {
+            fs::remove_dir(destination)
+        } else {
+            fs::remove_file(destination)
+        };
+    }
+    result
 }
 
 fn move_problem(error: io::Error, destination: &Path) -> String {
@@ -409,6 +463,70 @@ mod tests {
         assert_eq!(renamed, dir.0.join("c.txt"));
         assert_eq!(dir.names(), ["b.txt", "c.txt"]);
         assert_eq!(std::fs::read_to_string(renamed).unwrap(), "a");
+    }
+
+    #[test]
+    fn unsupported_exclusive_rename_claims_the_destination_for_files_and_folders() {
+        let dir = Scratch::new("rename-unsupported");
+        let file = dir.file("source.txt", "original");
+        let folder = dir.0.join("source-folder");
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("child"), "original").unwrap();
+        let file_destination = dir.0.join("target.txt");
+        let folder_destination = dir.0.join("target-folder");
+        for (source, destination, contents) in [
+            (file, &file_destination, file_destination.clone()),
+            (folder, &folder_destination, folder_destination.join("child")),
+        ] {
+            let taken = dir.0.join("taken");
+            std::os::unix::fs::symlink("missing", &taken).unwrap();
+            let error = rename_with_fallback(&source, &taken, |_, _| {
+                Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+            })
+            .unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+            assert_eq!(fs::read_link(&taken).unwrap(), Path::new("missing"));
+            fs::remove_file(taken).unwrap();
+
+            rename_with_fallback(&source, destination, |_, _| {
+                Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+            })
+            .unwrap();
+            assert!(!source.exists());
+            assert_eq!(fs::read_to_string(contents).unwrap(), "original");
+        }
+    }
+
+    #[test]
+    fn failed_fallback_removes_its_reservation() {
+        let dir = Scratch::new("rename-rollback");
+        let source = dir.0.join("source");
+        fs::create_dir(&source).unwrap();
+        let destination = source.join("destination");
+        assert!(
+            rename_with_fallback(&source, &destination, |_, _| {
+                Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+            })
+            .is_err()
+        );
+        assert!(source.is_dir());
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn other_rename_errors_are_preserved_without_creating_a_destination() {
+        let dir = Scratch::new("rename-error");
+        let source = dir.file("source.txt", "original");
+        let destination = dir.0.join("destination.txt");
+        for errno in [libc::EXDEV, libc::EACCES, libc::EEXIST] {
+            let error = rename_with_fallback(&source, &destination, |_, _| {
+                Err(io::Error::from_raw_os_error(errno))
+            })
+            .unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(errno));
+            assert!(!destination.exists());
+        }
+        assert_eq!(fs::read_to_string(source).unwrap(), "original");
     }
 
     #[test]

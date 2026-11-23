@@ -93,14 +93,18 @@ fn reap(receipt: &Path) -> io::Result<()> {
     }
     match stage.symlink_metadata() {
         Ok(metadata) => {
+            if !metadata.is_dir() {
+                return fs::remove_file(receipt);
+            }
             let marker = stage.join(MARKER);
-            if !metadata.is_dir()
-                || !marker.symlink_metadata().is_ok_and(|metadata| metadata.is_file())
-                || !fs::read(&marker).is_ok_and(|value| value == name.as_encoded_bytes())
-            {
-                return Err(io::Error::other(
-                    "the copy staging folder no longer matches its receipt",
-                ));
+            let matches = match marker.symlink_metadata() {
+                Ok(metadata) if metadata.is_file() => fs::read(&marker)? == name.as_encoded_bytes(),
+                Ok(_) => false,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(error) => return Err(error),
+            };
+            if !matches {
+                return fs::remove_file(receipt);
             }
             // Leave the marker in place if removing the staged copy fails and needs to be retried.
             let entry = stage.join("entry");
@@ -168,8 +172,9 @@ mod tests {
 
         let recovery = recover(&journal);
         let _ = fs::set_permissions(&partial, fs::Permissions::from_mode(0o700));
-        assert!(recovery.is_err());
+        recovery.unwrap();
         assert!(!abandoned.exists());
         assert_eq!(fs::read_to_string(replaced.join("entry")).unwrap(), "user data");
+        assert_eq!(fs::read_dir(journal).unwrap().count(), 0);
     }
 }
