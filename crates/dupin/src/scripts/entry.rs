@@ -29,7 +29,7 @@ impl Entry {
         )
     }
 
-    pub fn command(&self) -> Result<ScriptRun, String> {
+    fn command(&self) -> Result<ScriptRun, String> {
         let args = split_args(&self.query.text)?;
         self.script.header.bind_args(&args)?;
         Ok(ScriptRun {

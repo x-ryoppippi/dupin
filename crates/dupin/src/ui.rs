@@ -286,7 +286,7 @@ pub struct Ui {
     prefs: AppHandle<crate::prefs::Prefs>,
     snapshots: AppHandle<crate::snapshots::Snapshots>,
     script_output: AppHandle<crate::scripts::output::Output>,
-    script_output_after_close: Option<u64>,
+    script_output_after_close: Option<crate::scripts::runner::RunId>,
 }
 
 impl Ui {
@@ -623,7 +623,7 @@ impl Ui {
     }
 
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
-    /// Automatic updates wait for both windows to hide; an explicit request closes them.
+    /// Automatic updates wait so a restart does not interrupt work in a visible window.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
             && (self.me.is_visible()
@@ -748,7 +748,7 @@ impl Ui {
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
         if let Some(id) = self.script_output_after_close.take() {
-            self.show_script_output(id);
+            self.show_script_output(id, self.runner.snapshots());
         }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
@@ -889,7 +889,7 @@ impl Ui {
         }
         if let Some(card) = &self.script_card {
             if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
-                self.show_script_output(card.id);
+                self.show_script_output(card.id, self.runner.snapshots());
                 return true;
             }
             if matches!(ev.key, Key::Enter) {
@@ -903,7 +903,7 @@ impl Ui {
                 return true;
             }
             if ev.mods.cmd && matches!(ev.key, Key::Command('.')) {
-                self.runner.cancel(card.id);
+                self.cancel_script(card.id);
                 return true;
             }
         }
@@ -1243,26 +1243,20 @@ impl Ui {
         }
     }
 
-    pub fn scripts_catalog(&mut self, catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
-        self.scripts_notice = catalog.notice.clone();
+    pub(crate) fn scripts_catalog(&mut self, mut catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
+        self.scripts_notice = catalog.notice.take();
         *self.scripts.write().unwrap() = catalog;
         self.refresh_default(tx);
     }
 
-    pub fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
-        if self
-            .script_entry
-            .as_ref()
-            .is_some_and(|entry| entry.query.is_composing())
-        {
+    fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        let Some(entry) = &self.script_entry else {
+            return false;
+        };
+        if entry.query.is_composing() {
             return false;
         }
-        if matches!(ev.key, Key::Escape)
-            || (matches!(ev.key, Key::Backspace)
-                && self
-                    .script_entry
-                    .as_ref()
-                    .is_some_and(|e| e.query.text.is_empty()))
+        if matches!(ev.key, Key::Escape) || (matches!(ev.key, Key::Backspace) && entry.query.text.is_empty())
         {
             self.script_entry = None;
             tx.focus("query", false);
@@ -1280,48 +1274,46 @@ impl Ui {
         false
     }
 
-    pub fn script_entry_current(&self) -> bool {
-        self.script_entry
-            .as_ref()
-            .is_some_and(|entry| entry.is_current(&self.session, &self.scripts.read().unwrap()))
+    pub(crate) fn script_entry_current(&self, entry: &crate::scripts::entry::Entry) -> bool {
+        entry.is_current(&self.session, &self.scripts.read().unwrap())
     }
 
     pub fn kill_scripts(&mut self) {
         self.runner.kill_all_now();
     }
 
-    pub fn cancel_script(&mut self, id: u64) {
+    pub(crate) fn cancel_script(&mut self, id: crate::scripts::runner::RunId) {
         self.runner.cancel(id);
     }
-    pub fn repeat_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
-        self.start_script(command, tx);
-    }
-    pub fn show_script_output(&self, id: u64) {
-        let runs = self.runner.snapshots();
+
+    fn show_script_output(
+        &self,
+        id: crate::scripts::runner::RunId,
+        runs: Vec<crate::scripts::runner::Snapshot>,
+    ) {
         self.script_output.update(move |s, _| s.update(runs, Some(id)));
         self.script_output.open();
     }
 
     fn script_changed(&mut self, id: crate::scripts::runner::RunId, tx: &mut Tx) {
-        use crate::scripts::runner::Status;
         let runs = self.runner.snapshots();
         if let Some(snapshot) = runs.iter().find(|run| run.id == id) {
-            let failed = matches!(snapshot.status, Status::Failed(_) | Status::Exited(None))
-                || matches!(snapshot.status,Status::Exited(Some(code)) if code!=0);
-            if failed
-                && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
-            {
-                self.show_script_output(id);
-            }
             if self.script_card.as_ref().is_some_and(|card| card.id == id) {
                 self.script_card = Some(snapshot.clone());
                 tx.instant();
+            }
+            if snapshot.status.failed()
+                && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
+            {
+                self.show_script_output(id, runs);
+                return;
             }
         }
         self.script_output.update(move |s, _| s.update(runs, None));
     }
 
-    fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+    pub(crate) fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        use dupin_core::script::OutputMode;
         let valid = self
             .scripts
             .read()
@@ -1339,17 +1331,16 @@ impl Ui {
         }
         let mode = command.mode;
         match self.runner.start(command) {
-            Ok(id) => {
-                if mode == dupin_core::script::OutputMode::Inline {
+            Ok(id) => match mode {
+                OutputMode::Inline => {
                     self.script_card = self.runner.snapshots().into_iter().find(|run| run.id == id);
-                } else if mode == dupin_core::script::OutputMode::Full {
-                    self.script_output_after_close = Some(id);
-                    if !self.me.is_visible() {
-                        self.script_output_after_close = None;
-                        self.show_script_output(id);
-                    }
                 }
-            }
+                OutputMode::Full if self.me.is_visible() => {
+                    self.script_output_after_close = Some(id);
+                }
+                OutputMode::Full => self.show_script_output(id, self.runner.snapshots()),
+                OutputMode::Silent => {}
+            },
             Err(problem) => self.show_notice(problem, tx),
         }
     }

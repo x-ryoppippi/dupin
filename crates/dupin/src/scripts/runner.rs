@@ -26,11 +26,19 @@ pub enum Status {
     Failed(String),
 }
 
+impl Status {
+    pub(crate) fn failed(&self) -> bool {
+        matches!(self, Self::Failed(_) | Self::Exited(None))
+            || matches!(self, Self::Exited(Some(code)) if *code != 0)
+    }
+}
+
 impl std::fmt::Display for Status {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Running => f.write_str("Running"),
-            Self::Exited(Some(code)) => write!(f, "Exit {code}"),
+            Self::Exited(Some(0)) => f.write_str("Finished"),
+            Self::Exited(Some(code)) => write!(f, "Exited with code {code}"),
             Self::Exited(None) => f.write_str("Terminated by signal"),
             Self::Cancelled => f.write_str("Cancelled"),
             Self::Failed(problem) => write!(f, "Failed: {problem}"),
@@ -45,6 +53,12 @@ pub struct Snapshot {
     pub status: Status,
     pub output: OutputBuffer,
     pub elapsed: Duration,
+}
+
+impl Snapshot {
+    pub(crate) fn summary(&self) -> String {
+        format!("{} · {:.1} s", self.status, self.elapsed.as_secs_f64())
+    }
 }
 
 struct Run {

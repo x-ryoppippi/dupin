@@ -2,6 +2,7 @@
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
+use dupin_core::script::split_args;
 use dupin_core::session::Results;
 use dupin_core::{Item, View};
 use rune::tok::{self, type_};
@@ -10,6 +11,10 @@ use rune::{
     row, text, text_input,
 };
 
+use crate::scripts::{
+    entry::Entry,
+    runner::{Snapshot, Status},
+};
 use crate::ui::{ActionStage, ApplicationState, ICON_SIZE, Ui};
 
 pub const HEADER_H: f32 = 64.0;
@@ -33,7 +38,9 @@ const WARNING: Color = Color {
 };
 
 pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
-    if let Some(picker) = &s.picker {
+    let dark = cx.system_dark();
+    let t = ResolvedTheme::new(&s.theme, dark);
+    let content = if let Some(picker) = &s.picker {
         let mut list = col().w_full().fill(Color::BLACK).on_key(Ui::key);
         list = list.child(
             text_input(&s.query, TextStyle::new(22.0, 400.0))
@@ -73,10 +80,24 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                     .child(text(label).color(Color::WHITE)),
             );
         }
-        return list;
-    }
-    let dark = cx.system_dark();
-    let t = ResolvedTheme::new(&s.theme, dark);
+        list
+    } else {
+        launcher(s, &t, dark)
+    };
+    // Headless and opaque windows draw the same card in place of Liquid Glass.
+    col().w_full().child(
+        col()
+            .key("panel")
+            .w_full()
+            .radius(s.active_radius)
+            .continuous_corners()
+            .fill(t.card)
+            .system_material(SystemMaterial::Glass)
+            .child(content),
+    )
+}
+
+fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
     let accent = t.accent;
 
     // A light frost over the glass keeps text readable over whatever is behind the panel.
@@ -98,51 +119,12 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     if let Some(entry) = &s.script_entry {
-        let preview = if !s.script_entry_current() {
-            "Script list changed — Esc to go back".into()
-        } else {
-            entry
-                .command()
-                .map(|command| format!("{:?}", command.args))
-                .unwrap_or_else(|problem| problem)
-        };
-        return panel
-            .child(
-                row()
-                    .w_full()
-                    .h(HEADER_H)
-                    .px(18.0)
-                    .gap(12.0)
-                    .center_y()
-                    .child(
-                        text(&entry.script.header.title)
-                            .font(t.font(type_::BODY))
-                            .color(accent),
-                    )
-                    .child(
-                        text_input(&entry.query, t.font(TextStyle::new(22.0, 400.0)))
-                            .key("script-arguments")
-                            .label("Script arguments")
-                            .single_line()
-                            .grow(1.0)
-                            .color(t.text)
-                            .on_edit(|s: &mut Ui| &mut s.script_entry.as_mut().unwrap().query)
-                            .on_input_key(Ui::script_entry_key),
-                    ),
-            )
-            .child(divider(&t))
-            .child(
-                text(preview)
-                    .font(t.font(type_::BODY))
-                    .color(t.text_secondary)
-                    .padding(18.0)
-                    .wrap(),
-            );
+        return panel.children(script_arguments(s, entry, t));
     }
     panel = panel.child(if s.action_screen.is_some() {
-        action_header(s, &t)
+        action_header(s, t)
     } else {
-        header(s, &t, accent)
+        header(s, t, accent)
     });
     let notices = [
         ("config-problem", s.config_problem.as_deref()),
@@ -152,7 +134,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         ("backdrop-notice", s.backdrop.problem()),
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
-        panel = panel.child(divider(&t)).child(
+        panel = panel.child(divider(t)).child(
             row().key(key).w_full().px(18.0).py(12.0).fill(WARNING).child(
                 text(notice)
                     .font(t.font(type_::BODY.lh(18.0)))
@@ -163,41 +145,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     if let Some(card) = &s.script_card {
-        use crate::scripts::runner::Status;
-        let status = match &card.status {
-            Status::Running => "Running… · ⌘. Cancel".into(),
-            Status::Exited(Some(0)) => "Finished · Enter to copy".into(),
-            Status::Exited(_) => format!("{}: {}", card.status, card.output.stderr_tail()),
-            Status::Cancelled => "Cancelled".into(),
-            Status::Failed(problem) => problem.clone(),
-        };
-        return panel.child(divider(&t)).child(
-            col()
-                .w_full()
-                .gap(12.0)
-                .padding(18.0)
-                .child(
-                    text(format!(
-                        "{} · {:.1}s",
-                        card.command.title,
-                        card.elapsed.as_secs_f64()
-                    ))
-                    .font(t.font(type_::BODY))
-                    .color(t.text_secondary),
-                )
-                .child(
-                    text(card.output.last_stdout().unwrap_or(""))
-                        .font(t.font(type_::BODY))
-                        .color(t.text)
-                        .wrap(),
-                )
-                .child(
-                    text(status)
-                        .font(t.font(type_::LABEL))
-                        .color(t.text_secondary)
-                        .wrap(),
-                ),
-        );
+        return panel.child(divider(t)).child(script_inline(card, t));
     }
     for (origin, failure) in s.session.failures() {
         panel = panel.child(
@@ -227,13 +175,13 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     }
     let items = s.session.items();
     if s.action_screen.is_some() {
-        panel = panel.child(divider(&t)).child(action_list(s, &t, accent));
+        panel = panel.child(divider(t)).child(action_list(s, t, accent));
     } else if !items.is_empty()
         && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
     {
-        panel = panel.child(divider(&t)).child(results(s, items, &t, accent));
+        panel = panel.child(divider(t)).child(results(s, items, t, accent));
     } else if let Some(hint) = hint(s) {
-        panel = panel.child(divider(&t)).child(
+        panel = panel.child(divider(t)).child(
             row()
                 .key("hint")
                 .w_full()
@@ -243,18 +191,170 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .child(text(hint).font(t.font(type_::BODY)).color(t.text_secondary)),
         );
     }
-    // Liquid Glass (NSGlassEffectView) under the panel on macOS 26 and later. Headless renders
-    // and opaque windows draw the fill instead, so screenshots show the plain card.
-    col().w_full().child(
-        col()
-            .key("panel")
+    panel
+}
+
+fn script_arguments(s: &Ui, entry: &Entry, t: &ResolvedTheme) -> [El; 3] {
+    let header = &entry.script.header;
+    let args = if s.script_entry_current(entry) {
+        split_args(&entry.query.text)
+    } else {
+        Err("The script list changed. Press Escape to go back.".into())
+    };
+    let mut bindings = col().w_full().gap(8.0);
+    let mut pending = false;
+    for (arg, values) in header.argument_values(args.as_deref().unwrap_or_default()) {
+        let mut label = col().w(144.0).gap(2.0).child(
+            text(arg.name())
+                .font(t.font(type_::TITLE))
+                .color(t.text)
+                .truncate(),
+        );
+        let kind = match (arg.is_optional(), arg.is_variadic()) {
+            (true, true) => Some("Optional · Multiple values"),
+            (true, false) => Some("Optional"),
+            (false, true) => Some("One or more values"),
+            (false, false) => None,
+        };
+        if let Some(kind) = kind {
+            label = label.child(text(kind).font(t.font(type_::LABEL)).color(t.text_secondary));
+        }
+        let mut value = col().grow(1.0).min_w(0.0).gap(2.0);
+        if values.is_empty() {
+            let status = if args.is_err() {
+                "—"
+            } else if arg.is_optional() {
+                "Omitted"
+            } else {
+                pending = true;
+                "Waiting for input"
+            };
+            value = value.child(text(status).font(t.font(type_::BODY)).color(t.text_secondary));
+        } else {
+            value = value.children(values.iter().map(|value| {
+                let (value, color) = if value.is_empty() {
+                    ("Empty string", t.text_secondary)
+                } else {
+                    (value.as_str(), t.text)
+                };
+                text(value).w_full().font(t.font(type_::BODY)).color(color).wrap()
+            }));
+        }
+        bindings = bindings.child(row().w_full().gap(12.0).child(label).child(value));
+    }
+
+    let problem = args.and_then(|args| header.bind_args(&args)).err();
+    let mut summary = row().w_full().gap(12.0).center_y().child(
+        text(&header.title)
+            .grow(1.0)
+            .min_w(0.0)
+            .font(t.font(type_::TITLE))
+            .color(t.text)
+            .truncate(),
+    );
+    if problem.is_none() {
+        summary = summary.child(
+            text("↵ Run script")
+                .font(t.font(type_::LABEL))
+                .color(t.text_secondary),
+        );
+    }
+    let mut preview = col()
+        .key("argument-preview")
+        .w_full()
+        .px(18.0)
+        .py(12.0)
+        .gap(10.0)
+        .child(summary);
+    if let Some(problem) = problem.filter(|_| !pending) {
+        preview = preview.child(
+            text(problem)
+                .key("arguments-problem")
+                .w_full()
+                .font(t.font(type_::BODY))
+                .color(t.text)
+                .wrap(),
+        );
+    }
+    [
+        row().w_full().h(HEADER_H).px(18.0).center_y().child(
+            text_input(&entry.query, t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
+                .key("script-arguments")
+                .label("Script arguments")
+                .placeholder("Script arguments", t.text_secondary)
+                .single_line()
+                .grow(1.0)
+                .color(t.text)
+                .on_edit(|s: &mut Ui| &mut s.script_entry.as_mut().unwrap().query)
+                .on_input_key(Ui::key),
+        ),
+        divider(t),
+        preview.child(
+            col()
+                .w_full()
+                .shrink()
+                .max_h(LIST_HEIGHT_BUDGET - 60.0)
+                .scroll(ScrollSpec { stick_bottom: false })
+                .child(bindings),
+        ),
+    ]
+}
+
+fn script_inline(run: &Snapshot, t: &ResolvedTheme) -> El {
+    let output = run.output.last_stdout();
+    let shortcut = match run.status {
+        Status::Running => "⌘. Cancel · ⌘O Full output",
+        Status::Exited(Some(0)) if output.is_some() => "↵ Copy · ⌘O Full output",
+        Status::Exited(Some(0)) => "↵ Close · ⌘O Full output",
+        _ => "⌘O Full output",
+    };
+    let mut card = col()
+        .key("script-inline")
+        .w_full()
+        .px(18.0)
+        .py(12.0)
+        .gap(8.0)
+        .child(
+            row()
+                .w_full()
+                .gap(12.0)
+                .center_y()
+                .child(
+                    text(&run.command.title)
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .font(t.font(type_::TITLE))
+                        .color(t.text)
+                        .truncate(),
+                )
+                .child(text(shortcut).font(t.font(type_::LABEL)).color(t.text_secondary)),
+        );
+    if let Some(output) = output {
+        card = card.child(script_excerpt(output, t));
+    }
+    card = card.child(
+        text(run.summary())
             .w_full()
-            .radius(s.active_radius)
-            .continuous_corners()
-            .fill(t.card)
-            .system_material(SystemMaterial::Glass)
-            .child(panel),
-    )
+            .font(t.font(type_::LABEL))
+            .color(t.text_secondary)
+            .wrap(),
+    );
+    if run.status.failed() {
+        let stderr = run.output.stderr_tail();
+        if !stderr.is_empty() {
+            card = card.child(script_excerpt(stderr, t));
+        }
+    }
+    card
+}
+
+fn script_excerpt(body: &str, t: &ResolvedTheme) -> El {
+    col()
+        .w_full()
+        .shrink()
+        .max_h(160.0)
+        .scroll(ScrollSpec { stick_bottom: false })
+        .child(text(body).w_full().font(t.font(type_::BODY)).color(t.text).wrap())
 }
 
 fn action_header(s: &Ui, t: &ResolvedTheme) -> El {

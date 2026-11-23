@@ -1,9 +1,9 @@
-use super::runner::{Snapshot, Status};
+use super::runner::{RunId, Snapshot, Status};
 use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, Tx, col, row, text};
 
 pub struct Output {
-    pub runs: Vec<Snapshot>,
-    pub selected: Option<u64>,
+    runs: Vec<Snapshot>,
+    selected: Option<RunId>,
     panel: AppHandle<crate::ui::Ui>,
 }
 impl Output {
@@ -14,14 +14,17 @@ impl Output {
             panel,
         }
     }
-    pub fn update(&mut self, runs: Vec<Snapshot>, selected: Option<u64>) {
+    pub fn update(&mut self, runs: Vec<Snapshot>, selected: Option<RunId>) {
         self.runs = runs;
         if let Some(id) = selected {
             self.selected = Some(id);
         }
-        if !self.runs.iter().any(|run| Some(run.id) == self.selected) {
+        if self.selected_run().is_none() {
             self.selected = self.runs.first().map(|run| run.id);
         }
+    }
+    fn selected_run(&self) -> Option<&Snapshot> {
+        self.runs.iter().find(|run| Some(run.id) == self.selected)
     }
     fn cancel(&mut self) {
         if let Some(id) = self.selected {
@@ -29,13 +32,13 @@ impl Output {
         }
     }
     fn repeat(&mut self) {
-        if let Some(run) = self.runs.iter().find(|run| Some(run.id) == self.selected) {
+        if let Some(run) = self.selected_run() {
             let command = run.command.clone();
-            self.panel.update(move |s, tx| s.repeat_script(command, tx));
+            self.panel.update(move |s, tx| s.start_script(command, tx));
         }
     }
     fn copy(&self, tx: &mut Tx) {
-        if let Some(run) = self.runs.iter().find(|run| Some(run.id) == self.selected) {
+        if let Some(run) = self.selected_run() {
             let notice = dropped_notice(&run.output);
             tx.copy(
                 notice
@@ -77,38 +80,86 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
         let id = run.id;
         list = list.child(
             col()
-                .padding(10.0)
-                .gap(4.0)
+                .w_full()
+                .px(10.0)
+                .py(8.0)
+                .gap(2.0)
+                .radius(8.0)
                 .fill(if Some(id) == s.selected {
                     k.c.layer_02
                 } else {
                     k.c.bg_base
                 })
-                .child(text(&run.command.title).font(k.ty.ui_medium).color(k.c.text_base))
+                .hover(k.c.layer_02)
+                .child(
+                    text(&run.command.title)
+                        .font(k.ty.ui_medium)
+                        .color(k.c.text_base)
+                        .truncate(),
+                )
                 .child(
                     text(run.status.to_string())
                         .font(k.ty.small)
-                        .color(k.c.text_muted),
+                        .color(k.c.text_muted)
+                        .truncate(),
                 )
+                .focusable(true)
                 .key(format!("script-run-{id}"))
                 .on_press(move |s: &mut Output| s.selected = Some(id)),
         );
     }
     let mut detail = col().grow(1.0).min_w(0.0).gap(12.0);
-    if let Some(run) = s.runs.iter().find(|run| Some(run.id) == s.selected) {
-        detail = detail
-            .child(text(&run.command.title).font(k.ty.ui_medium).color(k.c.text_base))
-            .child(
-                text(format!(
-                    "{} · {:.1}s · {:?}",
-                    run.status,
-                    run.elapsed.as_secs_f64(),
-                    run.command.args
-                ))
-                .font(k.ty.small)
-                .color(k.c.text_muted)
-                .wrap(),
-            );
+    if let Some(run) = s.selected_run() {
+        detail = detail.child(
+            col()
+                .w_full()
+                .gap(4.0)
+                .child(
+                    text(&run.command.title)
+                        .w_full()
+                        .font(k.ty.body_medium)
+                        .color(k.c.text_base)
+                        .truncate(),
+                )
+                .child(
+                    text(run.summary())
+                        .w_full()
+                        .font(k.ty.small)
+                        .color(if run.status.failed() {
+                            k.c.text_base
+                        } else {
+                            k.c.text_muted
+                        })
+                        .wrap(),
+                ),
+        );
+        if !run.command.args.is_empty() {
+            detail =
+                detail.child(
+                    row()
+                        .w_full()
+                        .gap(12.0)
+                        .child(text("Arguments").font(k.ty.small).color(k.c.text_muted))
+                        .child(
+                            col()
+                                .grow(1.0)
+                                .min_w(0.0)
+                                .shrink()
+                                .max_h(72.0)
+                                .scroll(ScrollSpec { stick_bottom: false })
+                                .child(col().w_full().gap(2.0).children(run.command.args.iter().map(
+                                    |value| {
+                                        let (value, color) = if value.is_empty() {
+                                            ("Empty string", k.c.text_muted)
+                                        } else {
+                                            (value.as_str(), k.c.text_base)
+                                        };
+                                        text(value).w_full().font(k.ty.small).color(color).wrap()
+                                    },
+                                ))),
+                        ),
+                );
+        }
         let button = |label: &str| rune_kit::Button::new(label).build(k).key(label);
         detail = detail.child(
             row()
@@ -129,35 +180,32 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                     .key("script-output-dropped"),
             );
         }
-        let mut lines = col()
-            .grow(1.0)
-            .min_h(0.0)
-            .scroll(ScrollSpec { stick_bottom: true });
+        let mut lines = col().w_full().padding(12.0).gap(2.0).selection_group(true);
+        let mut style = k.ty.ui;
+        style.family = rune::tok::Family::SystemMono;
         for (i, line) in run.output.lines().iter().enumerate() {
-            let mut style = k.ty.small;
-            style.family = rune::tok::Family::SystemMono;
+            let stderr = line.stream == dupin_core::script::Stream::Stderr;
             lines = lines.child(
-                text(format!(
-                    "{}{}",
-                    if line.stream == dupin_core::script::Stream::Stderr {
-                        "stderr: "
-                    } else {
-                        ""
-                    },
-                    line.text
-                ))
-                .font(style)
-                .color(if line.stream == dupin_core::script::Stream::Stderr {
-                    k.c.danger.fg
-                } else {
-                    k.c.text_base
-                })
-                .wrap()
-                .selectable(true)
-                .key(format!("output-{i}")),
+                text(format!("{}{}", if stderr { "stderr: " } else { "" }, line.text))
+                    .w_full()
+                    .font(style)
+                    .color(if stderr { k.c.danger.fg } else { k.c.text_base })
+                    .wrap()
+                    .selectable(true)
+                    .key(format!("output-{i}")),
             );
         }
-        detail = detail.child(lines);
+        detail = detail.child(
+            col()
+                .key(format!("script-output-{}", run.id))
+                .w_full()
+                .grow(1.0)
+                .min_h(0.0)
+                .radius(8.0)
+                .fill(k.c.layer_01)
+                .scroll(ScrollSpec { stick_bottom: true })
+                .child(lines),
+        );
     } else {
         detail = detail.child(text("No script runs yet").color(k.c.text_muted));
     }

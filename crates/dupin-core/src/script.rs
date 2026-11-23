@@ -37,6 +37,20 @@ pub struct ArgSpec {
     kind: ArgKind,
 }
 
+impl ArgSpec {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_optional(&self) -> bool {
+        matches!(self.kind, ArgKind::Optional | ArgKind::ZeroOrMore)
+    }
+
+    pub fn is_variadic(&self) -> bool {
+        matches!(self.kind, ArgKind::ZeroOrMore | ArgKind::OneOrMore)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Header {
     pub title: String,
@@ -152,29 +166,38 @@ impl Header {
             .join(" ")
     }
 
+    pub fn argument_values<'a>(
+        &'a self,
+        mut remaining: &'a [String],
+    ) -> impl Iterator<Item = (&'a ArgSpec, &'a [String])> {
+        let mut required = self.arguments.iter().filter(|arg| !arg.is_optional()).count();
+        self.arguments.iter().map(move |arg| {
+            required -= usize::from(!arg.is_optional());
+            let count = match arg.kind {
+                ArgKind::Required => usize::from(!remaining.is_empty()),
+                ArgKind::Optional => usize::from(remaining.len() > required),
+                ArgKind::ZeroOrMore | ArgKind::OneOrMore => remaining.len(),
+            };
+            let (values, rest) = remaining.split_at(count);
+            remaining = rest;
+            (arg, values)
+        })
+    }
+
     pub fn bind_args(&self, args: &[String]) -> Result<Vec<(String, Vec<String>)>, String> {
         if args.len() > MAX_ARGS || args.iter().map(String::len).sum::<usize>() > MAX_ARG_BYTES {
             return Err("Too many argument bytes or values".into());
         }
-        let mut at = 0;
+        let mut used = 0;
         let mut bound = Vec::new();
-        for (index, arg) in self.arguments.iter().enumerate() {
-            let required_after = self.arguments[index + 1..]
-                .iter()
-                .filter(|arg| matches!(arg.kind, ArgKind::Required | ArgKind::OneOrMore))
-                .count();
-            let remaining = args.len().saturating_sub(at);
-            let count = match arg.kind {
-                ArgKind::Required if remaining == 0 => return Err(format!("Needs {}", arg.name)),
-                ArgKind::Required => 1,
-                ArgKind::Optional => usize::from(remaining > required_after),
-                ArgKind::OneOrMore if remaining == 0 => return Err(format!("Needs {}", arg.name)),
-                ArgKind::ZeroOrMore | ArgKind::OneOrMore => remaining,
-            };
-            bound.push((arg.name.clone(), args[at..at + count].to_vec()));
-            at += count;
+        for (arg, values) in self.argument_values(args) {
+            if values.is_empty() && !arg.is_optional() {
+                return Err(format!("Needs {}", arg.name));
+            }
+            used += values.len();
+            bound.push((arg.name.clone(), values.to_vec()));
         }
-        if at != args.len() {
+        if used != args.len() {
             return Err("Too many arguments".into());
         }
         Ok(bound)
@@ -220,7 +243,8 @@ pub fn split_args(input: &str) -> Result<Vec<String>, String> {
         }
     }
     if let Some(quote) = quote {
-        return Err(format!("Unclosed {quote}"));
+        let kind = if quote == '\'' { "single" } else { "double" };
+        return Err(format!("Unclosed {kind} quote"));
     }
     if started {
         args.push(word);
@@ -449,6 +473,11 @@ mod tests {
         assert_eq!(header.synopsis(), "interface [note] files…");
         assert!(header.bind_args(&[]).is_err());
         assert!(header.bind_args(&["en0".into()]).is_err());
+        let partial = ["en0".to_owned()];
+        let preview: Vec<_> = header.argument_values(&partial).collect();
+        assert_eq!(preview[0].1, ["en0"]);
+        assert!(preview[1].0.is_optional() && preview[1].1.is_empty());
+        assert!(preview[2].0.is_variadic() && !preview[2].0.is_optional() && preview[2].1.is_empty());
         let bound = header.bind_args(&["en0".into(), "file".into()]).unwrap();
         assert!(bound[1].1.is_empty());
         assert_eq!(bound[2].1, ["file"]);
