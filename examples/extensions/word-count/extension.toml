@@ -1,0 +1,5 @@
+id = "word-count"
+name = "Word Count"
+version = "0.1.0"
+keyword = "wc"
+entry = "word_count.wasm"
