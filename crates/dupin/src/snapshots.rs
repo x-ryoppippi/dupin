@@ -99,8 +99,9 @@ impl Snapshots {
                     if let Some(id) = id {
                         self.open(id);
                     }
-                    self.panel.update(crate::ui::Ui::show_snapshots);
-                    Ok(serde_json::Value::Null)
+                    self.panel
+                        .update(move |ui, tx| ui.control_snapshots_open(call, tx));
+                    return;
                 }
             }
             Command::SnapshotsClose {} => {
@@ -673,13 +674,13 @@ mod tests {
             me: snapshot_handle(),
             loaded: false,
             sources: vec![],
-            entries: vec![saved("saved", 1)],
-            filtered: vec![0],
-            search: vec!["query".into()],
+            entries: vec![saved("other", 2), saved("saved", 1)],
+            filtered: vec![0, 1],
+            search: vec!["query".into(), "query".into()],
             writer,
             archive_problem: None,
             query: TextEdit::new("query"),
-            selected: Some("saved".into()),
+            selected: Some("other".into()),
             pending_delete: None,
             problem: None,
             panel,
@@ -711,12 +712,6 @@ mod tests {
                 Some("NotFound: snapshot"),
             ),
             (Command::SnapshotsList {}, None),
-            (
-                Command::SnapshotsOpen {
-                    id: Some("saved".into()),
-                },
-                None,
-            ),
             (Command::SnapshotsClose {}, None),
         ] {
             let (reply, rx) = std::sync::mpsc::sync_channel(1);
@@ -729,8 +724,27 @@ mod tests {
                 &mut Tx::default(),
             );
             assert_eq!(rx.recv().unwrap().result.err().as_deref(), expected);
-            assert_eq!(s.selected.as_deref(), Some("saved"));
+            assert_eq!(s.selected.as_deref(), Some("other"));
         }
+        let (reply, rx) = std::sync::mpsc::sync_channel(1);
+        s.control(
+            Call {
+                request: ControlRequest {
+                    id: 1,
+                    command: Command::SnapshotsOpen {
+                        id: Some("saved".into()),
+                    },
+                },
+                cancelled: Default::default(),
+                reply,
+            },
+            &mut Tx::default(),
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "opening replies only after the panel's final Busy check"
+        );
+        assert_eq!(s.selected.as_deref(), Some("saved"));
         assert!(s.query.text.is_empty());
         assert!(received.try_recv().is_err());
     }

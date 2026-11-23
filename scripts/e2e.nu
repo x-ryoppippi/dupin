@@ -71,6 +71,11 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
 }
 
 def cli-stage [out: path, binary: path] {
+    let recording = $out | path join recording
+    if ($recording | path join started.json | path exists) {
+        let started = open ($recording | path join started.json) | into datetime
+        ((date now) - $started) / 1sec | to json | save --force ($recording | path join cli-start.json)
+    }
     let log = $out | path join dupin.log
     let archive = $out | path join data dupin snapshots archive.json
     let history = $env.HOME | path join 'Library/Application Support/Dupin/history.json'

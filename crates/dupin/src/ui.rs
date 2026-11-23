@@ -189,9 +189,6 @@ impl Ui {
             return;
         }
         match &call.request.command {
-            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
-                call.finish(Err("Busy: picker active".into()));
-            }
             Command::SnapshotsList {} | Command::SnapshotsOpen { .. } | Command::SnapshotsClose {} => {
                 self.snapshots.update(move |s, tx| s.control(call, tx));
             }
@@ -715,6 +712,18 @@ impl Ui {
             self.dismiss(tx);
         } else {
             self.snapshots.open();
+        }
+    }
+
+    pub fn control_snapshots_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.picker.is_some() {
+            call.finish(Err("Busy: picker active".into()));
+        } else {
+            self.show_snapshots(tx);
+            call.finish(Ok(serde_json::Value::Null));
         }
     }
 
