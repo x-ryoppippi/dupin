@@ -129,6 +129,7 @@ fn main() {
             scripts::output::view,
         )
     })
+    .windowless()
     .srgb_blend(true)
     .on_close(scripts::output::Output::closed);
     let scripts_handle = scripts.handle();
