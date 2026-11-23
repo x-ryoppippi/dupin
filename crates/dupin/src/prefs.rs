@@ -752,8 +752,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
 fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
     let status = login.map(|login| login.status);
     let detail = match status {
-        Some(LoginStatus::NotRegistered) => "Off",
-        Some(LoginStatus::Enabled) => "On",
+        Some(LoginStatus::NotRegistered | LoginStatus::Enabled) => "Open Dupin when you log in",
         Some(LoginStatus::RequiresApproval) => "Approval required in System Settings",
         Some(LoginStatus::NotFound) => "Login item not found",
         Some(_) => "macOS returned an unknown login item status",
@@ -764,20 +763,25 @@ fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
         None => detail.to_owned(),
     };
     let control = match status.and_then(login_action) {
-        Some(action) => Button::new(match action {
-            LoginAction::SetEnabled(true) => "Enable",
-            LoginAction::SetEnabled(false) => "Disable",
-            LoginAction::OpenSettings => "Open Login Items",
-        })
-        .on_press(move |s: &mut Prefs| s.change_login_item(action)),
-        None => Button::new("Unavailable").disabled(true),
+        Some(LoginAction::OpenSettings) => Button::new("Open Login Items")
+            .on_press(|s: &mut Prefs| s.change_login_item(LoginAction::OpenSettings))
+            .build(k),
+        action => {
+            let enabled = action == Some(LoginAction::SetEnabled(false));
+            Switch::new(enabled)
+                .label("Launch at login")
+                .hide_label()
+                .disabled(action.is_none())
+                .on_toggle(move |s: &mut Prefs| s.change_login_item(LoginAction::SetEnabled(!enabled)))
+                .build(k)
+        }
     };
     setting(
         k,
         &icons::LOGIN,
         "Launch at login",
         Some(&detail),
-        control.build(k).key("launch-at-login"),
+        control.key("launch-at-login"),
     )
 }
 
