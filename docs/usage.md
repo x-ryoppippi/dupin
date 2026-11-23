@@ -39,6 +39,13 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 
 When an app matches through one of those other names, the name shows before its folder in the result.
 
+## Calculator
+
+Type a calculation in app search, such as `12*3`, `2^10`, `(1+2)/3` or
+`15% of 200`. Convert units with `5 km to mi`, `100 f to c` or `1 GiB in MB`.
+The answer appears above apps. Press Enter to copy it. Turn Calculator off in
+**Settings → Search**.
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.

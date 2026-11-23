@@ -9,6 +9,7 @@ pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
 const SETTINGS: &str = "settings.search";
+const CALCULATOR: &str = "calculator.evaluate";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
@@ -133,6 +134,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         presentation("Search settings", None, None, None, false, 0.0),
     ))?;
     registry.register(CommandSpec::new(
+        id(CALCULATOR),
+        usize::from(config.calculator),
+        presentation("Calculate", None, None, None, false, 0.0),
+    ))?;
+    registry.register(CommandSpec::new(
         id(WEB_KEYWORDS),
         1,
         presentation("Web search", None, None, None, false, 0.0),
@@ -145,10 +151,12 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
         .with_fallback(),
     )?;
-    registry.set_default_providers(
-        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
-        Some(id(WEB_KEYWORDS)),
-    )?;
+    let mut providers = Vec::new();
+    if config.calculator {
+        providers.push(id(CALCULATOR));
+    }
+    providers.extend([apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)]);
+    registry.set_default_providers(providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
@@ -189,6 +197,10 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
+        (
+            id(CALCULATOR),
+            Arc::new(crate::calculator::Calculator) as Arc<dyn Provider>,
+        ),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -231,6 +243,78 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calculator_precedes_apps_and_enter_copies_without_recording_usage() {
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Item, Request, Session, View};
+
+        let registry = configured(&Config::default()).unwrap().registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        let mut items = Vec::new();
+        crate::calculator::Calculator
+            .search(&Request::detached("12*3", 1), &mut |batch| items.extend(batch))
+            .unwrap();
+        session.deliver_from(
+            id(APPS),
+            Delivery::Batch {
+                generation,
+                items: vec![Item::path("/fixture.app".into(), "Fixture".into(), Vec::new())],
+            },
+        );
+        session.deliver_from(id(CALCULATOR), Delivery::Batch { generation, items });
+        assert_eq!(
+            session.selected_item().unwrap().view,
+            View::Pair {
+                source: "12*3".into(),
+                result: "36".into()
+            }
+        );
+        assert_eq!(session.items()[1].display_title(), "Fixture");
+        let activate = session.intent(Intent::Open).unwrap();
+        assert!(activate.contains(&Effect::Run(Action::Copy("36".into()))));
+        assert!(!activate.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn disabling_calculator_refreshes_default_search_without_it() {
+        use dupin_core::{Delivery, Effect, History, Session};
+
+        let registry = configured(&Config::parse("file_limit = 20").unwrap())
+            .unwrap()
+            .registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        let effects = session.set_query("12*3");
+        let generation = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Search {
+                    command, generation, ..
+                } if command.as_str() == CALCULATOR => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+
+        let disabled = Config::parse("calculator = false").unwrap();
+        assert!(
+            session
+                .set_commands(configured(&disabled).unwrap().registry)
+                .unwrap()
+        );
+        assert!(session.refresh().iter().all(
+            |effect| !matches!(effect, Effect::Search { command, .. } if command.as_str() == CALCULATOR)
+        ));
+        assert!(!session.deliver_from(id(CALCULATOR), Delivery::Done { generation }));
+    }
 
     #[test]
     fn web_results_use_the_registered_session_action_and_completion_paths() {

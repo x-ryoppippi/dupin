@@ -497,11 +497,13 @@ impl Ui {
         };
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
-        self.session
+        let providers_changed = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
-        if self.session.command().result_limit != previous_limit
+        if providers_changed
+            || self.session.command().result_limit != previous_limit
             || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
         {

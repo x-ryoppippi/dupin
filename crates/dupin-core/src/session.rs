@@ -149,13 +149,15 @@ impl Session {
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    /// Replace the command registry and report whether the current search's provider order changed.
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<bool, crate::CommandError> {
         commands.validate()?;
         if !commands.contains(&self.command) {
             return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
         }
+        let previous = self.provider_ids();
         self.commands = commands;
-        Ok(())
+        Ok(self.provider_ids() != previous)
     }
 
     /// The same, with a clock in Unix seconds other than the system's.

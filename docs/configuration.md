@@ -11,6 +11,7 @@ hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
+calculator = true # show calculations and unit conversions in app search
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -24,6 +25,9 @@ Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaul
 Aliases must be non-empty, have no leading or trailing whitespace and leave other commands' keywords, such as `in`, available. Dupin reports invalid or conflicting aliases in the panel and ignores those entries; the other aliases still work.
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
+
+Set `calculator = false` or turn off **Calculator** in Settings → Search to
+hide calculator results. Changes apply immediately.
 
 ## Web searches
 

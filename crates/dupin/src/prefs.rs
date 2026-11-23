@@ -702,13 +702,29 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
-    vec![setting(
-        k,
-        &icons::FILES,
-        "Files shown",
-        Some("The most files a Spotlight search lists"),
-        limit,
-    )]
+    let next_calculator = !s.config.calculator;
+    let calculator = Switch::new(s.config.calculator)
+        .label("Calculator")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator = next_calculator))
+        .build(k);
+    vec![
+        setting(
+            k,
+            &icons::FILES,
+            "Files shown",
+            Some("The most files a Spotlight search lists"),
+            limit,
+        ),
+        setting(
+            k,
+            &icons::CALCULATOR,
+            "Calculator",
+            Some("Show calculations and unit conversions in app search"),
+            calculator,
+        ),
+    ]
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};
