@@ -50,7 +50,7 @@ impl Permission {
         }
     }
 
-    pub fn settings_url(self) -> &'static str {
+    fn settings_url(self) -> &'static str {
         match self {
             Permission::Accessibility => accessibility::SETTINGS_URL,
             Permission::Calendars => CALENDARS_SETTINGS_URL,
