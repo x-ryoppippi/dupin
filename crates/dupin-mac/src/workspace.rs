@@ -113,7 +113,7 @@ pub fn applications_for(path: &Path) -> Result<Vec<Application>, String> {
 }
 
 /// Open a URL with its registered handler.
-fn open_url(value: &str) -> bool {
+pub(crate) fn open_url(value: &str) -> bool {
     let Some(url) = NSURL::URLWithString(&NSString::from_str(value)) else {
         return false;
     };
