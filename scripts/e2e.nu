@@ -320,7 +320,7 @@ def system-pane [out: path, focused: closure, found: closure] {
         snap --app 'System Settings' $out bluetooth-evidence-after
         null
     } catch {|error|
-        snap --app 'System Settings' $out bluetooth-evidence-failure
+        try { snap --app 'System Settings' $out bluetooth-evidence-failure }
         $error
     }
     cp $log ($out | path join bluetooth-evidence-after-trace.log)
