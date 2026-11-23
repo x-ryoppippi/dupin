@@ -8,11 +8,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use dupin_core::{Config, config::HotkeyTarget};
+use dupin_mac::system_hotkey;
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
-
-mod system;
 
 pub struct Binding {
     panel: AppHandle<Ui>,
@@ -135,7 +134,9 @@ impl Binding {
 
     pub fn replace(&self, kind: LauncherShortcut, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let targets = replacement_targets(&state, kind, next, system::owns)?;
+        let targets = replacement_targets(&state, kind, next, |shortcut| {
+            system_hotkey::owner(shortcut).is_some()
+        })?;
         self.update_registrations(&mut state, &targets)
             .map_err(|(_, error)| error)?;
         state.targets = targets;
@@ -285,7 +286,8 @@ impl Binding {
         if let Some(Target::Launcher(other)) = state.targets.get(shortcut) {
             let keys = shortcut.keycaps().join("");
             return Some(if *other == kind {
-                format!("{keys} is used by macOS.")
+                let owner = system_hotkey::owner(shortcut).unwrap_or("macOS");
+                format!("{keys} is used by {owner}.")
             } else {
                 format!("{keys} is assigned to the {} shortcut.", other.name())
             });

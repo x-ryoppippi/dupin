@@ -13,6 +13,7 @@ pub mod quick_look;
 pub mod selection;
 mod settings_search;
 pub mod spotlight;
+pub mod system_hotkey;
 pub mod watcher;
 pub mod window;
 pub mod workspace;

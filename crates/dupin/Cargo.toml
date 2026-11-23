@@ -30,14 +30,6 @@ naga = { workspace = true }
 # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
 # Rune's backend will draw it.
 objc2 = { workspace = true }
-objc2-core-foundation = { workspace = true, features = [
-	"std",
-	"CFArray",
-	"CFDictionary",
-	"CFNumber",
-	"CFString",
-] }
-winit = { version = "0.30.13", default-features = false }
 objc2-foundation = { workspace = true, features = [
 	"std",
 	"NSError",
