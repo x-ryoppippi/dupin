@@ -152,3 +152,63 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
         .child(list)
         .child(detail)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "offscreen screenshot, run explicitly"]
+    fn render_output_fixture() {
+        let panel = rune::App::new(rune::AppSpec::new(
+            "panel",
+            (1.0, 1.0),
+            || unreachable!(),
+            crate::view::view,
+        ))
+        .handle();
+        let mut state = Output::new(panel);
+        let mut output = dupin_core::script::OutputBuffer::default();
+        output.push(dupin_core::script::Stream::Stdout, b"Stream line 1");
+        output.push(dupin_core::script::Stream::Stdout, b"Stream line 2");
+        output.push(dupin_core::script::Stream::Stderr, b"A fixture warning");
+        state.update(
+            vec![Snapshot {
+                id: 1,
+                command: dupin_core::script::ScriptRun {
+                    path: "/fixture/stream".into(),
+                    title: "Fixture stream".into(),
+                    args: vec!["hello world".into()],
+                    mode: dupin_core::script::OutputMode::Full,
+                },
+                status: Status::Running,
+                output,
+                elapsed: std::time::Duration::from_secs(2),
+            }],
+            Some(1),
+        );
+        let app = rune::App::new(rune::AppSpec::new(
+            "Dupin Script Output",
+            (900.0, 600.0),
+            || unreachable!(),
+            view,
+        ))
+        .init(move || state);
+        let path = std::env::temp_dir().join("dupin35-output.png");
+        rune::tooling::run_windows_with_args(
+            Default::default(),
+            [
+                "render",
+                "--window",
+                "scripts",
+                "--snap",
+                path.to_str().unwrap(),
+                "--theme",
+                "dark",
+            ]
+            .map(str::to_owned),
+            move |_| [rune::WindowSpec::from_app("scripts", app)],
+        );
+        assert!(path.exists());
+    }
+}

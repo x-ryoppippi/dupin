@@ -1,0 +1,5 @@
+#!/bin/sh
+# @dupin.title Dupin fixture echo
+# @dupin.argument values+
+# @dupin.output inline
+printf '%s\n' "$@"
