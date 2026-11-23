@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -102,7 +102,7 @@ impl FileTransfers {
         let staging = self.stage_copy(path, folder)?;
         let entry = staging.entry();
         claim(folder, names, |destination| {
-            rename_exclusive(&entry, destination).map_err(Attempt::from)
+            publish_staged_entry(&entry, destination, rename_exclusive).map_err(Attempt::from)
         })
     }
 
@@ -144,7 +144,8 @@ fn publish_move(
     destination: PathBuf,
     trash: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<PathBuf, String> {
-    rename_exclusive(staged, &destination).map_err(|error| move_problem(error, &destination))?;
+    publish_staged_entry(staged, &destination, rename_exclusive)
+        .map_err(|error| move_problem(error, &destination))?;
     match SourceSnapshot::read(path) {
         Ok(current) if current == *original => {}
         Ok(_) => {
@@ -160,6 +161,42 @@ fn publish_move(
         format!("The copy was saved in the destination. Couldn't move the source to the Trash: {error}")
     })?;
     Ok(destination)
+}
+
+fn publish_staged_entry(
+    staged: &Path,
+    destination: &Path,
+    publish: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
+    let metadata = staged.symlink_metadata()?;
+    let original = metadata.permissions();
+    if !metadata.is_dir() || original.mode() & 0o200 != 0 {
+        return publish(staged, destination);
+    }
+
+    // Moving a directory to another parent needs write access to update its `..`.
+    // Read access lets us keep a descriptor to restore the mode even if the name changes.
+    fs::set_permissions(staged, fs::Permissions::from_mode(original.mode() | 0o600))?;
+    let entry = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(staged);
+    let (result, restoration) = match entry {
+        Ok(entry) => (publish(staged, destination), entry.set_permissions(original)),
+        Err(error) => (Err(error), fs::set_permissions(staged, original)),
+    };
+    if let Err(error) = restoration {
+        return Err(io::Error::other(match result {
+            Ok(()) => format!(
+                "The copy was saved at “{}”, but its folder permissions couldn't be restored ({error}).",
+                destination.display()
+            ),
+            Err(publish_error) => {
+                format!("{publish_error}. Couldn't restore the staged folder permissions ({error}).")
+            }
+        }));
+    }
+    result
 }
 
 #[derive(PartialEq, Eq)]
@@ -469,7 +506,7 @@ mod tests {
 
     impl Drop for Scratch {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            let _ = staging::remove_staged_directory(&self.0);
         }
     }
 
@@ -553,6 +590,31 @@ mod tests {
         );
         assert!(source.is_dir());
         assert!(!destination.exists());
+    }
+
+    #[test]
+    fn publishing_a_read_only_folder_restores_its_mode_with_the_reservation_fallback() {
+        let dir = Scratch::new("read-only-fallback");
+        let staged = dir.0.join("stage/entry");
+        fs::create_dir_all(&staged).unwrap();
+        dir.file("stage/entry/child", "original");
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let publish_without_exclusive = |source: &Path, destination: &Path| {
+            rename_with_fallback(source, destination, |_, _| {
+                Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+            })
+        };
+        let invalid = staged.join("destination");
+        assert!(publish_staged_entry(&staged, &invalid, publish_without_exclusive).is_err());
+        assert!(!invalid.exists());
+        assert_eq!(staged.metadata().unwrap().mode() & 0o7777, 0o555);
+
+        let destination = dir.0.join("destination");
+        publish_staged_entry(&staged, &destination, publish_without_exclusive).unwrap();
+        assert!(!staged.exists());
+        assert_eq!(destination.metadata().unwrap().mode() & 0o7777, 0o555);
+        assert_eq!(fs::read_to_string(destination.join("child")).unwrap(), "original");
     }
 
     #[test]
@@ -652,6 +714,28 @@ mod tests {
         assert_eq!(std::fs::read_to_string(first).unwrap(), "existing");
         assert_eq!(std::fs::read_to_string(next).unwrap(), "original");
         assert_eq!(std::fs::read_to_string(source).unwrap(), "original");
+    }
+
+    #[test]
+    fn copy_and_duplicate_preserve_read_only_folders() {
+        let dir = Scratch::new("read-only-copy");
+        let files = dir.transfers();
+        let source = dir.0.join("source");
+        let folder = dir.0.join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&folder).unwrap();
+        dir.file("source/child.txt", "original");
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let copied = files.copy_to(&source, &folder).unwrap();
+        let duplicated = files.duplicate(&source).unwrap();
+
+        assert_eq!(copied, folder.canonicalize().unwrap().join("source"));
+        assert_eq!(duplicated, dir.0.join("source copy"));
+        for path in [source, copied, duplicated] {
+            assert_eq!(path.metadata().unwrap().mode() & 0o7777, 0o555);
+            assert_eq!(fs::read_to_string(path.join("child.txt")).unwrap(), "original");
+        }
     }
 
     #[test]
@@ -771,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn staged_move_preserves_a_folder_and_removes_it_only_after_publishing() {
+    fn staged_move_preserves_a_read_only_folder_and_removes_it_only_after_publishing() {
         let dir = Scratch::new("staged-move");
         let files = dir.transfers();
         let source = dir.0.join("source");
@@ -791,11 +875,13 @@ mod tests {
         assert_eq!(std::fs::read_link(&target).unwrap(), Path::new("missing"));
         assert!(!files.journal.as_ref().unwrap().exists());
         std::fs::remove_file(&target).unwrap();
+        fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
         let snapshot = SourceSnapshot::read(&source).unwrap();
         let staging = files.stage_copy(&source, &folder).unwrap();
         let trash = dir.0.join("trash");
         let output = publish_move(&source, &snapshot, &staging.entry(), target.clone(), |path| {
             assert!(target.join("child.txt").exists());
+            assert_eq!(target.metadata().unwrap().mode() & 0o7777, 0o555);
             fs::rename(path, &trash).map_err(|error| error.to_string())
         })
         .unwrap();

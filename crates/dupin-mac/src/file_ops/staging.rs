@@ -128,7 +128,7 @@ fn reap(receipt: &Path) -> io::Result<()> {
     fs::remove_file(receipt)
 }
 
-fn remove_staged_directory(root: &Path) -> io::Result<()> {
+pub(super) fn remove_staged_directory(root: &Path) -> io::Result<()> {
     // The copy can inherit read-only directories, which would prevent removing their children.
     let mut directories = vec![root.to_owned()];
     while let Some(path) = directories.pop() {
