@@ -31,6 +31,8 @@ This history holds up to 100 terms and is separate from app-ranking history.
 
 ## Apps
 
+Executable [script commands](./scripts.md) also appear in normal search. Scripts with arguments open a separate argument field; their output can stay inline or stream into the Script Output window.
+
 Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~/Applications`, one folder deep (so `Utilities` is included). An app matches by any name macOS knows it by:
 
 - the name Finder shows, localized (システム設定 for System Settings on a Japanese Mac);
