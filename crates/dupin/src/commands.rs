@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::{CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation};
-use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
+use dupin_core::{
+    CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
+};
+use dupin_mac::{AppsProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target};
 
 pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
@@ -53,6 +55,10 @@ pub fn query_problem(command: &CommandId, raw: &str) -> Option<&'static str> {
 
 fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
+}
+
+pub fn recent_id() -> CommandId {
+    id("recent.items")
 }
 
 fn presentation(
@@ -145,10 +151,20 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
         .with_fallback(),
     )?;
-    registry.set_default_providers(
-        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
-        Some(id(WEB_KEYWORDS)),
-    )?;
+    let mut default_providers = vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)];
+    if config.show_recent {
+        let recent = recent_id();
+        registry.register(
+            CommandSpec::new(
+                recent.clone(),
+                10,
+                presentation("Recent items", None, None, None, false, 0.0),
+            )
+            .with_query_eligibility(QueryEligibility::EmptyOnly),
+        )?;
+        default_providers.push(recent);
+    }
+    registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
@@ -175,7 +191,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     })
 }
 
-pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
+pub fn register(
+    config: &Config,
+    apps: Arc<AppsProvider>,
+    history: Arc<RwLock<History>>,
+) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
@@ -188,7 +208,11 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
-        (apps_id, apps as Arc<dyn Provider>),
+        (apps_id, apps.clone() as Arc<dyn Provider>),
+        (
+            recent_id(),
+            Arc::new(RecentProvider::new(apps, history)) as Arc<dyn Provider>,
+        ),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -231,6 +255,25 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_is_the_only_blank_search_provider_and_can_be_disabled() {
+        use dupin_core::{Effect, Session};
+
+        let mut config = Config::default();
+        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
+        assert!(matches!(
+            session.refresh().as_slice(),
+            [Effect::Search { command, query, .. }] if *command == recent_id() && query.is_empty()
+        ));
+
+        config.show_recent = false;
+        session
+            .set_commands(configured(&config).unwrap().registry)
+            .unwrap();
+        assert_eq!(session.refresh(), [Effect::CancelSearch]);
+        assert!(session.items().is_empty());
+    }
 
     #[test]
     fn web_results_use_the_registered_session_action_and_completion_paths() {

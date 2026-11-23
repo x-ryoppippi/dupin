@@ -1,6 +1,15 @@
+use std::path::PathBuf;
+
 use dupin_core::{Action, Item, ItemAction};
 
-pub(crate) fn add(item: &mut Item) {
+pub(crate) fn item(path: PathBuf, title: String, matched: Vec<usize>) -> Item {
+    let mut item = Item::path(path, title, matched);
+    crate::quick_look::add_action(&mut item);
+    add(&mut item);
+    item
+}
+
+fn add(item: &mut Item) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };

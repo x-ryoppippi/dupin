@@ -330,7 +330,7 @@ impl Session {
             self.selected = 0;
             self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
-            effects.extend(self.switch(command));
+            effects.extend(self.switch(command, true));
             return effects;
         }
         self.query = text.to_owned();
@@ -384,22 +384,20 @@ impl Session {
                 .commands
                 .space_on_empty(&self.command)
                 .cloned()
-                .map_or_else(Vec::new, |command| self.switch(command)),
+                .map_or_else(Vec::new, |command| self.switch(command, true)),
             Intent::Space if self.command == *self.commands.default() => {
                 let command = self.commands.keyword(&self.query)?.clone();
                 self.query.clear();
                 let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(command));
+                effects.extend(self.switch(command, true));
                 effects
             }
             Intent::Backspace if empty && self.command != *self.commands.default() => {
-                let effects = self.switch(self.commands.default().clone());
-                self.explicit = false;
-                effects
+                self.switch(self.commands.default().clone(), false)
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if empty || self.recalled.is_some() => self.recall(true),
+            Intent::Up if (empty && self.selected == 0) || self.recalled.is_some() => self.recall(true),
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 self.refresh_selection = None;
@@ -445,11 +443,19 @@ impl Session {
         self.commands.command(id)
     }
     pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
-        if self.explicit {
+        let candidates = if self.explicit {
             vec![self.command.clone()]
         } else {
             self.commands.providers(&self.command)
-        }
+        };
+        candidates
+            .into_iter()
+            .filter(|id| {
+                self.commands
+                    .command(id)
+                    .is_some_and(|spec| spec.query_eligibility.allows(&self.query))
+            })
+            .collect()
     }
     pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
         self.providers.iter().filter_map(|(id, state)| match state.phase {
@@ -765,20 +771,20 @@ impl Session {
         effects
     }
 
-    fn switch(&mut self, command: CommandId) -> Vec<Effect> {
+    fn switch(&mut self, command: CommandId, explicit: bool) -> Vec<Effect> {
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;
         self.command = command;
-        self.explicit = true;
+        self.explicit = explicit;
         self.search()
     }
 
     fn search(&mut self) -> Vec<Effect> {
         self.refresh_selection = None;
         self.selection_held = false;
-        let query = self.query.trim();
-        if query.is_empty() {
+        let provider_ids = self.provider_ids();
+        if provider_ids.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -789,14 +795,22 @@ impl Session {
         }
         let query = self.query.clone();
         self.generation += 1;
-        // A command change clears the previous command's rows before starting a search.
+        if self.origins.iter().all(|origin| !provider_ids.contains(origin)) {
+            self.items.clear();
+            self.origins.clear();
+            self.selected = 0;
+        }
         self.results = Results::Searching { replaced: false };
-        self.active_order = self.provider_ids();
-        self.active_pin = self.commands.pinned().filter(|_| !self.explicit).cloned();
+        self.active_order.clone_from(&provider_ids);
+        self.active_pin = self
+            .commands
+            .pinned()
+            .filter(|pin| !self.explicit && provider_ids.contains(pin))
+            .cloned();
         self.active_limit = self.command().result_limit;
         self.providers = self
-            .provider_ids()
-            .into_iter()
+            .active_order
+            .iter()
             .map(|id| {
                 (
                     id.clone(),
@@ -804,14 +818,14 @@ impl Session {
                         items: Vec::new(),
                         ids: HashSet::new(),
                         phase: ProviderPhase::Pending,
-                        fallback: !self.explicit && self.commands.command(&id).unwrap().is_fallback(),
-                        candidate_limit: self.commands.command(&id).unwrap().candidate_limit(),
-                        result_limit: self.commands.command(&id).unwrap().result_limit,
+                        fallback: !self.explicit && self.commands.command(id).unwrap().is_fallback(),
+                        candidate_limit: self.commands.command(id).unwrap().candidate_limit(),
+                        result_limit: self.commands.command(id).unwrap().result_limit,
                     },
                 )
             })
             .collect();
-        self.provider_ids()
+        provider_ids
             .into_iter()
             .map(|command| Effect::Search {
                 command,
