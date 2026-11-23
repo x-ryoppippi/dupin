@@ -22,6 +22,11 @@ impl FakeClock {
     fn advance(&self, by: Duration) {
         self.0.fetch_add(by.as_millis() as u64, Ordering::SeqCst);
     }
+
+    fn set(&self, time: SystemTime) {
+        let millis = time.duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        self.0.store(millis, Ordering::SeqCst);
+    }
 }
 
 impl Clock for FakeClock {
@@ -307,12 +312,145 @@ fn a_tampered_or_missing_blob_drops_only_its_record() {
         store.read_blob(&damaged.blobs[0].handle),
         Err(Error::Corrupt(_))
     ));
+    assert_eq!(store.get(&damaged.id).unwrap(), None);
+    assert!(!damaged_path.exists());
     drop(store);
 
     fs::remove_file(blobs.join(format!("{}.blob", missing.blobs[0].handle))).unwrap();
     let store = fixture.open(Limits::default());
     assert_eq!(store.open_report().corrupt_records, 1);
-    assert_eq!(texts(&store), ["fine", "damaged"]);
+    assert_eq!(texts(&store), ["fine"]);
+}
+
+#[test]
+fn content_whose_blob_was_found_damaged_is_stored_afresh() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let image = b"image bytes".to_vec();
+    let first = store
+        .put(NewRecord {
+            data: json!("first copy"),
+            blobs: vec![image.clone()],
+        })
+        .unwrap();
+    let path = fixture
+        .namespace()
+        .join("blobs")
+        .join(format!("{}.blob", first.blobs[0].handle));
+    let mut bytes = fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&path, bytes).unwrap();
+    assert!(matches!(
+        store.read_blob(&first.blobs[0].handle),
+        Err(Error::Corrupt(_))
+    ));
+
+    let again = store
+        .put(NewRecord {
+            data: json!("second copy"),
+            blobs: vec![image.clone()],
+        })
+        .unwrap();
+    assert_eq!(again.blobs[0].handle, first.blobs[0].handle);
+    assert_eq!(*store.read_blob(&again.blobs[0].handle).unwrap(), image);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_record_fails_the_open_and_deletes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let put = store
+        .put(NewRecord {
+            data: json!("kept"),
+            blobs: vec![b"blob".to_vec()],
+        })
+        .unwrap();
+    drop(store);
+    let path = fixture
+        .namespace()
+        .join("records")
+        .join(format!("{}.rec", put.id));
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(&path).is_ok() {
+        // Running as root, permissions can't make the file unreadable.
+        return;
+    }
+    let records = files_in(&fixture.namespace().join("records"));
+    let blobs = files_in(&fixture.namespace().join("blobs"));
+
+    assert!(matches!(
+        fixture.storage().open("clipboard", Limits::default()),
+        Err(Error::Io(_))
+    ));
+    assert_eq!(files_in(&fixture.namespace().join("records")), records);
+    assert_eq!(files_in(&fixture.namespace().join("blobs")), blobs);
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report(), Default::default());
+    assert_eq!(store.get(&put.id).unwrap(), Some(put));
+}
+
+#[test]
+fn a_damaged_key_check_is_rewritten_when_the_records_open() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    store.put(text("secret")).unwrap();
+    drop(store);
+    let check = fixture.namespace().join("key.check");
+    let mut bytes = fs::read(&check).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&check, &bytes).unwrap();
+
+    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    assert!(matches!(
+        other.open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(fs::read(&check).unwrap(), bytes);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report(), Default::default());
+    assert_eq!(texts(&store), ["secret"]);
+    drop(store);
+    assert_ne!(fs::read(&check).unwrap(), bytes);
+    assert!(matches!(
+        other.open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+}
+
+#[test]
+fn records_keep_their_real_time_after_the_clock_ran_ahead() {
+    let fixture = Fixture::new();
+    let limits = Limits {
+        max_age: Some(DAY),
+        ..Limits::default()
+    };
+    let store = fixture.open(Limits::default());
+    let now = fixture.clock.now();
+    let before = store.put(text("before")).unwrap();
+    fixture.clock.set(now + DAY * 3650);
+    store.put(text("future")).unwrap();
+    fixture.clock.set(now);
+    let secret = store.put(text("secret")).unwrap();
+    assert_eq!(secret.created_at(), now);
+    assert!(secret.id > before.id);
+    drop(store);
+
+    let store = fixture.open(limits);
+    let reopened = store.put(text("reopened")).unwrap();
+    assert_eq!(reopened.created_at(), now);
+    assert!(reopened.id > secret.id);
+
+    fixture.clock.advance(DAY * 30);
+    assert_eq!(store.sweep().unwrap(), 3);
+    assert_eq!(texts(&store), ["future"]);
+    assert_eq!(store.open_report().expired, 0);
 }
 
 #[test]
@@ -635,7 +773,7 @@ fn the_sweeper_stops_with_its_store() {
 fn a_key_file_is_created_once_and_kept_private() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("storage/key");
+    let path = dir.path().join("storage.key");
     let provider = FileKey::new(&path);
     let first = provider.data_key().unwrap();
     assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
@@ -646,6 +784,22 @@ fn a_key_file_is_created_once_and_kept_private() {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
     fs::write(&path, b"short").unwrap();
     assert!(matches!(provider.data_key(), Err(Error::Key(_))));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_key_file_beside_the_storage_root_leaves_every_namespace_name_free() {
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Storage::new(
+        dir.path().join("storage"),
+        FileKey::new(dir.path().join("storage.key")),
+    );
+    storage
+        .open("key", Limits::default())
+        .unwrap()
+        .put(text("x"))
+        .unwrap();
+    assert_eq!(texts(&storage.open("key", Limits::default()).unwrap()), ["x"]);
 }
 
 #[test]

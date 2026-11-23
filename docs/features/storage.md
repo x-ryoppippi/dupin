@@ -4,7 +4,7 @@
 
 ## What a namespace holds
 
-- **Records** are JSON values with an ID and the time they were stored. IDs sort by time, so `list` pages newest first with a `before` cursor and returns at most 200 records a page.
+- **Records** are JSON values with an ID and the time they were stored, taken from the clock even if it has gone back since the last record. IDs sort by that time, so `list` pages newest first with a `before` cursor and returns at most 200 records a page.
 - **Blobs** are byte strings stored beside a record: an image, a file snapshot, a video. A blob is named by a keyed hash of its contents, so the same image copied twice is stored once and kept until no record refers to it. `put` returns a handle per blob; `read_blob` takes the handle and returns the bytes.
 - **Limits** apply per namespace: maximum age (any duration, or forever), maximum entries, maximum total bytes and maximum bytes per item. An item over its limit is refused whole, never truncated. The oldest records go first when a limit is exceeded. Limits apply when the namespace opens, after every `put` and when they change; the owner also runs a `Sweeper` thread that applies them periodically, so entries age out while nothing is being written. Hard ceilings (100,000 entries, 512 MiB per item, 16 GiB per namespace) bound what any owner can ask for.
 
@@ -25,14 +25,14 @@ storage/<namespace>/
 
 Each file is sealed with XChaCha20-Poly1305 under a fresh random 192-bit nonce. Two keys are derived per namespace from the data key with HKDF-SHA256: one seals files, the other names blobs. The associated data authenticates the format version, the namespace and the file's name, so a file renamed, moved to another namespace or rolled into another record's place fails to open. A record file seals a small header (the body's length and the blobs it uses) and the JSON body separately, so opening a namespace reads only the headers. The body is bound to its own header.
 
-Every write goes to `tmp/`, is flushed, then renamed into place and the directory flushed, so a crash leaves either the old state or the new one. There is no separate index to fall out of step: the record files are the index. Opening a namespace deletes leftover temporary files, records that fail authentication or have lost a blob, and blobs that no record uses. A damaged record is dropped on its own; the rest stay readable. Before anything is deleted as damaged, the namespace's `key.check` must open, so a wrong or missing key reports an error and leaves every file untouched; the owner can then discard the namespace deliberately.
+Every write goes to `tmp/`, is flushed, then renamed into place and the directory flushed, so a crash leaves either the old state or the new one. There is no separate index to fall out of step: the record files are the index. Opening a namespace deletes leftover temporary files, records that fail authentication or have lost a blob, and blobs that no record uses. A damaged record is dropped on its own; the rest stay readable. Before anything is deleted as damaged, the key must be confirmed: the namespace's `key.check` opens, or, if that file is missing or damaged, at least one record opens and the check is written again. A wrong or missing key therefore reports an error and leaves every file untouched; the owner can then discard the namespace deliberately. A read or permission error is reported as an error too, never taken for damage. A blob that turns out to be damaged when read is dropped with the records that use it, so the next copy of the same content is stored afresh.
 
 ## The data key
 
 One random 256-bit data key protects every namespace. A `KeyProvider` supplies it, and creates it only if none exists; a locked or refused key store is reported as an error, never answered with a new key that would orphan the stored data.
 
 - **macOS:** a generic password item, service `app.dupin.Dupin.storage`, account `data-key`, never synchronized. A build with the data protection keychain entitlement stores it there as accessible after first unlock, this device only. Builds without that entitlement (ad hoc and Developer ID builds without a provisioning profile) fall back to the login keychain, which ignores the accessibility class and whose access control trusts the app that created the item, so a differently signed build may be asked for the login password before it can read the key.
-- **Linux and others:** `FileKey`, a `0600` file meant to sit at `storage/key`. It is refused if other users can read it. This is weaker than a key store: anyone who can read the file, or a backup that contains it alongside the data, can decrypt everything.
+- **Linux and others:** `FileKey`, a `0600` file meant to sit at `storage.key` beside `storage/`, never inside it, where every name belongs to a namespace. It is refused if other users can read it. This is weaker than a key store: anyone who can read the file, or a backup that contains it alongside the data, can decrypt everything.
 - **Tests and fixtures** use an in-memory key and never touch the real Keychain.
 
 ## Threat model

@@ -324,11 +324,16 @@ impl Storage {
                 .and_then(|name| name.to_str())
                 .and_then(|name| name.strip_suffix(".rec"))
                 .and_then(|stem| stem.parse::<RecordId>().ok());
-            match id.map(|id| (id, read_header(&keys, &path, &id))) {
-                Some((id, Ok(meta))) => {
+            let Some(id) = id else {
+                unreadable.push(path);
+                continue;
+            };
+            match read_header(&keys, &path, &id) {
+                Ok(meta) => {
                     records.insert(id, meta);
                 }
-                _ => unreadable.push(path),
+                Err(Error::Corrupt(_)) => unreadable.push(path),
+                Err(error) => return Err(error),
             }
         }
 
@@ -461,34 +466,32 @@ fn clear_dir(dir: &Path) -> io::Result<usize> {
 }
 
 /// Confirms the namespace was sealed with this key before anything is deleted as corrupt.
-/// A namespace from before the check file existed, or one whose check file was lost, passes
-/// when at least one record opens.
+/// When the check file is missing or damaged, the key passes if at least one record opens,
+/// and the check file is written again.
 fn verify_key(keys: &NamespaceKeys, path: &Path, nothing_opened: bool) -> Result<(), Error> {
     let aad = keys.aad("check", &[]);
     match fs::read(path) {
         Ok(bytes) => {
             let opened = parse_sealed(CHECK_MAGIC, &bytes)
                 .and_then(|(nonce, ciphertext)| keys.open(&nonce, &aad, ciphertext.to_vec()));
-            match opened {
-                Some(plaintext) if plaintext.as_slice() == CHECK_PLAINTEXT => Ok(()),
-                _ => Err(Error::WrongKey),
+            if opened.is_some_and(|plaintext| plaintext.as_slice() == CHECK_PLAINTEXT) {
+                return Ok(());
             }
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if nothing_opened {
-                return Err(Error::WrongKey);
-            }
-            let (nonce, ciphertext) = keys.seal(&aad, CHECK_PLAINTEXT)?;
-            let file = framed(CHECK_MAGIC, &[&nonce, &ciphertext]);
-            let tmp = path
-                .parent()
-                .expect("the check file is in the namespace")
-                .join(TMP);
-            Staged::write(&tmp, &file)?.commit(path)?;
-            Ok(())
-        }
-        Err(error) => Err(error.into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
+    if nothing_opened {
+        return Err(Error::WrongKey);
+    }
+    let (nonce, ciphertext) = keys.seal(&aad, CHECK_PLAINTEXT)?;
+    let file = framed(CHECK_MAGIC, &[&nonce, &ciphertext]);
+    let tmp = path
+        .parent()
+        .expect("the check file is in the namespace")
+        .join(TMP);
+    Staged::write(&tmp, &file)?.commit(path)?;
+    Ok(())
 }
 
 fn framed(magic: &[u8; 4], parts: &[&[u8]]) -> Vec<u8> {
@@ -543,10 +546,14 @@ impl RecordFile {
 
 fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Meta, Error> {
     let corrupt = || Error::Corrupt(format!("record {id}"));
+    let truncated = |error: io::Error| match error.kind() {
+        io::ErrorKind::UnexpectedEof => corrupt(),
+        _ => Error::Io(error),
+    };
     let mut file = File::open(path)?;
     let file_len = file.metadata()?.len();
     let mut prefix = [0u8; PREFIX_LEN + 4];
-    file.read_exact(&mut prefix).map_err(|_| corrupt())?;
+    file.read_exact(&mut prefix).map_err(truncated)?;
     if &prefix[..4] != RECORD_MAGIC || prefix[4] != VERSION {
         return Err(corrupt());
     }
@@ -555,9 +562,9 @@ fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Meta,
         return Err(corrupt());
     }
     let mut nonce = [0u8; NONCE_LEN];
-    file.read_exact(&mut nonce).map_err(|_| corrupt())?;
+    file.read_exact(&mut nonce).map_err(truncated)?;
     let mut ciphertext = vec![0u8; header_len];
-    file.read_exact(&mut ciphertext).map_err(|_| corrupt())?;
+    file.read_exact(&mut ciphertext).map_err(truncated)?;
     let plain = keys
         .open(&nonce, &RecordFile::header_aad(keys, id), ciphertext)
         .ok_or_else(corrupt)?;
@@ -578,6 +585,36 @@ struct State {
     blobs: HashMap<BlobHandle, BlobEntry>,
     total: u64,
     last_id: Option<RecordId>,
+}
+
+impl State {
+    /// An unused ID stamped with `now`, even when the clock has gone back since the last
+    /// record: an ID's time is the record's age, which retention relies on.
+    fn next_id(&self, now: u64) -> RecordId {
+        let mut millis = now;
+        loop {
+            let taken = self
+                .records
+                .range(
+                    ..=RecordId {
+                        millis,
+                        seq: u32::MAX,
+                    },
+                )
+                .next_back()
+                .map(|(id, _)| *id)
+                .into_iter()
+                .chain(self.last_id)
+                .filter(|id| id.millis == millis)
+                .map(|id| id.seq)
+                .max();
+            match taken.map(|seq| seq.checked_add(1)) {
+                None => return RecordId { millis, seq: 0 },
+                Some(Some(seq)) => return RecordId { millis, seq },
+                Some(None) => millis += 1,
+            }
+        }
+    }
 }
 
 /// One open namespace. Safe to share between threads; calls are serialized and block on IO.
@@ -662,20 +699,7 @@ impl Store {
         }
         drop(blobs);
 
-        let now = unix_millis(self.clock.now());
-        let id = match state.last_id {
-            Some(last) if last.millis >= now => match last.seq.checked_add(1) {
-                Some(seq) => RecordId {
-                    millis: last.millis,
-                    seq,
-                },
-                None => RecordId {
-                    millis: last.millis + 1,
-                    seq: 0,
-                },
-            },
-            _ => RecordId { millis: now, seq: 0 },
-        };
+        let id = state.next_id(unix_millis(self.clock.now()));
         let header = Header {
             body_len: body.len() as u64,
             blobs: refs.clone(),
@@ -764,14 +788,37 @@ impl Store {
         Ok(page)
     }
 
-    /// A blob's contents, if a record in this namespace still refers to it.
+    /// A blob's contents, if a record in this namespace still refers to it. A corrupt blob is
+    /// dropped with every record that refers to it, so the next `put` of its content stores
+    /// it again.
     pub fn read_blob(&self, handle: &BlobHandle) -> Result<Zeroizing<Vec<u8>>, Error> {
-        let state = self.state();
-        let entry = state.blobs.get(handle).ok_or(Error::NotFound)?;
+        let mut state = self.state();
+        let len = state.blobs.get(handle).ok_or(Error::NotFound)?.len;
+        match self.decode_blob(handle, len) {
+            Err(Error::Corrupt(what)) => {
+                let dependents: Vec<RecordId> = state
+                    .records
+                    .iter()
+                    .filter(|(_, meta)| meta.blobs.iter().any(|blob| blob.handle == *handle))
+                    .map(|(id, _)| *id)
+                    .collect();
+                for id in dependents {
+                    self.remove(&mut state, &id)?;
+                }
+                Err(Error::Corrupt(what))
+            }
+            other => other,
+        }
+    }
+
+    fn decode_blob(&self, handle: &BlobHandle, len: u64) -> Result<Zeroizing<Vec<u8>>, Error> {
         let path = self.paths.blobs.join(handle.file_name());
-        let expected = (PREFIX_LEN + NONCE_LEN + TAG_LEN) as u64 + entry.len;
+        let expected = (PREFIX_LEN + NONCE_LEN + TAG_LEN) as u64 + len;
         let corrupt = || Error::Corrupt(format!("blob {handle}"));
-        let mut file = File::open(&path)?;
+        let mut file = match File::open(&path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(corrupt()),
+            other => other?,
+        };
         if file.metadata()?.len() != expected {
             return Err(corrupt());
         }

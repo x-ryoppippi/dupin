@@ -67,7 +67,8 @@ impl KeyProvider for MemoryKey {
 
 /// A key kept in a file only the user can read, for systems without a usable OS key store.
 /// Anyone who can read the file, or a backup that includes it alongside the data, can decrypt
-/// everything, so this is weaker than an OS key store.
+/// everything, so this is weaker than an OS key store. Keep it outside the [`crate::Storage`]
+/// root, where every name is a namespace's directory.
 #[derive(Debug, Clone)]
 pub struct FileKey {
     path: PathBuf,
