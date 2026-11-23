@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
+use dupin_core::clipboard::ClipboardProvider;
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
     Session,
@@ -14,6 +15,7 @@ pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
 pub const CALENDAR: &str = "calendar.events";
+pub const CLIPBOARD: &str = "clipboard.history";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -172,6 +174,25 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.add_keyword(&contents_id, "in")?;
+    if config.clipboard.enabled {
+        let clipboard = id(CLIPBOARD);
+        let mut spec = CommandSpec::new(
+            clipboard.clone(),
+            config.clipboard.max_entries,
+            presentation(
+                "Search clipboard history",
+                Some("Clipboard"),
+                Some("Nothing copied yet  ·  ⌫ back to apps"),
+                Some("No matches"),
+                false,
+                4.0,
+            ),
+        )
+        .with_query_eligibility(QueryEligibility::Any);
+        spec.private_results = true;
+        registry.register(spec)?;
+        registry.add_keyword(&clipboard, "clip")?;
+    }
     if config.calendar.enabled {
         let calendar = id(CALENDAR);
         let mut spec = CommandSpec::new(
@@ -220,6 +241,7 @@ pub fn register(
     apps: Arc<AppsProvider>,
     history: History,
     calendar: CalendarProvider,
+    clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
 ) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
@@ -258,6 +280,13 @@ pub fn register(
         (
             dictionary_id,
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
+        ),
+        (
+            id(CLIPBOARD),
+            Arc::new(ClipboardProvider::new(
+                clipboard,
+                dupin_mac::clipboard::access_item,
+            )) as Arc<dyn Provider>,
         ),
         (
             id(WEB_KEYWORDS),
@@ -411,6 +440,66 @@ mod tests {
             "https://github.com/search?q=dupin%20%26%20Rust".into(),
         ))));
         assert!(!activation.contains(&Effect::SaveHistory));
+    }
+
+    #[test]
+    fn clip_is_reserved_only_while_clipboard_history_is_enabled() {
+        use dupin_core::{Delivery, Effect, Session};
+
+        for enabled in [false, true] {
+            let mut config = Config::default();
+            config.clipboard.enabled = enabled;
+            config.web_searches.insert(
+                "clip".into(),
+                dupin_core::config::WebSearch {
+                    name: "Clips".into(),
+                    url: "https://clips.example/?q={query}".into(),
+                },
+            );
+            let commands = configured(&config).unwrap();
+            let clipboard = id(CLIPBOARD);
+            assert_eq!(commands.registry.keyword("clip"), enabled.then_some(&clipboard));
+            assert_eq!(commands.notice.is_some(), enabled);
+
+            let mut session = Session::new(History::default(), commands.registry).unwrap();
+            let effects = session.set_query("clip term");
+            if enabled {
+                assert!(session.command().private_results);
+                let [
+                    Effect::ReplaceQuery(_),
+                    Effect::Search {
+                        command,
+                        generation,
+                        query,
+                    },
+                ] = effects.as_slice()
+                else {
+                    panic!("clip should enter clipboard history: {effects:?}");
+                };
+                assert_eq!(command, &clipboard);
+                assert_eq!(query, "term");
+
+                config.clipboard.enabled = false;
+                let effects = session
+                    .set_commands(configured(&config).unwrap().registry)
+                    .unwrap();
+                assert!(effects.contains(&Effect::ClearQuery));
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(!session.deliver_from(
+                    clipboard,
+                    Delivery::Done {
+                        generation: *generation
+                    }
+                ));
+            } else {
+                assert_eq!(session.command_id(), &id(APPS));
+                assert!(session.provider_spec(&clipboard).is_none());
+                assert!(effects.iter().any(|effect| matches!(
+                    effect,
+                    Effect::Search { command, query, .. } if *command == id(WEB_KEYWORDS) && query == "clip term"
+                )));
+            }
+        }
     }
 
     #[test]

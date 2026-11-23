@@ -299,6 +299,7 @@ pub struct Ui {
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
+    clipboard: crate::clipboard::Clipboard,
     saver: crate::store::Saver,
     position: Position,
     display: DisplaySelection,
@@ -444,6 +445,7 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
+        let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
         let calendar = if rune::tooling::is_headless() {
             dupin_mac::CalendarProvider::fixtures()
         } else {
@@ -457,8 +459,14 @@ impl Ui {
                 });
             })
         };
-        let registration = crate::commands::register(&config, apps_provider.clone(), history, calendar)
-            .expect("built-in command registration is valid");
+        let registration = crate::commands::register(
+            &config,
+            apps_provider.clone(),
+            history,
+            calendar,
+            clipboard.history(),
+        )
+        .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_apps(tx))
@@ -530,6 +538,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
+            clipboard,
             position: config.position,
             display: config.display,
             display_notice: None,
@@ -564,6 +573,7 @@ impl Ui {
             }
             changed
         };
+        let clipboard_changed = self.clipboard.apply(&config.clipboard);
         let registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
         let web_changed = {
@@ -592,6 +602,7 @@ impl Ui {
             || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (recent_changed && is_apps && empty)
+            || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
         {
             self.action_screen = None;
             let effects = self.session.refresh();
@@ -1628,10 +1639,24 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
+                    dupin_core::Action::CopyFiles(paths) => {
+                        if let Err(error) = dupin_mac::clipboard::copy_files(&paths) {
+                            self.show_notice(error, tx);
+                        }
+                    }
                     dupin_core::Action::ChooseApplication(_)
                     | dupin_core::Action::Trash(_)
                     | dupin_core::Action::Rename(_)
-                    | dupin_core::Action::ChooseDestination { .. } => {}
+                    | dupin_core::Action::ChooseDestination { .. }
+                    | dupin_core::Action::DeleteClipboardEntry(_)
+                    | dupin_core::Action::ClearClipboardHistory => {}
+                    dupin_core::Action::RequestClipboardAccess => {
+                        let busy = Busy::new(self.running.clone());
+                        std::thread::spawn(move || {
+                            dupin_mac::clipboard::request_access();
+                            drop(busy);
+                        });
+                    }
                     dupin_core::Action::Duplicate(path) => {
                         let name = file_name(&path);
                         let files = self.file_transfers.clone();
@@ -1691,6 +1716,24 @@ impl Ui {
                             }
                         },
                     );
+                }
+                Effect::RunConsuming {
+                    id,
+                    action: dupin_core::Action::DeleteClipboardEntry(entry),
+                } => {
+                    self.action_screen = None;
+                    self.clipboard.delete(entry);
+                    self.session.forget(&id);
+                }
+                Effect::RunConsuming {
+                    action: dupin_core::Action::ClearClipboardHistory,
+                    ..
+                } => {
+                    self.action_screen = None;
+                    self.clipboard.clear();
+                    let effects = self.session.refresh();
+                    self.apply(effects, tx);
+                    self.timed_notice("Cleared the clipboard history".into(), tx);
                 }
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),

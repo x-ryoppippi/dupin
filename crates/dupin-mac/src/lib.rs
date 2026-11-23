@@ -7,6 +7,7 @@ pub mod apps;
 pub mod bundle;
 mod bundle_names;
 mod calendar;
+pub mod clipboard;
 pub mod dictionary;
 pub mod file_actions;
 pub mod file_ops;

@@ -60,6 +60,11 @@ line_icon!(
     r#"<path d="M14 3H8a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M3 8v11a2 2 0 0 0 2 2h9"/>"#
 );
 line_icon!(
+    CLIPBOARD,
+    "clipboard",
+    r#"<path d="M9 4.5H7a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="3" rx="1"/>"#
+);
+line_icon!(
     FOLDER,
     "folder",
     r#"<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>"#

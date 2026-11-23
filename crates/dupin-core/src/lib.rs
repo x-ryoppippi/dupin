@@ -2,6 +2,7 @@
 //! result is, how providers hand results over, fuzzy matching, and the launcher session that
 //! turns keys and query edits into searches and actions.
 
+pub mod clipboard;
 pub mod command;
 pub mod config;
 pub mod file_name;

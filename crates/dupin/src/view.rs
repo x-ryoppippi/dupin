@@ -438,12 +438,12 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                 .color(t.text)
                                 .wrap(),
                         )
-                        .child(
+                        .children((!path.is_empty()).then(|| {
                             text(path.as_ref())
                                 .font(t.font(type_::LABEL))
                                 .color(t.text_secondary)
-                                .wrap(),
-                        ),
+                                .wrap()
+                        })),
                 )
                 .children(
                     ["Cancel", confirmation.button.as_str()]

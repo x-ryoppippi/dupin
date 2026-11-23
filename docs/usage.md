@@ -25,7 +25,8 @@ Dupin needs macOS Accessibility access for this shortcut. If access is missing, 
 | Space on an empty query                 | Search files with Spotlight, by file and display name |
 | `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`  |
 | `define` or `d`, then Space             | Look up a word in macOS dictionaries                  |
-| ⌫ on an empty query                     | Leave file, content or dictionary search              |
+| `clip` then Space                       | Search the clipboard history, when it is on           |
+| ⌫ on an empty query                     | Leave file, content, dictionary or clipboard search   |
 | ↑ ↓                                     | Move the selection                                    |
 | Tab at the end of an unselected input   | Complete the selected search keyword                  |
 | ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
@@ -61,6 +62,12 @@ When an app matches through one of those other names, the name shows before its 
 ## Hotkeys
 
 Use a global shortcut to launch an app, bring it to the front, or run a shell command. Set `hide_if_frontmost = true` to hide an app if it is already frontmost. A shell command runs silently in the background, so you can use it to open the panel with a preset query or run a CLI directly. See [hotkey configuration](./configuration.md#hotkeys).
+
+## Clipboard history
+
+Turn on clipboard history in Settings → Search (it is off by default; see [configuration](./configuration.md#clipboard-history)). Then type `clip` and Space: a "Clipboard" chip shows the mode and the list starts with your most recent copies, each with how long ago it was copied. Type to keep only entries containing every word, ignoring case. ↑ and ↓ move through the list even with an empty query. Clipboard search terms are not kept for query recall. Enter copies the selected entry back to the clipboard and hides the panel, ready to paste; file entries copy the files, as Finder's Copy does. Dupin does not paste into the frontmost app for you.
+
+The action screen (→, ⌘K or Ctrl+K) offers Copy, Delete from History and Clear History. Deleting removes that entry only; the clipboard itself keeps whatever it holds. Clear History asks for confirmation with Cancel selected before forgetting every entry. Clipboard results can't be saved as snapshots and are not recorded in usage-ranking history.
 
 ## Snapshots
 
