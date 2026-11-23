@@ -35,8 +35,9 @@
           '';
           description = ''
             Written to {file}`$XDG_CONFIG_HOME/dupin/config.toml`. Leave it empty to keep the
-            file out of Nix, so Dupin's Settings window can change it. When set, the file is
-            read-only and Settings shows its values without offering to change them. See
+            file out of Nix, so Dupin's Settings window can change it. When set, the keys it
+            contains are locked in Settings and other edits are saved to `settings.toml` in
+            Dupin's data directory. See
             <https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md>.
           '';
         };
@@ -60,7 +61,13 @@
             KeepAlive.SuccessfulExit = false;
             ProcessType = "Interactive";
             # launchd doesn't load the shell's session variables.
-            EnvironmentVariables.XDG_CONFIG_HOME = config.xdg.configHome;
+            EnvironmentVariables = {
+              XDG_CONFIG_HOME = config.xdg.configHome;
+            }
+            // lib.optionalAttrs config.xdg.enable {
+              # The settings.toml overlay lives under XDG_DATA_HOME when the shell exports it.
+              XDG_DATA_HOME = config.xdg.dataHome;
+            };
           };
         };
       };
