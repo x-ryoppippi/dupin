@@ -1,8 +1,8 @@
-use rune::{El, col, row, text};
+use rune::{El, col};
 use rune_kit::{Button, Kit, Switch};
 
 use super::controls::{card, setting};
-use super::{Page, Prefs};
+use super::{Page, Prefs, footer_link};
 use crate::icons;
 use crate::update::Status;
 
@@ -72,41 +72,22 @@ pub(super) fn footer(s: &Prefs, k: &Kit) -> El {
         .w_full()
         .mt(12.0)
         .child(
-            text(version.clone())
-                .key("current-version")
-                .role("button")
+            footer_link(k, "current-version", &version)
                 .label(format!("{version}. Open update settings"))
-                .focusable(true)
                 .focus_selected(s.page == Page::Updates)
-                .focus_ring(2.0, 0.0, k.c.border_focus)
-                .on_press(|s: &mut Prefs| s.show(Page::Updates))
                 .w_full()
-                .px(6.0)
-                .font(k.ty.small.lh(20.0))
-                .color(k.c.text_muted)
-                .truncate(),
+                .on_press(|s: &mut Prefs| s.show(Page::Updates)),
         )
         .child(
-            row()
-                .key(Page::Updates.key())
-                .role("button")
-                .label(title)
-                .focusable(true)
-                .focus_ring(2.0, 0.0, k.c.border_focus)
+            footer_link(k, Page::Updates.key(), title)
                 .w_full()
                 .h(24.0)
-                .px(6.0)
-                .center_y()
-                .radius(k.radius.sm)
-                .hover(k.c.hover)
-                .press(k.c.pressed)
                 .on_press(|s: &mut Prefs| {
                     s.show(Page::Updates);
                     let status = s.updater.status();
                     if status.can_check() && !matches!(status, Status::Download { .. }) {
                         s.updater.check_now();
                     }
-                })
-                .child(text(title).font(k.ty.small).color(k.c.text_muted).truncate()),
+                }),
         )
 }

@@ -32,6 +32,7 @@ pub const SIZE: (f32, f32) = (760.0, 480.0);
 /// Room above the sidebar's rows for the traffic lights, which sit over a full-size content view.
 const SIDEBAR_TOP: f32 = 38.0;
 const SIDEBAR_WIDTH: f32 = 220.0;
+const SIDEBAR_ROW_INSET: f32 = 6.0;
 /// The page title's band, level with the traffic lights.
 const TITLE_HEIGHT: f32 = 52.0;
 /// Text on a page lines up this far in; cards reach `ROW_PX` past it.
@@ -386,7 +387,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             .focusable(true)
             .focus_ring(2.0, 0.0, c.border_focus)
             .h(28.0)
-            .px(6.0)
+            .px(SIDEBAR_ROW_INSET)
             .gap(8.0)
             .center_y()
             .radius(k.radius.sm)
@@ -446,13 +447,18 @@ fn footer_link(k: &Kit, key: &str, label: &str) -> El {
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
         .h(20.0)
-        .px(6.0)
+        .px(SIDEBAR_ROW_INSET)
         .self_start()
         .center_y()
         .radius(k.radius.sm)
         .hover(c.hover)
         .press(c.pressed)
-        .child(text(label.to_owned()).font(k.ty.small).color(c.text_muted))
+        .child(
+            text(label.to_owned())
+                .font(k.ty.small)
+                .color(c.text_muted)
+                .truncate(),
+        )
 }
 
 #[cfg(test)]
