@@ -31,7 +31,7 @@ Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and 
 | `inline` | Keep the panel open. After completion, Enter copies the last non-empty stdout line. Command-O shows full output; typing a new search or hiding clears the card. |
 | `full`   | Open Script Output and stream stdout and stderr.                                                                                                                |
 
-Command-Period cancels a running script. Script Output offers Cancel, Run again (Command-R) and Copy output (Shift-Command-C). It retains this session's last 20 runs. Output is bounded to 1 MiB per run and 8 KiB per line; old lines are dropped, and terminal SGR sequences are removed. Non-zero exits retain the exit status and stderr.
+Command-Period cancels a running script. Script Output offers Cancel, Run again (Command-R) and Copy output (Shift-Command-C). It retains this session's last 20 runs. Output is bounded to 1 MiB per run and 8 KiB per line; old lines are dropped with a line-count marker in the window and copied output, and terminal SGR sequences are removed. Non-zero exits retain the exit status and stderr.
 
 At most eight scripts run concurrently, with no execution timeout. Cancellation sends TERM to the owned process group, then KILL after two seconds if needed. Quitting Dupin immediately kills its owned groups; an update relaunch waits for active work instead. Processes that leave their group, or survive a crash of Dupin, are outside that cleanup boundary.
 

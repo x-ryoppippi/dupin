@@ -36,11 +36,12 @@ impl Output {
     }
     fn copy(&self, tx: &mut Tx) {
         if let Some(run) = self.runs.iter().find(|run| Some(run.id) == self.selected) {
+            let notice = dropped_notice(&run.output);
             tx.copy(
-                run.output
-                    .lines()
-                    .iter()
-                    .map(|line| line.text.as_str())
+                notice
+                    .as_deref()
+                    .into_iter()
+                    .chain(run.output.lines().iter().map(|line| line.text.as_str()))
                     .collect::<Vec<_>>()
                     .join("\n"),
             );
@@ -60,6 +61,11 @@ impl Output {
         self.panel.update(crate::ui::Ui::resume_restart);
     }
 }
+
+fn dropped_notice(output: &dupin_core::script::OutputBuffer) -> Option<String> {
+    (output.dropped() > 0).then(|| format!("… {} lines dropped", output.dropped()))
+}
+
 pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let mut list = col()
@@ -115,6 +121,14 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                 .child(button("Run again").on_press(Output::repeat))
                 .child(button("Copy output").on_press_tx(|s: &mut Output, tx| s.copy(tx))),
         );
+        if let Some(notice) = dropped_notice(&run.output) {
+            detail = detail.child(
+                text(notice)
+                    .font(k.ty.small)
+                    .color(k.c.text_muted)
+                    .key("script-output-dropped"),
+            );
+        }
         let mut lines = col()
             .grow(1.0)
             .min_h(0.0)
