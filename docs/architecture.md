@@ -36,6 +36,10 @@ The resident panel owns the active configuration and hotkey binding; the Setting
 
 Each queued save has a revision. Reads carry the last revision the worker processed, and both views reject a snapshot older than the newest submitted save. Settings queues its panel update before submitting a save, so the worker's own file event cannot register the same hotkey twice. Parse and hotkey errors preserve the active values and remain visible without opening a window.
 
+## Stored data
+
+Data that must survive a restart without sitting on disk in the clear goes through `dupin-storage`, which has no OS dependencies. It gives each owner a namespace of sealed JSON records and content-addressed blobs with its own retention limits, and takes its data key from a `KeyProvider`: `dupin-mac::keychain::KeychainKey` on macOS, a private key file elsewhere, an in-memory key in tests. The host owns the files and the key; an extension will reach its own namespace only through the broker's `storage` capability. See [Encrypted storage](./features/storage.md).
+
 ## The panel
 
 The panel is a Rune `launcher_panel`: a non-activating, retained panel that Rune draws ahead of time while hidden, so the hotkey only has to show it. The app is an accessory app (no Dock icon) that starts windowless and keeps running. The panel fits its content height, sits on Liquid Glass (`SystemMaterial::Glass`) under a light frost, and AppKit rounds it and draws its shadow. Behind the panel's content sits a Rune effect slot. A compositor (`backdrop.rs`) draws the backdrop shader into it: the built-in `flow` or a user's WGSL file. `shader.rs` wraps that file in Dupin's prelude and entry point and validates it with naga before it reaches the GPU. The compositor reads the shader's inputs (time since the panel showed, the last keystroke, the mode) from the panel state, and keeps frames coming only while the panel shows.
