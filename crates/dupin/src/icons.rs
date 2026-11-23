@@ -32,6 +32,11 @@ line_icon!(
     "sparkles",
     r#"<path d="M10 3.5l1.6 4.4a2 2 0 0 0 1.2 1.2l4.4 1.6-4.4 1.6a2 2 0 0 0-1.2 1.2L10 17.9l-1.6-4.4a2 2 0 0 0-1.2-1.2L2.8 10.7l4.4-1.6a2 2 0 0 0 1.2-1.2z"/><path d="M18.5 15v5M16 17.5h5"/>"#
 );
+line_icon!(
+    SHIELD,
+    "shield",
+    r#"<path d="M12 3l7 3v5.5c0 4.3-2.9 7.8-7 9.5-4.1-1.7-7-5.2-7-9.5V6z"/><path d="M9 12l2 2 4-4"/>"#
+);
 
 // Rows.
 line_icon!(
@@ -60,9 +65,19 @@ line_icon!(
     r#"<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h1M15 11h1M8 15h1M15 15h1M8 18h1M15 18h1"/>"#
 );
 line_icon!(
+    CLIPBOARD,
+    "clipboard",
+    r#"<path d="M9 4.5H7a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="3" rx="1"/>"#
+);
+line_icon!(
     FOLDER,
     "folder",
     r#"<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>"#
+);
+line_icon!(
+    LOGIN,
+    "login",
+    r#"<path d="M13 4h5a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5M4 12h11m-4-4 4 4-4 4"/>"#
 );
 line_icon!(
     REFRESH,
@@ -73,4 +88,14 @@ line_icon!(
     INFO,
     "info",
     r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>"#
+);
+line_icon!(
+    ACCESSIBILITY,
+    "accessibility",
+    r#"<circle cx="12" cy="4.5" r="1.5"/><path d="M5 8.5l7 1.5 7-1.5M12 10v4.5M12 14.5L9 20M12 14.5l3 5.5"/>"#
+);
+line_icon!(
+    CALENDAR,
+    "calendar",
+    r#"<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>"#
 );
