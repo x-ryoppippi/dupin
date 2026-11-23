@@ -282,7 +282,10 @@ pub fn register(
         ),
         (
             id(CLIPBOARD),
-            Arc::new(ClipboardProvider::new(clipboard)) as Arc<dyn Provider>,
+            Arc::new(ClipboardProvider::new(
+                clipboard,
+                dupin_mac::clipboard::access_item,
+            )) as Arc<dyn Provider>,
         ),
         (
             id(WEB_KEYWORDS),
