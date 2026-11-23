@@ -26,7 +26,7 @@ impl Provider for Calculator {
                 id: "answer".into(),
                 view: View::Pair {
                     source: source.into(),
-                    result: result.clone(),
+                    result: result.display,
                 },
                 record_usage: false,
                 icon: None,
@@ -35,7 +35,11 @@ impl Provider for Calculator {
                 score: None,
                 primary: Some("copy".into()),
                 alternate: None,
-                actions: vec![ItemAction::new("copy", "Copy result", Action::Copy(result))],
+                actions: vec![ItemAction::new(
+                    "copy",
+                    "Copy number",
+                    Action::Copy(result.number),
+                )],
             }]);
         }
         Ok(())
@@ -53,19 +57,28 @@ impl Interrupt for Budget<'_> {
     }
 }
 
-fn calculate(source: &str, budget: &impl Interrupt) -> Option<String> {
+struct Answer {
+    display: String,
+    number: String,
+}
+
+fn calculate(source: &str, budget: &impl Interrupt) -> Option<Answer> {
     if budget.should_interrupt() || !is_expression(source) {
         return None;
     }
     let input = temperature_input(source);
     let result = fend_core::evaluate_with_interrupt(&input, &mut Context::new(), budget).ok()?;
     let answer = result.get_main_result();
-    (!budget.should_interrupt()
-        && answer.len() <= MAX_ANSWER_BYTES
-        && result
-            .get_main_result_spans()
-            .any(|span| span.kind() == SpanKind::Number))
-    .then(|| answer.to_owned())
+    if budget.should_interrupt() || answer.len() > MAX_ANSWER_BYTES {
+        return None;
+    }
+    let number = result
+        .get_main_result_spans()
+        .find(|span| span.kind() == SpanKind::Number)?;
+    Some(Answer {
+        display: answer.to_owned(),
+        number: number.string().to_owned(),
+    })
 }
 
 fn is_expression(source: &str) -> bool {
@@ -124,7 +137,27 @@ mod tests {
             request: &request,
             deadline: Instant::now() + Duration::from_secs(1),
         };
-        calculate(source, &budget)
+        calculate(source, &budget).map(|answer| answer.display)
+    }
+
+    #[test]
+    fn primary_action_copies_the_displayed_number_without_units_or_approximation() {
+        for (source, display, number) in [
+            ("12*3", "36", "36"),
+            ("100 f to c", "approx. 37.7777777778 °C", "37.7777777778"),
+            ("5 miles to feet", "26400 feet", "26400"),
+        ] {
+            let mut items = Vec::new();
+            Calculator
+                .search(&Request::detached(source, 1), &mut |batch| items.extend(batch))
+                .unwrap();
+            let item = &items[0];
+            assert!(matches!(&item.view, View::Pair { result, .. } if result == display));
+            assert_eq!(
+                item.action(item.primary.as_deref().unwrap()),
+                Some(&Action::Copy(number.into()))
+            );
+        }
     }
 
     #[test]
