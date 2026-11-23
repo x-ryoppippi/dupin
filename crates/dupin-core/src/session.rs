@@ -233,26 +233,43 @@ impl SearchState {
     /// renamed. The row keeps its place and rank; when `item` is already a candidate, the old
     /// row just goes.
     fn replace(&mut self, row: &str, mut item: Item) -> bool {
-        let Some((origin, id)) = self.locate(|origin, item| format!("{origin}:{}", item.id) == row) else {
+        let matches = |origin: &CommandId, item: &Item| format!("{origin}:{}", item.id) == row;
+        let visible = self
+            .origins
+            .iter()
+            .zip(&self.items)
+            .position(|(origin, item)| matches(origin, item));
+        let Some((origin, id)) = visible
+            .map(|index| (self.origins[index].clone(), self.items[index].id.clone()))
+            .or_else(|| self.locate(matches))
+        else {
             return false;
         };
-        let provider = self.providers.get_mut(&origin).expect("located provider");
-        if provider.items.iter().any(|row| row.id == item.id) {
-            self.remove(&origin, &id);
-            return true;
-        }
-        let index = provider
-            .items
-            .iter()
-            .position(|row| row.id == id)
-            .expect("located item");
-        item.score = provider.items[index].score;
-        // The old ID stays known, so a late batch can't bring back the entry's previous name.
-        provider.ids.insert(item.id.clone());
-        provider.items[index] = item.clone();
-        if let Some(index) =
-            (0..self.items.len()).find(|&i| self.origins[i] == origin && self.items[i].id == id)
+
+        if let Some((selected_origin, selected_id)) = &mut self.refresh_selection
+            && *selected_origin == origin
+            && *selected_id == id
         {
+            selected_id.clone_from(&item.id);
+        }
+
+        if let Some(index) = visible {
+            item.score = self.items[index].score;
+        }
+        if let Some(provider) = self.providers.get_mut(&origin) {
+            // A refresh may have cleared the candidates while keeping the old rows on screen.
+            provider.ids.insert(id.clone());
+            if id != item.id && provider.items.iter().any(|row| row.id == item.id) {
+                self.remove(&origin, &id);
+                return true;
+            }
+            if let Some(candidate) = provider.items.iter_mut().find(|row| row.id == id) {
+                item.score = candidate.score;
+                provider.ids.insert(item.id.clone());
+                *candidate = item.clone();
+            }
+        }
+        if let Some(index) = visible {
             self.items[index] = item;
         }
         true

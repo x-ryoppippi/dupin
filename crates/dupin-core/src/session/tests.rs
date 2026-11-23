@@ -1755,6 +1755,39 @@ fn a_search_started_during_a_rename_still_receives_the_renamed_row() {
 }
 
 #[test]
+fn rename_during_refresh_updates_the_retained_row_without_reintroducing_it_as_a_match() {
+    let (mut s, _) = rename_session();
+    let row = s.layout_key(1);
+    let generation = searched(&s.refresh()).1;
+    assert!(s.replace(&row, item("summary.pdf")));
+    assert_eq!(s.selected_item().unwrap().id, "/x/summary.pdf");
+
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("report.pdf"), item("report-archive.pdf")],
+    });
+    s.deliver(Delivery::Done { generation });
+    assert_eq!(
+        s.items().iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+        ["/x/report-archive.pdf"]
+    );
+}
+
+#[test]
+fn a_renamed_selection_stays_selected_when_the_refresh_finishes() {
+    let (mut s, _) = rename_session();
+    let row = s.layout_key(1);
+    let generation = searched(&s.refresh()).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("other"), item("report.pdf")],
+    });
+    assert!(s.replace(&row, item("summary.pdf")));
+    s.deliver(Delivery::Done { generation });
+    assert_eq!(s.selected_item().unwrap().id, "/x/summary.pdf");
+}
+
+#[test]
 fn enter_on_an_unchanged_name_leaves_even_when_the_name_is_now_invalid() {
     let mut s = session();
     let generation = searched(&s.set_query("long")).1;
