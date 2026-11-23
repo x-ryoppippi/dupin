@@ -12,6 +12,8 @@ use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
 
+mod system;
+
 pub struct Binding {
     panel: AppHandle<Ui>,
     state: Mutex<State>,
@@ -133,21 +135,7 @@ impl Binding {
 
     pub fn replace(&self, kind: LauncherShortcut, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let matches_kind = |target: &Target| matches!(target, Target::Launcher(found) if *found == kind);
-        if state.unavailable_at_launch[kind as usize]
-            && let Some(shortcut) = next
-            && state.targets.get(shortcut).is_some_and(matches_kind)
-            && self.owner(shortcut).is_some()
-        {
-            return Err(ShortcutError::Conflict);
-        }
-        let mut targets = state.targets.clone();
-        targets.retain(|_, target| !matches_kind(target));
-        if let Some(next) = next
-            && targets.insert(next.clone(), Target::Launcher(kind)).is_some()
-        {
-            return Err(ShortcutError::Conflict);
-        }
+        let targets = replacement_targets(&state, kind, next, system::owns)?;
         self.update_registrations(&mut state, &targets)
             .map_err(|(_, error)| error)?;
         state.targets = targets;
@@ -279,7 +267,12 @@ impl Binding {
         self.panel.shortcut_owner(shortcut)
     }
 
-    pub fn recorder_conflict(&self, shortcut: &Shortcut, config: &Config) -> Option<String> {
+    pub fn recorder_conflict(
+        &self,
+        kind: LauncherShortcut,
+        shortcut: &Shortcut,
+        config: &Config,
+    ) -> Option<String> {
         let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if matches!(state.targets.get(shortcut), Some(Target::Configured(_)))
             || binding_targets(config).contains_key(shortcut)
@@ -288,6 +281,14 @@ impl Binding {
                 "{} is assigned to a binding in config.toml.",
                 shortcut.keycaps().join("")
             ));
+        }
+        if let Some(Target::Launcher(other)) = state.targets.get(shortcut) {
+            let keys = shortcut.keycaps().join("");
+            return Some(if *other == kind {
+                format!("{keys} is used by macOS.")
+            } else {
+                format!("{keys} is assigned to the {} shortcut.", other.name())
+            });
         }
         self.owner(shortcut)
             .map(|owner| format!("{} is used by {owner}.", shortcut.keycaps().join("")))
@@ -300,6 +301,30 @@ impl Binding {
             (e, _) => e.to_string(),
         }
     }
+}
+
+fn replacement_targets(
+    state: &State,
+    kind: LauncherShortcut,
+    next: Option<&Shortcut>,
+    system_owns: impl FnOnce(&Shortcut) -> bool,
+) -> Result<HashMap<Shortcut, Target>, ShortcutError> {
+    let matches_kind = |target: &Target| matches!(target, Target::Launcher(found) if *found == kind);
+    if state.unavailable_at_launch[kind as usize]
+        && let Some(shortcut) = next
+        && state.targets.get(shortcut).is_some_and(matches_kind)
+        && system_owns(shortcut)
+    {
+        return Err(ShortcutError::Conflict);
+    }
+    let mut targets = state.targets.clone();
+    targets.retain(|_, target| !matches_kind(target));
+    if let Some(next) = next
+        && targets.insert(next.clone(), Target::Launcher(kind)).is_some()
+    {
+        return Err(ShortcutError::Conflict);
+    }
+    Ok(targets)
 }
 
 pub fn binding_targets(config: &Config) -> HashMap<Shortcut, &HotkeyTarget> {
@@ -493,6 +518,26 @@ mod tests {
         ));
         config.bindings.insert("Control+Option+C".into(), app());
         assert!(configured_targets(&config).is_err());
+    }
+
+    #[test]
+    fn rerecording_an_installed_launcher_only_refuses_a_chord_macos_still_uses() {
+        let kind = LauncherShortcut::Panel;
+        let shortcut: Shortcut = "cmd+space".parse().unwrap();
+        let state = State {
+            targets: HashMap::from([(shortcut.clone(), Target::Launcher(kind))]),
+            unavailable_at_launch: [true, false],
+            ..State::default()
+        };
+        assert!(matches!(
+            replacement_targets(&state, kind, Some(&shortcut), |_| true),
+            Err(ShortcutError::Conflict)
+        ));
+        let targets = replacement_targets(&state, kind, Some(&shortcut), |_| false).unwrap();
+        assert!(matches!(
+            targets.get(&shortcut),
+            Some(Target::Launcher(LauncherShortcut::Panel))
+        ));
     }
 
     #[test]

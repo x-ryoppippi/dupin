@@ -261,7 +261,7 @@ impl Prefs {
             };
         self.shortcut_problems[kind as usize] = next
             .filter(|_| result == Err(ShortcutError::Conflict))
-            .and_then(|next| self.binding.recorder_conflict(next, &base));
+            .and_then(|next| self.binding.recorder_conflict(kind, next, &base));
         result?;
         self.config = base.clone();
         kind.set(&mut self.config, next);
@@ -648,7 +648,9 @@ fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, labe
     let shortcut_problem = s.shortcut_problems[i].clone();
     let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
         shortcut_problem
-            .clone()
+            .as_ref()
+            .filter(|_| *error == ShortcutError::Conflict)
+            .cloned()
             .unwrap_or_else(|| shortcut_error_message(error, chord))
     };
     ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
