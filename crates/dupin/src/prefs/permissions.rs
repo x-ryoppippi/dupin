@@ -1,8 +1,7 @@
 //! Settings → Permissions: each macOS permission a Dupin feature can use, what uses it, and
-//! whether macOS grants it, with a way to its System Settings pane. The page only reads status;
-//! a feature asks for access itself, when it is used (#12).
+//! whether macOS grants it, with controls to request or manage access.
 
-use dupin_mac::privacy::{Access, Permission};
+use dupin_mac::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 use rune::{El, Icon, row};
 use rune_kit::{Badge, BadgeVariant, Button, Kit};
 
@@ -43,8 +42,18 @@ pub(super) fn available() -> bool {
 
 /// Status reads are cheap and never prompt, so the page rereads them whenever Settings gains
 /// focus, such as on returning from System Settings.
-pub(super) fn read() -> Vec<Access> {
-    used_entries().map(|entry| entry.permission.status()).collect()
+pub(super) fn read(calendar: &CalendarAccess) -> Vec<PermissionStatus> {
+    used_entries()
+        .map(|entry| {
+            if rune::tooling::is_headless() {
+                return PermissionStatus::Access(Access::NotDetermined);
+            }
+            match entry.permission {
+                Permission::Accessibility => PermissionStatus::Access(entry.permission.status()),
+                Permission::Calendars => calendar.status(),
+            }
+        })
+        .collect()
 }
 
 fn glyph(permission: Permission) -> &'static Icon {
@@ -54,7 +63,13 @@ fn glyph(permission: Permission) -> &'static Icon {
     }
 }
 
-fn status_title(access: Access) -> &'static str {
+fn status_title(status: PermissionStatus) -> &'static str {
+    let access = match status {
+        PermissionStatus::Access(access) => access,
+        PermissionStatus::Requesting => return "Waiting for macOS",
+        PermissionStatus::RequestIncomplete => return "Request incomplete",
+        PermissionStatus::Unavailable => return "Unavailable",
+    };
     match access {
         Access::Allowed => "Allowed",
         Access::NotAllowed => "Not allowed",
@@ -74,30 +89,69 @@ fn used_by(features: &[&str]) -> Option<String> {
     }
 }
 
-fn entry_row(k: &Kit, index: usize, entry: &Entry, access: Access) -> El {
+fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: PermissionStatus) -> El {
     let permission = entry.permission;
-    let badge = Badge::new(status_title(access))
-        .variant(if access == Access::Allowed {
+    let badge = Badge::new(status_title(status))
+        .variant(if status == PermissionStatus::Access(Access::Allowed) {
             BadgeVariant::Accent
         } else {
             BadgeVariant::Neutral
         })
         .build(k)
         .key(format!("permission-{index}-status"));
-    let open = Button::new("Open System Settings")
-        .on_press(move |_: &mut Prefs| {
-            if !permission.open_settings() {
-                crate::log::warn(&format!("couldn't open the {} settings", permission.name()));
-            }
-        })
-        .build(k)
-        .key(format!("permission-{index}-open"));
+    let action = match status {
+        PermissionStatus::Access(Access::NotDetermined) | PermissionStatus::RequestIncomplete => {
+            Button::new("Request Access")
+                .on_press(move |s: &mut Prefs| {
+                    if !rune::tooling::is_headless() {
+                        match permission {
+                            Permission::Accessibility => {
+                                if permission.status() == Access::NotDetermined {
+                                    dupin_mac::accessibility::request_once();
+                                }
+                            }
+                            Permission::Calendars => s.calendar_access.request(),
+                        }
+                        s.refresh_permissions();
+                    }
+                })
+                .build(k)
+                .key(format!("permission-{index}-request"))
+        }
+        PermissionStatus::Requesting | PermissionStatus::Unavailable => Button::new("Request Access")
+            .disabled(true)
+            .build(k)
+            .key(format!("permission-{index}-request")),
+        PermissionStatus::Access(_) => Button::new("Open System Settings")
+            .on_press(move |_: &mut Prefs| {
+                if !permission.open_settings() {
+                    crate::log::warn(&format!("couldn't open the {} settings", permission.name()));
+                }
+            })
+            .build(k)
+            .key(format!("permission-{index}-open")),
+    };
+    let mut detail = used_by(entry.used_by).unwrap_or_default();
+    if permission == Permission::Calendars && !s.config.calendar.enabled {
+        detail = "Turn on Calendar search in Search to use it.".into();
+    }
+    if permission == Permission::Accessibility
+        && s.config.display != dupin_core::config::DisplaySelection::Active
+        && s.config.selection_hotkey.is_empty()
+        && !s.config.snippet_paste
+        && !s.config.window_management
+    {
+        detail.push_str(". Turn on a feature that uses Accessibility in General or Search.");
+    }
+    if status == PermissionStatus::Unavailable {
+        detail.push_str(" Open the packaged Dupin.app to grant access.");
+    }
     setting(
         k,
         glyph(permission),
         permission.name(),
-        used_by(entry.used_by).as_deref(),
-        row().gap(12.0).center_y().child(badge).child(open),
+        Some(&detail),
+        row().gap(12.0).center_y().child(badge).child(action),
     )
 }
 
@@ -105,14 +159,14 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     let rows = used_entries()
         .zip(&s.permissions)
         .enumerate()
-        .map(|(i, (entry, access))| entry_row(k, i, entry, *access))
+        .map(|(i, (entry, status))| entry_row(s, k, i, entry, *status))
         .collect();
     vec![
         card(k, hair, rows),
         note(
             k,
-            "Dupin asks for a permission only when you use a feature that needs it. File search reads \
-             the Spotlight index and needs none.",
+            "Dupin only asks for access when you request it here or use a feature that needs it. \
+             File search reads the Spotlight index and needs no permission.",
         ),
     ]
 }

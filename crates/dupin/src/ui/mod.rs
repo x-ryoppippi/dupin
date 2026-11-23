@@ -153,7 +153,7 @@ impl Ui {
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
-        config_problem: Option<String>,
+        calendar_access: dupin_mac::privacy::CalendarAccess,
         quick_look: Rc<RefCell<Option<Previewer>>>,
         running: Arc<AtomicUsize>,
     ) -> Ui {
@@ -177,7 +177,11 @@ impl Ui {
         });
         currency.set_enabled(config.calculator && config.calculator_currency);
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
-        let calendar = calendar::provider(&me);
+        let calendar = if rune::tooling::is_headless() {
+            dupin_mac::CalendarProvider::fixtures()
+        } else {
+            dupin_mac::CalendarProvider::new(calendar_access)
+        };
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
@@ -244,7 +248,7 @@ impl Ui {
             session: registration.session,
             saver: crate::store::Saver::spawn(),
             query,
-            config_problem,
+            config_problem: None,
             hotkey_problem: None,
             registration_notice: registration.notice,
             selection_permission_required: false,

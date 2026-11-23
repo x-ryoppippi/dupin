@@ -1,17 +1,13 @@
-use std::sync::{Arc, Mutex};
-
-use block2::RcBlock;
 use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
 use objc2::rc::{Retained, autoreleasepool};
-use objc2::runtime::Bool;
 use objc2::{Message, msg_send};
 use objc2_event_kit::{EKAuthorizationStatus, EKEvent, EKEventStatus, EKEventStore};
 use objc2_foundation::{
-    NSArray, NSBundle, NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSDateFormatter,
-    NSDateIntervalFormatter, NSDateIntervalFormatterStyle, NSError, NSLocale, NSString, NSTimeZone,
+    NSArray, NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSDateFormatter, NSDateIntervalFormatter,
+    NSDateIntervalFormatterStyle, NSLocale, NSString, NSTimeZone,
 };
 
-use crate::privacy::{Permission, calendar_authorization};
+use crate::privacy::{Access, CalendarAccess, Permission, PermissionStatus, calendar_authorization};
 
 const FIXTURE_NOW: f64 = 1_795_420_800.0;
 
@@ -19,30 +15,16 @@ thread_local! {
     static STORE: Retained<EKEventStore> = unsafe { EKEventStore::new() };
 }
 
-#[derive(Clone, Copy, Default)]
-enum Prompt {
-    #[default]
-    Ready,
-    Pending,
-    Finished,
-}
-
 enum Source {
-    EventKit {
-        prompt: Arc<Mutex<Prompt>>,
-        changed: Arc<dyn Fn() + Send + Sync>,
-    },
+    EventKit(CalendarAccess),
     Fixtures,
 }
 
 pub struct CalendarProvider(Source);
 
 impl CalendarProvider {
-    pub fn new(access_changed: impl Fn() + Send + Sync + 'static) -> Self {
-        Self(Source::EventKit {
-            prompt: Arc::default(),
-            changed: Arc::new(access_changed),
-        })
+    pub fn new(access: CalendarAccess) -> Self {
+        Self(Source::EventKit(access))
     }
 
     pub fn fixtures() -> Self {
@@ -57,8 +39,11 @@ impl Provider for CalendarProvider {
         }
         autoreleasepool(|_| {
             let (now, zone) = match &self.0 {
-                Source::EventKit { prompt, changed } => {
-                    if let Some(row) = access_problem(prompt, changed, request) {
+                Source::EventKit(access) => {
+                    if request.is_cancelled() {
+                        return Ok(());
+                    }
+                    if let Some(row) = access_problem(access.request_on_use()) {
                         emit(vec![row]);
                         return Ok(());
                     }
@@ -75,7 +60,7 @@ impl Provider for CalendarProvider {
             let terms: Vec<_> = query.split_whitespace().collect();
             let (start, end) = bounds(&calendar, &now, terms.is_empty()).ok_or(ProviderError)?;
             let events = match &self.0 {
-                Source::EventKit { .. } => {
+                Source::EventKit(_) => {
                     let events = STORE.with(|store| read_events(store, &start, &end, request));
                     if calendar_authorization() != EKAuthorizationStatus::FullAccess {
                         emit(vec![permission_row()]);
@@ -101,53 +86,29 @@ impl Provider for CalendarProvider {
     }
 }
 
-fn access_problem(
-    prompt: &Arc<Mutex<Prompt>>,
-    changed: &Arc<dyn Fn() + Send + Sync>,
-    request: &Request,
-) -> Option<Item> {
-    match calendar_authorization() {
-        EKAuthorizationStatus::FullAccess => return None,
-        EKAuthorizationStatus::NotDetermined => {}
-        _ => return Some(permission_row()),
-    }
-
-    if NSBundle::mainBundle()
-        .objectForInfoDictionaryKey(&NSString::from_str("NSCalendarsFullAccessUsageDescription"))
-        .is_none()
-    {
-        return Some(row(
+fn access_problem(status: PermissionStatus) -> Option<Item> {
+    Some(match status {
+        PermissionStatus::Access(Access::Allowed) => return None,
+        PermissionStatus::Access(_) => permission_row(),
+        PermissionStatus::Unavailable => row(
             "app-bundle",
             "Calendar access is unavailable",
             "Open the packaged Dupin.app to grant access.".into(),
             None,
-        ));
-    }
-
-    let mut state = prompt.lock().unwrap();
-    match *state {
-        Prompt::Ready if !request.is_cancelled() => {
-            *state = Prompt::Pending;
-            drop(state);
-            let prompt = Arc::clone(prompt);
-            let changed = Arc::clone(changed);
-            let completion = RcBlock::new(move |_: Bool, _: *mut NSError| {
-                *prompt.lock().unwrap() = Prompt::Finished;
-                changed();
-            });
-            STORE.with(|store| unsafe {
-                store.requestFullAccessToEventsWithCompletion(RcBlock::as_ptr(&completion));
-            });
-        }
-        Prompt::Pending => {}
-        Prompt::Ready | Prompt::Finished => return Some(permission_row()),
-    }
-    Some(row(
-        "permission-pending",
-        "Waiting for Calendar access",
-        "Respond to the macOS permission request.".into(),
-        None,
-    ))
+        ),
+        PermissionStatus::Requesting => row(
+            "permission-pending",
+            "Waiting for Calendar access",
+            "Respond to the macOS permission request.".into(),
+            None,
+        ),
+        PermissionStatus::RequestIncomplete => row(
+            "permission-incomplete",
+            "Calendar access request did not complete",
+            "Try Request Access in Dupin Settings → Permissions.".into(),
+            None,
+        ),
+    })
 }
 
 fn permission_row() -> Item {
