@@ -749,11 +749,12 @@ fn segments(
     s: &Prefs,
     k: &Kit,
     key: &'static str,
+    label: &'static str,
     labels: &[&str],
     selected: Option<usize>,
     apply: impl Fn(&mut Theme, usize) + Clone + 'static,
 ) -> El {
-    let mut control = SegmentedControl::new(labels, selected).label(key).fit();
+    let mut control = SegmentedControl::new(labels, selected).label(label).fit();
     if s.read_only {
         for i in 0..labels.len() {
             control = control.segment_state(i, State::Disabled);
@@ -781,7 +782,12 @@ fn theme_row(k: &Kit, name: &str, controls: El) -> El {
 fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
     let t = &s.config.theme;
     let selected = color_preset(t);
-    let mut swatches = row().gap(12.0).center_y();
+    let mut swatches = row()
+        .role("radiogroup")
+        .label("Palette")
+        .focus_group()
+        .gap(12.0)
+        .center_y();
     for (i, (name, _)) in PRESETS.iter().enumerate() {
         let (light, dark) = preset_colors(i);
         let sample = Theme {
@@ -793,7 +799,11 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
         let mut swatch = el()
             .key(format!("color-{i}"))
             .label(*name)
-            .role("button")
+            .role("radio")
+            .focusable(!s.read_only)
+            .focus_selected(selected == Some(i))
+            .checked(selected == Some(i))
+            .position_in_set(i + 1, PRESETS.len())
             .size(26.0, 26.0)
             .radius(13.0)
             .padding(3.0)
@@ -816,7 +826,6 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
             swatch = swatch.disabled(true).layer_opacity(0.5);
         } else {
             swatch = swatch
-                .focusable(true)
                 .focus_ring(2.0, 2.0, k.c.border_focus)
                 .on_press(move |s: &mut Prefs| {
                     s.set(|c| {
@@ -892,6 +901,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
         s,
         k,
         "theme-corners",
+        "Corners",
         &["Square", "14", "28"],
         [0, 14, 28].iter().position(|&v| v == t.corner_radius),
         |t, i| t.corner_radius = [0, 14, 28][i],
@@ -919,6 +929,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                         s,
                         k,
                         "theme-font",
+                        "Font",
                         &["System", "Mono"],
                         Some(usize::from(t.font_family == FontFamily::Monospace)),
                         |t, i| t.font_family = [FontFamily::System, FontFamily::Monospace][i],
@@ -927,6 +938,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                         s,
                         k,
                         "theme-size",
+                        "Font size",
                         &["15", "18"],
                         [15, 18].iter().position(|&v| v == t.font_size),
                         |t, i| set_font(t, [15, 18][i]),
@@ -939,6 +951,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                     s,
                     k,
                     "theme-width",
+                    "Width",
                     &["Narrow", "Regular", "Wide"],
                     [400, 680, 900].iter().position(|&v| v == t.panel_width),
                     |t, i| t.panel_width = [400, 680, 900][i],
@@ -951,6 +964,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                     s,
                     k,
                     "theme-rows",
+                    "Rows",
                     &["Compact", "Comfy", "Spacious"],
                     [52, 72, 100].iter().position(|&v| v == t.row_height),
                     |t, i| set_rows(t, [52, 72, 100][i]),
