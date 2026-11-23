@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod config;
+pub mod file_name;
 pub mod file_query;
 pub mod file_rank;
 pub mod fuzzy;
