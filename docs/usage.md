@@ -8,7 +8,7 @@ The first launch opens Settings with a short welcome: choose the hotkey, turn on
 
 The welcome appears once. It is skipped when `history.json` already exists in `~/Library/Application Support/Dupin`, as it does for anyone who used Dupin before. **Show Welcome** in the Settings sidebar brings it back.
 
-Settings → Permissions lists the macOS permissions Dupin's features can use and whether each is granted, with a button to its pane in System Settings. Dupin asks for a permission only when you use a feature that needs it, never at launch or when Settings opens.
+Settings → Permissions appears when a feature uses a macOS permission. It shows each relevant grant and links to its pane in System Settings. Dupin asks for access only when you use a feature that needs it. File search uses the Spotlight index and needs no grant.
 
 ## Keys
 

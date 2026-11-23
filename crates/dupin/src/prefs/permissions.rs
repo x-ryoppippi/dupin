@@ -27,10 +27,18 @@ pub(super) const ENTRIES: &[Entry] = &[
     },
 ];
 
+fn used_entries() -> impl Iterator<Item = &'static Entry> {
+    ENTRIES.iter().filter(|entry| !entry.used_by.is_empty())
+}
+
+pub(super) fn available() -> bool {
+    used_entries().next().is_some()
+}
+
 /// Status reads are cheap and never prompt, so the page rereads them whenever Settings gains
 /// focus, such as on returning from System Settings.
 pub(super) fn read() -> Vec<Access> {
-    ENTRIES.iter().map(|entry| entry.permission.status()).collect()
+    used_entries().map(|entry| entry.permission.status()).collect()
 }
 
 fn glyph(permission: Permission) -> &'static Icon {
@@ -52,11 +60,11 @@ fn status_title(access: Access) -> &'static str {
     }
 }
 
-fn used_by(features: &[&str]) -> String {
+fn used_by(features: &[&str]) -> Option<String> {
     match features {
-        [] => "No feature uses this yet".to_owned(),
-        [one] => format!("Used by {one}"),
-        [rest @ .., last] => format!("Used by {} and {last}", rest.join(", ")),
+        [] => None,
+        [one] => Some(format!("Used by {one}")),
+        [rest @ .., last] => Some(format!("Used by {} and {last}", rest.join(", "))),
     }
 }
 
@@ -82,14 +90,13 @@ fn entry_row(k: &Kit, index: usize, entry: &Entry, access: Access) -> El {
         k,
         glyph(permission),
         permission.name(),
-        Some(&used_by(entry.used_by)),
+        used_by(entry.used_by).as_deref(),
         row().gap(12.0).center_y().child(badge).child(open),
     )
 }
 
 pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let rows = ENTRIES
-        .iter()
+    let rows = used_entries()
         .zip(&s.permissions)
         .enumerate()
         .map(|(i, (entry, access))| entry_row(k, i, entry, *access))
@@ -110,11 +117,14 @@ mod tests {
 
     #[test]
     fn features_read_as_a_list() {
-        assert_eq!(used_by(&[]), "No feature uses this yet");
-        assert_eq!(used_by(&["snippet paste"]), "Used by snippet paste");
+        assert_eq!(used_by(&[]), None);
         assert_eq!(
-            used_by(&["snippet paste", "selected text", "the active display"]),
-            "Used by snippet paste, selected text and the active display"
+            used_by(&["snippet paste"]).as_deref(),
+            Some("Used by snippet paste")
+        );
+        assert_eq!(
+            used_by(&["snippet paste", "selected text", "the active display"]).as_deref(),
+            Some("Used by snippet paste, selected text and the active display")
         );
     }
 }

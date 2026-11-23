@@ -8,7 +8,8 @@ use rune::{El, el, row, text};
 use rune_kit::{Button, ButtonVariant, Keybind, Kit};
 
 use super::{
-    DESCRIPTION, GUTTER, Page, Prefs, card, hotkey_setting, login_setting, note, setting, value_button,
+    DESCRIPTION, GUTTER, Page, Prefs, card, hotkey_setting, login_setting, note, permissions, setting,
+    value_button,
 };
 use crate::icons;
 
@@ -72,29 +73,25 @@ fn intro(k: &Kit, words: &str) -> El {
 }
 
 fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
-        .on_press(|s: &mut Prefs| s.show(Page::Permissions));
+    let mut rows = vec![hotkey_setting(s, k), login_setting(s.login.as_ref(), k)];
+    if permissions::available() {
+        let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
+            .on_press(|s: &mut Prefs| s.show(Page::Permissions));
+        rows.push(setting(
+            k,
+            &icons::SHIELD,
+            "Permissions",
+            Some("A feature that needs a permission asks when you first use it"),
+            review,
+        ));
+    }
     vec![
         intro(
             k,
             "Dupin lives in the background and opens from a hotkey in any app. Pick one you can \
              spare; Settings can change it later.",
         ),
-        card(
-            k,
-            hair,
-            vec![
-                hotkey_setting(s, k),
-                login_setting(s.login.as_ref(), k),
-                setting(
-                    k,
-                    &icons::SHIELD,
-                    "Permissions",
-                    Some("None are needed to start. A feature that needs one asks when you first use it"),
-                    review,
-                ),
-            ],
-        ),
+        card(k, hair, rows),
         note(
             k,
             "⌘Space is Spotlight's shortcut too. To give it to Dupin, turn off Show Spotlight search in \

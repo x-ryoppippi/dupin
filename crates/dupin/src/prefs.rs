@@ -522,6 +522,10 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (None, Page::Updates) => updates(s, k),
     };
     let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
+    let shows_config = match s.welcome {
+        Some(step) => step == welcome::Step::Hotkey,
+        None => s.page != Page::Permissions,
+    };
     let panel = col()
         .key("panel")
         .role("main")
@@ -574,7 +578,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                     },
                 )
                 .children(
-                    s.read_only
+                    (s.read_only && shows_config)
                         .then(|| note(k, "config.toml is read-only, so change these where it's managed.")),
                 ),
         )
@@ -596,7 +600,11 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_group()
         .focus_follows()
         .gap(4.0);
-    for page in [Page::General, Page::Search, Page::Appearance, Page::Permissions] {
+    let permissions = permissions::available().then_some(Page::Permissions);
+    for page in [Page::General, Page::Search, Page::Appearance]
+        .into_iter()
+        .chain(permissions)
+    {
         let on = s.welcome.is_none() && s.page == page;
         let mut item = row()
             .key(page.key())
