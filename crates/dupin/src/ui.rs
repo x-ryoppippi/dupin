@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -76,7 +77,6 @@ enum Restart {
 pub struct ActionScreen {
     pub key: String,
     pub item: dupin_core::Item,
-    pub layout_key: String,
     pub selected: usize,
     pub stage: ActionStage,
 }
@@ -256,7 +256,7 @@ pub struct Ui {
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
-    pub icons: HashMap<String, Image>,
+    pub icons: HashMap<PathBuf, Image>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -1146,10 +1146,9 @@ impl Ui {
         ) = (&screen.stage, &self.icon_cache)
         {
             for app in apps {
-                self.icons.insert(
-                    format!("choice-{}", app.path.display()),
-                    cache.app_icon(&app.path, ICON_SIZE),
-                );
+                self.icons
+                    .entry(app.path.clone())
+                    .or_insert_with(|| cache.app_icon(&app.path, ICON_SIZE));
             }
         }
         crate::trace::action_screen(
@@ -1378,7 +1377,6 @@ impl Ui {
                     self.action_screen = Some(ActionScreen {
                         key: id,
                         item: item.clone(),
-                        layout_key: self.session.layout_key(self.session.selected()),
                         selected: 0,
                         stage: ActionStage::List,
                     });
@@ -1593,21 +1591,17 @@ impl Ui {
     fn fetch_icons(&mut self) {
         let Some(cache) = &self.icon_cache else { return };
         if self.icons.len() > ICON_CAP {
-            let current: std::collections::HashSet<String> = self
+            let current: std::collections::HashSet<_> = self
                 .session
                 .items()
                 .iter()
-                .enumerate()
-                .map(|(i, _)| self.session.layout_key(i))
+                .filter_map(|item| item.icon.as_ref())
                 .collect();
-            self.icons.retain(|id, _| current.contains(id.as_str()));
+            self.icons.retain(|path, _| current.contains(path));
         }
-        for (index, item) in self.session.items().iter().enumerate() {
-            if let Some(path) = &item.icon
-                && !self.icons.contains_key(&self.session.layout_key(index))
-            {
-                self.icons
-                    .insert(self.session.layout_key(index), cache.app_icon(path, ICON_SIZE));
+        for path in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
+            if !self.icons.contains_key(path) {
+                self.icons.insert(path.clone(), cache.app_icon(path, ICON_SIZE));
             }
         }
     }
@@ -1978,7 +1972,6 @@ mod action_screen_tests {
         session.intent(Intent::Actions);
         let screen = ActionScreen {
             key: session.result_key(0),
-            layout_key: session.layout_key(0),
             item: session.items()[0].clone(),
             selected: 0,
             stage: ActionStage::List,

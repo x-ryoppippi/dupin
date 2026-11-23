@@ -259,10 +259,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
 
 fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
     let screen = s.action_screen.as_ref().unwrap();
-    let icon = match s.icons.get(&screen.layout_key) {
-        Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
-        None => el().size(ICON_SIZE, ICON_SIZE),
-    };
+    let icon = item_icon(s, screen.item.icon.as_deref());
     let subtitle = match &screen.item.view {
         View::Text { subtitle, .. } => subtitle.as_str(),
         _ => "Actions",
@@ -355,11 +352,7 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                             .scroll(ScrollSpec { stick_bottom: false })
                             .children(apps.iter().enumerate().map(|(index, app)| {
                                 let on = index == *selected;
-                                let icon = s
-                                    .icons
-                                    .get(&format!("choice-{}", app.path.display()))
-                                    .map(|image| el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()))
-                                    .unwrap_or_else(|| el().size(ICON_SIZE, ICON_SIZE));
+                                let icon = item_icon(s, Some(&app.path));
                                 row()
                                     .key(format!("action-{index}"))
                                     .w_full()
@@ -758,10 +751,7 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, ac
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let icon = match s.icons.get(&s.session.layout_key(index)) {
-        Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
-        None => el().size(ICON_SIZE, ICON_SIZE),
-    };
+    let icon = item_icon(s, item.icon.as_deref());
     let id = s.session.result_key(index);
     text_row(
         t,
@@ -779,6 +769,14 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, ac
     )
     .key(row_key(&s.session.layout_key(index)))
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
+}
+
+fn item_icon(s: &Ui, path: Option<&std::path::Path>) -> El {
+    let icon = el().size(ICON_SIZE, ICON_SIZE);
+    match path.and_then(|path| s.icons.get(path)) {
+        Some(image) => icon.pixels(image.pixels()),
+        None => icon,
+    }
 }
 
 fn text_row(

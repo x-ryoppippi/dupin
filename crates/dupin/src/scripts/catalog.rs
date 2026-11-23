@@ -148,6 +148,7 @@ mod tests {
             marker.display()
         );
         root.write("echo.sh", &body, 0o700);
+        root.write("plain.sh", "#!/bin/sh\nexit 99\n", 0o700);
         root.write(".hidden", &body, 0o700);
         root.write("backup~", &body, 0o700);
         root.write("backup.swp", &body, 0o700);
@@ -157,7 +158,7 @@ mod tests {
         std::fs::create_dir(root.0.join("folder")).unwrap();
         for _ in 0..3 {
             let catalog = Catalog::scan(&root.0);
-            assert_eq!(catalog.scripts.len(), 2);
+            assert_eq!(catalog.scripts.len(), 3);
             assert!(catalog.notice.as_ref().unwrap().contains("chmod +x"));
             assert!(catalog.notice.as_ref().unwrap().contains("unknown header key"));
             assert_eq!(
@@ -174,10 +175,19 @@ mod tests {
             )
             .unwrap();
             assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].icon, Some(root.0.join("icon.svg")));
             assert!(matches!(
                 rows[0].action("run"),
                 Some(dupin_core::Action::RunScript(_))
             ));
+            rows.clear();
+            dupin_core::Provider::search(
+                &provider,
+                &dupin_core::Request::detached("plain", 1),
+                &mut |items| rows.extend(items),
+            )
+            .unwrap();
+            assert_eq!(rows[0].icon, Some(root.0.join("plain.sh")));
             assert!(!marker.exists());
         }
     }

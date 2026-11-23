@@ -40,14 +40,19 @@ impl Provider for ScriptsProvider {
                     )
                     .keep_open()
                 };
+                let synopsis = script.header.synopsis();
                 Some(Item {
                     id: format!("script:{}", script.path.display()),
                     view: View::Text {
                         title: script.header.title.clone(),
-                        subtitle: script.header.synopsis(),
+                        subtitle: if synopsis.is_empty() {
+                            "Script".into()
+                        } else {
+                            format!("Script · {synopsis}")
+                        },
                     },
                     record_usage: true,
-                    icon: script.header.icon.clone(),
+                    icon: Some(script.header.icon.as_ref().unwrap_or(&script.path).clone()),
                     matched: matched.positions,
                     completion: None,
                     score: Some(matched.score),
