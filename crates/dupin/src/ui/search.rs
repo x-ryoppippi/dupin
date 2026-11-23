@@ -43,7 +43,7 @@ impl Ui {
     }
 
     pub(super) fn refresh_default(&mut self, tx: &mut Tx) {
-        if self.session.command_id().as_str() == crate::commands::APPS {
+        if self.session.command_id().as_str() == crate::features::apps::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }

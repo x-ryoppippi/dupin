@@ -119,7 +119,7 @@ pub(super) fn query_problem(s: &Ui) -> Option<&'static str> {
     {
         return Some("Choose a folder. Use kind:folder or remove the kind filter.");
     }
-    crate::commands::query_problem(s.session.command_id(), query)
+    crate::features::files::query_problem(s.session.command_id(), query)
 }
 
 fn hint(s: &Ui) -> Option<&str> {

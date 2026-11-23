@@ -1,28 +1,13 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-use dupin_core::clipboard::ClipboardProvider;
-use dupin_core::snippets::{SnippetCatalog, SnippetProvider};
+use dupin_core::snippets::SnippetCatalog;
 use dupin_core::{
-    CommandError, CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility,
-    QueryPresentation, Session,
+    CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
-use dupin_mac::{AppsProvider, CalendarProvider, DictionaryProvider, RecentProvider, system_commands};
+use dupin_mac::{AppsProvider, CalendarProvider, system_commands};
 
-use crate::features::{Feature, MANIFEST};
-
-pub use crate::features::files::{FILES, query_problem, query_qualifier_ranges};
-
-pub const APPS: &str = "apps.search";
-pub const DICTIONARY: &str = "dictionary.lookup";
-pub const CALENDAR: &str = "calendar.events";
-pub const CLIPBOARD: &str = "clipboard.history";
-pub const SNIPPETS: &str = "snippets.search";
-pub const SCRIPTS: &str = "scripts.search";
-pub(crate) const SYSTEM: &str = "system.commands";
-const SETTINGS: &str = "settings.search";
-const CALCULATOR: &str = "calculator.evaluate";
-const WINDOWS: &str = "windows.arrange";
+use crate::features::{MANIFEST, apps::APPS, files::FILES};
 
 pub struct Registration {
     pub session: Session,
@@ -42,32 +27,8 @@ pub struct ConfiguredCommands {
     pub snippets: SnippetCatalog,
 }
 
-/// Register `keywords` for `command`, describing the ones that couldn't be, under `setting`.
-fn add_keywords(
-    registry: &mut CommandRegistry,
-    command: &CommandId,
-    keywords: &[String],
-    setting: &str,
-) -> Option<String> {
-    let rejected: Vec<_> = keywords
-        .iter()
-        .filter_map(|keyword| registry.add_keyword(command, keyword).err())
-        .map(|error| error.to_string())
-        .collect();
-    (!rejected.is_empty()).then(|| {
-        format!(
-            "Some keywords were not registered. Review {setting} in config.toml: {}",
-            rejected.join("; "),
-        )
-    })
-}
-
 pub(super) fn id(value: &str) -> CommandId {
     CommandId::new(value).expect("built-in command IDs are valid")
-}
-
-fn recent_id() -> CommandId {
-    id("recent.items")
 }
 
 pub(super) fn presentation(
@@ -97,6 +58,22 @@ pub(super) struct Configure {
     pub snippets: SnippetCatalog,
 }
 
+impl Configure {
+    pub fn add_keywords(&mut self, command: &CommandId, keywords: &[String], setting: &str) {
+        let rejected: Vec<_> = keywords
+            .iter()
+            .filter_map(|keyword| self.registry.add_keyword(command, keyword).err())
+            .map(|error| error.to_string())
+            .collect();
+        if !rejected.is_empty() {
+            self.notices.push(format!(
+                "Some keywords were not registered. Review {setting} in config.toml: {}",
+                rejected.join("; "),
+            ));
+        }
+    }
+}
+
 pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
     let mut commands = Configure {
         registry: CommandRegistry::new(id(APPS), Some(id(FILES))),
@@ -123,225 +100,12 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
     })
 }
 
-pub(super) const LEGACY: Feature = Feature {
-    configure: configure_legacy,
-    start: start_legacy,
-    ..Feature::EMPTY
-};
-
-pub(super) const LEGACY_TAIL: Feature = Feature {
-    configure: configure_legacy_tail,
-    prepare: prepare_legacy,
-    ..Feature::EMPTY
-};
-
-fn configure_legacy(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {
-    let apps_id = id(APPS);
-    let dictionary_id = id(DICTIONARY);
-    let snippets_id = id(SNIPPETS);
-    let registry = &mut commands.registry;
-    for command in [
-        CommandSpec::new(
-            apps_id.clone(),
-            50,
-            presentation("Search apps", None, None, Some("No matches"), false, 0.0),
-        ),
-        CommandSpec::new(
-            dictionary_id.clone(),
-            1,
-            presentation(
-                "Look up a word",
-                Some("Define"),
-                Some("Type a word  ·  ⌫ back to apps"),
-                Some("No definition found"),
-                true,
-                3.0,
-            ),
-        ),
-        CommandSpec::new(
-            snippets_id.clone(),
-            config.snippets.len(),
-            presentation(
-                "Search snippets",
-                Some("Snippets"),
-                Some("No snippets yet: add them to config.toml  ·  ⌫ back to apps"),
-                Some("No matching snippets"),
-                false,
-                0.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any),
-    ] {
-        registry.register(command)?;
-    }
-    registry.register(CommandSpec::new(
-        id(SYSTEM),
-        system_commands::COMMANDS.len(),
-        presentation("Search system commands", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(SETTINGS),
-        10,
-        presentation("Search settings", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(CALCULATOR),
-        usize::from(config.calculator),
-        presentation("Calculate", None, None, None, false, 0.0),
-    ))?;
-    registry.register(CommandSpec::new(
-        id(SCRIPTS),
-        8,
-        presentation("Search scripts", None, None, None, false, 0.0),
-    ))?;
-    if config.calculator {
-        commands.defaults.push(id(CALCULATOR));
-    }
-    commands
-        .defaults
-        .extend([apps_id, id(SYSTEM), id(SCRIPTS), id(SETTINGS)]);
-    if config.clipboard.enabled {
-        let clipboard = id(CLIPBOARD);
-        let mut spec = CommandSpec::new(
-            clipboard.clone(),
-            config.clipboard.max_entries,
-            presentation(
-                "Search clipboard history",
-                Some("Clipboard"),
-                Some("Nothing copied yet  ·  ⌫ back to apps"),
-                Some("No matches"),
-                false,
-                4.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any);
-        spec.private_results = true;
-        registry.register(spec)?;
-        registry.add_keyword(&clipboard, "clip")?;
-    }
-    if config.calendar.enabled {
-        let calendar = id(CALENDAR);
-        let mut spec = CommandSpec::new(
-            calendar.clone(),
-            30,
-            presentation(
-                "Search calendar events",
-                Some("Calendar"),
-                Some("No upcoming events"),
-                Some("No matching events"),
-                true,
-                5.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any);
-        spec.private_results = true;
-        registry.register(spec)?;
-        registry.add_keyword(&calendar, "cal")?;
-    }
-    let dictionary_notice = add_keywords(
-        registry,
-        &dictionary_id,
-        &config.dictionary_keywords,
-        "dictionary_keywords",
-    );
-    let snippet_keyword_notice = add_keywords(
-        registry,
-        &snippets_id,
-        &config.snippet_keywords,
-        "snippet_keywords",
-    );
-
-    commands.notices.extend(dictionary_notice);
-    commands.notices.extend(snippet_keyword_notice);
-    Ok(())
-}
-
-fn configure_legacy_tail(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {
-    let registry = &mut commands.registry;
-    if config.show_recent {
-        let recent = recent_id();
-        registry.register(
-            CommandSpec::new(
-                recent.clone(),
-                10,
-                presentation("Recent items", None, None, None, false, 0.0),
-            )
-            .with_query_eligibility(QueryEligibility::EmptyOnly),
-        )?;
-        commands.defaults.push(recent);
-    }
-    if config.window_management {
-        registry.register(CommandSpec::new(
-            id(WINDOWS),
-            crate::window_management::COMMANDS.len(),
-            presentation("Arrange windows", None, None, None, false, 0.0),
-        ))?;
-        commands.defaults.push(id(WINDOWS));
-    }
-    Ok(())
-}
-
-fn prepare_legacy(config: &Config, commands: &mut Configure) {
-    let (catalog, notice) = SnippetCatalog::compile(config);
-    commands.snippets = catalog;
-    commands.notices.extend(notice);
-}
-
-/// Extensions whose commands were registered, and why the others were not. Built-in and
-/// configured keywords always win: an extension never replaces another command's keyword.
-pub struct Extensions {
-    pub registered: Vec<(CommandId, Arc<crate::extensions::Extension>)>,
-    pub problems: Vec<String>,
-}
-
-pub fn add_extensions(
-    configured: &mut ConfiguredCommands,
-    extensions: &[Arc<crate::extensions::Extension>],
-) -> Extensions {
-    let mut added = Extensions {
-        registered: Vec::new(),
-        problems: Vec::new(),
-    };
-    for extension in extensions {
-        let keyword = &extension.keyword;
-        if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
-            added.problems.push(format!(
-                "{}: keyword `{keyword}` is already used by another command",
-                extension.folder_name
-            ));
-            continue;
-        }
-        let Ok(command) = CommandId::new(format!("extension.{}", extension.id)) else {
-            continue;
-        };
-        let mut spec = CommandSpec::new(
-            command.clone(),
-            50,
-            presentation(
-                &format!("Ask {}", extension.name),
-                Some(&extension.name),
-                Some(&format!("Type for {}  ·  ⌫ back to apps", extension.name)),
-                Some("No results"),
-                true,
-                0.0,
-            ),
-        );
-        spec.deadline = crate::extensions::QUERY_DEADLINE + std::time::Duration::from_secs(1);
-        if configured.registry.register(spec).is_ok()
-            && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
-        {
-            added.registered.push((command, extension.clone()));
-        }
-    }
-    added
-}
-
 pub(super) struct Providers<'a> {
     pub registration: &'a mut Registration,
-    apps: Arc<AppsProvider>,
-    calendar: Arc<CalendarProvider>,
-    clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
-    calculator: Arc<crate::calculator::Calculator>,
+    pub apps: Arc<AppsProvider>,
+    pub calendar: Arc<CalendarProvider>,
+    pub clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
+    pub calculator: Arc<crate::calculator::Calculator>,
 }
 
 impl Providers<'_> {
@@ -393,51 +157,23 @@ pub fn register(
     Ok(registration)
 }
 
-fn start_legacy(providers: &mut Providers) {
-    let registration = &providers.registration;
-    let apps = providers.apps.clone();
-    let items: [(&str, Arc<dyn Provider>); 11] = [
-        (APPS, apps.clone()),
-        (SYSTEM, registration.system_provider.clone()),
-        (
-            "recent.items",
-            Arc::new(RecentProvider::new(apps, registration.session.recent_history())),
-        ),
-        (CALENDAR, providers.calendar.clone()),
-        (
-            SCRIPTS,
-            Arc::new(crate::scripts::provider::ScriptsProvider(
-                registration.scripts.clone(),
-            )),
-        ),
-        (CALCULATOR, providers.calculator.clone()),
-        (SETTINGS, Arc::new(dupin_mac::SettingsProvider::default())),
-        (WINDOWS, Arc::new(crate::window_management::WindowProvider)),
-        (DICTIONARY, Arc::new(DictionaryProvider::default())),
-        (
-            SNIPPETS,
-            Arc::new(SnippetProvider::new(registration.snippets.clone())),
-        ),
-        (
-            CLIPBOARD,
-            Arc::new(ClipboardProvider::new(
-                providers.clipboard.clone(),
-                dupin_mac::clipboard::access_item,
-            )),
-        ),
-    ];
-    for (command, provider) in items {
-        providers.add(command, provider);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::features::{
-        files::{CONTENTS, MAX_FILE_CANDIDATES},
+        calculator::CALCULATOR,
+        calendar::CALENDAR,
+        clipboard::CLIPBOARD,
+        dictionary::DICTIONARY,
+        extensions::add_extensions,
+        files::{CONTENTS, MAX_FILE_CANDIDATES, query_problem, query_qualifier_ranges},
+        recent::RECENT,
+        snippets::SNIPPETS,
+        system::SYSTEM,
         web::WEB_KEYWORDS,
+        windows::WINDOWS,
     };
+    use dupin_core::snippets::SnippetProvider;
 
     #[test]
     fn manifest_preserves_command_ids_provider_order_and_keywords() {
@@ -559,7 +295,7 @@ mod tests {
             (SystemCommand::ToggleDarkMode, "Toggle Dark Mode", false),
         ] {
             let configured = crate::commands::configured(&config).unwrap();
-            let origin = CommandId::new(crate::commands::SYSTEM).unwrap();
+            let origin = CommandId::new(SYSTEM).unwrap();
             let mut session = Session::new(History::default(), configured.registry).unwrap();
             let generation = session
                 .set_query(title)
@@ -732,7 +468,7 @@ mod tests {
         let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
         assert!(matches!(
             session.refresh().as_slice(),
-            [Effect::Search { command, query, .. }] if *command == recent_id() && query.is_empty()
+            [Effect::Search { command, query, .. }] if *command == id(RECENT) && query.is_empty()
         ));
 
         config.show_recent = false;
@@ -869,6 +605,7 @@ mod tests {
             ("Dictionary Clash", "define"),
             ("Contents Clash", "in"),
             ("Web Clash", "gh"),
+            ("Snippet Clash", "snip"),
             ("Second Count", "wc"),
         ]
         .into_iter()
@@ -882,12 +619,14 @@ mod tests {
         assert_eq!(configured.registry.keyword("wc"), Some(&words));
         assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("snip"), Some(&id(SNIPPETS)));
         assert!(configured.web.has_keyword("gh"));
-        assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
+        assert_eq!(added.problems.len(), 5, "{:?}", added.problems);
         for (problem, folder) in added.problems.iter().zip([
             "dictionary-clash-folder",
             "contents-clash-folder",
             "web-clash-folder",
+            "snippet-clash-folder",
             "second-count-folder",
         ]) {
             assert!(

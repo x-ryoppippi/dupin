@@ -1,9 +1,21 @@
+pub(super) mod apps;
+pub(super) mod calculator;
+pub(super) mod calendar;
+pub(super) mod clipboard;
+pub(super) mod dictionary;
+pub(super) mod extensions;
 pub(super) mod files;
+pub(super) mod recent;
+mod scripts;
+mod settings;
+pub(super) mod snippets;
+pub(super) mod system;
 pub(super) mod web;
+pub(super) mod windows;
 
 use dupin_core::{CommandError, Config};
 
-use crate::commands::{self, Configure, ConfiguredCommands, Providers};
+use crate::commands::{Configure, ConfiguredCommands, Providers};
 use crate::ui::Ui;
 
 pub(super) struct Feature {
@@ -14,7 +26,7 @@ pub(super) struct Feature {
 }
 
 impl Feature {
-    pub(super) const EMPTY: Self = Self {
+    const EMPTY: Self = Self {
         configure: |_, _| Ok(()),
         prepare: |_, _| {},
         start: |_| {},
@@ -22,11 +34,24 @@ impl Feature {
     };
 }
 
+// Default providers are appended in this order. Built-in routes are registered before
+// configured aliases, and web searches are compiled only after both have reserved their keywords.
 pub(super) const MANIFEST: &[Feature] = &[
+    // Dynamic routes are reconciled against the new registry before live catalogues are swapped.
+    extensions::FEATURE,
     files::FEATURE,
-    commands::LEGACY,
+    clipboard::FEATURE,
+    calendar::FEATURE,
+    dictionary::FEATURE,
+    calculator::FEATURE,
+    apps::FEATURE,
+    system::FEATURE,
+    scripts::FEATURE,
+    settings::FEATURE,
     web::FEATURE,
-    commands::LEGACY_TAIL,
+    snippets::FEATURE,
+    recent::FEATURE,
+    windows::FEATURE,
 ];
 
 pub(super) fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredCommands) -> bool {
@@ -38,5 +63,5 @@ pub(super) fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredComm
 }
 
 fn default_query(ui: &Ui) -> bool {
-    ui.session.command_id().as_str() == commands::APPS && !ui.session.query().trim().is_empty()
+    ui.session.command_id().as_str() == apps::APPS && !ui.session.query().trim().is_empty()
 }

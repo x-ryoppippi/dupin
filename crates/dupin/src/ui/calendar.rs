@@ -10,7 +10,7 @@ pub(super) fn provider(me: &AppHandle<Ui>) -> CalendarProvider {
         let panel = me.clone();
         dupin_mac::CalendarProvider::new(move || {
             panel.update(|ui, tx| {
-                if ui.session.command_id().as_str() == crate::commands::CALENDAR {
+                if ui.session.command_id().as_str() == crate::features::calendar::CALENDAR {
                     let effects = ui.session.refresh();
                     ui.apply(effects, tx);
                 }

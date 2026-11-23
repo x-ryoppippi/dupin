@@ -36,7 +36,7 @@ impl Ui {
 }
 
 fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
-    let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
+    let marks: Vec<_> = crate::features::files::query_qualifier_ranges(command, &edit.text)
         .into_iter()
         .filter(|range| {
             ![edit.anchor, edit.focus]
@@ -65,7 +65,7 @@ mod qualifier_tests {
     use rune::{Key, KeyEvent};
 
     fn files() -> CommandId {
-        CommandId::new(crate::commands::FILES).unwrap()
+        CommandId::new(crate::features::files::FILES).unwrap()
     }
 
     #[test]
@@ -135,7 +135,7 @@ mod qualifier_tests {
         assert_eq!(edit.pills().count(), 1);
         let (range, _) = edit.pills().next().unwrap();
         assert_eq!(&edit.text[range], "ext:rs");
-        mark_query_qualifiers(&mut edit, &CommandId::new(crate::commands::APPS).unwrap());
+        mark_query_qualifiers(&mut edit, &CommandId::new(crate::features::apps::APPS).unwrap());
         assert_eq!(edit.text, "report ext:rs");
         assert_eq!(edit.pills().count(), 0);
     }

@@ -21,7 +21,7 @@ pub(super) struct Extensions {
 impl Ui {
     /// Start or stop reading the extensions folder. Stopping drops their commands at the next
     /// registry install, so no guest runs once the switch is off.
-    pub(super) fn watch_extensions(&mut self, enabled: bool) {
+    pub(crate) fn watch_extensions(&mut self, enabled: bool) {
         if enabled == self.extensions.watch.is_some() {
             return;
         }
@@ -61,11 +61,11 @@ impl Ui {
         self.apply_config(&config, tx);
     }
 
-    pub(super) fn install_extensions(
+    pub(crate) fn install_extensions(
         &mut self,
         registration: &mut crate::commands::ConfiguredCommands,
     ) -> bool {
-        let added = crate::commands::add_extensions(registration, &self.extensions.catalog);
+        let added = crate::features::extensions::add_extensions(registration, &self.extensions.catalog);
         let registered: HashMap<_, _> = added.registered.into_iter().collect();
         let active = self.session.command_id();
         let active_changed = registered.get(active).is_some_and(|next| {
@@ -88,7 +88,7 @@ impl Ui {
             if self.extensions.registered.contains_key(&id) {
                 continue;
             }
-            let provider = Arc::new(crate::extensions::ExtensionProvider::new(extension.clone()));
+            let provider = crate::features::extensions::provider(extension.clone());
             let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
             self.searchers.insert(id.clone(), searcher);
             self.extensions.registered.insert(id, extension);
