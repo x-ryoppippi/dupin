@@ -14,6 +14,13 @@ pub struct PathWatcher {
     started: bool,
 }
 
+#[derive(Clone, Copy)]
+enum Scope {
+    Recursive,
+    Directory,
+    Entries,
+}
+
 // SAFETY: the stream delivers only on its serial queue, and Drop drains that queue.
 unsafe impl Send for PathWatcher {}
 
@@ -22,7 +29,7 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, true, move |_| changed())
+        Self::start_with_scope(roots, Scope::Recursive, move |_| changed())
     }
 
     /// Watches directory entries without forwarding descendant events. The callback receives
@@ -31,12 +38,20 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, false, changed)
+        Self::start_with_scope(roots, Scope::Directory, changed)
+    }
+
+    /// Directory notifications can miss in-place edits to files in the root.
+    pub fn start_entries(
+        roots: Vec<PathBuf>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::start_with_scope(roots, Scope::Entries, changed)
     }
 
     fn start_with_scope(
         roots: Vec<PathBuf>,
-        recursive: bool,
+        scope: Scope,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         let (events, received) = mpsc::channel();
@@ -44,7 +59,7 @@ impl PathWatcher {
             .name("dupin-path-watch-debounce".into())
             .spawn(move || debounce_events(received, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
-        match watch_roots(roots, recursive, events) {
+        match watch_roots(roots, scope, events) {
             Ok(mut watcher) => {
                 watcher.debounce = Some(debounce);
                 Ok(watcher)
@@ -101,6 +116,7 @@ type FSEventFlags = u32;
 type CFTimeInterval = f64;
 const USE_CF_TYPES: u32 = 1;
 const WATCH_ROOT: u32 = 4;
+const FILE_EVENTS: u32 = 16;
 const ROOT_CHANGED: u32 = 0x20;
 
 #[repr(C)]
@@ -115,7 +131,7 @@ struct FSEventStreamContext {
 struct WatchContext {
     events: mpsc::Sender<bool>,
     roots: Vec<PathBuf>,
-    recursive: bool,
+    scope: Scope,
 }
 
 type FSEventCallback = unsafe extern "C" fn(
@@ -160,7 +176,7 @@ unsafe extern "C" {
 
 fn watch_roots(
     roots: Vec<PathBuf>,
-    recursive: bool,
+    scope: Scope,
     events: mpsc::Sender<bool>,
 ) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
@@ -186,12 +202,8 @@ fn watch_roots(
         return Err("no paths can be watched");
     }
     let paths = NSArray::from_retained_slice(&paths);
-    let context_info = Box::into_raw(Box::new(WatchContext {
-        events,
-        roots,
-        recursive,
-    }))
-    .cast::<std::ffi::c_void>();
+    let context_info =
+        Box::into_raw(Box::new(WatchContext { events, roots, scope })).cast::<std::ffi::c_void>();
     let mut context = FSEventStreamContext {
         version: 0,
         info: context_info,
@@ -209,7 +221,12 @@ fn watch_roots(
             Retained::as_ptr(&paths).cast(),
             u64::MAX,
             0.5,
-            USE_CF_TYPES | if recursive { 0 } else { WATCH_ROOT },
+            USE_CF_TYPES
+                | match scope {
+                    Scope::Recursive => 0,
+                    Scope::Directory => WATCH_ROOT,
+                    Scope::Entries => WATCH_ROOT | FILE_EVENTS,
+                },
         )
     };
     if stream.is_null() {
@@ -267,7 +284,7 @@ unsafe extern "C" fn paths_changed(
                     context
                         .roots
                         .iter()
-                        .any(|root| matches_event_path(path, root, context.recursive))
+                        .any(|root| matches_event_path(path, root, context.scope))
                 })
         })
     {
@@ -275,8 +292,13 @@ unsafe extern "C" fn paths_changed(
     }
 }
 
-fn matches_event_path(path: &Path, root: &Path, recursive: bool) -> bool {
-    path == root || root.starts_with(path) || (recursive && path.starts_with(root))
+fn matches_event_path(path: &Path, root: &Path, scope: Scope) -> bool {
+    root.starts_with(path)
+        || match scope {
+            Scope::Recursive => path.starts_with(root),
+            Scope::Directory => false,
+            Scope::Entries => path.parent() == Some(root),
+        }
 }
 
 pub fn canonical_root(root: &Path) -> PathBuf {
@@ -297,7 +319,7 @@ pub fn canonical_root(root: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::matches_event_path;
+    use super::{Scope, matches_event_path};
     use std::path::Path;
 
     #[test]
@@ -319,18 +341,26 @@ mod tests {
     fn shallow_scope_matches_the_root_and_its_missing_ancestors_only() {
         let root = Path::new("/home/user/.config/dupin");
 
-        assert!(matches_event_path(root, root, false));
-        assert!(matches_event_path(Path::new("/home/user/.config"), root, false));
-        assert!(matches_event_path(Path::new("/home/user"), root, false));
+        assert!(matches_event_path(root, root, Scope::Directory));
+        assert!(matches_event_path(
+            Path::new("/home/user/.config"),
+            root,
+            Scope::Directory
+        ));
+        assert!(matches_event_path(
+            Path::new("/home/user"),
+            root,
+            Scope::Directory
+        ));
         assert!(!matches_event_path(
             Path::new("/home/user/.config/other"),
             root,
-            false
+            Scope::Directory
         ));
         assert!(!matches_event_path(
             Path::new("/home/user/.config/dupin/extra"),
             root,
-            false
+            Scope::Directory
         ));
     }
 
@@ -341,12 +371,23 @@ mod tests {
         assert!(matches_event_path(
             Path::new("/Applications/Utilities"),
             root,
-            true
+            Scope::Recursive
         ));
         assert!(!matches_event_path(
             Path::new("/ApplicationsElsewhere"),
             root,
-            true
+            Scope::Recursive
+        ));
+    }
+
+    #[test]
+    fn entry_scope_matches_direct_children() {
+        let root = Path::new("/home/user/.config/dupin/scripts");
+        assert!(matches_event_path(&root.join("script.sh"), root, Scope::Entries));
+        assert!(!matches_event_path(
+            &root.join("nested/script.sh"),
+            root,
+            Scope::Entries
         ));
     }
 }

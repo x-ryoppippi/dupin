@@ -42,7 +42,7 @@ fn watch_catalog(
                 if rebuild {
                     drop(watcher.take());
                     let changed = sender.clone();
-                    match dupin_mac::watcher::PathWatcher::start_shallow(
+                    match dupin_mac::watcher::PathWatcher::start_entries(
                         vec![directory.clone()],
                         move |root_moved| {
                             let _ = changed.send(WatchEvent::Changed(root_moved));
