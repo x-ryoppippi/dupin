@@ -572,10 +572,14 @@ impl Ui {
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
             match self.session.capture() {
                 Ok(saved) => {
+                    crate::trace::snapshot("capture accepted");
                     self.snapshots.update(move |s, _| s.save(saved));
                     self.snapshot_notice("Saving snapshot…".into(), tx);
                 }
-                Err(problem) => self.snapshot_notice(problem, tx),
+                Err(problem) => {
+                    crate::trace::snapshot("capture refused");
+                    self.snapshot_notice(problem, tx);
+                }
             }
             return true;
         }
@@ -701,6 +705,9 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
+            if self.session.results() == dupin_core::session::Results::Done {
+                crate::trace::results_done(&self.query.text, self.session.items().len());
+            }
             if self
                 .deadlines
                 .get(&origin)
@@ -862,7 +869,11 @@ impl Ui {
                 if let Some(worker) = self.searchers.get(&id) {
                     worker.cancel();
                 }
-                changed |= self.session.deliver_from(id, Delivery::Expired { generation });
+                let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
+                changed |= delivered;
+                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                    crate::trace::results_done(&self.query.text, self.session.items().len());
+                }
             }
         }
         if let Some(next) = self

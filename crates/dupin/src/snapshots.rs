@@ -400,6 +400,12 @@ fn publish(
     result: Option<Result<Option<String>, String>>,
     cache: &mut std::collections::HashMap<String, String>,
 ) {
+    match &result {
+        Some(Ok(Some(_))) => crate::trace::snapshot("saved"),
+        Some(Ok(None)) => crate::trace::snapshot("deleted"),
+        Some(Err(_)) => crate::trace::snapshot("write failed"),
+        None => {}
+    }
     let entries = store.list().to_vec();
     cache.retain(|id, _| entries.iter().any(|entry| &entry.id == id));
     let search = entries
