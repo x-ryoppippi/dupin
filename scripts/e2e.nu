@@ -41,6 +41,11 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     mkdir $runtime
     ^chmod 700 $runtime
     let binary = $app | path join Contents MacOS dupin
+    let control = $out | path join cli dupin-control-e2e
+    mkdir ($control | path dirname)
+    # A waiting CLI inside the bundle shares the resident's AX application name.
+    cp $binary $control
+    ^chmod +x $control
     let dupin = job spawn {
         with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: $data, XDG_RUNTIME_DIR: $runtime, DUPIN_TRACE: '1'} {
             ^($app | path join Contents MacOS dupin) o+e> $log
@@ -54,11 +59,11 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if $record {
         record $out {
             scenario $out
-            with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $binary }
+            with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
         }
     } else {
         scenario $out
-        with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $binary }
+        with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
     }
 
     job kill $dupin
