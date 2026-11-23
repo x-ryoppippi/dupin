@@ -1,6 +1,6 @@
 use std::fs::{self, DirBuilder, File};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, symlink};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 
 const PREFIX: &str = ".dupin-copy-in-progress-";
@@ -36,6 +36,7 @@ impl Receipt {
         // Staging must be on the destination volume for an exclusive, atomic publish.
         let staging = tempfile::Builder::new()
             .prefix(PREFIX)
+            .permissions(fs::Permissions::from_mode(0o700))
             .tempdir_in(folder.canonicalize()?)?;
         let name = staging.path().file_name().expect("named staging directory");
         let receipt = journal.join(name);
@@ -104,7 +105,7 @@ fn reap(receipt: &Path) -> io::Result<()> {
             // Leave the marker in place if removing the staged copy fails and needs to be retried.
             let entry = stage.join("entry");
             match entry.symlink_metadata() {
-                Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&entry)?,
+                Ok(metadata) if metadata.is_dir() => remove_staged_directory(&entry)?,
                 Ok(_) => fs::remove_file(&entry)?,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error),
@@ -123,6 +124,28 @@ fn reap(receipt: &Path) -> io::Result<()> {
     fs::remove_file(receipt)
 }
 
+fn remove_staged_directory(root: &Path) -> io::Result<()> {
+    // The copy can inherit read-only directories, which would prevent removing their children.
+    let mut directories = vec![root.to_owned()];
+    while let Some(path) = directories.pop() {
+        let metadata = path.symlink_metadata()?;
+        if !metadata.is_dir() {
+            continue;
+        }
+        let mode = metadata.permissions().mode();
+        if mode & 0o700 != 0o700 {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode | 0o700))?;
+        }
+        for child in fs::read_dir(path)? {
+            let child = child?;
+            if child.file_type()?.is_dir() {
+                directories.push(child.path());
+            }
+        }
+    }
+    fs::remove_dir_all(root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,12 +157,18 @@ mod tests {
         fs::create_dir(&journal).unwrap();
         let abandoned = Receipt::register(&journal, dir.path()).unwrap().stage;
         let replaced = Receipt::register(&journal, dir.path()).unwrap().stage;
-        fs::write(abandoned.join("entry"), "partial copy").unwrap();
+        assert_eq!(abandoned.metadata().unwrap().permissions().mode() & 0o077, 0);
+        let partial = abandoned.join("entry");
+        fs::create_dir(&partial).unwrap();
+        fs::write(partial.join("data"), "partial copy").unwrap();
+        fs::set_permissions(&partial, fs::Permissions::from_mode(0o500)).unwrap();
         fs::remove_dir_all(&replaced).unwrap();
         fs::create_dir(&replaced).unwrap();
         fs::write(replaced.join("entry"), "user data").unwrap();
 
-        assert!(recover(&journal).is_err());
+        let recovery = recover(&journal);
+        let _ = fs::set_permissions(&partial, fs::Permissions::from_mode(0o700));
+        assert!(recovery.is_err());
         assert!(!abandoned.exists());
         assert_eq!(fs::read_to_string(replaced.join("entry")).unwrap(), "user data");
     }
