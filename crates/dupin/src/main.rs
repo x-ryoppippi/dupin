@@ -7,6 +7,7 @@ mod cli;
 mod commands;
 mod control;
 mod hotkey;
+mod http;
 mod icons;
 mod log;
 mod prefs;

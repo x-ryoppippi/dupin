@@ -183,7 +183,11 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     })
 }
 
-pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration, dupin_core::CommandError> {
+pub fn register(
+    config: &Config,
+    apps: Arc<AppsProvider>,
+    calculator: crate::calculator::Calculator,
+) -> Result<Registration, dupin_core::CommandError> {
     let ConfiguredCommands {
         registry,
         notice,
@@ -197,10 +201,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
-        (
-            id(CALCULATOR),
-            Arc::new(crate::calculator::Calculator) as Arc<dyn Provider>,
-        ),
+        (id(CALCULATOR), Arc::new(calculator) as Arc<dyn Provider>),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -261,7 +262,7 @@ mod tests {
             })
             .unwrap();
         let mut items = Vec::new();
-        crate::calculator::Calculator
+        crate::calculator::Calculator::default()
             .search(&Request::detached("12*3", 1), &mut |batch| items.extend(batch))
             .unwrap();
         session.deliver_from(

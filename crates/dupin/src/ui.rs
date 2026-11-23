@@ -259,6 +259,7 @@ pub struct Ui {
     backdrop_pick: Backdrop,
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
+    currency: crate::calculator::Currency,
     web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
@@ -388,7 +389,18 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let registration = crate::commands::register(&config, apps_provider.clone())
+        let currency = crate::calculator::Currency::start({
+            let me = me.clone();
+            move || {
+                me.update(|s, tx| {
+                    if s.currency.enabled() && !s.session.query().trim().is_empty() {
+                        s.refresh_apps(tx);
+                    }
+                })
+            }
+        });
+        currency.set_enabled(config.calculator && config.calculator_currency);
+        let registration = crate::commands::register(&config, apps_provider.clone(), currency.calculator())
             .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
@@ -453,6 +465,7 @@ impl Ui {
             backdrop_pick: config.backdrop.clone(),
             icon_cache: None,
             searchers,
+            currency,
             web: registration.web,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
@@ -502,8 +515,12 @@ impl Ui {
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        let currency_changed = self
+            .currency
+            .set_enabled(config.calculator && config.calculator_currency);
         if providers_changed
             || self.session.command().result_limit != previous_limit
+            || (currency_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (web_changed && self.session.command_id().as_str() == crate::commands::APPS)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
         {

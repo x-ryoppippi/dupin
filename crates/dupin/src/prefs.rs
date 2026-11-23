@@ -709,6 +709,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator = next_calculator))
         .build(k);
+    let next_currency = !s.config.calculator_currency;
+    let currency = Switch::new(s.config.calculator_currency)
+        .label("Currency conversion")
+        .hide_label()
+        .disabled(s.read_only || !s.config.calculator)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calculator_currency = next_currency))
+        .build(k);
     vec![
         setting(
             k,
@@ -723,6 +730,13 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
             "Calculator",
             Some("Show calculations and unit conversions in app search"),
             calculator,
+        ),
+        setting(
+            k,
+            &icons::CALCULATOR,
+            "Currency conversion",
+            Some("Fetch European Central Bank rates in the background"),
+            currency,
         ),
     ]
 }

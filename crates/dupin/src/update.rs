@@ -550,12 +550,7 @@ fn remove_beside(bundle: &Path) {
 
 /// curl that fails on HTTP errors and gives up on a stalled server.
 fn curl(max: Duration) -> Command {
-    let mut command = Command::new("/usr/bin/curl");
-    command
-        .args(["--fail", "--silent", "--show-error", "--location"])
-        .args(["--connect-timeout", "30", "--max-time"])
-        .arg(max.as_secs().to_string());
-    command
+    crate::http::curl(max, &["--location"])
 }
 
 fn info_value(bundle: &Path, key: &str) -> Result<String, String> {

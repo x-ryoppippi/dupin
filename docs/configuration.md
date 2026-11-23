@@ -12,6 +12,7 @@ file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
 calculator = true # show calculations and unit conversions in app search
+calculator_currency = false # allow downloading exchange rates when Calculator is on
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -28,6 +29,15 @@ Choose **Relaunch** in Settings → General to restart Dupin. File edits reload 
 
 Set `calculator = false` or turn off **Calculator** in Settings → Search to
 hide calculator results. Changes apply immediately.
+
+Turn on **Currency conversion** in Settings → Search to convert currencies in
+app search. Try `100 USD to JPY`, `€50 in GBP` or `10 GBP` (which converts to EUR).
+Dupin checks the European Central Bank's public reference feed in the background
+at most once every 12 hours. The request contains no search text. The calculator
+uses the last good rates offline and shows their observation date. It labels
+rates as cached if they have not been refreshed in the past 12 hours.
+Rates are stored in `~/Library/Caches/Dupin/calculator`, or in
+`$XDG_CACHE_HOME/dupin/calculator` when that variable is set.
 
 ## Web searches
 
