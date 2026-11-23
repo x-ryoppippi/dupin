@@ -1522,13 +1522,23 @@ fn is_quick_look_shortcut(key: &Key) -> bool {
 }
 
 fn selection_query(text: &str) -> TextEdit {
+    const MAX_QUERY_CHARS: usize = 500;
+    let mut chars = text.trim().chars().peekable();
+    let query: String = std::iter::from_fn(|| {
+        let next = chars.next()?;
+        if next == '\r' {
+            chars.next_if_eq(&'\n');
+        }
+        Some(match next {
+            '\r' | '\n' | '\t' | '\u{2028}' | '\u{2029}' => ' ',
+            other => other,
+        })
+    })
+    .take(MAX_QUERY_CHARS)
+    .collect();
     let mut edit = TextEdit::new("");
     edit.set_single_line(true);
-    edit.insert(
-        &text
-            .replace("\r\n", "\n")
-            .replace(['\r', '\n', '\t', '\u{2028}', '\u{2029}'], " "),
-    );
+    edit.insert(query.trim_end());
     edit.set_selection(0, edit.text.len());
     edit
 }
@@ -1642,11 +1652,19 @@ mod config_tests {
 
     #[test]
     fn typing_replaces_the_entire_selected_query() {
-        let mut edit = selection_query("日本語\r\nsecond line");
+        let mut edit = selection_query("\t 日本語\r\nsecond line\u{2029} ");
         assert_eq!(edit.text, "日本語 second line");
         assert_eq!(edit.range(), (0, edit.text.len()));
         edit.insert("calculator");
         assert_eq!(edit.text, "calculator");
+    }
+
+    #[test]
+    fn a_document_selection_becomes_a_bounded_unicode_query() {
+        let text = format!("{}\r\n続き", "猫".repeat(500));
+        let edit = selection_query(&text);
+        assert_eq!(edit.text, "猫".repeat(500));
+        assert_eq!(edit.range(), (0, edit.text.len()));
     }
 }
 
