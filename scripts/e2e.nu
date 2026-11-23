@@ -93,6 +93,7 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
 
 def scenario [out: path] {
     let log = $out | path join dupin.log
+    close-startup-welcome $out
     ad $out press-hotkey press alt+space | ignore
     let focused = {|r| $r.ok and 'focused' in ($r.data?.match?.states? | default []) }
     poll $out field $focused find --app Dupin --role textfield --first
@@ -314,6 +315,23 @@ def scenario [out: path] {
 
     system-pane $out $focused $found
     file-actions-stage $out $found
+}
+
+def close-startup-welcome [out: path] {
+    let settings_closed = {|r| $r.ok and not ($r.data | any {|w| $w.title == 'Dupin Settings' }) }
+    let windows = ad $out startup-windows list-windows --app Dupin
+    if not $windows.ok { error make {msg: 'Could not inspect Dupin startup windows'} }
+    if (do $settings_closed $windows) { return }
+
+    let close = (poll
+        $out
+        welcome-close-button
+        {|r| $r.ok and $r.data?.match?.ref_id? != null }
+        find --app Dupin --role button --name Close --exact --first
+    )
+    let clicked = ad $out welcome-close click $close.data.match.ref_id
+    if not $clicked.ok { error make {msg: 'Could not close the startup welcome'} }
+    poll $out welcome-closed $settings_closed list-windows --app Dupin | ignore
 }
 
 def file-actions-stage [out: path, found: closure] {
