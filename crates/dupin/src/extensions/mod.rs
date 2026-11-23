@@ -30,6 +30,7 @@ struct Manifest {
 
 pub struct Extension {
     pub id: String,
+    pub folder_name: String,
     pub name: String,
     pub version: String,
     pub keyword: String,
@@ -127,6 +128,11 @@ fn load(folder: &Path) -> Result<Extension, String> {
     let module = GuestModule::load(&bytes).map_err(|error| format!("{}: {error}", manifest.entry))?;
     Ok(Extension {
         id: manifest.id,
+        folder_name: folder
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
         name: manifest.name,
         version: manifest.version,
         keyword: manifest.keyword,
@@ -231,8 +237,10 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn extension(name: &str, keyword: &str, module: GuestModule) -> Extension {
+        let id = name.to_lowercase().replace(' ', "-");
         Extension {
-            id: name.to_lowercase().replace(' ', "-"),
+            folder_name: format!("{id}-folder"),
+            id,
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
