@@ -131,6 +131,8 @@ mod tests {
             query: query.into(),
             limit: 1,
             state: None,
+            view: None,
+            context: None,
         }
     }
 

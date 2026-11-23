@@ -12,6 +12,8 @@ fn request() -> Request {
         query: "1+2".into(),
         limit: 1,
         state: None,
+        view: None,
+        context: None,
     }
 }
 

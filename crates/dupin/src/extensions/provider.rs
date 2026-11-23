@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Page, Provider, ProviderError, Request, View};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{HostError, QueryControl};
 
@@ -44,21 +44,26 @@ impl ExtensionProvider {
     }
 }
 
-fn item(item: protocol::PluginItem) -> Item {
-    let actions: Vec<_> = item
-        .actions
+fn actions(actions: Vec<protocol::PluginAction>) -> Vec<ItemAction> {
+    actions
         .into_iter()
         .map(|action| {
             let run = match action.effect {
                 protocol::Effect::Copy { text } => Action::Copy(text),
                 protocol::Effect::OpenUrl { url } => Action::OpenUrl(url),
+                protocol::Effect::Push { view, title, context } => {
+                    Action::Push(Page { view, title, context })
+                }
             };
             ItemAction::new(&action.id, &action.title, run)
         })
-        .collect();
+        .collect()
+}
+
+fn item(id: String, view: View, actions: Vec<ItemAction>) -> Item {
     Item {
-        id: item.id,
-        view: item.view,
+        id,
+        view,
         record_usage: false,
         icon: None,
         matched: Vec::new(),
@@ -70,13 +75,11 @@ fn item(item: protocol::PluginItem) -> Item {
     }
 }
 
-impl Provider for ExtensionProvider {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        if request.limit == 0 {
-            return Ok(());
-        }
+impl ExtensionProvider {
+    fn wire(&self, request: &Request) -> protocol::Request {
         let correlation = (self.requests.fetch_add(1, Ordering::Relaxed) + 1).to_string();
-        let wire = protocol::Request {
+        let page = request.page.as_ref();
+        protocol::Request {
             version: protocol::VERSION,
             request_id: correlation.clone(),
             generation: correlation,
@@ -84,14 +87,37 @@ impl Provider for ExtensionProvider {
             query: request.query.clone(),
             limit: request.limit.min(protocol::MAX_RESULTS as usize) as u32,
             state: None,
-        };
+            view: page.map(|page| page.view.clone()),
+            context: page.and_then(|page| page.context.clone()),
+        }
+    }
+}
+
+impl Provider for ExtensionProvider {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        if request.limit == 0 {
+            return Ok(());
+        }
+        let wire = self.wire(request);
         let control = QueryControl {
             deadline: Instant::now() + QUERY_DEADLINE,
             is_cancelled: &|| request.is_cancelled(),
         };
         let items = match self.extension.module.query_controlled(&wire, &control) {
             Ok(response) => match response.outcome {
-                protocol::Outcome::Results { items, .. } => items.into_iter().map(item).collect(),
+                protocol::Outcome::Results { items, .. } => items
+                    .into_iter()
+                    .map(|row| item(row.id, row.view, actions(row.actions)))
+                    .collect(),
+                protocol::Outcome::Detail {
+                    title,
+                    body,
+                    actions: offered,
+                } => vec![item(
+                    "detail".into(),
+                    View::Detail { title, body },
+                    actions(offered),
+                )],
                 protocol::Outcome::Error { message, .. } => vec![self.problem(message)],
             },
             Err(HostError::Cancelled) => return Ok(()),
@@ -161,6 +187,84 @@ mod tests {
         );
         assert!(!rows[0].record_usage);
         assert_eq!(rows[1].primary, None);
+    }
+
+    fn page() -> Page {
+        Page {
+            view: "stats".into(),
+            title: "Statistics".into(),
+            context: Some(serde_json::json!({"text": "two words"})),
+        }
+    }
+
+    #[test]
+    fn push_effects_become_push_actions_and_views_reach_the_guest() {
+        let response = serde_json::json!({
+            "version": 1, "request_id": "1", "generation": "1",
+            "outcome": {"kind": "results", "state": null, "items": [
+                {"id": "count", "view": {"kind": "text", "title": "2 words", "subtitle": ""},
+                 "actions": [{"id": "stats", "title": "Statistics", "effect":
+                    {"kind": "push", "view": "stats", "title": "Statistics", "context": {"text": "two words"}}}]}
+            ]}
+        });
+        let provider = ExtensionProvider::new(Arc::new(extension(
+            "Word Count",
+            "wc",
+            module(&response.to_string()),
+        )));
+        let rows = search(&provider, "two words");
+        assert_eq!(rows[0].action("stats"), Some(&Action::Push(page())));
+        assert_eq!(rows[0].primary.as_deref(), Some("stats"));
+
+        let root = provider.wire(&Request::detached("q", 10));
+        assert_eq!((root.view, root.context), (None, None));
+        let wire = provider.wire(&Request::detached_page("filter", page(), 10));
+        assert_eq!(wire.query, "filter");
+        assert_eq!(wire.view.as_deref(), Some("stats"));
+        assert_eq!(wire.context, page().context);
+        assert!(wire.encode().is_ok());
+    }
+
+    #[test]
+    fn a_detail_answer_to_a_view_is_one_detail_row_and_is_refused_outside_one() {
+        let response = serde_json::json!({
+            "version": 1, "request_id": "1", "generation": "1",
+            "outcome": {"kind": "detail", "title": "Statistics", "body": "2 words\n9 characters",
+                "actions": [{"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}}]}
+        });
+        let provider = ExtensionProvider::new(Arc::new(extension(
+            "Word Count",
+            "wc",
+            module(&response.to_string()),
+        )));
+        let mut rows = Vec::new();
+        provider
+            .search(&Request::detached_page("", page(), 10), &mut |batch| {
+                rows.extend(batch)
+            })
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].view,
+            View::Detail {
+                title: "Statistics".into(),
+                body: "2 words\n9 characters".into()
+            }
+        );
+        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
+        let provider = ExtensionProvider::new(Arc::new(extension(
+            "Word Count",
+            "wc",
+            module(&response.to_string()),
+        )));
+        let rows = search(&provider, "two words");
+        assert_eq!(
+            rows[0].view,
+            View::Text {
+                title: "Word Count failed".into(),
+                subtitle: "Plugin protocol: invalid field: outcome".into()
+            }
+        );
     }
 
     #[test]

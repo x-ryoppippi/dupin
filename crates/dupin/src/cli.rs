@@ -223,6 +223,8 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
                 query: String::new(),
                 limit: 1,
                 state: None,
+                view: None,
+                context: None,
             };
             let response = protocol::Response {
                 version: protocol::VERSION,
@@ -279,6 +281,9 @@ fn render(response: dupin_plugin_protocol::Response, output: &str) {
                         body = body.child(text(content).color(Color::WHITE).wrap());
                     }
                 }
+                Outcome::Detail {
+                    title, body: detail, ..
+                } => body = body.child(text(format!("{title}\n{detail}")).color(Color::WHITE).wrap()),
                 Outcome::Error { message, .. } => {
                     body = body.child(text(message.clone()).color(Color::WHITE))
                 }
