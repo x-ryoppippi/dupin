@@ -131,9 +131,11 @@ fn main() {
             };
             move || {
                 ui::Ui::new(
-                    handle,
-                    prefs_handle,
-                    snapshots_handle,
+                    ui::Windows {
+                        panel: handle,
+                        prefs: prefs_handle,
+                        snapshots: snapshots_handle,
+                    },
                     updater,
                     configuration,
                     history,

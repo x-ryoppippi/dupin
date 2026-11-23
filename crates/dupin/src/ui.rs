@@ -39,6 +39,12 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     }
 }
 
+pub struct Windows {
+    pub panel: AppHandle<Ui>,
+    pub prefs: AppHandle<crate::prefs::Prefs>,
+    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
+}
+
 pub struct Configuration {
     pub values: Rc<RefCell<Config>>,
     pub hotkey: Arc<crate::hotkey::Binding>,
@@ -148,15 +154,18 @@ impl Ui {
     }
 
     pub fn new(
-        me: AppHandle<Ui>,
-        prefs: AppHandle<crate::prefs::Prefs>,
-        snapshots: AppHandle<crate::snapshots::Snapshots>,
+        windows: Windows,
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
         notice: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
     ) -> Ui {
+        let Windows {
+            panel: me,
+            prefs,
+            snapshots,
+        } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())

@@ -261,14 +261,14 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
                 row()
                     .gap(20.0)
                     .child(
-                        button("Run again (⌘R)", &k)
+                        button("Run again (⌘R)", k)
                             .disabled(!s.sources.contains(&saved.mode))
                             .color(k.c.text_base)
                             .focusable(true)
                             .on_press(|s: &mut Snapshots| s.resume()),
                     )
                     .child(
-                        button("Delete…", &k)
+                        button("Delete…", k)
                             .color(k.c.text_base)
                             .focusable(true)
                             .on_press(move |s: &mut Snapshots| s.pending_delete = Some(delete_id.clone())),
@@ -291,13 +291,13 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
                         row()
                             .gap(20.0)
                             .child(
-                                button("Cancel", &k)
+                                button("Cancel", k)
                                     .focusable(true)
                                     .color(k.c.text_base)
                                     .on_press(|s: &mut Snapshots| s.pending_delete = None),
                             )
                             .child(
-                                button("Delete snapshot", &k)
+                                button("Delete snapshot", k)
                                     .focusable(true)
                                     .color(k.c.text_base)
                                     .on_press(move |s: &mut Snapshots| s.delete(&id)),
