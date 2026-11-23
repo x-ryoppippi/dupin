@@ -281,13 +281,17 @@ impl Session {
                 action: action.action,
             }];
         }
+        let dismiss = action.disposition == ActionDisposition::Dismiss;
+        let picked = dismiss || matches!(action.action, Action::RunScript(_));
         let mut effects = vec![Effect::Run(action.action)];
-        if action.disposition == ActionDisposition::Dismiss {
+        if picked {
             if item.record_usage {
                 self.history.record(&item.id, &self.query, (self.clock)());
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);
+        }
+        if dismiss {
             effects.extend(self.dismiss());
         }
         effects

@@ -32,7 +32,7 @@ pub(crate) enum ActionDisposition {
     /// Run the action, record usage and dismiss the launcher.
     #[default]
     Dismiss,
-    /// Run the action without recording a pick or dismissing the launcher.
+    /// Run the action without dismissing the launcher.
     KeepOpen,
     Consume,
 }

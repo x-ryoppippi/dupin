@@ -135,10 +135,7 @@ mod tests {
                 effects.iter().any(|effect| matches!(effect, Effect::Hide)),
                 mode != OutputMode::Inline
             );
-            assert_eq!(
-                effects.iter().any(|effect| matches!(effect, Effect::SaveHistory)),
-                mode != OutputMode::Inline
-            );
+            assert!(effects.contains(&Effect::SaveHistory));
             assert!(entry.is_none());
             assert!(Entry::submit(&mut entry, &mut session, &catalog).is_empty());
         }

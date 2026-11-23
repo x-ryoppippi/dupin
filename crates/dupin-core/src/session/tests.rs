@@ -358,6 +358,41 @@ fn followup_actions_refuse_missing_parents_and_stale_or_pending_results() {
 }
 
 #[test]
+fn running_an_inline_script_records_the_pick_and_query_before_dismissal() {
+    use crate::script::{OutputMode, ScriptRun};
+    let mut s = session();
+    let generation = searched(&s.set_query("fixture")).1;
+    let mut row = item("fixture");
+    row.primary = Some("run".into());
+    row.actions.push(
+        ItemAction::new(
+            "run",
+            "Run script",
+            Action::RunScript(ScriptRun {
+                path: "/fixture".into(),
+                title: "Fixture".into(),
+                args: vec![],
+                mode: OutputMode::Inline,
+            }),
+        )
+        .keep_open(),
+    );
+    let id = row.id.clone();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![row],
+    });
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(matches!(
+        &effects[..],
+        [Effect::Run(Action::RunScript(_)), Effect::SaveHistory]
+    ));
+    assert_eq!(s.query(), "fixture");
+    assert!(s.history().boost(&id, "fixture", 0) > 0);
+    assert_eq!(s.queries, [(app_command(), "fixture".into())]);
+}
+
+#[test]
 fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
     for entry in 0..3 {
         let mut s = session();
