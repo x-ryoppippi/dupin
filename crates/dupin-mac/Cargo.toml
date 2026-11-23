@@ -22,6 +22,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSEnumerator",
 	"NSError",
 	"NSFileManager",
+	"NSGeometry",
 	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
@@ -38,6 +39,7 @@ objc2-foundation = { workspace = true, features = [
 objc2-app-kit = { workspace = true, features = [
 	"std",
 	"NSEvent",
+	"NSGraphics",
 	"NSApplication",
 	"NSResponder",
 	"NSScreen",
@@ -46,6 +48,7 @@ objc2-app-kit = { workspace = true, features = [
 	"NSWorkspace",
 	"NSRunningApplication",
 	"block2",
+	"libc",
 ] }
 objc2-quick-look-ui = { workspace = true }
 objc2-service-management = { workspace = true, features = [

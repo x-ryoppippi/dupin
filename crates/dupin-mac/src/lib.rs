@@ -1,16 +1,14 @@
 //! The macOS side of Dupin: the providers that need the system (installed apps, Spotlight)
 //! and the actions that hand results to it (NSWorkspace).
 
-#[allow(
-    dead_code,
-    reason = "The shared prompt is used by the Accessibility feature branches."
-)]
-pub(crate) mod accessibility;
+pub mod accessibility;
+mod accessibility_window;
 pub mod apps;
 pub mod bundle;
 mod bundle_names;
 pub mod dictionary;
-mod file_actions;
+pub mod file_actions;
+pub mod file_ops;
 pub mod font;
 pub mod input_source;
 pub mod login_item;

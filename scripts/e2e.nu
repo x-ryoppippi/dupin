@@ -53,8 +53,17 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     let data = $out | path join data
     rm --recursive --force $data
     mkdir $data
+    let runtime = $out | path join runtime
+    mkdir $runtime
+    ^chmod 700 $runtime
+    let binary = $app | path join Contents MacOS dupin
+    let control = $out | path join cli dupin-control-e2e
+    mkdir ($control | path dirname)
+    # A waiting CLI inside the bundle shares the resident's AX application name.
+    cp $binary $control
+    ^chmod +x $control
     let dupin = job spawn {
-        with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: $data, DUPIN_TRACE: '1'} {
+        with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: $data, XDG_RUNTIME_DIR: $runtime, DUPIN_TRACE: '1'} {
             ^($app | path join Contents MacOS dupin) o+e> $log
         }
     }
@@ -64,7 +73,15 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         # Dupin is running well before its on_ready callback registers the hotkey.
         wait-for-log $log 'dupin-trace: hotkey alt+space registered'
         snap $out launched
-        if $record { record $out { scenario $out } } else { scenario $out }
+        if $record {
+            record $out {
+                scenario $out
+                with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
+            }
+        } else {
+            scenario $out
+            with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
+        }
         null
     } catch {|error| $error }
 
@@ -88,7 +105,191 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: Quick Look restored the query; Calculator, Settings, Bluetooth, Open with… and confirmed Trash passed'
+    print 'e2e: Quick Look returned to the query, the panel opened Calculator, Dupin Settings and the Bluetooth pane, Open with… and confirmed Trash; CLI picker and Snapshot controls passed'
+}
+
+def cli-stage [out: path, binary: path] {
+    let recording = $out | path join recording
+    if ($recording | path join started.json | path exists) {
+        let started = open ($recording | path join started.json) | into datetime
+        ((date now) - $started) / 1sec | to json | save --force ($recording | path join cli-start.json)
+    }
+    let log = $out | path join dupin.log
+    let archive = $out | path join data dupin snapshots archive.json
+    let history = $env.HOME | path join 'Library/Application Support/Dupin/history.json'
+    let before = file-proof $history
+    let archive_before = file-proof $archive
+    try {
+        let opened = ^$binary open --query calculator --json | from json
+        if $opened != null { error make {msg: 'CLI open returned unexpected data'} }
+        wait-for-log $log 'dupin-trace: control open ok=true'
+        (poll
+            $out
+            cli-open
+            {|r| is-focused-query $r calculator }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+        snap $out cli-open
+        let closed = log-count $log 'dupin-trace: panel closed '
+        ad $out cli-hide press escape | ignore
+        wait-for-log --after $closed $log 'dupin-trace: panel closed '
+
+        let selected_closed = log-count $log 'dupin-trace: panel closed '
+        job spawn { "red\nblue\n" | ^$binary pick --json | complete | job send 0 --tag 2 } | ignore
+        (poll
+            $out
+            cli-pick
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --native-id
+            pick-query
+            --first
+        ) | ignore
+        (poll
+            $out
+            cli-picker-panel
+            {|r| $r.ok and (
+                $r.data?.tree?.children?
+                | default []
+                | any {|window|
+                    let fits = $window.role == dialog and ($window.bounds?.height? | default 0) >= 168
+                    $fits and (mentions {data: $window} red) and (mentions {data: $window} blue)
+                }
+            ) }
+            snapshot
+            --app
+            Dupin
+            --include-bounds
+        ) | ignore
+        snap $out cli-pick
+        ^osascript -e 'tell application "System Events"
+            key code 125
+            key code 36
+        end tell'
+        let selected = job recv --tag 2 --timeout 20sec
+        $selected | to json | save ($out | path join cli-picked.json)
+        if $selected.exit_code != 0 or ($selected.stdout | from json) != blue {
+            error make {msg: 'CLI picker did not return the original blue value'}
+        }
+        wait-for-log $log 'dupin-trace: control pick ok=true'
+        wait-for-log --after $selected_closed $log 'dupin-trace: panel closed '
+        let closed = log-count $log 'dupin-trace: panel closed '
+        job spawn { "red\nblue\n" | ^$binary pick --json | complete | job send 0 --tag 3 } | ignore
+        (poll
+            $out
+            cli-cancel-field
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --native-id
+            pick-query
+            --first
+        ) | ignore
+        ad $out cli-cancel press escape | ignore
+        let result = job recv --tag 3 --timeout 20sec
+        $result | to json | save ($out | path join cli-cancelled.json)
+        if $result.exit_code != 1 or ($result.stdout | from json).error != Cancelled {
+            error make {msg: 'CLI picker cancellation did not return Cancelled'}
+        }
+        wait-for-log --after $closed $log 'dupin-trace: panel closed '
+        (poll
+            $out
+            cli-hidden
+            {|r| $r.ok and $r.data?.match? == null }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+
+        let listed = ^$binary snapshots list --json | from json
+        $listed | to json | save ($out | path join cli-snapshots.json)
+        if ($listed.entries | length) != 1 or $listed.truncated {
+            error make {msg: 'CLI Snapshot list did not return the saved fixture'}
+        }
+        if ($listed.entries.0 | columns | sort) != ([id mode query saved_at title] | sort) {
+            error make {msg: 'CLI Snapshot list exposed unexpected fields'}
+        }
+        let id = $listed.entries.0.id
+        let opened = ^$binary snapshots open --id $id --json | from json
+        if $opened != null { error make {msg: 'CLI Snapshot open returned unexpected data'} }
+        poll $out cli-snapshot-window {|r| $r.ok and (
+            $r.data?
+            | default []
+            | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
+        ) } list-windows --app Dupin | ignore
+        (poll
+            $out
+            cli-snapshot-field
+            {|r| is-focused-query $r '' }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --name
+            'Search saved snapshots'
+            --exact
+            --first
+        ) | ignore
+        snap $out cli-snapshots-open
+        let closed = ^$binary snapshots close --json | from json
+        if $closed != null { error make {msg: 'CLI Snapshot close returned unexpected data'} }
+        (poll
+            $out
+            cli-snapshot-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        let panel_closed = log-count $log 'dupin-trace: panel closed '
+        ^$binary open --query calculator --json | from json | ignore
+        (poll
+            $out
+            cli-before-snapshot-handoff
+            {|r| is-focused-query $r calculator }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+        ^$binary snapshots open --id $id --json | from json | ignore
+        ^$binary snapshots close --json | from json | ignore
+        wait-for-log --after $panel_closed $log 'dupin-trace: panel closed '
+        (poll
+            $out
+            cli-snapshot-handoff-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
+        if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
+            error make {msg: 'CLI controls changed the Snapshot archive or launch history'}
+        }
+        {
+            archive_before: $archive_before
+            archive_after: (file-proof $archive)
+            history_before: $before
+            history_after: (file-proof $history)
+        } | to json | save ($out | path join cli-storage-proof.json)
+    } catch {|failure|
+        try { snap $out cli-failure }
+        error make $failure
+    }
 }
 
 def scenario [out: path] {
@@ -343,8 +544,7 @@ def file-actions-stage [out: path, found: closure] {
         file-search $out open-me $found
         let loading = count-log $log 'dupin-trace: action-screen applications loading'
         let ready = count-log $log 'dupin-trace: action-screen applications ready'
-        ad $out file-actions-choose-down press down | ignore
-        ad $out file-actions-choose press return | ignore
+        click-file-action $out file-actions-choose 'Open with…'
         wait-for-log --after $loading $log 'dupin-trace: action-screen applications loading'
         wait-for-log --after $ready $log 'dupin-trace: action-screen applications ready'
         let viewer = (poll
@@ -370,13 +570,8 @@ def file-actions-stage [out: path, found: closure] {
         wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
         file-search $out trash-me $found
-        ^osascript -e 'tell application "System Events"
-            repeat 8 times
-                key code 125
-            end repeat
-        end tell'
         let confirm = count-log $log 'dupin-trace: action-screen confirm'
-        ad $out file-actions-trash-review press return | ignore
+        click-file-action $out file-actions-trash-review 'Move to Trash'
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         (poll
             $out
@@ -407,7 +602,11 @@ def file-actions-stage [out: path, found: closure] {
         ad $out file-actions-trash-cancel press return | ignore
         wait-for-log --after $list $log 'dupin-trace: action-screen list'
         let confirm = count-log $log 'dupin-trace: action-screen confirm'
-        ad $out file-actions-trash-review-again press return | ignore
+        (click-file-action
+            $out
+            file-actions-trash-review-again
+            'Move to Trash'
+        )
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
         snap $out file-actions-trash-cancelled
@@ -449,6 +648,20 @@ def file-actions-stage [out: path, found: closure] {
         try { cp $log ($out | path join file-actions-failure.log) }
         error make $failure
     }
+}
+
+def click-file-action [out: path, name: string, title: string] {
+    let action = (poll
+        $out
+        $'($name)-button'
+        {|r|
+            let label = $r.data?.match?.name? | default '' | str replace --regex '\s*↩$' '' | str trim
+            $r.ok and $r.data?.match?.ref_id? != null and $label == $title
+        }
+        find --app Dupin --role button --name $title --first
+    )
+    let clicked = ad $out $name click $action.data.match.ref_id
+    if not $clicked.ok { error make {msg: $'Could not activate ($title)'} }
 }
 
 def file-row-name [out: path, name: string]: nothing -> string {
