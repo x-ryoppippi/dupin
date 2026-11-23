@@ -51,7 +51,7 @@ fn resolve(path: &Path) -> std::io::Result<PathBuf> {
     resolve_with(path, |_| {})
 }
 
-fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
+pub(super) fn resolve_with(path: &Path, mut visit: impl FnMut(&Path)) -> std::io::Result<PathBuf> {
     let mut path = path.to_owned();
     'links: for _ in 0..40 {
         visit(&path);

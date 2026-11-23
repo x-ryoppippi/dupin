@@ -18,11 +18,11 @@ pub struct PathWatcher {
 unsafe impl Send for PathWatcher {}
 
 impl PathWatcher {
-    pub fn start(
+    pub(crate) fn start(
         roots: Vec<PathBuf>,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, true, move |_| changed())
+        Self::start_with_scope(Vec::new(), roots, false, move |_| changed())
     }
 
     /// Watches directory entries without forwarding descendant events. The callback receives
@@ -31,12 +31,23 @@ impl PathWatcher {
         roots: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, false, changed)
+        Self::start_scoped(roots, Vec::new(), changed)
+    }
+
+    /// Watches shallow directory entries and recursive trees in one stream. The callback
+    /// receives `true` when a watched root moved and the stream must be rebuilt.
+    pub fn start_scoped(
+        shallow: Vec<PathBuf>,
+        recursive: Vec<PathBuf>,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::start_with_scope(shallow, recursive, true, changed)
     }
 
     fn start_with_scope(
-        roots: Vec<PathBuf>,
-        recursive: bool,
+        shallow: Vec<PathBuf>,
+        recursive: Vec<PathBuf>,
+        watch_moves: bool,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
         let (events, received) = mpsc::channel();
@@ -44,7 +55,12 @@ impl PathWatcher {
             .name("dupin-path-watch-debounce".into())
             .spawn(move || debounce_events(received, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
-        match watch_roots(roots, recursive, events) {
+        let roots = shallow
+            .into_iter()
+            .map(|root| (canonical_root(&root), false))
+            .chain(recursive.into_iter().map(|root| (canonical_root(&root), true)))
+            .collect();
+        match watch_roots(roots, watch_moves, events) {
             Ok(mut watcher) => {
                 watcher.debounce = Some(debounce);
                 Ok(watcher)
@@ -114,8 +130,7 @@ struct FSEventStreamContext {
 
 struct WatchContext {
     events: mpsc::Sender<bool>,
-    roots: Vec<PathBuf>,
-    recursive: bool,
+    roots: Vec<(PathBuf, bool)>,
 }
 
 type FSEventCallback = unsafe extern "C" fn(
@@ -159,25 +174,26 @@ unsafe extern "C" {
 }
 
 fn watch_roots(
-    roots: Vec<PathBuf>,
-    recursive: bool,
+    roots: Vec<(PathBuf, bool)>,
+    watch_moves: bool,
     events: mpsc::Sender<bool>,
 ) -> Result<PathWatcher, &'static str> {
     use objc2::rc::Retained;
     use objc2_foundation::{NSArray, NSString};
 
-    let roots: Vec<_> = roots.iter().map(|root| canonical_root(root)).collect();
-    let watched: Vec<_> = roots
+    let mut watched: Vec<_> = roots
         .iter()
-        .map(|root| {
+        .map(|(root, _)| {
             let mut path = root.as_path();
             while !path.exists() {
                 let Some(parent) = path.parent() else { break };
                 path = parent;
             }
-            path.to_owned()
+            path
         })
         .collect();
+    watched.sort_unstable();
+    watched.dedup();
     let paths: Vec<Retained<NSString>> = watched
         .iter()
         .filter_map(|path| path.to_str().map(NSString::from_str))
@@ -186,12 +202,7 @@ fn watch_roots(
         return Err("no paths can be watched");
     }
     let paths = NSArray::from_retained_slice(&paths);
-    let context_info = Box::into_raw(Box::new(WatchContext {
-        events,
-        roots,
-        recursive,
-    }))
-    .cast::<std::ffi::c_void>();
+    let context_info = Box::into_raw(Box::new(WatchContext { events, roots })).cast::<std::ffi::c_void>();
     let mut context = FSEventStreamContext {
         version: 0,
         info: context_info,
@@ -209,7 +220,7 @@ fn watch_roots(
             Retained::as_ptr(&paths).cast(),
             u64::MAX,
             0.5,
-            USE_CF_TYPES | if recursive { 0 } else { WATCH_ROOT },
+            USE_CF_TYPES | if watch_moves { WATCH_ROOT } else { 0 },
         )
     };
     if stream.is_null() {
@@ -267,7 +278,7 @@ unsafe extern "C" fn paths_changed(
                     context
                         .roots
                         .iter()
-                        .any(|root| matches_event_path(path, root, context.recursive))
+                        .any(|(root, recursive)| matches_event_path(path, root, *recursive))
                 })
         })
     {

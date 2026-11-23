@@ -2,6 +2,7 @@
 //! press Space first to search files with Spotlight.
 
 mod backdrop;
+mod catalog_watch;
 mod cli;
 mod commands;
 mod control;

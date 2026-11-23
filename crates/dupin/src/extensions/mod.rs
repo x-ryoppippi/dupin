@@ -5,12 +5,14 @@ mod provider;
 
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 
 use dupin_plugin_runtime::{GuestModule, MAX_MODULE_BYTES};
 use serde::Deserialize;
 
 pub use provider::{ExtensionProvider, QUERY_DEADLINE};
+
+pub(crate) use crate::catalog_watch::Watch;
 
 pub const MANIFEST: &str = "extension.toml";
 const MAX_MANIFEST_BYTES: usize = 16 * 1024;
@@ -189,44 +191,23 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
 
 /// Scans now and after every change under `directory`, delivering each catalogue in order.
 /// Dropping it stops the watch; a scan already running still delivers once.
-pub struct Watch {
-    _watcher: Option<dupin_mac::PathWatcher>,
+pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
+    Watch::start(directory, true, scan_for_watch, deliver)
 }
 
-pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> Watch {
-    let (wake, woken) = mpsc::channel::<()>();
-    let watcher = dupin_mac::PathWatcher::start(vec![directory.clone()], move || {
-        let _ = wake.send(());
-    });
-    let problem = watcher
-        .as_ref()
-        .err()
-        .map(|error| format!("Couldn't watch {} for changes: {error}", directory.display()));
-    let scanning = std::thread::Builder::new()
-        .name("dupin-extensions".into())
-        .spawn(move || {
-            loop {
-                let mut catalog = Catalog::scan(&directory);
-                catalog.problems.extend(problem.clone());
-                deliver(catalog);
-                // The sender lives in the watcher, so dropping the watch ends this loop.
-                if woken.recv().is_err() {
-                    return;
-                }
-                while woken.try_recv().is_ok() {}
-            }
-        });
-    if let Err(error) = scanning {
-        crate::log::warn(&format!("couldn't start the extension scanner: {error}"));
-    }
-    Watch {
-        _watcher: watcher.ok(),
-    }
+fn scan_for_watch(directory: &Path, watch_problem: Option<String>) -> Catalog {
+    let mut catalog = Catalog::scan(directory);
+    catalog.problems.extend(watch_problem);
+    catalog
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
 
     pub(crate) fn guest(response: &str) -> Vec<u8> {
         let data: String = response.bytes().map(|byte| format!("\\{byte:02x}")).collect();
@@ -285,6 +266,115 @@ pub(crate) mod tests {
         format!(
             "id = \"{id}\"\nname = \"Word Count\"\nversion = \"0.1.0\"\nkeyword = \"{keyword}\"\nentry = \"guest.wasm\"\n"
         )
+    }
+
+    fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
+        let (updates, received) = mpsc::channel();
+        let watcher = watch(directory.to_owned(), move |catalog| {
+            let _ = updates.send(catalog);
+        })
+        .unwrap();
+        (watcher, received)
+    }
+
+    fn wait_for_keyword(received: &mpsc::Receiver<Catalog>, keyword: Option<&str>) {
+        let deadline = Instant::now() + Duration::from_secs(6);
+        loop {
+            let catalog = received
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap_or_else(|error| panic!("no catalogue with keyword {keyword:?}: {error}"));
+            let keywords = catalog
+                .extensions
+                .iter()
+                .map(|extension| extension.keyword.as_str());
+            if keywords.eq(keyword) {
+                assert!(catalog.problems.is_empty(), "{:?}", catalog.problems);
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn retargeted_catalogue_symlink_is_rewatched_before_later_edits() {
+        let root = folder();
+        let directory = root.join("extensions");
+        let first = root.join("generation-one");
+        let second = root.join("generation-two");
+        let wasm = guest("{}");
+        install(&first, "words", &manifest("words", "first"), Some(&wasm));
+        install(&second, "words", &manifest("words", "second"), Some(&wasm));
+        symlink(&first, &directory).unwrap();
+
+        let (watcher, received) = observe(&directory);
+        wait_for_keyword(&received, Some("first"));
+
+        let replacement = root.join("replacement");
+        symlink(&second, &replacement).unwrap();
+        fs::rename(&replacement, &directory).unwrap();
+        wait_for_keyword(&received, Some("second"));
+
+        fs::write(second.join("words").join(MANIFEST), manifest("words", "edited")).unwrap();
+        wait_for_keyword(&received, Some("edited"));
+        drop(watcher);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retargeted_extension_symlink_hop_is_rewatched_before_later_edits() {
+        let root = folder();
+        let directory = root.join("extensions");
+        let links = root.join("links");
+        fs::create_dir(&directory).unwrap();
+        fs::create_dir(&links).unwrap();
+        let wasm = guest("{}");
+        install(&root, "first", &manifest("words", "first"), Some(&wasm));
+        install(&root, "second", &manifest("words", "second"), Some(&wasm));
+        symlink("../first", links.join("current")).unwrap();
+        symlink("../links/current", directory.join("words")).unwrap();
+
+        let (watcher, received) = observe(&directory);
+        wait_for_keyword(&received, Some("first"));
+
+        let replacement = links.join("replacement");
+        symlink("../second", &replacement).unwrap();
+        fs::rename(&replacement, links.join("current")).unwrap();
+        wait_for_keyword(&received, Some("second"));
+
+        fs::write(root.join("second").join(MANIFEST), manifest("words", "edited")).unwrap();
+        wait_for_keyword(&received, Some("edited"));
+        drop(watcher);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn moved_catalogue_directory_is_rewatched_before_later_edits() {
+        let root = folder();
+        let directory = root.join("extensions");
+        let wasm = guest("{}");
+        install(&directory, "words", &manifest("words", "first"), Some(&wasm));
+
+        let (watcher, received) = observe(&directory);
+        wait_for_keyword(&received, Some("first"));
+
+        fs::rename(&directory, root.join("moved")).unwrap();
+        wait_for_keyword(&received, None);
+
+        install(
+            &directory,
+            "words",
+            &manifest("words", "replacement"),
+            Some(&wasm),
+        );
+        wait_for_keyword(&received, Some("replacement"));
+
+        fs::write(
+            directory.join("words").join(MANIFEST),
+            manifest("words", "edited"),
+        )
+        .unwrap();
+        wait_for_keyword(&received, Some("edited"));
+        drop(watcher);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
