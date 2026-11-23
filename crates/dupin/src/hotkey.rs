@@ -201,9 +201,22 @@ impl Binding {
         })
     }
 
-    /// Who holds `shortcut`, for a refusal message.
-    pub fn owner(&self, shortcut: &Shortcut) -> Option<String> {
+    fn owner(&self, shortcut: &Shortcut) -> Option<String> {
         self.panel.shortcut_owner(shortcut)
+    }
+
+    pub fn recorder_conflict(&self, shortcut: &Shortcut, config: &Config) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(state.targets.get(shortcut), Some(Target::Configured(_)))
+            || binding_targets(config).contains_key(shortcut)
+        {
+            return Some(format!(
+                "{} is assigned to a binding in config.toml.",
+                shortcut.keycaps().join("")
+            ));
+        }
+        self.owner(shortcut)
+            .map(|owner| format!("{} is used by {owner}.", shortcut.keycaps().join("")))
     }
 
     fn report(&self, accelerator: &str, reason: &str) {
