@@ -324,7 +324,9 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
             }
             return list;
         }
-        ActionStage::Confirm { action_id, selected } => {
+        ActionStage::Confirm {
+            action_id, selected, ..
+        } => {
             let action = screen.item.item_action(action_id).unwrap();
             let confirmation = action.confirmation().unwrap();
             let path = match screen.item.action(action_id) {

@@ -99,6 +99,7 @@ pub enum ActionStage {
     Confirm {
         action_id: String,
         selected: usize,
+        from_list: bool,
     },
 }
 
@@ -146,17 +147,24 @@ impl ActionScreen {
         }
     }
 
+    fn back(&mut self) -> ActionKey {
+        if matches!(
+            self.stage,
+            ActionStage::List | ActionStage::Confirm { from_list: false, .. }
+        ) {
+            return ActionKey::Back;
+        }
+        self.stage = ActionStage::List;
+        crate::trace::action_screen("list");
+        ActionKey::Stay
+    }
+
     fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
         if matches!(key, Key::Enter) && repeat {
             return ActionKey::Stay;
         }
         if matches!(key, Key::Left | Key::Escape) {
-            if matches!(self.stage, ActionStage::List) {
-                return ActionKey::Back;
-            }
-            self.stage = ActionStage::List;
-            crate::trace::action_screen("list");
-            return ActionKey::Stay;
+            return self.back();
         }
         match &mut self.stage {
             ActionStage::Confirm { selected, .. } => {
@@ -164,10 +172,7 @@ impl ActionScreen {
                     Key::Up => *selected = 0,
                     Key::Down => *selected = 1,
                     Key::Enter if *selected == 1 => return ActionKey::Confirm,
-                    Key::Enter => {
-                        self.stage = ActionStage::List;
-                        crate::trace::action_screen("list");
-                    }
+                    Key::Enter => return self.back(),
                     _ => {}
                 }
                 return ActionKey::Stay;
@@ -898,10 +903,7 @@ impl Ui {
         }
         if let Some(screen) = &mut self.action_screen {
             match screen.key(&ev.key, tx.key_repeat()) {
-                ActionKey::Back => {
-                    self.action_screen = None;
-                    tx.focus("query", false);
-                }
+                ActionKey::Back => self.close_action_screen(tx),
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
                 ActionKey::Confirm => self.confirm_action(tx),
                 ActionKey::Choice(index) => self.pick_application(index, tx),
@@ -989,15 +991,16 @@ impl Ui {
     }
 
     pub fn action_back(&mut self, tx: &mut Tx) {
-        if let Some(screen) = &mut self.action_screen {
-            if matches!(screen.stage, ActionStage::List) {
-                self.action_screen = None;
-                tx.focus("query", false);
-            } else {
-                screen.stage = ActionStage::List;
-                crate::trace::action_screen("list");
-            }
+        if let Some(screen) = &mut self.action_screen
+            && screen.back() == ActionKey::Back
+        {
+            self.close_action_screen(tx);
         }
+    }
+
+    fn close_action_screen(&mut self, tx: &mut Tx) {
+        self.action_screen = None;
+        tx.focus("query", false);
     }
 
     pub fn pick_action(&mut self, key: &str, action: &str, tx: &mut Tx) {
@@ -1045,6 +1048,7 @@ impl Ui {
             self.action_screen.as_mut().unwrap().stage = ActionStage::Confirm {
                 action_id: action.into(),
                 selected: 0,
+                from_list: true,
             };
             self.action_screen.as_mut().unwrap().selected = selected;
             crate::trace::action_screen("confirm");
@@ -1106,6 +1110,7 @@ impl Ui {
         let ActionStage::Confirm {
             action_id,
             selected: 1,
+            ..
         } = &screen.stage
         else {
             return;
@@ -1121,8 +1126,7 @@ impl Ui {
         {
             *index = selected.min(1);
             if selected == 0 {
-                screen.stage = ActionStage::List;
-                crate::trace::action_screen("list");
+                self.action_back(tx);
             } else {
                 self.confirm_action(tx);
             }
@@ -1209,6 +1213,7 @@ impl Ui {
                             ActionStage::Confirm {
                                 action_id,
                                 selected: 0,
+                                from_list: false,
                             },
                         )
                     } else {
@@ -1717,12 +1722,14 @@ mod action_screen_tests {
                 screen.stage = ActionStage::Confirm {
                     action_id: "trash".into(),
                     selected: 0,
+                    from_list: true,
                 };
             }
         }
         screen.stage = ActionStage::Confirm {
             action_id: "trash".into(),
             selected: 0,
+            from_list: true,
         };
         screen.key(&Key::Down, false);
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
@@ -1737,6 +1744,7 @@ mod action_screen_tests {
             ActionStage::Confirm {
                 action_id: "trash".into(),
                 selected: 0,
+                from_list: true,
             },
             ActionStage::Applications {
                 parent: "choose".into(),
@@ -1840,7 +1848,12 @@ mod action_screen_tests {
             session.selected(),
             session.result_key(0),
         );
-        for key in [Key::Left, Key::Escape] {
+        for key in [Key::Left, Key::Escape, Key::Enter] {
+            screen.stage = ActionStage::Confirm {
+                action_id: "restart".into(),
+                selected: 0,
+                from_list: false,
+            };
             assert_eq!(screen.key(&key, false), ActionKey::Back);
             assert_eq!(
                 (
