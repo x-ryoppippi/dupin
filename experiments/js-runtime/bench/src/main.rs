@@ -67,8 +67,10 @@ fn main() {
             footprint_child(Path::new(path), cycles.parse().expect("cycle count"))
         }
         ["contain-child", name] => contain_child(name),
+        ["contain", names @ ..] if !names.is_empty() => Json::Array(contain(names)),
         _ => {
             eprintln!("usage: dupin-js-runtime-bench all --label <label> --samples <n> --cold-runs <n>");
+            eprintln!("       dupin-js-runtime-bench contain <case>...");
             std::process::exit(2);
         }
     };
@@ -363,10 +365,10 @@ fn contain_child(name: &str) -> Json {
     })
 }
 
-fn contain() -> Vec<Json> {
-    CASES
+fn contain(names: &[&str]) -> Vec<Json> {
+    names
         .iter()
-        .map(|(name, _)| {
+        .map(|name| {
             let (value, wall, killed) = run_child(&["contain-child", name]);
             let elapsed = value["elapsed_ms"].as_f64();
             let peak = value["peak_over_idle_bytes"].as_u64();
@@ -411,7 +413,8 @@ fn all(label: &str, samples: usize, runs: usize) -> Json {
     ]);
     assert!(!killed, "footprint child did not exit");
     eprintln!("[{label}] containment…");
-    let containment = contain();
+    let names: Vec<&str> = CASES.iter().map(|(name, _)| *name).collect();
+    let containment = contain(&names);
     fs::remove_dir_all(&dir).ok();
 
     let warm_p95 = search_warm["stages"]["total"]["p95_ms"].as_f64().unwrap();

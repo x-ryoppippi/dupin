@@ -5,6 +5,7 @@
 - [Configuration](./configuration.md): `config.toml`, the home-manager module, the hotkey and what happens when it's taken
 - [Development](./development.md): building, dependency builds, formatting, headless renders, peak memory
 - [Extensions](./features/extensions.md): writing and installing JavaScript and Wasm extensions, and their limits
+- [Extension capabilities](./extension-capabilities.md): the host side of the `files` and `exec` capabilities
 - [Architecture](./architecture.md): crates, providers, the session and the panel
 - [Encrypted storage](./features/storage.md): how Dupin keeps data on disk, its key and its threat model
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
