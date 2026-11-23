@@ -1,0 +1,6 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "gh dupin" },
+		{ "t": 1.0, "type": "mark", "name": "end" }
+	]
+}

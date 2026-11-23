@@ -1,0 +1,15 @@
+hotkey = ""
+auto_update = false
+input_source = "keep"
+[theme]
+panel_width = 400
+row_height = 100
+font_size = 18
+font_family = "monospace"
+corner_radius = 28
+[theme.light]
+accent = "#176EA6"
+background = "#E9F4FA"
+[theme.dark]
+accent = "#176EA6"
+background = "#142734"

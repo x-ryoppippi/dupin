@@ -12,9 +12,7 @@ use rune::{
 
 use crate::ui::{ICON_SIZE, Ui};
 
-pub const RADIUS: f32 = 14.0;
 pub const HEADER_H: f32 = 64.0;
-const ROW_H: f32 = 52.0;
 /// Rows shown before the list scrolls.
 const VISIBLE_ROWS: usize = 8;
 const LIST_PAD: f32 = 6.0;
@@ -29,17 +27,17 @@ const WARNING: Color = Color {
 
 pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     let dark = cx.system_dark();
-    let t = tok::theme(dark);
-    let accent = tok::accent(0, dark);
+    let t = ResolvedTheme::new(&s.theme, dark);
+    let accent = t.accent;
 
     // A light frost over the glass keeps text readable over whatever is behind the panel.
     let ink = if dark { Color::WHITE } else { Color::BLACK };
     let mut panel = col()
         .key("frost")
         .w_full()
-        .radius(RADIUS)
+        .radius(s.active_radius)
         .continuous_corners()
-        .clip_rounded(RADIUS)
+        .clip_rounded(s.active_radius)
         .fill(t.card.alpha(FROST))
         .border(1.0, ink.alpha(0.08));
     if s.backdrop.module().is_some() {
@@ -65,7 +63,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         panel = panel.child(divider(&t)).child(
             row().key(key).w_full().px(18.0).py(12.0).fill(WARNING).child(
                 text(notice)
-                    .font(type_::BODY.lh(18.0))
+                    .font(t.font(type_::BODY.lh(18.0)))
                     .color(t.text)
                     .wrap()
                     .w_full(),
@@ -91,7 +89,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                                 .unwrap_or(&spec.presentation.placeholder))
                             .unwrap_or("Search")
                     ))
-                    .font(type_::BODY)
+                    .font(t.font(type_::BODY))
                     .color(t.text_secondary)
                     .wrap()
                     .w_full(),
@@ -113,7 +111,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .h(44.0)
                 .px(20.0)
                 .center_y()
-                .child(text(hint).font(type_::BODY).color(t.text_secondary)),
+                .child(text(hint).font(t.font(type_::BODY)).color(t.text_secondary)),
         );
     }
     // Liquid Glass (NSGlassEffectView) under the panel on macOS 26 and later. Headless renders
@@ -122,7 +120,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         col()
             .key("panel")
             .w_full()
-            .radius(RADIUS)
+            .radius(s.active_radius)
             .continuous_corners()
             .fill(t.card)
             .system_material(SystemMaterial::Glass)
@@ -130,7 +128,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     )
 }
 
-fn action_header(s: &Ui, t: &tok::Theme) -> El {
+fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
     let screen = s.action_screen.as_ref().unwrap();
     let icon = match s.icons.get(&screen.layout_key) {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
@@ -155,20 +153,20 @@ fn action_header(s: &Ui, t: &tok::Theme) -> El {
                 .gap(2.0)
                 .child(
                     text(screen.item.display_title())
-                        .font(type_::TITLE)
+                        .font(t.font(type_::TITLE))
                         .color(t.text)
                         .truncate(),
                 )
                 .child(
                     text(subtitle)
-                        .font(type_::LABEL)
+                        .font(t.font(type_::LABEL))
                         .color(t.text_secondary)
                         .truncate(),
                 ),
         )
         .child(
             text("← Search")
-                .font(type_::LABEL)
+                .font(t.font(type_::LABEL))
                 .color(t.text_secondary)
                 .on_press_tx(|s: &mut Ui, tx| {
                     s.action_screen = None;
@@ -177,12 +175,12 @@ fn action_header(s: &Ui, t: &tok::Theme) -> El {
         )
 }
 
-fn action_list(s: &Ui, t: &tok::Theme, accent: Color) -> El {
+fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let screen = s.action_screen.as_ref().unwrap();
     col().key("actions").w_full().py(LIST_PAD).child(
         col()
             .w_full()
-            .max_h(44.0 * VISIBLE_ROWS as f32)
+            .max_h((s.theme.row_height as f32 - 8.0) * VISIBLE_ROWS as f32)
             .scroll(ScrollSpec { stick_bottom: false })
             .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
                 let on = index == screen.selected;
@@ -191,7 +189,7 @@ fn action_list(s: &Ui, t: &tok::Theme, accent: Color) -> El {
                 row()
                     .key(format!("action-{index}"))
                     .w_full()
-                    .h(44.0)
+                    .h(s.theme.row_height as f32 - 8.0)
                     .px(LIST_PAD)
                     .child(
                         row()
@@ -205,14 +203,14 @@ fn action_list(s: &Ui, t: &tok::Theme, accent: Color) -> El {
                             .hover(if on { accent } else { t.hover })
                             .child(
                                 text(&action.title)
-                                    .font(type_::BODY)
-                                    .color(if on { Color::WHITE } else { t.text })
+                                    .font(t.font(type_::BODY))
+                                    .color(if on { t.selected_text } else { t.text })
                                     .grow(1.0),
                             )
                             .child(
                                 text(if on { "↩" } else { "" })
-                                    .font(type_::LABEL)
-                                    .color(Color::WHITE.alpha(0.78)),
+                                    .font(t.font(type_::LABEL))
+                                    .color(t.selected_text.alpha(0.78)),
                             )
                             .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx)),
                     )
@@ -220,15 +218,16 @@ fn action_list(s: &Ui, t: &tok::Theme, accent: Color) -> El {
     )
 }
 
-fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
+fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
     let placeholder = presentation.placeholder.as_str();
-    let field = text_input(&s.query_display(), TextStyle::new(22.0, 400.0).lh(30.0))
+    let field = text_input(&s.query_display(), t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
         .key("query")
         .label(placeholder)
         .single_line()
         .grow(1.0)
         .color(t.text)
+        .caret(accent, accent.alpha(0.25))
         .pill_colors(accent.alpha(0.16), Some(accent))
         .placeholder(placeholder, t.text_secondary)
         .on_edit(Ui::query_edit)
@@ -250,18 +249,22 @@ fn header(s: &Ui, t: &tok::Theme, accent: Color) -> El {
                 .radius(7.0)
                 .center_y()
                 .fill(accent.alpha(0.16))
-                .child(text(chip).font(type_::TITLE).color(accent)),
+                .child(text(chip).font(t.font(type_::TITLE)).color(accent)),
         )
     } else {
         bar.child(
             text("⌕")
-                .font(TextStyle::new(24.0, 400.0).lh(30.0))
+                .font(t.font(TextStyle::new(24.0, 400.0).lh(30.0)))
                 .color(t.text_secondary),
         )
     };
     bar = bar.child(field);
     if presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
-        bar = bar.child(text("Searching…").font(type_::LABEL).color(t.text_secondary));
+        bar = bar.child(
+            text("Searching…")
+                .font(t.font(type_::LABEL))
+                .color(t.text_secondary),
+        );
     }
     bar
 }
@@ -280,7 +283,7 @@ fn hint(s: &Ui) -> Option<&str> {
     }
 }
 
-fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
+fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
     if !items.iter().all(|item| matches!(item.view, View::Text { .. })) {
         let rows = items
             .iter()
@@ -314,7 +317,7 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
         col()
             .key("scroll")
             .w_full()
-            .h(shown * ROW_H)
+            .h(shown * s.theme.row_height as f32)
             .scroll(ScrollSpec { stick_bottom: false })
             .instant_changes()
             .child(
@@ -322,13 +325,13 @@ fn results(s: &Ui, items: &[Item], t: &tok::Theme, accent: Color) -> El {
                     .key("rows")
                     .w_full()
                     .growth(GrowthSpec::default())
-                    .virtualize(ROW_H)
+                    .virtualize(s.theme.row_height as f32)
                     .children(rows),
             ),
     )
 }
 
-fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accent: Color) -> El {
+fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
     let id = s.session.result_key(index);
     let mut card = col()
         .w_full()
@@ -342,7 +345,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
     let has_title = if let View::Detail { title, .. } = &item.view {
         header = header.child(
             text(title)
-                .font(TextStyle::new(24.0, 600.0))
+                .font(t.font(TextStyle::new(24.0, 600.0)))
                 .color(t.text)
                 .grow(1.0)
                 .min_w(0.0)
@@ -356,7 +359,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
     if !item.actions.is_empty() {
         header = header.child(
             text("→ Actions")
-                .font(type_::BODY)
+                .font(t.font(type_::BODY))
                 .color(accent)
                 .cursor(rune::Cursor::Pointer)
                 .hover(t.hover)
@@ -390,7 +393,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
             ))
             .child(
                 text("→")
-                    .font(TextStyle::new(28.0, 400.0))
+                    .font(t.font(TextStyle::new(28.0, 400.0)))
                     .color(t.text_secondary),
             )
             .child(pair_value(
@@ -410,7 +413,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, acc
         .child(card.child(body))
 }
 
-fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &tok::Theme) -> El {
+fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &ResolvedTheme) -> El {
     col()
         .grow(1.0)
         .min_w(0.0)
@@ -419,22 +422,23 @@ fn pair_value(id: &str, part: &str, value: &str, label: &str, t: &tok::Theme) ->
             text(value)
                 .key(format!("{}-{part}", row_key(id)))
                 .w_full()
-                .font(TextStyle::new(28.0, 600.0).lh(36.0))
+                .font(t.font(TextStyle::new(28.0, 600.0).lh(36.0)))
                 .color(t.text)
                 .align(Align::Center)
                 .wrap()
-                .selectable(true),
+                .selectable(true)
+                .selection_color(t.accent.alpha(0.25)),
         )
         .child(
             text(label)
                 .w_full()
-                .font(type_::LABEL)
+                .font(t.font(type_::LABEL))
                 .color(t.text_secondary)
                 .align(Align::Center),
         )
 }
 
-fn detail_body(id: &str, body: &str, t: &tok::Theme) -> El {
+fn detail_body(id: &str, body: &str, t: &ResolvedTheme) -> El {
     let boundaries: Vec<usize> = std::iter::once(0)
         .chain(
             body.match_indices('•')
@@ -452,19 +456,20 @@ fn detail_body(id: &str, body: &str, t: &tok::Theme) -> El {
             text(body[range[0]..range[1]].trim_end())
                 .key(format!("{}-paragraph-{index}", row_key(id)))
                 .w_full()
-                .font(TextStyle::new(16.0, 400.0).lh(25.0))
+                .font(t.font(TextStyle::new(16.0, 400.0).lh(25.0)))
                 .color(t.text)
                 .wrap()
                 .selectable(true)
+                .selection_color(t.accent.alpha(0.25))
         }))
 }
 
-fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accent: Color) -> El {
+fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, accent: Color) -> El {
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
     let (ink, sub) = if on {
-        (Color::WHITE, Color::WHITE.alpha(0.78))
+        (t.selected_text, t.selected_text.alpha(0.78))
     } else {
         (t.text, t.text_secondary)
     };
@@ -477,7 +482,7 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accen
     row()
         .key(row_key(&s.session.layout_key(index)))
         .w_full()
-        .h(ROW_H)
+        .h(s.theme.row_height as f32)
         .px(LIST_PAD)
         .child(
             row()
@@ -495,15 +500,20 @@ fn result_row(s: &Ui, item: &Item, index: usize, on: bool, t: &tok::Theme, accen
                         .grow(1.0)
                         .min_w(0.0)
                         .gap(2.0)
-                        .child(title(item, ink, if on { Color::WHITE } else { accent }))
-                        .child(text(subtitle.as_str()).font(type_::LABEL).color(sub).truncate()),
+                        .child(title(item, ink, if on { t.selected_text } else { accent }, t))
+                        .child(
+                            text(subtitle.as_str())
+                                .font(t.font(type_::LABEL))
+                                .color(sub)
+                                .truncate(),
+                        ),
                 )
                 .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx)),
         )
 }
 
 /// The title with the characters the query matched in bold.
-fn title(item: &Item, ink: Color, highlight: Color) -> El {
+fn title(item: &Item, ink: Color, highlight: Color, t: &ResolvedTheme) -> El {
     let byte_of: Vec<usize> = item
         .display_title()
         .char_indices()
@@ -517,12 +527,12 @@ fn title(item: &Item, ink: Color, highlight: Color) -> El {
         .map(|&c| Span::new(byte_of[c], byte_of[c + 1]).bold().color(highlight))
         .collect();
     rich(item.display_title(), spans)
-        .font(TextStyle::new(15.0, 500.0).lh(20.0))
+        .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
         .color(ink)
         .truncate()
 }
 
-fn divider(t: &tok::Theme) -> El {
+fn divider(t: &ResolvedTheme) -> El {
     el().h(1.0).w_full().fill(t.separator)
 }
 
@@ -532,4 +542,121 @@ pub fn row_key(id: &str) -> String {
     let mut h = DefaultHasher::new();
     id.hash(&mut h);
     format!("row-{:016x}", h.finish())
+}
+
+pub struct ResolvedTheme {
+    palette: tok::Theme,
+    pub accent: Color,
+    pub selected_text: Color,
+    scale: f32,
+    family: tok::Family,
+}
+impl std::ops::Deref for ResolvedTheme {
+    type Target = tok::Theme;
+    fn deref(&self) -> &Self::Target {
+        &self.palette
+    }
+}
+impl ResolvedTheme {
+    pub fn new(theme: &dupin_core::config::Theme, dark: bool) -> Self {
+        let c = if dark { &theme.dark } else { &theme.light };
+        let mut palette = tok::theme(dark);
+        fn color(value: &Option<String>, fallback: Color) -> Color {
+            value
+                .as_ref()
+                .and_then(|v| rune::color::hex(v))
+                .unwrap_or(fallback)
+        }
+        palette.card = color(&c.background, palette.card);
+        palette.text = color(&c.text, palette.text);
+        palette.text_secondary = color(&c.secondary, palette.text_secondary);
+        palette.hover = color(&c.hover, palette.hover);
+        palette.separator = color(&c.separator, palette.separator);
+        Self {
+            palette,
+            accent: color(&c.accent, tok::accent(0, dark)),
+            selected_text: color(&c.selected_text, Color::WHITE),
+            scale: theme.font_size as f32 / 15.0,
+            family: match theme.font_family {
+                dupin_core::config::FontFamily::System => tok::Family::Sans,
+                dupin_core::config::FontFamily::Monospace => tok::Family::SystemMono,
+            },
+        }
+    }
+    pub fn font(&self, mut style: TextStyle) -> TextStyle {
+        style.size *= self.scale;
+        style.line_height *= self.scale;
+        style.family = self.family;
+        style
+    }
+}
+
+pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool) -> El {
+    let t = ResolvedTheme::new(theme, dark);
+    let radius = theme.corner_radius as f32;
+    col().w_full().scroll(ScrollSpec { stick_bottom: false }).child(
+        col()
+            .w(theme.panel_width as f32)
+            .radius(radius)
+            .clip_rounded(radius)
+            .fill(t.card)
+            .system_material(SystemMaterial::Glass)
+            .child(
+                row().h(HEADER_H).px(18.0).center_y().child(
+                    text(if dark {
+                        "Dark appearance"
+                    } else {
+                        "Light appearance"
+                    })
+                    .font(t.font(TextStyle::new(22.0, 400.0)))
+                    .color(t.text),
+                ),
+            )
+            .child(divider(&t))
+            .children([false, true].into_iter().map(|selected| {
+                row()
+                    .h(theme.row_height as f32)
+                    .px(16.0)
+                    .center_y()
+                    .fill(if selected { t.accent } else { Color::TRANSPARENT })
+                    .child(
+                        col()
+                            .gap(2.0)
+                            .child(
+                                text("Example result")
+                                    .font(t.font(TextStyle::new(15.0, 500.0)))
+                                    .color(if selected { t.selected_text } else { t.text }),
+                            )
+                            .child(
+                                text("Preview subtitle · → Actions")
+                                    .font(t.font(type_::LABEL))
+                                    .color(if selected {
+                                        t.selected_text.alpha(0.78)
+                                    } else {
+                                        t.text_secondary
+                                    }),
+                            ),
+                    )
+            })),
+    )
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::*;
+    #[test]
+    fn defaults_and_mode_overrides_resolve_independently() {
+        let mut theme = dupin_core::config::Theme::default();
+        assert_eq!(ResolvedTheme::new(&theme, false).text, tok::theme(false).text);
+        assert_eq!(ResolvedTheme::new(&theme, true).card, tok::theme(true).card);
+        theme.light.text = Some("#123456".into());
+        assert_ne!(ResolvedTheme::new(&theme, false).text, tok::theme(false).text);
+        assert_eq!(ResolvedTheme::new(&theme, true).text, tok::theme(true).text);
+        theme.font_size = 18;
+        theme.font_family = dupin_core::config::FontFamily::Monospace;
+        let font = ResolvedTheme::new(&theme, false).font(TextStyle::new(15.0, 400.0).lh(20.0));
+        assert_eq!(font.size, 18.0);
+        assert_eq!(font.line_height, 24.0);
+        assert_eq!(font.family, tok::Family::SystemMono);
+    }
 }

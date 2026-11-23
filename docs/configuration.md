@@ -114,3 +114,54 @@ If the hotkey can't be registered, Dupin doesn't fail silently. It:
 It also names a macOS shortcut that holds the chord (Spotlight's, for one), which registers without an error but would take the key first.
 
 One case can't be detected: another app holding the chord through a non-exclusive registration, as Raycast and Alfred can. macOS accepts both registrations and delivers the key to only one of them, which is why step 2 above matters.
+
+# Themes
+
+Omitting `[theme]` preserves the default panel and follows system light/dark appearance.
+Themes are built in: share the TOML section below without installing an extension.
+
+```toml
+[theme]
+panel_width = 680
+row_height = 72
+corner_radius = 14
+font_family = "monospace" # "system" or "monospace"
+font_size = 18
+
+[theme.light]
+background = "#E9F4FA"
+accent = "#176EA6"
+
+[theme.dark]
+background = "#142734"
+accent = "#176EA6"
+```
+
+Each appearance accepts `background`, `text`, `secondary`, `accent`, `selected_text`,
+`hover` and `separator` as `#RRGGBB`. Omitted colors use the system palette. The
+background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
+Choose contrasting text and selection colors when overriding the palette.
+
+Geometry uses integer points: width 400–1200, row height 52–100, radius 0–32 and
+font size 12–20. Rows must be at least `3 * font_size + 7` points tall. Invalid
+reloads keep the last good configuration and show an error.
+
+Settings → Appearance shows light and dark previews at the configured width (scroll
+to see wide panels), with a menu for colors, font and geometry presets. Edit TOML
+for precise values. Changes use the usual settings save/conflict handling; the theme
+section is one setting for conflict detection. Read-only configurations lock the menu.
+Width, rows, colors and typography apply live without clearing the search. Corner
+radius requires relaunch because pinned Rune only sets native corners at window creation;
+the running panel keeps both its native and drawn corners at the launch radius.
+
+For headless checks, copy one of `scripts/themes/{default,ocean,rose}.toml` to
+`$XDG_CONFIG_HOME/dupin/config.toml` under a temporary directory, then run:
+
+```sh
+target/debug/dupin --script scripts/themes/preview.json --realtime \
+  --snap /tmp/theme.png --at mark:end --size 680x500 --scale 2
+```
+
+Use width 400 for Ocean and 900 for Rose. These fixtures disable hotkeys and updates;
+never point screenshot runs at your regular configuration. Headless snapshots show
+the same resolved colors, fonts and geometry, using the material fallback.

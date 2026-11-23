@@ -22,8 +22,6 @@ use std::sync::Arc;
 
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
-/// The panel's width; its height follows its content.
-pub const PANEL_WIDTH: f32 = 680.0;
 /// The panel with nothing below the field: the window's first size, before it fits its content.
 pub const HEADER_HEIGHT: f32 = view::HEADER_H;
 /// San Francisco's family, as its file names it (`dupin_mac::font::system_ui_font`).
@@ -50,7 +48,7 @@ fn main() {
         families: FAMILIES,
         ..AppSpec::new(
             "Dupin",
-            (PANEL_WIDTH, HEADER_HEIGHT),
+            (config.theme.panel_width as f32, HEADER_HEIGHT),
             || unreachable!(),
             view::view,
         )
@@ -98,6 +96,7 @@ fn main() {
     });
 
     let hotkey = config.hotkey.clone();
+    let radius = config.theme.corner_radius as f32;
     let mut registered = false;
     let app = app
         .init({
@@ -136,7 +135,7 @@ fn main() {
 
     rune::run_windows(move |_| {
         // AppKit rounds the panel and its shadow; the view also clips, for headless renders.
-        let options = WindowOptions::launcher_panel().macos(|native| native.corner_radius(view::RADIUS));
+        let options = WindowOptions::launcher_panel().macos(|native| native.corner_radius(radius));
         let panel: rune::AnyWindowSpec = WindowSpec::from_app("panel", app)
             .configured_options(options)
             .into();

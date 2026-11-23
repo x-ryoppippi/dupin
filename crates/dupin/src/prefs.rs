@@ -260,6 +260,65 @@ impl Prefs {
     /// The backdrop menu: the built-in shader, none, an example (copied beside config.toml to
     /// be edited) or a file in the shaders folder. A file elsewhere that config.toml names shows
     /// checked with them.
+    fn pick_theme(&mut self, tx: &mut Tx) {
+        let mut menu = PopupMenu::new();
+        for (id, label) in [
+            ("reset", "Default theme"),
+            ("blue", "Ocean colors"),
+            ("rose", "Rose colors"),
+            ("system", "System font"),
+            ("mono", "Monospace font"),
+            ("font15", "15 pt font"),
+            ("font18", "18 pt font (taller rows)"),
+            ("width400", "400 pt panel"),
+            ("width680", "680 pt panel"),
+            ("width900", "900 pt panel"),
+            ("row52", "52 pt rows (15 pt font)"),
+            ("row72", "72 pt rows"),
+            ("row100", "100 pt rows"),
+            ("radius0", "Square corners (relaunch)"),
+            ("radius14", "14 pt corners (relaunch)"),
+            ("radius28", "28 pt corners (relaunch)"),
+        ] {
+            menu = menu.item(PopupItem::new(id, label));
+        }
+        tx.popup_menu(menu, anchor("theme"), |s: &mut Prefs, picked, _| {
+            let Some(picked) = picked else { return };
+            s.set(|c| {
+                use dupin_core::config::FontFamily;
+                let t = &mut c.theme;
+                match picked {
+                    "reset" => *t = Default::default(),
+                    "system" => t.font_family = FontFamily::System,
+                    "mono" => t.font_family = FontFamily::Monospace,
+                    "blue" | "rose" => {
+                        let color = if picked == "blue" { "#176EA6" } else { "#A52D61" };
+                        t.light.accent = Some(color.into());
+                        t.dark.accent = Some(color.into());
+                    }
+                    "font15" => t.font_size = 15,
+                    "font18" => {
+                        t.font_size = 18;
+                        t.row_height = t.row_height.max(61);
+                    }
+                    "width400" => t.panel_width = 400,
+                    "width680" => t.panel_width = 680,
+                    "width900" => t.panel_width = 900,
+                    "row52" => {
+                        t.row_height = 52;
+                        t.font_size = t.font_size.min(15);
+                    }
+                    "row72" => t.row_height = 72,
+                    "row100" => t.row_height = 100,
+                    "radius0" => t.corner_radius = 0,
+                    "radius14" => t.corner_radius = 14,
+                    "radius28" => t.corner_radius = 28,
+                    _ => {}
+                }
+            });
+        });
+    }
+
     fn pick_backdrop(&mut self, tx: &mut Tx) {
         let current = &self.config.backdrop;
         let id = |b: &Backdrop| match b {
@@ -716,6 +775,15 @@ fn appearance(s: &Prefs, k: &Kit) -> Vec<El> {
         open.disabled(true).layer_opacity(0.5)
     };
     vec![
+        setting(
+            k,
+            &icons::SPARKLES,
+            "Theme",
+            Some("Colors follow system appearance. Radius changes require relaunch."),
+            menu_value(s, k, "theme", "Theme", "Customize…", Prefs::pick_theme),
+        ),
+        crate::view::theme_preview(&s.config.theme, false),
+        crate::view::theme_preview(&s.config.theme, true),
         setting(
             k,
             &icons::SPARKLES,
