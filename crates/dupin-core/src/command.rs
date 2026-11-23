@@ -66,6 +66,7 @@ pub enum QueryEligibility {
     NonEmpty,
     /// The command is eligible only when the query is empty or whitespace.
     EmptyOnly,
+    Any,
 }
 
 impl QueryEligibility {
@@ -73,6 +74,7 @@ impl QueryEligibility {
         match self {
             Self::NonEmpty => !query.trim().is_empty(),
             Self::EmptyOnly => query.trim().is_empty(),
+            Self::Any => true,
         }
     }
 }

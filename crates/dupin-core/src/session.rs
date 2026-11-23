@@ -397,7 +397,14 @@ impl Session {
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if (empty && self.selected == 0) || self.recalled.is_some() => self.recall(true),
+            Intent::Up
+                if self.recalled.is_some()
+                    || (empty
+                        && self.selected == 0
+                        && !(self.explicit && self.command().query_eligibility.allows(&self.query))) =>
+            {
+                self.recall(true)
+            }
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 self.refresh_selection = None;

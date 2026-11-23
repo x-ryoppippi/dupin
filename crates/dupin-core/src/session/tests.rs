@@ -1355,6 +1355,48 @@ fn empty_up_recalls_typed_query_even_when_empty_query_suggestions_exist() {
 }
 
 #[test]
+fn an_explicit_list_searches_every_query_and_up_wraps_on_an_empty_query() {
+    let default = command("shell.launch");
+    let listing = command("sample.list");
+    let mut registry = CommandRegistry::new(default.clone(), None);
+    registry
+        .register(CommandSpec::new(default, 10, QueryPresentation::new("Launch")))
+        .unwrap();
+    registry
+        .register(
+            CommandSpec::new(listing.clone(), 10, QueryPresentation::new("Browse"))
+                .with_query_eligibility(QueryEligibility::Any),
+        )
+        .unwrap();
+    registry.add_keyword(&listing, "browse").unwrap();
+    let mut s = Session::new(History::default(), registry).unwrap();
+    assert!(s.refresh().is_empty());
+
+    s.set_query("browse");
+    let effects = s.intent(Intent::Space).unwrap();
+    assert_eq!(effects[0], Effect::ClearQuery);
+    let (provider, _, query) = searched(&effects[1..]);
+    assert_eq!((provider, query), (listing.clone(), ""));
+
+    complete_query(&mut s, "previous");
+    let effects = s.set_query("");
+    let (provider, generation, query) = searched(&effects);
+    assert_eq!((provider, query), (listing, ""));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("one"), item("two")],
+    });
+    s.deliver(Delivery::Done { generation });
+
+    assert_eq!(s.selected(), 0);
+    assert_eq!(s.intent(Intent::Up).unwrap(), [Effect::RevealSelection]);
+    assert_eq!(s.selected(), 1);
+    assert_eq!(s.query(), "");
+    assert_eq!(s.intent(Intent::Up).unwrap(), [Effect::RevealSelection]);
+    assert_eq!(s.selected(), 0);
+}
+
+#[test]
 fn dictionary_words_are_recalled_without_opening_dictionary() {
     let mut s = session();
     s.set_query("d ");
