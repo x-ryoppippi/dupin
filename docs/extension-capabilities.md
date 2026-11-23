@@ -1,0 +1,33 @@
+# Extension capabilities: files and exec
+
+`dupin-host-services` implements the host side of the `files` and `exec` capabilities from the [extension platform design](./design/extension-platform.md#capabilities-and-consent). Neither is reachable from a guest yet. The broker bridge will call them after it checks the installation's grant, and it owns consent, persistence, revocation and activation checks. Nothing in this crate prompts, stores grants or requests macOS access. Both capabilities act with your own user access, so consent shows each scope's or profile's `describe()` text verbatim.
+
+## files
+
+A grant binds a scope name from the manifest to a file or folder you pick. Dupin resolves the picked path's symbolic links once, at pick time, because you chose the target. A folder scope remembers the folder's device and inode. A file scope remembers its parent folder and the file name, so an editor's atomic save keeps the grant working. If the folder is later moved, deleted or replaced, including by a symbolic link, operations fail until you pick it again.
+
+Extensions can read and list. They cannot write. Paths are relative to the scope with `/` separators. Dupin rejects `..`, absolute paths, NUL, names over 255 bytes, paths over 4 KiB and nesting deeper than 64 levels before it touches the disk. It opens one component at a time from the scope's folder descriptor with `O_NOFOLLOW`, so it never follows a symbolic link anywhere in the path, including one that points back inside the scope. A listing shows symbolic links, FIFOs and devices, but they get no handle. Reads accept regular files only, and Dupin opens them non-blocking so a FIFO can't stall the worker.
+
+A component can be swapped between two steps of the walk. To catch this, Dupin checks every opened descriptor against the entry of that name in its opened parent before it reads, and reports `Escaped` when one was moved out of the scope. Changes after that check affect only data from a file that was inside the scope when it was checked.
+
+| Operation | Bound                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `read`    | The first `limit` bytes, at most 4 MiB, defaulting to 256 KiB. The result reports the file size and whether it was truncated.                    |
+| `list`    | At most `limit` entries, up to 1,000 and 200 by default, in the order the file system returns them, then sorted by name. Truncation is reported. |
+
+Results carry opaque handles, such as `3.1f`, instead of paths. A handle is valid only in the installation table that issued it, and only while the entry keeps the same device and inode. A replaced file reports `StaleHandle`. Revoking or re-picking a scope invalidates its handles. A table holds at most 4,096 handles and drops the oldest first. Host actions such as Open or Quick Look resolve a handle with `Files::open`, which repeats the walk and checks and returns the descriptor and the path it had.
+
+## exec
+
+A profile binds a name to a target, an argument template, typed inputs and options. You select the target and approve the profile. The guest supplies only input values.
+
+- **Target.** An absolute path to an executable you chose, or `@script:<filename>`, an installed [script command](./features/scripts.md) in the scripts folder.
+- **Template.** Each element is one argv entry. `{name}` inserts an input, optionally between a literal prefix and suffix such as `--count={count}`, with at most one placeholder per element. Write `{{` and `}}` for literal braces. An optional input without a value removes its whole element. Every declared input must appear in the template.
+- **Inputs.** `Text` has a byte limit up to 16 KiB and refuses control characters, with an opt-in for newlines. `Integer` has an inclusive range, and `Choice` accepts only listed strings. Text that starts an argument can't start with `-` unless the input is declared `option_like` or the template puts it after a literal `--`, so a value can't become an option. Unknown, missing and mistyped values are refused. The rendered argv is limited to 64 entries and 64 KiB.
+- **Options.** A working folder (your home folder by default), a timeout up to five minutes (30 seconds by default), an output limit up to 1 MiB per stream (64 KiB by default) and `return_output`.
+
+Dupin runs argv directly, without a shell, so quotes, `$(…)`, globs, `;` and redirections in a value are ordinary characters. An executable target gets only `PATH=/usr/bin:/bin:/usr/sbin:/sbin` and your `HOME`, `TMPDIR`, `LANG` and `USER`. A script target resolves by filename through the script catalogue, which checks the rendered values against the script's declared arguments. It then runs as it does from the launcher, in your home folder with Dupin's environment. A script target can't set a working folder.
+
+Both targets run through the script runner with stdin closed, in a process group that Dupin owns. A timeout or cancellation sends TERM to the group, then KILL when the leader exits or after two seconds. When the leader exits, Dupin kills processes that remain in the group, and it kills every group when it quits. At most four extension commands run at once, separately from the eight script slots, and they don't appear in Script Output. The call blocks its broker worker until the command finishes.
+
+Without `return_output` in the grant, Dupin discards stdout and stderr and the guest learns only the exit: a code, a signal, a timeout or a cancellation. With `return_output`, the guest receives each stream up to the output limit as lossy UTF-8, with a truncation flag. `Profile::describe()` states the program and every argument with its input type, the working folder and environment, that the command runs with your full user access and can use its own credentials, configuration and hooks, the timeout, and what the extension receives.
