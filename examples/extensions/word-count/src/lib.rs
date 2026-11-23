@@ -114,9 +114,9 @@ fn words(text: &str, filter: &str, limit: usize) -> Vec<PluginItem> {
     let filter = filter.trim().to_lowercase();
     counted
         .into_iter()
-        .filter(|(word, _)| word.to_lowercase().contains(&filter))
-        .take(limit)
         .enumerate()
+        .filter(|(_, (word, _))| word.to_lowercase().contains(&filter))
+        .take(limit)
         .map(|(index, (word, n))| PluginItem {
             id: format!("word-{index}"),
             view: View::Text {
@@ -307,7 +307,10 @@ mod tests {
         else {
             panic!("expected a list");
         };
-        assert_eq!(filtered.len(), 2);
+        assert_eq!(
+            filtered.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            [words[1].id.as_str(), words[3].id.as_str()]
+        );
 
         let Outcome::Detail { title, body, .. } = ask_view("", Some(("stats", context.clone()))) else {
             panic!("expected a detail");
