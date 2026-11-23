@@ -120,6 +120,22 @@ impl Lifecycle {
     fn reaped(&self, id: RunId) {
         lock(&self.state).groups.remove(&id);
     }
+
+    fn reap<T>(&self, id: RunId, poll: impl FnOnce() -> io::Result<Option<T>>) -> io::Result<Option<T>> {
+        let mut state = lock(&self.state);
+        let result = poll()?;
+        if result.is_some() {
+            state.groups.remove(&id);
+        }
+        Ok(result)
+    }
+
+    fn killed(&self, id: RunId) -> bool {
+        lock(&self.state)
+            .groups
+            .get(&id)
+            .is_some_and(|group| group.killed)
+    }
 }
 
 struct Inner {
@@ -353,10 +369,9 @@ fn execute(inner: &Inner, run: &Run) -> Status {
             notified = Instant::now();
             dirty = false;
         }
-        if ended == 2 {
-            match child.try_wait() {
+        if ended == 2 || inner.lifecycle.killed(run.id) {
+            match inner.lifecycle.reap(run.id, || child.try_wait()) {
                 Ok(Some(status)) => {
-                    inner.lifecycle.reaped(run.id);
                     return if run.cancelled.load(Ordering::Acquire) {
                         Status::Cancelled
                     } else if let Some(error) = problem {
@@ -483,6 +498,23 @@ mod tests {
         assert!(lock(&signals).is_empty());
     }
 
+    #[test]
+    fn reaping_reserves_the_group_until_removal() {
+        let (lifecycle, signals) = lifecycle();
+        lifecycle
+            .spawn(1, &AtomicBool::new(false), || Ok(((), 789)))
+            .unwrap();
+        lifecycle
+            .reap(1, || {
+                assert!(lifecycle.state.try_lock().is_err());
+                Ok(Some(()))
+            })
+            .unwrap();
+        lifecycle.cancel(1, false);
+        lifecycle.kill_all_now();
+        assert!(lock(&signals).is_empty());
+    }
+
     struct Fixture(PathBuf);
 
     impl Fixture {
@@ -598,5 +630,50 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert!(lock(&inner.lifecycle.state).groups.is_empty());
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture for cancellation_keeps_a_slot_from_waiting_on_escaped_pipes"]
+    fn escaped_pipe_holder() {
+        let Some(marker) = std::env::var_os("DUPIN_RUNNER_ESCAPE_MARKER") else {
+            return;
+        };
+        assert!(unsafe { libc::setsid() } >= 0);
+        let marker = PathBuf::from(marker);
+        fs::write(&marker, "ready").unwrap();
+        let start = Instant::now();
+        while !marker.with_extension("stop").exists() && start.elapsed() < Duration::from_secs(6) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let _ = fs::write(marker.with_extension("done"), "done");
+    }
+
+    #[test]
+    fn cancellation_keeps_a_slot_from_waiting_on_escaped_pipes() {
+        let fixture = Fixture::new(
+            "DUPIN_RUNNER_ESCAPE_MARKER=\"$2\" \"$1\" --exact scripts::runner::tests::escaped_pipe_holder --ignored --nocapture &\nwait\n",
+        );
+        let running = Arc::new(AtomicUsize::new(0));
+        let runner = Runner::new(fixture.0.clone(), running.clone(), Arc::new(|_| {}));
+        let executable = std::env::current_exe().unwrap();
+        let marker = fixture.0.join("holder.ready");
+        let id = runner
+            .start(fixture.command(&[executable.to_str().unwrap(), marker.to_str().unwrap()]))
+            .unwrap();
+        let start = Instant::now();
+        while !marker.exists() {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(10));
+        }
+        runner.cancel(id);
+        assert_eq!(wait(&runner, id).status, Status::Cancelled);
+        assert_eq!(running.load(Ordering::Acquire), 0);
+        assert!(!marker.with_extension("done").exists());
+        fs::write(marker.with_extension("stop"), "stop").unwrap();
+        let start = Instant::now();
+        while !marker.with_extension("done").exists() {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
