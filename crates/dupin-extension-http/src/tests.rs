@@ -715,3 +715,90 @@ fn text_and_json_reject_bodies_they_cannot_read() {
         "invalid-body"
     );
 }
+
+#[test]
+fn a_head_reports_the_headers_of_a_resource_larger_than_the_body_limit() {
+    let server = Server::respond(
+        "HTTP/1.1 200 OK\r\nContent-Length: 100000000\r\nContent-Type: video/mp4\r\nConnection: close\r\n\r\n",
+    );
+    let scope = scope(&[(&server.origin(), &[Method::Head])]);
+    let request = Request {
+        method: Method::Head,
+        ..Request::get(server.origin())
+    };
+    let response = fetch(&service(Limits::default()), request, &scope).unwrap();
+    assert_eq!(response.status, 200);
+    assert_eq!(response.header("content-length"), Some("100000000"));
+    assert!(response.body.is_empty());
+    assert_eq!(server.requests()[0].request_line, "HEAD / HTTP/1.1");
+}
+
+#[test]
+fn chunked_trailers_stay_out_of_the_body_and_the_headers() {
+    let server = Server::respond(
+        "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nTrailer: Set-Cookie, Server-Timing\r\nConnection: close\r\n\r\n7\r\n{\"a\":1}\r\n0\r\nSet-Cookie: sid=secret\r\nServer-Timing: db;dur=5\r\n\r\n",
+    );
+    let scope = scope(&[(&server.origin(), &[Method::Get])]);
+    let response = fetch(&service(Limits::default()), Request::get(server.origin()), &scope).unwrap();
+    assert_eq!(response.status, 200);
+    assert_eq!(response.body, b"{\"a\":1}");
+    assert_eq!(response.json().unwrap(), serde_json::json!({ "a": 1 }));
+    assert_eq!(response.header("set-cookie"), None);
+    assert_eq!(response.header("server-timing"), None);
+}
+
+#[test]
+fn request_headers_and_the_url_stay_out_of_curl_s_arguments() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = std::env::temp_dir().join(format!(
+        "dupin-http-argv-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let curl = directory.join("curl");
+    std::fs::write(
+        &curl,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\n/bin/cat /dev/fd/3 > \"$0.config\"\nexit 7\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let service = HttpService::for_tests(
+        HttpConfig {
+            curl,
+            ..HttpConfig::default()
+        },
+        loopback_resolver(),
+    );
+    let scope = scope(&[("http://127.0.0.1:9", &[Method::Get])]);
+    let request = Request {
+        headers: vec![
+            ("Authorization".into(), "Bearer secret-token".into()),
+            ("X-Quoted".into(), "a \"b\" \\c".into()),
+        ],
+        ..Request::get("http://127.0.0.1:9/x?key=query-secret")
+    };
+
+    let error = fetch(&service, request, &scope).unwrap_err();
+    let arguments = std::fs::read_to_string(directory.join("curl.args")).unwrap();
+    let config = std::fs::read_to_string(directory.join("curl.config")).unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
+    assert_eq!(error.code(), "connect");
+    assert_eq!(arguments, "--disable\n--config\n/dev/fd/3\n");
+    assert!(
+        config.contains("header = \"Authorization: Bearer secret-token\"\n"),
+        "{config}"
+    );
+    assert!(
+        config.contains("header = \"X-Quoted: a \\\"b\\\" \\\\c\"\n"),
+        "{config}"
+    );
+    assert!(
+        config.contains("url = \"http://127.0.0.1:9/x?key=query-secret\"\n"),
+        "{config}"
+    );
+}

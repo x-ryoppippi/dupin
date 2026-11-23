@@ -1,5 +1,7 @@
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::net::IpAddr;
+use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -10,6 +12,13 @@ use crate::{CancelToken, HttpError, Limits, Method};
 
 const POLL: Duration = Duration::from_millis(20);
 const STDERR_CAP: usize = 4096;
+
+/// curl reads its options from this descriptor, so guest headers and the URL never appear in
+/// its argument list, which any process of the same user can read.
+const CONFIG_FD: RawFd = 3;
+/// curl writes every response head here, keeping stdout for the body alone: on a shared stream
+/// chunked trailers would land after the body and be read as part of it.
+const HEADERS_FD: RawFd = 4;
 
 pub(crate) struct Exchange<'a> {
     pub(crate) curl: &'a std::path::Path,
@@ -41,52 +50,77 @@ impl Drop for Reaper {
     }
 }
 
-impl Exchange<'_> {
-    fn arguments(&self, remaining: Duration) -> Vec<String> {
-        let limits = self.limits;
-        // `--disable` must come first: it stops curl reading `.curlrc`.
-        let mut args: Vec<String> = [
-            "--disable",
-            "--silent",
-            "--show-error",
-            "--no-buffer",
-            "--globoff",
-            "--noproxy",
-            "*",
-            "--max-redirs",
-            "0",
-        ]
-        .map(str::to_owned)
-        .to_vec();
-        args.push("--proto".into());
-        args.push(self.protocols().into());
-        args.push("--connect-timeout".into());
-        args.push(seconds(limits.connect_time.min(remaining)));
-        args.push("--max-time".into());
-        args.push(seconds(remaining));
-        args.push("--max-filesize".into());
-        args.push(limits.max_response_bytes.to_string());
-        args.push("--user-agent".into());
-        args.push(self.user_agent.into());
-        match self.method {
-            Method::Head => args.push("--head".into()),
-            Method::Get => args.push("--include".into()),
-            method => {
-                args.push("--include".into());
-                args.push("--request".into());
-                args.push(method.as_str().into());
+/// A curl config file: one option per line, values quoted.
+#[derive(Default)]
+struct Config(String);
+
+impl Config {
+    fn flag(&mut self, name: &str) {
+        self.0.push_str(name);
+        self.0.push('\n');
+    }
+
+    fn option(&mut self, name: &str, value: &str) {
+        self.0.push_str(name);
+        self.0.push_str(" = \"");
+        for c in value.chars() {
+            match c {
+                '\\' => self.0.push_str("\\\\"),
+                '"' => self.0.push_str("\\\""),
+                c => self.0.push(c),
             }
         }
-        args.push("--header".into());
-        args.push("Expect:".into());
+        self.0.push_str("\"\n");
+    }
+}
+
+impl Exchange<'_> {
+    fn arguments() -> [String; 3] {
+        // `--disable` must come first: it stops curl reading `.curlrc`.
+        [
+            "--disable".to_owned(),
+            "--config".to_owned(),
+            format!("/dev/fd/{CONFIG_FD}"),
+        ]
+    }
+
+    fn config(&self, remaining: Duration) -> String {
+        let limits = self.limits;
+        let mut config = Config::default();
+        for flag in ["silent", "show-error", "no-buffer", "globoff"] {
+            config.flag(flag);
+        }
+        config.option("noproxy", "*");
+        config.option("max-redirs", "0");
+        config.option("proto", self.protocols());
+        config.option("connect-timeout", &seconds(limits.connect_time.min(remaining)));
+        config.option("max-time", &seconds(remaining));
+        config.option("user-agent", self.user_agent);
+        config.option("dump-header", &format!("/dev/fd/{HEADERS_FD}"));
+        match self.method {
+            // curl compares an advertised length with `max-filesize` even when no body follows.
+            Method::Head => {
+                config.flag("head");
+                config.option("output", "/dev/null");
+            }
+            method => {
+                config.option("max-filesize", &limits.max_response_bytes.to_string());
+                if method != Method::Get {
+                    config.option("request", method.as_str());
+                }
+            }
+        }
+        config.option("header", "Expect:");
         for (name, value) in self.headers {
-            args.push("--header".into());
             // `Name:` with nothing after it tells curl to drop the header; `Name;` sends it empty.
-            args.push(if value.is_empty() {
-                format!("{name};")
-            } else {
-                format!("{name}: {value}")
-            });
+            config.option(
+                "header",
+                &if value.is_empty() {
+                    format!("{name};")
+                } else {
+                    format!("{name}: {value}")
+                },
+            );
         }
         if self.body.is_some() {
             if !self
@@ -94,11 +128,9 @@ impl Exchange<'_> {
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
             {
-                args.push("--header".into());
-                args.push("Content-Type:".into());
+                config.option("header", "Content-Type:");
             }
-            args.push("--data-binary".into());
-            args.push("@-".into());
+            config.option("data-binary", "@-");
         }
         if let Host::Domain(name) = &self.url.origin.host {
             let pinned: Vec<String> = self
@@ -109,12 +141,13 @@ impl Exchange<'_> {
                     IpAddr::V6(ip) => format!("[{ip}]"),
                 })
                 .collect();
-            args.push("--resolve".into());
-            args.push(format!("{name}:{}:{}", self.url.origin.port, pinned.join(",")));
+            config.option(
+                "resolve",
+                &format!("{name}:{}:{}", self.url.origin.port, pinned.join(",")),
+            );
         }
-        args.push("--url".into());
-        args.push(self.url.to_string());
-        args
+        config.option("url", &self.url.to_string());
+        config.0
     }
 
     fn protocols(&self) -> &'static str {
@@ -130,8 +163,13 @@ impl Exchange<'_> {
         if remaining.is_zero() {
             return Err(HttpError::Timeout);
         }
-        let mut child = Command::new(self.curl)
-            .args(self.arguments(remaining))
+        let start_failed =
+            |e: io::Error| HttpError::Network(format!("couldn't start {}: {e}", self.curl.display()));
+        let (config_reader, mut config_writer) = io::pipe().map_err(start_failed)?;
+        let (headers_reader, headers_writer) = io::pipe().map_err(start_failed)?;
+        let mut command = Command::new(self.curl);
+        command
+            .args(Self::arguments())
             .env_clear()
             .stdin(if self.body.is_some() {
                 Stdio::piped()
@@ -139,9 +177,23 @@ impl Exchange<'_> {
                 Stdio::null()
             })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| HttpError::Network(format!("couldn't start {}: {e}", self.curl.display())))?;
+            .stderr(Stdio::piped());
+        pass_descriptors(
+            &mut command,
+            [
+                (config_reader.as_raw_fd(), CONFIG_FD),
+                (headers_writer.as_raw_fd(), HEADERS_FD),
+            ],
+        );
+        let mut child = command.spawn().map_err(start_failed)?;
+        // The child holds its own copies; ours would keep the header stream from ending.
+        drop(config_reader);
+        drop(headers_writer);
+
+        let config = self.config(remaining);
+        thread::spawn(move || {
+            let _ = config_writer.write_all(config.as_bytes());
+        });
         if let (Some(mut stdin), Some(body)) = (child.stdin.take(), self.body) {
             let body = body.to_vec();
             thread::spawn(move || {
@@ -152,8 +204,10 @@ impl Exchange<'_> {
         let stderr = child.stderr.take().expect("stderr is piped");
         let mut child = Reaper(child);
 
-        let (chunks, received) = mpsc::sync_channel::<Vec<u8>>(4);
-        thread::spawn(move || pump(stdout, chunks));
+        let (chunks, received) = mpsc::sync_channel::<Chunk>(4);
+        let head_chunks = chunks.clone();
+        thread::spawn(move || pump(headers_reader, Chunk::Head, head_chunks));
+        thread::spawn(move || pump(stdout, Chunk::Body, chunks));
         let errors = thread::spawn(move || {
             let mut text = Vec::new();
             let _ = stderr.take(STDERR_CAP as u64).read_to_end(&mut text);
@@ -170,7 +224,7 @@ impl Exchange<'_> {
                 return Err(HttpError::Timeout);
             }
             match received.recv_timeout(POLL.min(self.deadline - now)) {
-                Ok(chunk) => parser.feed(&chunk)?,
+                Ok(chunk) => parser.feed(chunk)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
@@ -185,13 +239,46 @@ impl Exchange<'_> {
     }
 }
 
-fn pump(mut stdout: impl Read, chunks: mpsc::SyncSender<Vec<u8>>) {
+/// Makes each `(source, target)` descriptor available to the child as `target`.
+fn pass_descriptors<const N: usize>(command: &mut Command, descriptors: [(RawFd, RawFd); N]) {
+    // A source may already sit on another pair's target number, so every source moves above
+    // all targets before any target is filled.
+    let above_targets = descriptors.iter().map(|&(_, target)| target).max().unwrap_or(2) + 1;
+    let hand_over = move || {
+        let mut moved = [0; N];
+        for (slot, (source, _)) in moved.iter_mut().zip(descriptors) {
+            // SAFETY: fcntl is async-signal-safe and only duplicates a descriptor we own.
+            *slot = unsafe { libc::fcntl(source, libc::F_DUPFD_CLOEXEC, above_targets) };
+            if *slot < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        for (source, (_, target)) in moved.into_iter().zip(descriptors) {
+            // SAFETY: dup2 is async-signal-safe; the copy it makes is not close-on-exec.
+            if unsafe { libc::dup2(source, target) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
+    };
+    // SAFETY: the closure runs between fork and exec and calls only fcntl and dup2.
+    unsafe {
+        command.pre_exec(hand_over);
+    }
+}
+
+enum Chunk {
+    Head(Vec<u8>),
+    Body(Vec<u8>),
+}
+
+fn pump(mut from: impl Read, tag: fn(Vec<u8>) -> Chunk, chunks: mpsc::SyncSender<Chunk>) {
     let mut buffer = vec![0; 16 * 1024];
     loop {
-        match stdout.read(&mut buffer) {
+        match from.read(&mut buffer) {
             Ok(0) | Err(_) => return,
             Ok(n) => {
-                if chunks.send(buffer[..n].to_vec()).is_err() {
+                if chunks.send(tag(buffer[..n].to_vec())).is_err() {
                     return;
                 }
             }
@@ -218,19 +305,9 @@ fn curl_error(code: i32, stderr: String, limits: &Limits) -> HttpError {
     }
 }
 
-enum Stage {
-    Headers,
-    Body {
-        status: u16,
-        headers: Vec<(String, String)>,
-    },
-}
-
 struct Parser<'a> {
     limits: &'a Limits,
-    stage: Stage,
     head: Vec<u8>,
-    header_bytes: usize,
     body: Vec<u8>,
 }
 
@@ -238,63 +315,52 @@ impl<'a> Parser<'a> {
     fn new(limits: &'a Limits) -> Self {
         Self {
             limits,
-            stage: Stage::Headers,
             head: Vec::new(),
-            header_bytes: 0,
             body: Vec::new(),
         }
     }
 
-    fn feed(&mut self, mut chunk: &[u8]) -> Result<(), HttpError> {
-        while !chunk.is_empty() {
-            match &self.stage {
-                Stage::Headers => {
-                    let before = self.head.len();
-                    self.head.extend_from_slice(chunk);
-                    let Some(end) = find_blank_line(&self.head) else {
-                        self.header_bytes += chunk.len();
-                        if self.header_bytes > self.limits.max_header_bytes {
-                            return Err(HttpError::HeadersTooLarge(self.limits.max_header_bytes));
-                        }
-                        return Ok(());
-                    };
-                    let consumed = end - before;
-                    self.header_bytes += consumed;
-                    if self.header_bytes > self.limits.max_header_bytes {
-                        return Err(HttpError::HeadersTooLarge(self.limits.max_header_bytes));
-                    }
-                    let block = std::mem::take(&mut self.head);
-                    let (status, headers) = parse_head(&block[..end])?;
-                    chunk = &chunk[consumed..];
-                    // An interim 1xx response precedes the real one on the same stream.
-                    if !(100..200).contains(&status) {
-                        self.stage = Stage::Body { status, headers };
-                    }
+    fn feed(&mut self, chunk: Chunk) -> Result<(), HttpError> {
+        match chunk {
+            Chunk::Head(bytes) => {
+                if self.head.len() + bytes.len() > self.limits.max_header_bytes {
+                    return Err(HttpError::HeadersTooLarge(self.limits.max_header_bytes));
                 }
-                Stage::Body { .. } => {
-                    if self.body.len() + chunk.len() > self.limits.max_response_bytes {
-                        return Err(HttpError::ResponseTooLarge(self.limits.max_response_bytes));
-                    }
-                    self.body.extend_from_slice(chunk);
-                    return Ok(());
+                self.head.extend_from_slice(&bytes);
+            }
+            Chunk::Body(bytes) => {
+                if self.body.len() + bytes.len() > self.limits.max_response_bytes {
+                    return Err(HttpError::ResponseTooLarge(self.limits.max_response_bytes));
                 }
+                self.body.extend_from_slice(&bytes);
             }
         }
         Ok(())
     }
 
     fn finish(self) -> Result<Raw, HttpError> {
-        match self.stage {
-            Stage::Body { status, headers } => Ok(Raw {
-                status,
-                headers,
-                body: self.body,
-            }),
-            Stage::Headers => Err(HttpError::InvalidResponse(
-                "the response ended inside its headers".to_owned(),
-            )),
-        }
+        let (status, headers) = final_head(&self.head)?;
+        Ok(Raw {
+            status,
+            headers,
+            body: self.body,
+        })
     }
+}
+
+/// The final response head from curl's header stream, which holds interim 1xx heads before it
+/// and chunked trailers after it.
+fn final_head(mut stream: &[u8]) -> Result<(u16, Vec<(String, String)>), HttpError> {
+    while let Some(end) = find_blank_line(stream) {
+        let (status, headers) = parse_head(&stream[..end])?;
+        if !(100..200).contains(&status) {
+            return Ok((status, headers));
+        }
+        stream = &stream[end..];
+    }
+    Err(HttpError::InvalidResponse(
+        "the response ended inside its headers".to_owned(),
+    ))
 }
 
 fn find_blank_line(bytes: &[u8]) -> Option<usize> {
