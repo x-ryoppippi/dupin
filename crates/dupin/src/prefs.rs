@@ -257,9 +257,6 @@ impl Prefs {
         self.save(&base);
     }
 
-    /// The backdrop menu: the built-in shader, none, an example (copied beside config.toml to
-    /// be edited) or a file in the shaders folder. A file elsewhere that config.toml names shows
-    /// checked with them.
     fn pick_theme(&mut self, tx: &mut Tx) {
         let mut menu = PopupMenu::new();
         for (id, label) in [
@@ -319,6 +316,9 @@ impl Prefs {
         });
     }
 
+    /// The backdrop menu: the built-in shader, none, an example (copied beside config.toml to
+    /// be edited) or a file in the shaders folder. A file elsewhere that config.toml names shows
+    /// checked with them.
     fn pick_backdrop(&mut self, tx: &mut Tx) {
         let current = &self.config.backdrop;
         let id = |b: &Backdrop| match b {
