@@ -12,6 +12,7 @@ selection_hotkey = "" # optional shortcut for searching selected text
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
+display = "mouse" # "mouse", "main", or "active"
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -28,6 +29,12 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 
+In Settings → General → Display, choose Mouse pointer (`"mouse"`, the default), Main display (`"main"`), or Focused window (`"active"`). Focused window uses any existing Accessibility grant. If access or the focused window is unavailable, the panel opens on the main display with a notice. When access is missing, choose **Set Up Accessibility** in the notice to request access or open Accessibility Settings.
+
+## Launch at login
+
+In Settings → General, turn **Launch at login** on or off. If macOS requires approval, choose **Open Login Items** and allow Dupin in System Settings. Dupin refreshes the status when you return. This setting is managed by macOS and is available in the signed app bundle outside the Nix store.
+
 ## App hotkeys
 
 Add a table to `config.toml` for each shortcut, using the app's macOS bundle identifier.
@@ -43,7 +50,9 @@ Each shortcut must be distinct from the panel and selection shortcuts and other 
 
 ## Web searches
 
-The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.
+The default keywords are `g` (Google), `gh` (GitHub), `maps` (Apple Maps) and `yt` (YouTube). An explicit `web_searches` table replaces the defaults. Add the Maps entry below to use it with a custom table, or set `web_searches = {}` to disable all web searches.
+
+Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. The exact template `maps://?q={query}` opens Apple Maps directly. Dupin encodes the text as UTF-8 URL data. Templates cannot contain credentials or put the placeholder in the origin.
 
 ```toml
 web_fallbacks = ["gh"]
@@ -51,6 +60,10 @@ web_fallbacks = ["gh"]
 [web_searches.gh]
 name = "GitHub"
 url = "https://github.com/search?q={query}"
+
+[web_searches.maps]
+name = "Apple Maps"
+url = "maps://?q={query}"
 
 [web_searches.docs]
 name = "Rust documentation"

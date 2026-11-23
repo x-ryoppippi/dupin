@@ -1,19 +1,6 @@
-use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
-use std::ptr::{self, NonNull};
+use objc2_core_foundation::CFString;
 
 use crate::accessibility;
-
-#[link(name = "ApplicationServices", kind = "framework")]
-unsafe extern "C" {
-    fn AXUIElementCreateSystemWide() -> *mut CFType;
-    fn AXUIElementGetTypeID() -> CFTypeID;
-    fn AXUIElementSetMessagingTimeout(element: *const CFType, seconds: f32) -> i32;
-    fn AXUIElementCopyAttributeValue(
-        element: *const CFType,
-        attribute: *const CFString,
-        value: *mut *mut CFType,
-    ) -> i32;
-}
 
 pub enum Selection {
     Text(String),
@@ -46,37 +33,21 @@ fn read_with(
 }
 
 fn selected_text() -> Option<String> {
-    let system = unsafe { CFRetained::from_raw(NonNull::new(AXUIElementCreateSystemWide())?) };
+    let system = accessibility::system_wide()?;
     // The system-wide element changes the process default, so restore it after the focus lookup.
-    let focused = unsafe {
-        if AXUIElementSetMessagingTimeout(&*system, 0.12) != 0 {
-            return None;
-        }
-        let focused = attribute(&system, "AXFocusedUIElement");
-        AXUIElementSetMessagingTimeout(&*system, 0.0);
-        focused?
-    };
-    unsafe {
-        if CFGetTypeID(Some(&focused)) != AXUIElementGetTypeID()
-            || AXUIElementSetMessagingTimeout(&*focused, 0.12) != 0
-        {
-            return None;
-        }
+    if !accessibility::set_timeout(&system, 0.12) {
+        return None;
     }
-    let text = attribute(&focused, "AXSelectedText")?
+    let focused = accessibility::attribute(&system, "AXFocusedUIElement");
+    accessibility::set_timeout(&system, 0.0);
+    let focused = focused?;
+    if !accessibility::set_timeout(&focused, 0.12) {
+        return None;
+    }
+    let text = accessibility::attribute(&focused, "AXSelectedText")?
         .downcast::<CFString>()
         .ok()?;
     Some(text.to_string())
-}
-
-fn attribute(element: &CFType, name: &str) -> Option<CFRetained<CFType>> {
-    let name = CFString::from_str(name);
-    let mut value = ptr::null_mut();
-    let status = unsafe { AXUIElementCopyAttributeValue(element, &*name, &mut value) };
-    if status != 0 {
-        return None;
-    }
-    Some(unsafe { CFRetained::from_raw(NonNull::new(value)?) })
 }
 
 #[cfg(test)]

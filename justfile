@@ -6,3 +6,23 @@ default:
 
 hawk:
     nu scripts/hawk.nu
+
+build-all: build build-debug website::build
+
+build:
+    nix build .#dupin
+
+build-debug:
+    cargo build -p dupin
+
+run: build
+    open result/Applications/Dupin.app
+
+package channel="nightly" identity="-":
+    nu scripts/package-app.nu --channel {{ channel }} --identity "{{ identity }}"
+
+snap: build-debug
+    nu scripts/snap.nu
+
+footprint: build-debug
+    nu scripts/footprint.nu
