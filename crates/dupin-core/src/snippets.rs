@@ -29,11 +29,12 @@ enum Placeholder {
     Clipboard,
 }
 
+const CLIPBOARD_PLACEHOLDER: &str = "{clipboard}";
 const PLACEHOLDERS: [(&str, Placeholder); 4] = [
     ("{date}", Placeholder::Date),
     ("{time}", Placeholder::Time),
     ("{datetime}", Placeholder::DateTime),
-    ("{clipboard}", Placeholder::Clipboard),
+    (CLIPBOARD_PLACEHOLDER, Placeholder::Clipboard),
 ];
 
 /// The next placeholder at or after `from`: its byte range and kind. Braces that don't spell
@@ -48,14 +49,15 @@ fn next_placeholder(text: &str, from: usize) -> Option<(usize, usize, Placeholde
     })
 }
 
-/// `text` with `{date}` (2026-01-31), `{time}` (09:05), `{datetime}` (2026-01-31 09:05) and
-/// `{clipboard}` filled in. The clipboard is read at most once, and only when the text uses
-/// it; one that holds no text fills in as nothing.
-pub fn expand(text: &str, now: LocalTime, clipboard: impl FnOnce() -> Option<String>) -> String {
+/// Whether expanding the snippet requires clipboard text.
+pub fn needs_clipboard(text: &str) -> bool {
+    text.contains(CLIPBOARD_PLACEHOLDER)
+}
+
+/// Fill the placeholders using the activation time and any clipboard text already read.
+pub fn expand(text: &str, now: LocalTime, clipboard: &str) -> String {
     let date = format!("{:04}-{:02}-{:02}", now.year, now.month, now.day);
     let time = format!("{:02}:{:02}", now.hour, now.minute);
-    let mut clipboard = Some(clipboard);
-    let mut pasted: Option<String> = None;
     let mut out = String::with_capacity(text.len());
     let mut from = 0;
     while let Some((start, end, kind)) = next_placeholder(text, from) {
@@ -68,9 +70,7 @@ pub fn expand(text: &str, now: LocalTime, clipboard: impl FnOnce() -> Option<Str
                 out.push(' ');
                 out.push_str(&time);
             }
-            Placeholder::Clipboard => out.push_str(
-                pasted.get_or_insert_with(|| clipboard.take().and_then(|read| read()).unwrap_or_default()),
-            ),
+            Placeholder::Clipboard => out.push_str(clipboard),
         }
         from = end;
     }
@@ -296,34 +296,29 @@ mod tests {
 
     #[test]
     fn fills_in_date_and_time_placeholders() {
-        let none = || -> Option<String> { panic!("the clipboard is read only when used") };
-        assert_eq!(expand("{date}", NOW, none), "2026-01-31");
-        assert_eq!(expand("at {time}", NOW, none), "at 09:05");
-        assert_eq!(expand("{datetime}.", NOW, none), "2026-01-31 09:05.");
+        assert_eq!(expand("{date}", NOW, ""), "2026-01-31");
+        assert_eq!(expand("at {time}", NOW, ""), "at 09:05");
+        assert_eq!(expand("{datetime}.", NOW, ""), "2026-01-31 09:05.");
         let year = LocalTime { year: 987, ..NOW };
-        assert_eq!(expand("{date}", year, none), "0987-01-31");
+        assert_eq!(expand("{date}", year, ""), "0987-01-31");
     }
 
     #[test]
-    fn reads_the_clipboard_once_and_only_when_used() {
-        let mut reads = 0;
-        let text = expand("{clipboard} and {clipboard}", NOW, || {
-            reads += 1;
-            Some("pasted".into())
-        });
-        assert_eq!(text, "pasted and pasted");
-        assert_eq!(reads, 1);
-        assert_eq!(expand("[{clipboard}]", NOW, || None), "[]");
+    fn clipboard_placeholders_share_the_same_text() {
+        let template = "{clipboard} and {{clipboard}}";
+        assert!(needs_clipboard(template));
+        assert!(!needs_clipboard("fn main() {} {date} {Clipboard} {clipboard"));
+        assert_eq!(expand(template, NOW, "pasted"), "pasted and {pasted}");
+        assert_eq!(expand("[{clipboard}]", NOW, ""), "[]");
     }
 
     #[test]
     fn other_braces_stay_as_written() {
-        let none = || None;
-        assert_eq!(expand("fn main() {}", NOW, none), "fn main() {}");
-        assert_eq!(expand("{{date}}", NOW, none), "{2026-01-31}");
-        assert_eq!(expand("{Date} {date", NOW, none), "{Date} {date");
-        assert_eq!(expand("日本{time}語", NOW, none), "日本09:05語");
-        assert_eq!(expand("", NOW, none), "");
+        assert_eq!(expand("fn main() {}", NOW, ""), "fn main() {}");
+        assert_eq!(expand("{{date}}", NOW, ""), "{2026-01-31}");
+        assert_eq!(expand("{Date} {date", NOW, ""), "{Date} {date");
+        assert_eq!(expand("日本{time}語", NOW, ""), "日本09:05語");
+        assert_eq!(expand("", NOW, ""), "");
     }
 
     #[test]

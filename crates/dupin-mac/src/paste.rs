@@ -3,6 +3,10 @@
 
 use std::ffi::c_void;
 
+use objc2::rc::autoreleasepool;
+use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+use objc2_foundation::NSString;
+
 /// System Settings › Privacy & Security › Accessibility.
 pub const ACCESSIBILITY_SETTINGS: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
@@ -43,8 +47,19 @@ pub fn key_code() -> u16 {
     crate::input_source::command_v_key()
 }
 
-/// Press ⌘V in whichever app is frontmost, using its resolved key code.
-pub fn paste(key: u16) -> Result<(), String> {
+/// Copy text and press ⌘V in the frontmost app using its resolved key code.
+pub fn paste(key: u16, text: &str) -> Result<(), String> {
+    // Rune queues ordinary writes without a completion callback, but ⌘V needs the new text in place.
+    autoreleasepool(|_| {
+        let board = NSPasteboard::generalPasteboard();
+        board.clearContents();
+        // SAFETY: NSPasteboardTypeString is an immutable AppKit constant.
+        if board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString }) {
+            Ok(())
+        } else {
+            Err("Couldn't copy the snippet to the clipboard.".to_owned())
+        }
+    })?;
     for down in [true, false] {
         // SAFETY: A null source is allowed; the event is released after it is posted.
         unsafe {

@@ -753,7 +753,7 @@ impl Ui {
     pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
         if let Some(snippet) = self.paste_after_close.take() {
-            self.deliver_snippet(snippet, true);
+            self.deliver_snippet(snippet, true, tx);
         }
         if let Some(notice) = self.notice_after_close.take() {
             self.show_notice(notice, tx);
@@ -1273,7 +1273,7 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
-                    dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste),
+                    dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
                         let shown = self
@@ -1341,15 +1341,15 @@ impl Ui {
 
     /// Copy the snippet now, or, to paste it, once the panel closes. Pasting needs
     /// Accessibility access: the first attempt without it asks macOS, and later ones explain.
-    fn run_snippet(&mut self, text: String, paste: bool) {
+    fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
         let snippet = SnippetRun {
             text,
             now: dupin_mac::clock::now(),
         };
-        if paste && self.may_paste() {
+        if paste && !rune::tooling::is_headless() && self.may_paste() {
             self.paste_after_close = Some(snippet);
         } else {
-            self.deliver_snippet(snippet, false);
+            self.deliver_snippet(snippet, false, tx);
         }
     }
 
@@ -1365,17 +1365,32 @@ impl Ui {
         false
     }
 
-    /// The clipboard is read, when the snippet uses it, and written off the UI thread: an
-    /// app that promised its clipboard data lazily answers in its own time.
-    fn deliver_snippet(&self, snippet: SnippetRun, paste: bool) {
+    fn deliver_snippet(&self, snippet: SnippetRun, paste: bool, tx: &mut Tx) {
+        use dupin_core::snippets::{expand, needs_clipboard};
+
+        if needs_clipboard(&snippet.text) {
+            let busy = Busy::new(self.running.clone());
+            tx.read_clipboard(move |ui: &mut Self, content, tx| {
+                let text = expand(&snippet.text, snippet.now, content.text());
+                ui.finish_snippet(text, paste, tx);
+                drop(busy);
+            });
+        } else {
+            let text = expand(&snippet.text, snippet.now, "");
+            self.finish_snippet(text, paste, tx);
+        }
+    }
+
+    fn finish_snippet(&self, text: String, paste: bool, tx: &mut Tx) {
+        if !paste {
+            tx.copy(text);
+            return;
+        }
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
-        let key = paste.then(dupin_mac::paste::key_code);
+        let key = dupin_mac::paste::key_code();
         std::thread::spawn(move || {
-            let text = dupin_core::snippets::expand(&snippet.text, snippet.now, dupin_mac::pasteboard::text);
-            let result = dupin_mac::pasteboard::set_text(&text)
-                .and_then(|()| key.map_or(Ok(()), dupin_mac::paste::paste));
-            if let Err(error) = result {
+            if let Err(error) = dupin_mac::paste::paste(key, &text) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);
