@@ -347,7 +347,7 @@ pub struct Ui {
     scripts: Arc<RwLock<Catalog>>,
     scripts_catalog_ready: bool,
     runner: crate::scripts::runner::Runner,
-    _scripts_watcher: Option<crate::scripts::CatalogWatch>,
+    _scripts_watcher: Option<crate::catalog_watch::Watch>,
     pub action_screen: Option<ActionScreen>,
     next_lookup: u64,
     notice_until: Option<f64>,

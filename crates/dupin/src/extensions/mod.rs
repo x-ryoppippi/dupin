@@ -279,6 +279,7 @@ pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> 
     let mut scanner = Scanner::default();
     Watch::start(
         directory,
+        crate::catalog_watch::Depth::Trees,
         move |directory, problem| scanner.update(directory, problem),
         deliver,
     )
@@ -325,17 +326,11 @@ pub(crate) mod tests {
         }
     }
 
-    fn folder() -> PathBuf {
-        let path = std::env::temp_dir().join(format!(
-            "dupin-extensions-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        path
+    fn folder() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix("dupin-extensions-")
+            .tempdir()
+            .unwrap()
     }
 
     fn install(root: &Path, folder: &str, manifest: &str, wasm: Option<&[u8]>) {
@@ -381,7 +376,8 @@ pub(crate) mod tests {
 
     #[test]
     fn retargeted_catalogue_symlink_is_rewatched_before_later_edits() {
-        let root = folder();
+        let fixture = folder();
+        let root = fixture.path();
         let directory = root.join("extensions");
         let first = root.join("generation-one");
         let second = root.join("generation-two");
@@ -401,19 +397,19 @@ pub(crate) mod tests {
         fs::write(second.join("words").join(MANIFEST), manifest("words", "edited")).unwrap();
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn retargeted_extension_symlink_hop_is_rewatched_before_later_edits() {
-        let root = folder();
+        let fixture = folder();
+        let root = fixture.path();
         let directory = root.join("extensions");
         let links = root.join("links");
         fs::create_dir(&directory).unwrap();
         fs::create_dir(&links).unwrap();
         let wasm = guest("{}");
-        install(&root, "first", &manifest("words", "first"), Some(&wasm));
-        install(&root, "second", &manifest("words", "second"), Some(&wasm));
+        install(root, "first", &manifest("words", "first"), Some(&wasm));
+        install(root, "second", &manifest("words", "second"), Some(&wasm));
         symlink("../first", links.join("current")).unwrap();
         symlink("../links/current", directory.join("words")).unwrap();
 
@@ -428,12 +424,12 @@ pub(crate) mod tests {
         fs::write(root.join("second").join(MANIFEST), manifest("words", "edited")).unwrap();
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn moved_catalogue_directory_is_rewatched_before_later_edits() {
-        let root = folder();
+        let fixture = folder();
+        let root = fixture.path();
         let directory = root.join("extensions");
         let wasm = guest("{}");
         install(&directory, "words", &manifest("words", "first"), Some(&wasm));
@@ -459,19 +455,19 @@ pub(crate) mod tests {
         .unwrap();
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn a_missing_folder_is_an_empty_catalogue() {
-        let catalog = Scanner::default().scan(&folder().join("absent"));
+        let catalog = Scanner::default().scan(&folder().path().join("absent"));
         assert!(catalog.extensions.is_empty());
         assert!(catalog.problems.is_empty());
     }
 
     #[test]
     fn catalogue_updates_reuse_unchanged_extensions_and_skip_unchanged_deliveries() {
-        let root = folder();
+        let fixture = folder();
+        let root = fixture.path();
         let directory = root.join("extensions");
         let wasm = guest("{}");
         install(&directory, "one", &manifest("one", "first"), Some(&wasm));
@@ -500,45 +496,45 @@ pub(crate) mod tests {
         assert!(Arc::ptr_eq(&reloaded.extensions[1], &removed.extensions[0]));
         assert!(removed.problems[0].starts_with("one:"));
         assert!(scanner.update(&directory, None).is_none());
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn valid_extensions_load_and_invalid_ones_are_reported_and_skipped() {
-        let root = folder();
+        let fixture = folder();
+        let root = fixture.path();
         let wasm = guest("{}");
-        install(&root, "a-valid", &manifest("words", "wc"), Some(&wasm));
-        install(&root, "b-duplicate", &manifest("words", "wc2"), Some(&wasm));
-        install(&root, "c-bad-id", &manifest("Words!", "w"), Some(&wasm));
-        install(&root, "d-spaced-keyword", &manifest("spaced", "w c"), Some(&wasm));
-        install(&root, "e-missing-entry", &manifest("missing", "m"), None);
+        install(root, "a-valid", &manifest("words", "wc"), Some(&wasm));
+        install(root, "b-duplicate", &manifest("words", "wc2"), Some(&wasm));
+        install(root, "c-bad-id", &manifest("Words!", "w"), Some(&wasm));
+        install(root, "d-spaced-keyword", &manifest("spaced", "w c"), Some(&wasm));
+        install(root, "e-missing-entry", &manifest("missing", "m"), None);
         install(
-            &root,
+            root,
             "f-unknown-key",
             &format!("{}extra = 1\n", manifest("x", "x")),
             Some(&wasm),
         );
         install(
-            &root,
+            root,
             "g-escape",
             &manifest("escape", "e").replace("guest.wasm", "../a-valid/guest.wasm"),
             None,
         );
-        install(&root, "h-not-wasm", &manifest("notwasm", "n"), Some(b"not wasm"));
+        install(root, "h-not-wasm", &manifest("notwasm", "n"), Some(b"not wasm"));
         let imports = wat::parse_str(r#"(module (import "wasi" "fd_write" (func)))"#).unwrap();
-        install(&root, "i-imports", &manifest("imports", "i"), Some(&imports));
+        install(root, "i-imports", &manifest("imports", "i"), Some(&imports));
         std::fs::create_dir_all(root.join("j-no-manifest")).unwrap();
         std::fs::create_dir_all(root.join(".hidden")).unwrap();
         std::os::unix::fs::symlink(root.join("a-valid/guest.wasm"), root.join("k-link.wasm")).unwrap();
         install(
-            &root,
+            root,
             "k-symlink",
             &manifest("symlink", "s").replace("guest.wasm", "outside.wasm"),
             None,
         );
         std::os::unix::fs::symlink(root.join("k-link.wasm"), root.join("k-symlink/outside.wasm")).unwrap();
 
-        let catalog = Scanner::default().scan(&root);
+        let catalog = Scanner::default().scan(root);
         let ids: Vec<_> = catalog.extensions.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, ["words"]);
         let words = &catalog.extensions[0];
@@ -567,19 +563,18 @@ pub(crate) mod tests {
             );
         }
         assert_eq!(catalog.problems.len(), 10, "{problems}");
-        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn oversized_manifests_are_rejected_before_parsing() {
-        let root = folder();
-        install(&root, "big", &"#".repeat(MAX_MANIFEST_BYTES + 1), None);
-        let catalog = Scanner::default().scan(&root);
+        let fixture = folder();
+        let root = fixture.path();
+        install(root, "big", &"#".repeat(MAX_MANIFEST_BYTES + 1), None);
+        let catalog = Scanner::default().scan(root);
         assert!(
             catalog.problems[0].contains("larger than 16 KiB"),
             "{:?}",
             catalog.problems
         );
-        std::fs::remove_dir_all(root).unwrap();
     }
 }

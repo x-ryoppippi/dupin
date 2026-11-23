@@ -4,87 +4,30 @@ pub mod output;
 pub mod provider;
 pub mod runner;
 
-use std::sync::mpsc;
-use std::thread::JoinHandle;
-
-enum WatchEvent {
-    Changed(bool),
-    Stop,
-}
-
-pub struct CatalogWatch {
-    events: mpsc::Sender<WatchEvent>,
-    worker: Option<JoinHandle<()>>,
-}
-
-impl Drop for CatalogWatch {
-    fn drop(&mut self) {
-        let _ = self.events.send(WatchEvent::Stop);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
+use crate::catalog_watch::{Depth, Watch};
 
 fn watch_catalog(
     directory: std::path::PathBuf,
     deliver: impl Fn(catalog::Catalog) + Send + 'static,
-) -> std::io::Result<CatalogWatch> {
-    let (events, received) = mpsc::channel();
-    let sender = events.clone();
-    let worker = std::thread::Builder::new()
-        .name("dupin-script-catalog".into())
-        .spawn(move || {
-            let mut watcher = None;
-            let mut rebuild = true;
-            let mut watch_problem = None;
-            loop {
-                if rebuild {
-                    drop(watcher.take());
-                    let changed = sender.clone();
-                    match dupin_mac::watcher::PathWatcher::start_entries(
-                        vec![directory.clone()],
-                        move |root_moved| {
-                            let _ = changed.send(WatchEvent::Changed(root_moved));
-                        },
-                    ) {
-                        Ok(next) => {
-                            watcher = Some(next);
-                            watch_problem = None;
-                        }
-                        Err(error) => {
-                            watch_problem = Some(format!("Couldn't watch scripts: {error}"));
-                        }
-                    }
-                }
-                let mut catalog = catalog::Catalog::scan(&directory);
-                if let Some(problem) = &watch_problem {
-                    catalog.notice = Some(match catalog.notice {
-                        Some(notice) => format!("{notice}\n{problem}"),
-                        None => problem.clone(),
-                    });
-                }
-                deliver(catalog);
-                rebuild = false;
-                match received.recv() {
-                    Ok(WatchEvent::Changed(root)) => rebuild |= root,
-                    _ => break,
-                }
-                while let Ok(event) = received.try_recv() {
-                    match event {
-                        WatchEvent::Changed(root) => rebuild |= root,
-                        WatchEvent::Stop => return,
-                    }
-                }
+) -> std::io::Result<Watch> {
+    Watch::start(
+        directory,
+        Depth::Entries,
+        |directory, watch_problem| {
+            let mut catalog = catalog::Catalog::scan(directory);
+            if let Some(problem) = watch_problem {
+                catalog.notice = Some(match catalog.notice {
+                    Some(notice) => format!("{notice}\n{problem}"),
+                    None => problem,
+                });
             }
-        })?;
-    Ok(CatalogWatch {
-        events,
-        worker: Some(worker),
-    })
+            Some(catalog)
+        },
+        deliver,
+    )
 }
 
-pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<CatalogWatch> {
+pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<Watch> {
     let directory = crate::settings::path()?.parent()?.join("scripts");
     match watch_catalog(directory, move |catalog| {
         panel.update(move |s, tx| s.scripts_catalog(catalog, tx));
@@ -101,6 +44,7 @@ pub fn watch(panel: rune::AppHandle<crate::ui::Ui>) -> Option<CatalogWatch> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
     #[test]

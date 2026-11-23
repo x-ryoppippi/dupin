@@ -5,6 +5,12 @@ use std::thread;
 
 use dupin_mac::{PathWatcher, watcher::canonical_root};
 
+#[derive(Clone, Copy)]
+pub(crate) enum Depth {
+    Entries,
+    Trees,
+}
+
 enum Event {
     Changed { root_moved: bool },
     Stop,
@@ -18,6 +24,7 @@ pub(crate) struct Watch {
 impl Watch {
     pub(crate) fn start<T>(
         directory: PathBuf,
+        depth: Depth,
         mut scan: impl FnMut(&Path, Option<String>) -> Option<T> + Send + 'static,
         deliver: impl Fn(T) + Send + 'static,
     ) -> io::Result<Self> {
@@ -30,21 +37,17 @@ impl Watch {
                 let mut watched = None;
                 let mut root_moved = false;
                 loop {
-                    let requested = Roots::discover(&directory);
+                    let requested = Roots::discover(&directory, depth);
                     let mut watch_problem = None;
                     if root_moved || watched.as_ref() != Some(&requested) {
                         let events = worker_events.clone();
-                        match PathWatcher::start_scoped(
-                            requested.shallow.clone(),
-                            requested.recursive.clone(),
-                            move |root_moved| {
-                                let _ = events.send(Event::Changed { root_moved });
-                            },
-                        ) {
+                        match requested.watch(move |root_moved| {
+                            let _ = events.send(Event::Changed { root_moved });
+                        }) {
                             Ok(next) => {
                                 watcher.replace(next);
                                 // A link may have moved between discovery and stream startup.
-                                if Roots::discover(&directory) != requested {
+                                if Roots::discover(&directory, depth) != requested {
                                     let _ = worker_events.send(Event::Changed { root_moved: false });
                                 }
                                 watched = Some(requested);
@@ -84,13 +87,37 @@ impl Drop for Watch {
     }
 }
 
+#[derive(PartialEq, Eq)]
+enum Roots {
+    Entries(PathBuf),
+    Trees(Trees),
+}
+
+impl Roots {
+    fn discover(directory: &Path, depth: Depth) -> Self {
+        match depth {
+            Depth::Entries => Self::Entries(directory.to_owned()),
+            Depth::Trees => Self::Trees(Trees::discover(directory)),
+        }
+    }
+
+    fn watch(&self, changed: impl Fn(bool) + Send + Sync + 'static) -> Result<PathWatcher, &'static str> {
+        match self {
+            Self::Entries(directory) => PathWatcher::start_entries(vec![directory.clone()], changed),
+            Self::Trees(roots) => {
+                PathWatcher::start_scoped(roots.shallow.clone(), roots.recursive.clone(), changed)
+            }
+        }
+    }
+}
+
 #[derive(Default, PartialEq, Eq)]
-struct Roots {
+struct Trees {
     shallow: Vec<PathBuf>,
     recursive: Vec<PathBuf>,
 }
 
-impl Roots {
+impl Trees {
     fn discover(directory: &Path) -> Self {
         let mut roots = Self::default();
         let directory = std::path::absolute(directory).unwrap_or_else(|_| directory.to_owned());
