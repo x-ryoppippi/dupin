@@ -123,11 +123,13 @@ pub struct Ui {
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
     settings_after_close: bool,
+    snapshots_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
+    snapshots: AppHandle<crate::snapshots::Snapshots>,
 }
 
 impl Ui {
@@ -146,6 +148,7 @@ impl Ui {
     pub fn new(
         me: AppHandle<Ui>,
         prefs: AppHandle<crate::prefs::Prefs>,
+        snapshots: AppHandle<crate::snapshots::Snapshots>,
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
@@ -220,10 +223,12 @@ impl Ui {
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
+            snapshots_after_close: false,
             running: Arc::new(AtomicUsize::new(0)),
             updater,
             me,
             prefs,
+            snapshots,
         }
     }
 
@@ -331,7 +336,9 @@ impl Ui {
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
     /// Automatic updates wait for both windows to hide; an explicit request closes them.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
-        if request == Restart::Update && (self.me.is_visible() || self.prefs.is_visible()) {
+        if request == Restart::Update
+            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+        {
             self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
             self.relaunch_when_idle(request);
@@ -440,6 +447,9 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if std::mem::take(&mut self.snapshots_after_close) {
+            self.snapshots.open();
+        }
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
             self.prefs.open();
@@ -457,6 +467,7 @@ impl Ui {
         self.notice = None;
         tx.close_window();
         if !self.settings_after_close
+            && !self.snapshots_after_close
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -503,8 +514,38 @@ impl Ui {
         self.key(ev, tx)
     }
 
+    pub fn open_snapshots(&mut self) {
+        self.snapshots.open();
+    }
+
+    pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
+        match self.session.restore(&saved) {
+            Ok(effects) => {
+                self.action_screen = None;
+                self.apply(effects, tx);
+                self.show(tx);
+            }
+            Err(problem) => self.show_notice(problem, tx),
+        }
+    }
+
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
+            match self.session.capture() {
+                Ok(saved) => {
+                    self.snapshots.update(move |s, _| s.save(saved));
+                    self.notice = Some("Saving snapshot…".into());
+                }
+                Err(problem) => self.notice = Some(problem),
+            }
+            return true;
+        }
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+            return true;
+        }
         crate::trace::key(ev);
         match &ev.key {
             // An accessory app has no menu bar, so ⌘Q in the panel is the way to quit.

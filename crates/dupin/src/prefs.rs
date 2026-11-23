@@ -546,6 +546,13 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .window_drag()
         .child(pages)
         .child(el().grow(1.0))
+        .child(
+            text("Open Snapshots")
+                .font(k.ty.small)
+                .color(c.text_muted)
+                .focusable(true)
+                .on_press(|s: &mut Prefs| s.panel.update(|ui, _| ui.open_snapshots())),
+        )
         .child(config)
         .children(s.updater.available().then(|| update_footer(s, k)))
 }

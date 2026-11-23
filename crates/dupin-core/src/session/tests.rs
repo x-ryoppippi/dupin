@@ -1179,3 +1179,50 @@ fn non_text_actions_obey_generation_and_selection() {
         assert!(effects.contains(&Effect::Run(Action::Open(PathBuf::from("/x/result")))));
     }
 }
+
+#[test]
+fn snapshot_capture_rejects_inert_and_stale_results_and_restore_has_no_activation() {
+    let mut s = session();
+    assert!(s.capture().is_err());
+    let g1 = searched(&s.set_query("first")).1;
+    s.deliver(Delivery::Batch {
+        generation: g1,
+        items: vec![item("Historical content")],
+    });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    let saved = s.capture().unwrap();
+    assert_eq!(saved.query, "first");
+    assert_eq!(saved.title, "Historical content");
+    let history = s.history().to_json();
+    let g2 = searched(&s.set_query("second")).1;
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Done { generation: g1 });
+    assert!(s.capture().is_err());
+    s.deliver(Delivery::Batch {
+        generation: g2,
+        items: vec![item("Current content")],
+    });
+    s.deliver(Delivery::Done { generation: g2 });
+    assert_eq!(s.capture().unwrap().title, "Current content");
+    let effects = s.restore(&saved).unwrap();
+    assert_eq!(s.query(), "first");
+    assert_eq!(s.command_id().as_str(), saved.mode);
+    assert_eq!(s.history().to_json(), history);
+    assert!(s.items().is_empty());
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::Search { query, .. } if query == "first"))
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::Run(_) | Effect::SaveHistory))
+    );
+    let mut unavailable = saved.clone();
+    unavailable.mode = "removed.extension".into();
+    assert!(s.restore(&unavailable).is_err());
+    assert!(saved.content().contains("Historical content"));
+    assert_eq!(s.query(), "first");
+}
