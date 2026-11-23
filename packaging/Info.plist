@@ -28,5 +28,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Dupin needs to read your calendars to find events when you use Calendar search.</string>
 </dict>
 </plist>

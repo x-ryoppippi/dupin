@@ -1,0 +1,10 @@
+[
+	{ "text": "cargo clippy --workspace --all-targets -- -D warnings", "age": 86400 },
+	{ "files": ["/Users/Shared/Fixtures/Quarterly report.pdf"], "age": 7200 },
+	{
+		"text": "Meeting moved to Thursday at 14:00.\nRoom: Baker Street 221B\nBring the printed agenda.",
+		"age": 1500
+	},
+	{ "text": "https://dupin.app/download", "age": 240 },
+	{ "text": "The game is afoot.", "age": 5 }
+]

@@ -9,9 +9,16 @@ use objc2_foundation::{NSArray, NSFileManager, NSString, NSURL};
 #[derive(Debug)]
 pub enum Action {
     Open(PathBuf),
+    OpenApp {
+        bundle_id: String,
+        hide_if_frontmost: bool,
+    },
     Reveal(PathBuf),
     OpenUrl(String),
-    OpenWith { path: PathBuf, application: PathBuf },
+    OpenWith {
+        path: PathBuf,
+        application: PathBuf,
+    },
     Trash(PathBuf),
 }
 
@@ -20,6 +27,10 @@ pub fn run(action: &Action) -> Result<(), String> {
         Action::Open(path) => open(path)
             .then_some(())
             .ok_or_else(|| format!("Couldn't open “{}”.", path.display())),
+        Action::OpenApp {
+            bundle_id,
+            hide_if_frontmost,
+        } => open_app(bundle_id, *hide_if_frontmost),
         Action::OpenUrl(url) => open_url(url)
             .then_some(())
             .ok_or_else(|| "Couldn't open this link.".into()),
@@ -70,6 +81,28 @@ pub fn run(action: &Action) -> Result<(), String> {
     })
 }
 
+fn open_app(bundle_id: &str, hide_if_frontmost: bool) -> Result<(), String> {
+    let workspace = NSWorkspace::sharedWorkspace();
+    let identifier = NSString::from_str(bundle_id);
+    if hide_if_frontmost
+        && let Some(app) = workspace.frontmostApplication()
+        && let Some(frontmost) = app.bundleIdentifier()
+        && frontmost.caseInsensitiveCompare(&identifier) == objc2_foundation::NSComparisonResult::Same
+    {
+        return app
+            .hide()
+            .then_some(())
+            .ok_or_else(|| format!("Couldn't hide “{bundle_id}”."));
+    }
+    let url = workspace
+        .URLForApplicationWithBundleIdentifier(&identifier)
+        .ok_or_else(|| format!("Couldn't find the app “{bundle_id}”."))?;
+    workspace
+        .openURL(&url)
+        .then_some(())
+        .ok_or_else(|| format!("Couldn't open “{bundle_id}”."))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Application {
     pub path: PathBuf,
@@ -112,8 +145,22 @@ pub fn applications_for(path: &Path) -> Result<Vec<Application>, String> {
     })
 }
 
+pub(crate) fn encode_url_component(value: &str) -> String {
+    use std::fmt::Write;
+
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            write!(encoded, "%{byte:02X}").expect("writing to a String cannot fail");
+        }
+    }
+    encoded
+}
+
 /// Open a URL with its registered handler.
-fn open_url(value: &str) -> bool {
+pub(crate) fn open_url(value: &str) -> bool {
     let Some(url) = NSURL::URLWithString(&NSString::from_str(value)) else {
         return false;
     };

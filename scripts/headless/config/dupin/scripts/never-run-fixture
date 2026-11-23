@@ -1,0 +1,3 @@
+#!/bin/sh
+# @dupin.title Dupin fixture never run
+printf executed > "$XDG_DATA_HOME/never-ran"

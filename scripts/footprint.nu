@@ -1,5 +1,7 @@
 #!/usr/bin/env nu
 
+use headless-config.nu scenario-env
+
 # Render each headless scenario in scripts/headless and fail if any run's peak physical footprint
 # (what Activity Monitor shows as "Memory" at its highest) goes over `--budget`.
 #
@@ -12,11 +14,15 @@ def main [
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
+    $env.DUPIN_HEADLESS_CLIPBOARD = $root | path join scripts/fixtures/clipboard.json
     let tmp = mktemp --directory
     let runs = glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
         let png = $tmp | path join $"($name).png"
-        {name: $name, peak: (peak-footprint $bin --script $script --realtime --snap $png --at mark:end)}
+        let peak = with-env (scenario-env $script $tmp) {
+            peak-footprint $bin --script $script --realtime --snap $png --at mark:end
+        }
+        {name: $name, peak: $peak}
     }
     rm --recursive $tmp
     let over = $runs | where peak > $budget
