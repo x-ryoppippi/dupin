@@ -103,9 +103,11 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
                 t.accent,
                 theme.row_height as f32,
                 on,
-                el().size(ICON_SIZE, ICON_SIZE)
-                    .radius(4.0)
-                    .fill(t.text_secondary.alpha(0.25)),
+                Some(
+                    el().size(ICON_SIZE, ICON_SIZE)
+                        .radius(4.0)
+                        .fill(t.text_secondary.alpha(0.25)),
+                ),
                 text(["dupin", "dupin-core", "dupin-mac"][i])
                     .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
                     .color(if on { t.selected_text } else { t.text })
