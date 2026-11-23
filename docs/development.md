@@ -99,9 +99,10 @@ Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--real
 ```sh
 cargo build -p dupin
 nu scripts/snap.nu
+nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearance
 ```
 
-The renders show real results from the machine, file paths included, so they stay out of the repository. Headless renders draw the panel's plain card where a window shows Liquid Glass.
+`--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
 ## Native E2E evidence
 

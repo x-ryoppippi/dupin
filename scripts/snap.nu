@@ -17,6 +17,8 @@ use headless-config.nu scenario-env
 def main [
     --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
     --out: path = "target/screenshots"
+    --theme: string # `light` or `dark`; the Mac's appearance when omitted
+    --only: string # Render only the scenarios whose name contains this
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
@@ -25,17 +27,22 @@ def main [
     let tmp = mktemp --directory
     let config = $tmp | path join config
     cp --recursive scripts/headless/config $config
-    let shots = with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: ($tmp | path join data), HOME: $tmp} { glob scripts/headless/*.json | sort | each {|script|
+    let appearance = if $theme == null { [] } else { [--theme $theme] }
+    let suffix = if $theme == null { "" } else { $"-($theme)" }
+    let scripts = glob scripts/headless/*.json | sort | where {|script|
+        $only == null or ($script | path parse | get stem | str contains $only)
+    }
+    let shots = with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: ($tmp | path join data), HOME: $tmp} { $scripts | each {|script|
         let name = $script | path parse | get stem
         let tree = $tmp | path join $"($name).json"
         let config = scenario-env $script $tmp
         with-env $config {
-            headless $bin --script $script --realtime --tree $tree --at mark:end
+            headless $bin --script $script --realtime ...$appearance --tree $tree --at mark:end
         }
         let height = open $tree | panel-height
-        let png = $out | path join $"($name).png"
+        let png = $out | path join $"($name)($suffix).png"
         with-env $config {
-            headless $bin --script $script --realtime --snap $png --at mark:end --scale 2 --size $"680x($height)"
+            headless $bin --script $script --realtime ...$appearance --snap $png --at mark:end --scale 2 --size $"680x($height)"
         }
         {name: $name, png: ($png | path expand), height: $height}
     } }
