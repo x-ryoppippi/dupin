@@ -3,6 +3,11 @@ use std::ops::Deref;
 
 use serde::Serialize;
 
+/// Messages and hints can carry text a guest chose, such as what it threw. Dupin shows them as
+/// one subtitle line and writes them to its log on every failed query.
+const MAX_TEXT_BYTES: usize = 1024;
+const MAX_LABEL_BYTES: usize = 256;
+
 /// A problem with an extension package or one of its answers, precise enough for an author (or
 /// an agent) to fix without reading Dupin's source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -40,7 +45,7 @@ impl Diagnostic {
     pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self(Box::new(Details {
             code,
-            message: message.into(),
+            message: one_line(message.into(), MAX_TEXT_BYTES),
             file: None,
             field: None,
             line: None,
@@ -50,12 +55,12 @@ impl Diagnostic {
     }
 
     pub fn file(mut self, file: impl Into<String>) -> Self {
-        self.0.file = Some(file.into());
+        self.0.file = Some(one_line(file.into(), MAX_LABEL_BYTES));
         self
     }
 
     pub fn field(mut self, field: impl Into<String>) -> Self {
-        self.0.field = Some(field.into());
+        self.0.field = Some(one_line(field.into(), MAX_LABEL_BYTES));
         self
     }
 
@@ -66,9 +71,33 @@ impl Diagnostic {
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
-        self.0.hint = Some(hint.into());
+        self.0.hint = Some(one_line(hint.into(), MAX_TEXT_BYTES));
         self
     }
+}
+
+/// `text` with control characters escaped, cut to at most `max` bytes with an ellipsis.
+fn one_line(text: String, max: usize) -> String {
+    if text.len() <= max && !text.chars().any(char::is_control) {
+        return text;
+    }
+    const ELLIPSIS: &str = "…";
+    let mut line = String::with_capacity(max);
+    let mut escaped = String::new();
+    for ch in text.chars() {
+        escaped.clear();
+        if ch.is_control() {
+            escaped.extend(ch.escape_default());
+        } else {
+            escaped.push(ch);
+        }
+        if line.len() + escaped.len() > max - ELLIPSIS.len() {
+            line.push_str(ELLIPSIS);
+            return line;
+        }
+        line.push_str(&escaped);
+    }
+    line
 }
 
 impl fmt::Display for Diagnostic {

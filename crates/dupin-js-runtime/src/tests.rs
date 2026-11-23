@@ -298,6 +298,53 @@ fn a_symlink_out_of_the_package_is_refused_when_loading() {
 }
 
 #[test]
+fn text_a_guest_chooses_stays_one_short_line_in_diagnostics() {
+    let huge = "'x'.repeat(4_000_000) + '\\nnext line\\u001b[31m'";
+    for (source, code) in [
+        (
+            format!("export function search() {{ throw new Error({huge}); }}"),
+            "search-threw",
+        ),
+        (
+            format!("export function search() {{ throw {huge}; }}"),
+            "search-threw",
+        ),
+        (
+            format!(
+                "export function search() {{ const error = new Error('short'); error.name = {huge}; throw error; }}"
+            ),
+            "search-threw",
+        ),
+        (
+            format!(
+                "export function search() {{ const error = new Error('short'); error.stack = '    at f (' + {huge} + ':1:1)'; throw error; }}"
+            ),
+            "search-threw",
+        ),
+        (
+            format!("throw new Error({huge});\nexport function search() {{}}"),
+            "module-threw",
+        ),
+        (
+            format!("export function search() {{ return {{ [{huge}]: 1 }}; }}"),
+            "unknown-field",
+        ),
+    ] {
+        let diagnostic = failure(run(&source, ""));
+        assert_eq!(diagnostic.code, code, "{diagnostic:?}");
+        let line = diagnostic.to_string();
+        assert!(line.len() <= 2048, "{code}: {} bytes", line.len());
+        assert!(!line.chars().any(char::is_control), "{code}: {line:?}");
+    }
+
+    let diagnostic = failure(run(
+        "export function search() { throw new Error('first\\nsecond'); }",
+        "",
+    ));
+    assert_eq!(diagnostic.message, "search threw Error: first\\nsecond");
+}
+
+#[test]
 fn a_throwing_search_reports_the_error_and_where_it_was_thrown() {
     let package = Package::load(&fixture("throwing-search"), DEFAULT_ENTRY).unwrap();
     let diagnostic = failure(search(&package, "it"));
