@@ -114,7 +114,7 @@ pub fn load() -> (Config, Option<String>) {
     }
 }
 
-fn read_source(path: &Path) -> std::io::Result<String> {
+pub fn read_source(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -131,6 +131,35 @@ fn read_source(path: &Path) -> std::io::Result<String> {
     let mut source = String::new();
     file.read_to_string(&mut source)?;
     Ok(source)
+}
+
+/// Whether `source` would be accepted as config.toml: it parses, and its hotkey is one the
+/// launcher can register.
+pub fn check(source: &str) -> Result<Config, String> {
+    let config = Config::parse(source).map_err(|error| match error.span() {
+        Some(span) => {
+            let (line, column) = location(source, span.start);
+            format!("line {line}, column {column}: {}", error.message())
+        }
+        None => error.message().to_owned(),
+    })?;
+    crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
+    Ok(config)
+}
+
+/// The one-based line and character column of byte `offset` in `source`.
+fn location(source: &str, offset: usize) -> (usize, usize) {
+    let mut start = offset.min(source.len());
+    while !source.is_char_boundary(start) {
+        start -= 1;
+    }
+    let prefix = &source[..start];
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit('\n')
+        .next()
+        .map_or(1, |line| line.chars().count() + 1);
+    (line, column)
 }
 
 fn problem(message: String) -> (Config, Option<String>) {
@@ -189,6 +218,17 @@ mod tests {
     }
 
     #[test]
+    fn check_locates_problems_and_rejects_unusable_hotkeys() {
+        assert_eq!(check("file_limit = 30\n").unwrap().file_limit, 30);
+        let problem = check("file_limit = 30\nfile_limit = \"é\"\n").unwrap_err();
+        assert!(problem.starts_with("line 2, column 1: "), "{problem}");
+        assert!(check("hotkey = \"Cmd+Nope\"\n").unwrap_err().contains("hotkey"));
+        assert!(check("hotkey = \"\"\n").is_ok());
+        assert_eq!(location("é\nab", 4), (2, 2));
+        assert_eq!(location("é", 1), (1, 1));
+    }
+
+    #[test]
     fn creates_a_missing_file() {
         let dir = scratch("missing");
         let path = dir.join("dupin/config.toml");
@@ -197,14 +237,16 @@ mod tests {
     }
 
     #[test]
-    fn saving_config_preserves_custom_dictionary_keywords() {
-        let config = dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]").unwrap();
+    fn saving_config_preserves_custom_settings() {
+        let config =
+            dupin_core::Config::parse("dictionary_keywords = [\"word\", \"lookup\"]\ndisplay = \"active\"")
+                .unwrap();
         let toml = toml::to_string(&config).unwrap();
         let path = scratch("dictionary-keywords").join("config.toml");
         write(&path, &toml).unwrap();
 
         let loaded = dupin_core::Config::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
-        assert_eq!(loaded.dictionary_keywords, ["word", "lookup"]);
+        assert_eq!(loaded, config);
     }
 
     #[test]

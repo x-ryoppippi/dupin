@@ -526,8 +526,7 @@ def file-actions-stage [out: path, found: closure] {
         file-search $out open-me $found
         let loading = count-log $log 'dupin-trace: action-screen applications loading'
         let ready = count-log $log 'dupin-trace: action-screen applications ready'
-        ad $out file-actions-choose-down press down | ignore
-        ad $out file-actions-choose press return | ignore
+        click-file-action $out file-actions-choose 'Open with…'
         wait-for-log --after $loading $log 'dupin-trace: action-screen applications loading'
         wait-for-log --after $ready $log 'dupin-trace: action-screen applications ready'
         let viewer = (poll
@@ -553,13 +552,8 @@ def file-actions-stage [out: path, found: closure] {
         wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
         file-search $out trash-me $found
-        ^osascript -e 'tell application "System Events"
-            repeat 8 times
-                key code 125
-            end repeat
-        end tell'
         let confirm = count-log $log 'dupin-trace: action-screen confirm'
-        ad $out file-actions-trash-review press return | ignore
+        click-file-action $out file-actions-trash-review 'Move to Trash'
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         (poll
             $out
@@ -590,7 +584,11 @@ def file-actions-stage [out: path, found: closure] {
         ad $out file-actions-trash-cancel press return | ignore
         wait-for-log --after $list $log 'dupin-trace: action-screen list'
         let confirm = count-log $log 'dupin-trace: action-screen confirm'
-        ad $out file-actions-trash-review-again press return | ignore
+        (click-file-action
+            $out
+            file-actions-trash-review-again
+            'Move to Trash'
+        )
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
         snap $out file-actions-trash-cancelled
@@ -632,6 +630,20 @@ def file-actions-stage [out: path, found: closure] {
         try { cp $log ($out | path join file-actions-failure.log) }
         error make $failure
     }
+}
+
+def click-file-action [out: path, name: string, title: string] {
+    let action = (poll
+        $out
+        $'($name)-button'
+        {|r|
+            let label = $r.data?.match?.name? | default '' | str replace --regex '\s*↩$' '' | str trim
+            $r.ok and $r.data?.match?.ref_id? != null and $label == $title
+        }
+        find --app Dupin --role button --name $title --first
+    )
+    let clicked = ad $out $name click $action.data.match.ref_id
+    if not $clicked.ok { error make {msg: $'Could not activate ($title)'} }
 }
 
 def file-row-name [out: path, name: string]: nothing -> string {

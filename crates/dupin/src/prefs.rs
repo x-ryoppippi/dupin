@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dupin_core::{Backdrop, Config, InputSource, Position};
+use dupin_core::{Backdrop, Config, DisplaySelection, InputSource, Position};
 use rune::{
     AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
     el, icon, row, text,
@@ -40,6 +40,7 @@ const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 
 const POSITION: &str = "position";
+const DISPLAY: &str = "display";
 const INPUT_SOURCE: &str = "input-source";
 const FILE_LIMIT: &str = "file-limit";
 const BACKDROP: &str = "backdrop";
@@ -96,6 +97,14 @@ fn position_title(position: Position) -> &'static str {
     match position {
         Position::Center => "Center",
         Position::Top => "Top",
+    }
+}
+
+fn display_option(display: DisplaySelection) -> (&'static str, &'static str) {
+    match display {
+        DisplaySelection::Mouse => ("mouse", "Mouse pointer"),
+        DisplaySelection::Main => ("main", "Main display"),
+        DisplaySelection::Active => ("active", "Focused window"),
     }
 }
 
@@ -340,6 +349,30 @@ impl Prefs {
             move |s: &mut Prefs, picked, _| {
                 if let Some(id) = picked {
                     apply(s, id);
+                }
+            },
+        );
+    }
+
+    fn pick_display(&mut self, tx: &mut Tx) {
+        const CHOICES: [DisplaySelection; 3] = [
+            DisplaySelection::Mouse,
+            DisplaySelection::Main,
+            DisplaySelection::Active,
+        ];
+        let options = CHOICES
+            .into_iter()
+            .map(display_option)
+            .map(|(id, label)| (id.to_owned(), label.to_owned()))
+            .collect();
+        Prefs::choose(
+            tx,
+            DISPLAY,
+            options,
+            display_option(self.config.display).0,
+            |s, id| {
+                if let Some(value) = CHOICES.into_iter().find(|value| display_option(*value).0 == id) {
+                    s.set(|config| config.display = value);
                 }
             },
         );
@@ -642,6 +675,14 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
         .error_message(refusal)
         .disabled(s.read_only)
         .build(k);
+    let display = menu_value(
+        s,
+        k,
+        DISPLAY,
+        "Display",
+        display_option(s.config.display).1,
+        Prefs::pick_display,
+    );
     let position = menu_value(
         s,
         k,
@@ -668,6 +709,17 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             "Hotkey",
             Some("Shows the panel from any app"),
             hotkey,
+        ),
+        setting(
+            k,
+            &icons::PANEL,
+            "Display",
+            Some(if s.config.display == DisplaySelection::Active {
+                "Uses the focused window's display when Accessibility access allows"
+            } else {
+                "Which display the panel opens on"
+            }),
+            display,
         ),
         setting(
             k,

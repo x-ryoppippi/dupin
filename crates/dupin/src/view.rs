@@ -94,6 +94,42 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             ),
         );
     }
+    use dupin_mac::window::DisplayNotice;
+    if let Some(notice) = s.display_notice {
+        let message = match notice {
+            DisplayNotice::AccessibilityRequired => {
+                "Dupin needs Accessibility access to find the focused window. Using the main display."
+            }
+            DisplayNotice::FocusedWindowUnavailable => {
+                "Couldn't find the focused window's display. Using the main display."
+            }
+        };
+        panel = panel.child(divider(&t)).child(
+            col()
+                .key("display-notice")
+                .w_full()
+                .px(18.0)
+                .py(12.0)
+                .gap(8.0)
+                .fill(WARNING)
+                .child(
+                    text(message)
+                        .font(t.font(type_::BODY.lh(18.0)))
+                        .color(t.text)
+                        .wrap()
+                        .w_full(),
+                )
+                .children((notice == DisplayNotice::AccessibilityRequired).then(|| {
+                    text("Set Up Accessibility")
+                        .font(t.font(type_::BODY))
+                        .color(accent)
+                        .key("open-accessibility-settings")
+                        .role("button")
+                        .focusable(true)
+                        .on_press_tx(Ui::open_accessibility_settings)
+                })),
+        );
+    }
     for (origin, failure) in s.session.failures() {
         panel = panel.child(
             row()
@@ -121,7 +157,9 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         );
     }
     let items = s.session.items();
-    if s.action_screen.is_some() {
+    if let Some(renaming) = s.session.renaming() {
+        panel = panel.child(divider(&t)).child(rename_status(s, renaming, &t));
+    } else if s.action_screen.is_some() {
         panel = panel.child(divider(&t)).child(action_list(s, &t, accent));
     } else if !items.is_empty()
         && crate::commands::query_problem(s.session.command_id(), s.session.query()).is_none()
@@ -452,7 +490,12 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
 
 fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let presentation = &s.session.command().presentation;
-    let placeholder = presentation.placeholder.as_str();
+    let renaming = s.session.renaming().is_some();
+    let placeholder = if renaming {
+        "Name"
+    } else {
+        presentation.placeholder.as_str()
+    };
     let field = text_input(&s.query_display(), t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
         .key("query")
         .label(placeholder)
@@ -471,7 +514,12 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if let Some(chip) = presentation.chip.as_deref() {
+    let chip = if renaming {
+        Some("Rename")
+    } else {
+        presentation.chip.as_deref()
+    };
+    bar = if let Some(chip) = chip {
         bar.child(
             row()
                 .key("mode")
@@ -490,7 +538,7 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         )
     };
     bar = bar.child(field);
-    if presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
+    if !renaming && presentation.show_searching && matches!(s.session.results(), Results::Searching { .. }) {
         bar = bar.child(
             text("Searching…")
                 .font(t.font(type_::LABEL))
@@ -498,6 +546,50 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         );
     }
     bar
+}
+
+/// What is being renamed, and what Enter will do with the name typed so far.
+fn rename_status(s: &Ui, renaming: &dupin_core::session::Renaming, t: &ResolvedTheme) -> El {
+    let icon = match s.icons.get(renaming.layout_key()) {
+        Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
+        None => el().size(ICON_SIZE, ICON_SIZE),
+    };
+    let folder = renaming
+        .path()
+        .parent()
+        .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy()))
+        .unwrap_or_default();
+    let (status, color) = match renaming.problem() {
+        Some(problem) => (problem, t.destructive),
+        None => ("↩ Rename · esc Cancel", t.text_secondary),
+    };
+    row()
+        .key("rename")
+        .w_full()
+        .h(s.theme.row_height as f32)
+        .px(18.0)
+        .gap(12.0)
+        .center_y()
+        .child(icon)
+        .child(
+            col()
+                .grow(1.0)
+                .min_w(0.0)
+                .gap(2.0)
+                .child(
+                    text(renaming.path().file_name().unwrap_or_default().to_string_lossy())
+                        .font(t.font(type_::BODY))
+                        .color(t.text)
+                        .truncate(),
+                )
+                .child(
+                    text(folder)
+                        .font(t.font(type_::LABEL))
+                        .color(t.text_secondary)
+                        .truncate(),
+                ),
+        )
+        .child(text(status).font(t.font(type_::LABEL)).color(color))
 }
 
 fn hint(s: &Ui) -> Option<&str> {

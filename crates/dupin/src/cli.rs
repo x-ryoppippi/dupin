@@ -1,7 +1,7 @@
-use crate::control::{self, Command, Reply, Request};
+use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -15,10 +15,11 @@ enum Action {
     Set(String, String),
     Snap(String, String),
     Ext(String, String, Option<String>),
+    Mcp,
 }
 fn parse(args: &[String]) -> Result<Action, String> {
     let mut parser = pico_args::Arguments::from_vec(args.iter().map(std::ffi::OsString::from).collect());
-    let _json = parser.contains("--json");
+    let json = parser.contains("--json");
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
@@ -29,6 +30,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
+        ["mcp"] if !json => Ok(Action::Mcp),
         ["pick"] => Ok(Action::Pick(false)),
         ["pick", "--input-json"] => Ok(Action::Pick(true)),
         ["snapshots", "list"] => Ok(Action::SnapshotsList),
@@ -76,17 +78,6 @@ fn file(path: &str, cap: usize) -> Result<Vec<u8>, String> {
         std::fs::File::open(path).map_err(|_| "could not open input")?,
         cap,
     )
-}
-fn exchange(command: Command) -> Result<Value, String> {
-    let request = Request { id: 1, command };
-    control::validate(&request).map_err(|e| e.to_string())?;
-    let mut stream = control::connect().map_err(|e| e.to_string())?;
-    control::write_frame(&mut stream, &request).map_err(|e| e.to_string())?;
-    let reply: Reply = control::read_frame(&mut stream).map_err(|e| e.to_string())?;
-    if reply.id != request.id {
-        return Err("control correlation mismatch".into());
-    }
-    reply.result
 }
 fn selection(bytes: &[u8], json: bool) -> Result<Vec<Value>, String> {
     let values = if json {
@@ -274,6 +265,7 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
         Action::Ext(_, _, _) => {
             Err("extension tools require a build with the extension-tools feature".into())
         }
+        Action::Mcp => crate::mcp::run().map(|()| Value::Null).map_err(|e| e.to_string()),
     }
 }
 fn render(response: dupin_plugin_protocol::Response, output: &str) {
@@ -362,6 +354,8 @@ mod tests {
         assert!(owns_arguments(&["pick".into()]));
         assert!(owns_arguments(&["invalid-subcommand".into()]));
         assert!(parse(&["open".into(), "--bad".into()]).is_err());
+        assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
+        assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(
             parse(&["open".into(), "--query".into(), "日本語".into()]).unwrap(),
             Action::Open(Some("日本語".into()))
