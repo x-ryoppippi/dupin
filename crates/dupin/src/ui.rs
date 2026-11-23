@@ -290,8 +290,15 @@ impl Ui {
             Command::SnapshotsOpen { .. } if self.picker.is_some() => {
                 call.finish(Err("Busy: picker active".into()));
             }
-            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } | Command::SnapshotsClose {} => {
-                self.snapshots.update(move |s, tx| s.control(call, tx));
+            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } => {
+                self.snapshots.update_if(move |s, _| {
+                    s.control(call);
+                    false
+                });
+            }
+            Command::SnapshotsClose {} => {
+                self.snapshots_after_close = false;
+                self.snapshots.update(move |s, _| s.control_close(call));
             }
             Command::Open { query } => {
                 if self.picker.is_some() {
@@ -721,12 +728,18 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
-        if std::mem::take(&mut self.snapshots_after_close) {
-            self.snapshots.open();
+        let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
+        let show_settings = std::mem::take(&mut self.settings_after_close);
+        if show_snapshots {
+            self.snapshots.update(|s, _| s.show());
         }
-        if std::mem::take(&mut self.settings_after_close) {
+        if show_settings {
             crate::trace::settings("panel closed");
             self.prefs.open();
+        }
+        if !show_snapshots && !show_settings && self.relaunch.is_some() {
+            // Rune clears the panel's visibility after this callback.
+            self.me.update(Self::resume_restart);
         }
     }
 
@@ -810,7 +823,7 @@ impl Ui {
             self.snapshots_after_close = true;
             self.dismiss(tx);
         } else {
-            self.snapshots.open();
+            self.snapshots.update(|s, _| s.show());
         }
     }
 
@@ -821,8 +834,8 @@ impl Ui {
         if self.picker.is_some() {
             call.finish(Err("Busy: picker active".into()));
         } else {
+            self.snapshots.update(move |s, _| s.accept_open(call));
             self.show_snapshots(tx);
-            call.finish(Ok(serde_json::Value::Null));
         }
     }
 

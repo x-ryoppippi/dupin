@@ -70,7 +70,7 @@ impl Snapshots {
         self.sources = sources;
     }
 
-    pub fn control(&mut self, call: crate::control::Call, tx: &mut Tx) {
+    pub fn control(&self, call: crate::control::Call) {
         use crate::control::Command;
         if call.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
             return;
@@ -92,28 +92,35 @@ impl Snapshots {
                 {
                     Err("NotFound: snapshot".into())
                 } else {
-                    self.query = TextEdit::new("");
-                    self.query.focused = true;
-                    self.pending_delete = None;
-                    self.filter();
-                    if let Some(id) = id {
-                        self.open(id);
-                    }
                     self.panel
                         .update(move |ui, tx| ui.control_snapshots_open(call, tx));
                     return;
                 }
             }
-            Command::SnapshotsClose {} => {
-                self.pending_delete = None;
-                if self.me.is_visible() {
-                    tx.close_window();
-                }
-                Ok(serde_json::Value::Null)
-            }
             _ => Err("invalid snapshots command".into()),
         };
         call.finish(result);
+    }
+
+    pub fn accept_open(&mut self, call: crate::control::Call) {
+        self.query = TextEdit::new("");
+        self.query.focused = true;
+        self.pending_delete = None;
+        self.filter();
+        if let crate::control::Command::SnapshotsOpen { id: Some(id) } = &call.request.command {
+            self.open(id);
+        }
+        call.finish(Ok(serde_json::Value::Null));
+    }
+
+    pub fn show(&self) {
+        self.me.open();
+    }
+
+    pub fn control_close(&mut self, call: crate::control::Call) {
+        self.pending_delete = None;
+        self.me.close();
+        call.finish(Ok(serde_json::Value::Null));
     }
 
     fn filter(&mut self) {
@@ -146,7 +153,7 @@ impl Snapshots {
     }
 
     pub fn open(&mut self, id: &str) -> bool {
-        if self.entries.iter().find(|s| s.id == id).is_none() {
+        if !self.entries.iter().any(|s| s.id == id) {
             return false;
         }
         self.selected = Some(id.into());
@@ -681,28 +688,26 @@ mod tests {
             archive_problem: None,
             query: TextEdit::new("query"),
             selected: Some("other".into()),
-            pending_delete: None,
+            pending_delete: Some("other".into()),
             problem: None,
             panel,
             running: Default::default(),
         };
-        let mut invoke = |command| {
-            let (reply, rx) = std::sync::mpsc::sync_channel(1);
-            s.control(
-                Call {
-                    request: ControlRequest { id: 1, command },
-                    cancelled: Default::default(),
-                    reply,
-                },
-                &mut Tx::default(),
-            );
-            rx.recv().unwrap().result
+        let request = |command| {
+            let (reply, receiver) = std::sync::mpsc::sync_channel(1);
+            let call = Call {
+                request: ControlRequest { id: 1, command },
+                cancelled: Default::default(),
+                reply,
+            };
+            (call, receiver)
         };
+        let (call, reply) = request(Command::SnapshotsList {});
+        s.control(call);
         assert_eq!(
-            invoke(Command::SnapshotsList {}).unwrap_err(),
+            reply.recv().unwrap().result.unwrap_err(),
             "Busy: snapshots loading"
         );
-        drop(invoke);
         s.loaded = true;
         for (command, expected) in [
             (
@@ -712,40 +717,38 @@ mod tests {
                 Some("NotFound: snapshot"),
             ),
             (Command::SnapshotsList {}, None),
-            (Command::SnapshotsClose {}, None),
         ] {
-            let (reply, rx) = std::sync::mpsc::sync_channel(1);
-            s.control(
-                Call {
-                    request: ControlRequest { id: 1, command },
-                    cancelled: Default::default(),
-                    reply,
-                },
-                &mut Tx::default(),
-            );
-            assert_eq!(rx.recv().unwrap().result.err().as_deref(), expected);
+            let (call, reply) = request(command);
+            s.control(call);
+            assert_eq!(reply.recv().unwrap().result.err().as_deref(), expected);
             assert_eq!(s.selected.as_deref(), Some("other"));
         }
-        let (reply, rx) = std::sync::mpsc::sync_channel(1);
-        s.control(
-            Call {
-                request: ControlRequest {
-                    id: 1,
-                    command: Command::SnapshotsOpen {
-                        id: Some("saved".into()),
-                    },
-                },
-                cancelled: Default::default(),
-                reply,
-            },
-            &mut Tx::default(),
-        );
+        let open = || {
+            request(Command::SnapshotsOpen {
+                id: Some("saved".into()),
+            })
+        };
+        let (call, reply) = open();
+        s.control(call);
         assert!(
-            matches!(rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
+            matches!(reply.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
             "opening replies only after the panel's final Busy check"
         );
+        assert_eq!(s.selected.as_deref(), Some("other"));
+        assert_eq!(s.query.text, "query");
+        assert_eq!(s.pending_delete.as_deref(), Some("other"));
+
+        let (call, reply) = open();
+        s.accept_open(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
         assert_eq!(s.selected.as_deref(), Some("saved"));
         assert!(s.query.text.is_empty());
+        assert!(s.pending_delete.is_none());
+
+        let (call, reply) = request(Command::SnapshotsClose {});
+        s.control_close(call);
+        assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
+        assert_eq!(s.selected.as_deref(), Some("saved"));
         assert!(received.try_recv().is_err());
     }
 

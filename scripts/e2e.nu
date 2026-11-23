@@ -253,6 +253,30 @@ def cli-stage [out: path, binary: path] {
             --app
             Dupin
         ) | ignore
+        let panel_closed = log-count $log 'dupin-trace: panel closed '
+        ^$binary open --query calculator --json | from json | ignore
+        (poll
+            $out
+            cli-before-snapshot-handoff
+            {|r| is-focused-query $r calculator }
+            find
+            --app
+            Dupin
+            --role
+            textfield
+            --first
+        ) | ignore
+        ^$binary snapshots open --id $id --json | from json | ignore
+        ^$binary snapshots close --json | from json | ignore
+        wait-for-log --after $panel_closed $log 'dupin-trace: panel closed '
+        (poll
+            $out
+            cli-snapshot-handoff-closed
+            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
+            list-windows
+            --app
+            Dupin
+        ) | ignore
         if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
             error make {msg: 'CLI controls changed the Snapshot archive or launch history'}
         }
