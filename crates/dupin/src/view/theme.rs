@@ -1,0 +1,167 @@
+use rune::tok;
+use rune::{Color, El, TextStyle, col, el, row, text};
+
+use crate::ui::ICON_SIZE;
+
+use super::header::HEADER_H;
+use super::results::{LIST_PAD, text_row};
+
+pub struct ResolvedTheme {
+    palette: tok::Theme,
+    pub accent: Color,
+    pub selected_text: Color,
+    pub destructive: Color,
+    scale: f32,
+    family: tok::Family,
+}
+impl std::ops::Deref for ResolvedTheme {
+    type Target = tok::Theme;
+    fn deref(&self) -> &Self::Target {
+        &self.palette
+    }
+}
+impl ResolvedTheme {
+    pub fn new(theme: &dupin_core::config::Theme, dark: bool) -> Self {
+        let c = if dark { &theme.dark } else { &theme.light };
+        let mut palette = tok::theme(dark);
+        fn color(value: &Option<String>, fallback: Color) -> Color {
+            value
+                .as_ref()
+                .and_then(|v| rune::color::hex(v))
+                .unwrap_or(fallback)
+        }
+        palette.card = color(&c.background, palette.card);
+        palette.text = color(&c.text, palette.text);
+        palette.text_secondary = color(&c.secondary, palette.text_secondary);
+        palette.hover = color(&c.hover, palette.hover);
+        palette.separator = color(&c.separator, palette.separator);
+        Self {
+            palette,
+            accent: color(&c.accent, tok::accent(0, dark)),
+            selected_text: color(&c.selected_text, Color::WHITE),
+            destructive: rune::color::hex(if dark { "#FF453A" } else { "#FF3B30" }).unwrap(),
+            scale: theme.font_size as f32 / 15.0,
+            family: match theme.font_family {
+                dupin_core::config::FontFamily::System => tok::Family::Sans,
+                dupin_core::config::FontFamily::Monospace => tok::Family::SystemMono,
+            },
+        }
+    }
+    pub fn font(&self, mut style: TextStyle) -> TextStyle {
+        style.size *= self.scale;
+        style.line_height *= self.scale;
+        style.family = self.family;
+        style
+    }
+}
+
+fn preview_geometry(theme: &dupin_core::config::Theme, avail_w: f32) -> (f32, f32, f32, usize) {
+    let n = if theme.row_height <= 72 { 3 } else { 2 };
+    let h = HEADER_H + 1.0 + 2.0 * LIST_PAD + n as f32 * theme.row_height as f32;
+    let w = theme.panel_width as f32;
+    // Reserve room for the view toggle and exact-value caption in the well.
+    let scale = (avail_w / w).min(104.0 / h).min(0.5);
+    (w, h, scale, n)
+}
+
+pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32) -> El {
+    let t = ResolvedTheme::new(theme, dark);
+    let (w, h, scale, n) = preview_geometry(theme, avail_w);
+    let radius = theme.corner_radius as f32;
+    let panel = col()
+        .w(w)
+        .h(h)
+        .radius(radius)
+        .continuous_corners()
+        .clip_rounded(radius)
+        .fill(t.card)
+        .border(1.0, t.text.alpha(0.08))
+        .child(
+            row()
+                .w_full()
+                .h(HEADER_H)
+                .px(18.0)
+                .gap(12.0)
+                .center_y()
+                .child(
+                    text("⌕")
+                        .font(t.font(TextStyle::new(24.0, 400.0).lh(30.0)))
+                        .color(t.text_secondary),
+                )
+                .child(
+                    text("gh dupin")
+                        .font(t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
+                        .color(t.text),
+                )
+                .child(el().size(2.0, 26.0).fill(t.accent)),
+        )
+        .child(divider(&t))
+        .child(col().w_full().py(LIST_PAD).children((0..n).map(|i| {
+            let on = i == 0;
+            text_row(
+                &t,
+                t.accent,
+                theme.row_height as f32,
+                on,
+                el().size(ICON_SIZE, ICON_SIZE)
+                    .radius(4.0)
+                    .fill(t.text_secondary.alpha(0.25)),
+                text(["dupin", "dupin-core", "dupin-mac"][i])
+                    .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
+                    .color(if on { t.selected_text } else { t.text })
+                    .truncate(),
+                "Repository · → Actions",
+            )
+        })));
+    el().size((w * scale).round(), (h * scale).round())
+        .a11y_hidden()
+        .child(panel.scale(scale).pin(
+            Some((w * scale - w) / 2.0),
+            Some((h * scale - h) / 2.0),
+            None,
+            None,
+        ))
+}
+
+pub(super) fn divider(t: &ResolvedTheme) -> El {
+    el().h(1.0).w_full().fill(t.separator)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn miniature_fits_both_axes_for_custom_geometry() {
+        for width in [400, 680, 900, 1200] {
+            for height in [52, 72, 100] {
+                let theme = dupin_core::config::Theme {
+                    panel_width: width,
+                    row_height: height,
+                    ..Default::default()
+                };
+                let (w, h, scale, n) = preview_geometry(&theme, 414.0);
+                assert!(w * scale <= 414.01);
+                assert!(h * scale <= 104.01);
+                assert!(scale <= 0.5);
+                assert_eq!(n, if height <= 72 { 3 } else { 2 });
+            }
+        }
+    }
+
+    #[test]
+    fn defaults_and_mode_overrides_resolve_independently() {
+        let mut theme = dupin_core::config::Theme::default();
+        assert_eq!(ResolvedTheme::new(&theme, false).text, tok::theme(false).text);
+        assert_eq!(ResolvedTheme::new(&theme, true).card, tok::theme(true).card);
+        theme.light.text = Some("#123456".into());
+        assert_ne!(ResolvedTheme::new(&theme, false).text, tok::theme(false).text);
+        assert_eq!(ResolvedTheme::new(&theme, true).text, tok::theme(true).text);
+        theme.font_size = 18;
+        theme.font_family = dupin_core::config::FontFamily::Monospace;
+        let font = ResolvedTheme::new(&theme, false).font(TextStyle::new(15.0, 400.0).lh(20.0));
+        assert_eq!(font.size, 18.0);
+        assert_eq!(font.line_height, 24.0);
+        assert_eq!(font.family, tok::Family::SystemMono);
+    }
+}
