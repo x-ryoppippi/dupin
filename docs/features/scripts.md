@@ -25,7 +25,7 @@ Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and 
 
 ## Hotkeys
 
-Use a [script binding](./configuration.md#hotkeys) to run a script by its filename. Each string in `args` becomes one argument. Omit `args` for a script that can run without arguments. Dupin checks the filename and arguments whenever the scripts or configuration change.
+Use a [script binding](./hotkeys.md#configuration) to run a script by its filename. Each string in `args` becomes one argument. Omit `args` for a script that can run without arguments. Dupin checks the filename and arguments whenever the scripts or configuration change.
 
 The script's output mode controls what the shortcut opens. `inline` opens the panel with the inline card. `full` opens Script Output. `silent` opens Script Output on failure.
 
@@ -95,3 +95,7 @@ exec claude -p "$1"
 The prompt is one argument: quote a multiword prompt in the argument field. The command runs with your installed CLI's own configuration and access; Dupin supplies no credentials or additional permissions.
 
 Scripts are trusted, unsandboxed native programs, separate from the extension permission system. Installing a script gives its code your user authority when you run it. Script discovery and enabling do not request macOS permissions.
+
+## Configuration
+
+Executable script commands live beside the configuration in the `scripts` directory. Their headers define their titles, arguments and output mode; no `config.toml` key is required.

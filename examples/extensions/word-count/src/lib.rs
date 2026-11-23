@@ -185,7 +185,7 @@ fn encode(text: &str) -> String {
         .collect()
 }
 
-// The ABI Dupin calls; see docs/extensions.md. Buffers live until the host drops this
+// The ABI Dupin calls; see docs/features/extensions.md. Buffers live until the host drops this
 // request's instance, so nothing is freed here.
 #[cfg(target_arch = "wasm32")]
 mod abi {

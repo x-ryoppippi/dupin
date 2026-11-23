@@ -20,7 +20,7 @@
 
 ## Quick start
 
-Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/configuration.md#freeing-the-hotkey)). Then install it with Homebrew (`dupin@nightly` for builds of `main`); it [updates itself](./docs/configuration.md#updates):
+Free ⌘Space first: turn off Spotlight's shortcut and unassign it in any other launcher ([how](./docs/features/hotkeys.md#freeing-the-hotkey)). Then install it with Homebrew (`dupin@nightly` for builds of `main`); it [updates itself](./docs/features/updates.md#updates):
 
 ```sh
 brew install --cask x-ryoppippi/tap/dupin
@@ -83,7 +83,7 @@ reply follows reconciliation. `--json` emits JSON values on success and an `erro
 on failure. `dupin --help` and `dupin --version` perform no app or configuration work.
 
 `dupin mcp` serves the same controls, with configuration reading and validation, to agents
-over the Model Context Protocol; see [MCP server](./docs/mcp.md).
+over the Model Context Protocol; see [MCP server](./docs/features/mcp.md).
 
 Pure headless examples (no resident instance required):
 
@@ -98,7 +98,7 @@ The extension commands accept the bounded
 versioned guest request contract, execute a
 module through the existing fuel/deadline-limited runtime, and validate its response.
 Imports (including OS/WASI imports) are forbidden. They test a module on its own; the
-launcher loads [extensions](docs/extensions.md) from the configuration folder. Headless rendering shows the returned text/detail/pair views without
+launcher loads [extensions](docs/features/extensions.md) from the configuration folder. Headless rendering shows the returned text/detail/pair views without
 executing actions or loading configuration, history or application providers.
 
 Local control uses length-prefixed JSON, one correlated request/reply per connection,
@@ -109,4 +109,4 @@ is never replaced; an owner-only socket with no listener is recovered on restart
 Picker and settings contention return Busy. Disconnecting cancels a pending picker.
 Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
 [--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
-See the [Snapshots usage guide](docs/usage.md#snapshots) for details.
+See the [Snapshots usage guide](docs/features/snapshots.md#snapshots) for details.

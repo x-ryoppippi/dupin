@@ -4,7 +4,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
@@ -28,6 +28,9 @@ use rune::{
 };
 
 use crate::scripts::catalog::Catalog;
+
+mod notice;
+use notice::{FileAction, FileOperation, Notices};
 
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
@@ -350,12 +353,9 @@ pub struct Ui {
     _scripts_watcher: Option<crate::catalog_watch::Watch>,
     pub action_screen: Option<ActionScreen>,
     next_lookup: u64,
-    notice_until: Option<f64>,
+    notices: Notices,
     pub session: Session,
     pub query: TextEdit,
-    /// A problem to show above the results until the panel next hides (a hotkey that
-    /// couldn't be registered, a broken config file).
-    pub notice: Option<String>,
     pub config_problem: Option<String>,
     pub hotkey_problem: Option<String>,
     pub registration_notice: Option<String>,
@@ -655,13 +655,12 @@ impl Ui {
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
             next_lookup: 0,
-            notice_until: None,
+            notices: Notices::default(),
             acknowledged_config: config.clone(),
             bindings_applied: false,
             session: registration.session,
             saver: crate::store::Saver::spawn(),
             query,
-            notice: None,
             config_problem,
             hotkey_problem: None,
             registration_notice: registration.notice,
@@ -1368,9 +1367,8 @@ impl Ui {
         }
         self.query.clear();
         self.shown = false;
-        self.notice = None;
+        self.notices.clear();
         self.selection_permission_required = false;
-        self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
@@ -1382,10 +1380,17 @@ impl Ui {
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
-        self.notice_until = None;
-        self.notice = Some(message);
+        self.show_persistent_notice(message, None, tx);
+    }
+
+    fn show_persistent_notice(&mut self, message: String, owner: Option<FileOperation>, tx: &mut Tx) {
+        self.notices.persistent(message, owner);
         tx.instant();
         self.show(tx);
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notices.message()
     }
 
     /// The field's text changed.
@@ -2158,28 +2163,25 @@ impl Ui {
                     self.query.set_selection(0, end);
                 }
                 Effect::Rename { row, path, name } => {
-                    let old = file_name(&path);
-                    self.on_worker(
-                        move || {
-                            dupin_mac::file_ops::rename(&path, &name).map(|renamed| {
-                                dupin_mac::file_actions::item(renamed, name.clone(), Vec::new())
-                            })
+                    self.on_file_worker(
+                        FileAction::Rename,
+                        path,
+                        move |path| {
+                            dupin_mac::file_ops::rename(path, &name)
+                                .map(|renamed| dupin_mac::file_actions::item(renamed, name, Vec::new()))
                         },
-                        move |ui, result, tx| match result {
-                            Ok(item) => {
-                                let notice = format!("Renamed to “{}”", item.display_title());
-                                ui.session.replace(&row, item);
-                                if ui
-                                    .action_screen
-                                    .as_ref()
-                                    .is_some_and(|screen| !screen.is_current(&ui.session))
-                                {
-                                    ui.action_screen = None;
-                                }
-                                ui.fetch_icons();
-                                ui.timed_notice(notice, tx);
+                        move |ui, _, item| {
+                            let notice = format!("Renamed to “{}”", item.display_title());
+                            ui.session.replace(&row, item);
+                            if ui
+                                .action_screen
+                                .as_ref()
+                                .is_some_and(|screen| !screen.is_current(&ui.session))
+                            {
+                                ui.action_screen = None;
                             }
-                            Err(error) => ui.show_notice(format!("Couldn't rename “{old}”: {error}"), tx),
+                            ui.fetch_icons();
+                            notice
                         },
                     );
                 }
@@ -2188,43 +2190,31 @@ impl Ui {
                     path,
                     folder,
                 } => {
-                    let name = file_name(&path);
                     let destination = file_name(&folder);
                     let files = self.file_transfers.clone();
-                    self.on_worker(
-                        move || {
-                            let result = match transfer {
-                                Transfer::Move => files.move_to(&path, &folder),
-                                Transfer::Copy => files.copy_to(&path, &folder),
-                            };
-                            (path, result)
+                    self.on_file_worker(
+                        FileAction::Transfer(transfer),
+                        path,
+                        move |path| match transfer {
+                            Transfer::Move => files.move_to(path, &folder),
+                            Transfer::Copy => files.copy_to(path, &folder),
                         },
-                        move |ui, (path, result), tx| {
-                            let (done, verb) = match transfer {
-                                Transfer::Move => ("Moved", "move"),
-                                Transfer::Copy => ("Copied", "copy"),
-                            };
-                            match result {
-                                Ok(output) => {
-                                    if transfer == Transfer::Move {
-                                        ui.session.forget_path(&path);
-                                        if ui
-                                            .action_screen
-                                            .as_ref()
-                                            .is_some_and(|screen| !screen.is_current(&ui.session))
-                                        {
-                                            ui.action_screen = None;
-                                        }
-                                    }
-                                    ui.timed_notice(
-                                        format!("{done} “{}” to “{destination}”", file_name(&output)),
-                                        tx,
-                                    );
-                                }
-                                Err(error) => {
-                                    ui.show_notice(format!("Couldn't {verb} “{name}”: {error}"), tx)
+                        move |ui, path, output| {
+                            if transfer == Transfer::Move {
+                                ui.session.forget_path(path);
+                                if ui
+                                    .action_screen
+                                    .as_ref()
+                                    .is_some_and(|screen| !screen.is_current(&ui.session))
+                                {
+                                    ui.action_screen = None;
                                 }
                             }
+                            let done = match transfer {
+                                Transfer::Move => "Moved",
+                                Transfer::Copy => "Copied",
+                            };
+                            format!("{done} “{}” to “{destination}”", file_name(&output))
                         },
                     );
                 }
@@ -2307,32 +2297,20 @@ impl Ui {
                         });
                     }
                     dupin_core::Action::Duplicate(path) => {
-                        let name = file_name(&path);
                         let files = self.file_transfers.clone();
-                        self.on_worker(
-                            move || files.duplicate(&path),
-                            move |ui, result, tx| match result {
-                                Ok(copy) => {
-                                    ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)
-                                }
-                                Err(error) => {
-                                    ui.show_notice(format!("Couldn't duplicate “{name}”: {error}"), tx)
-                                }
-                            },
+                        self.on_file_worker(
+                            FileAction::Duplicate,
+                            path,
+                            move |path| files.duplicate(path),
+                            |_, _, copy| format!("Duplicated as “{}”", file_name(&copy)),
                         );
                     }
                     dupin_core::Action::Compress(path) => {
-                        let name = file_name(&path);
-                        self.on_worker(
-                            move || dupin_mac::file_ops::compress(&path),
-                            move |ui, result, tx| match result {
-                                Ok(archive) => {
-                                    ui.timed_notice(format!("Compressed to “{}”", file_name(&archive)), tx)
-                                }
-                                Err(error) => {
-                                    ui.show_notice(format!("Couldn't compress “{name}”: {error}"), tx)
-                                }
-                            },
+                        self.on_file_worker(
+                            FileAction::Compress,
+                            path,
+                            dupin_mac::file_ops::compress,
+                            |_, _, archive| format!("Compressed to “{}”", file_name(&archive)),
                         );
                     }
                     dupin_core::Action::OpenWith { path, application } => self
@@ -2352,17 +2330,15 @@ impl Ui {
                     action: dupin_core::Action::Trash(path),
                 } => {
                     self.action_screen = None;
-                    let name = file_name(&path);
-                    self.on_worker(
-                        move || dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path)),
-                        move |ui, result, tx| match result {
-                            Ok(()) => {
-                                ui.session.forget(&id);
-                                ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
-                            }
-                            Err(error) => {
-                                ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
-                            }
+                    self.on_file_worker(
+                        FileAction::Trash,
+                        path,
+                        |path| {
+                            dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path.to_owned()))
+                        },
+                        move |ui, path, ()| {
+                            ui.session.forget(&id);
+                            format!("Moved “{}” to the Trash", file_name(path))
                         },
                     );
                 }
@@ -2507,27 +2483,49 @@ impl Ui {
 
     /// Run a file operation off the main thread and report its result back on it. A relaunch
     /// waits until it has finished.
-    fn on_worker<T: Send + 'static>(
+    fn on_file_worker<T: Send + 'static>(
         &self,
-        work: impl FnOnce() -> T + Send + 'static,
-        done: impl FnOnce(&mut Ui, T, &mut Tx) + Send + 'static,
+        action: FileAction,
+        path: PathBuf,
+        work: impl FnOnce(&Path) -> Result<T, String> + Send + 'static,
+        done: impl FnOnce(&mut Ui, &Path, T) -> String + Send + 'static,
     ) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
+        let operation = FileOperation { action, path };
         std::thread::spawn(move || {
-            let result = work();
-            me.update(move |ui, tx| done(ui, result, tx));
+            let result = work(&operation.path);
+            me.update(move |ui, tx| match result {
+                Ok(output) => {
+                    let message = done(ui, &operation.path, output);
+                    ui.show_timed_notice(message, Some(&operation), tx);
+                }
+                Err(error) => {
+                    let name = file_name(&operation.path);
+                    let what = match operation.action {
+                        FileAction::Rename => format!("rename “{name}”"),
+                        FileAction::Transfer(Transfer::Move) => format!("move “{name}”"),
+                        FileAction::Transfer(Transfer::Copy) => format!("copy “{name}”"),
+                        FileAction::Duplicate => format!("duplicate “{name}”"),
+                        FileAction::Compress => format!("compress “{name}”"),
+                        FileAction::Trash => format!("move “{name}” to the Trash"),
+                    };
+                    ui.show_persistent_notice(format!("Couldn't {what}: {error}"), Some(operation), tx);
+                }
+            });
             drop(busy);
         });
     }
 
     fn timed_notice(&mut self, notice: String, tx: &mut Tx) {
-        if self.notice.is_some() && self.notice_until.is_none() {
-            return;
+        self.show_timed_notice(notice, None, tx);
+    }
+
+    fn show_timed_notice(&mut self, message: String, owner: Option<&FileOperation>, tx: &mut Tx) {
+        let until = tx.clock() + 5.0;
+        if self.notices.timed(message, owner, until) {
+            tx.wake_at(until);
         }
-        self.notice = Some(notice);
-        self.notice_until = Some(tx.clock() + 5.0);
-        tx.wake_at(tx.clock() + 5.0);
     }
 
     pub fn set_panel_window(&mut self, window: rune::WindowHandle) {
@@ -2609,12 +2607,7 @@ impl Ui {
             tx.wake_at(clock + 0.05);
         }
         let due = take_due(&mut self.deadlines, clock);
-        let mut changed = false;
-        if self.notice_until.is_some_and(|due| clock >= due) {
-            self.notice_until = None;
-            self.notice = None;
-            changed = true;
-        }
+        let mut changed = self.notices.expire(clock);
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
                 if let Some(worker) = self.searchers.get(&id) {

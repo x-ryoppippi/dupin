@@ -4,7 +4,7 @@ The search and ranking model must remain independent of UI frameworks and operat
 
 ## Providers
 
-Every source of results is a `Provider` that streams batches of `Item`s and stops when its request is superseded. A `Request` carries the query, candidate budget and an optional `page` for a pushed view. Apps, file names and file contents each have a provider. Each loaded [extension](extensions.md) has a provider that runs the Wasm guest through `dupin-plugin-runtime` and turns the returned views and actions into items.
+Every source of results is a `Provider` that streams batches of `Item`s and stops when its request is superseded. A `Request` carries the query, candidate budget and an optional `page` for a pushed view. Apps, file names and file contents each have a provider. Each loaded [extension](./features/extensions.md) has a provider that runs the Wasm guest through `dupin-plugin-runtime` and turns the returned views and actions into items.
 
 An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (title/subtitle), Detail (title/body), or Pair (source/result). It also carries its stable ID, icon path, matched title characters, optional score, action list and primary/alternate action IDs. `display_title()` returns the Text/Detail title or Pair source. Explicit `record_usage` metadata controls history recording; apps/files opt in and dictionary results opt out, independently of view.
 
@@ -14,7 +14,7 @@ Registered routes and shared internal views advance the plugin migration. Native
 
 ## Searching off the main thread
 
-Trusted [script commands](./scripts.md) use a separate native execution path. Discovery only reads bounded headers; activation runs the executable directly on a worker with bounded output and an owned process group. The lifecycle lock serializes spawning and group registration with synchronous quit cleanup. Script operations are absent from the guest protocol.
+Trusted [script commands](./features/scripts.md) use a separate native execution path. Discovery only reads bounded headers; activation runs the executable directly on a worker with bounded output and an owned process group. The lifecycle lock serializes spawning and group registration with synchronous quit cleanup. Script operations are absent from the guest protocol.
 
 Each provider runs on its own long-lived thread behind a `Searcher`. The newest request wins: queued requests never start, a running one sees `Request::is_cancelled`, and its late batches are dropped before they reach the UI. A dedicated thread, rather than a pool, lets the Spotlight provider turn that thread's run loop, which `NSMetadataQuery` delivers through.
 

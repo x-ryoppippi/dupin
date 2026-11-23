@@ -1,0 +1,59 @@
+hotkey = "cmd+space"
+selection_hotkey = ""
+show_recent = true
+file_limit = 200
+file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
+dictionary_keywords = ["define", "d"]
+window_management = false
+calculator = true
+calculator_currency = false
+web_fallbacks = []
+snippet_keywords = ["snip"]
+snippet_paste = false
+display = "mouse"
+position = "center"
+input_source = "ascii"
+auto_update = true
+system_automation = false
+backdrop = "off"
+extensions = false
+
+[bindings]
+
+[web_searches.g]
+name = "Google"
+url = "https://www.google.com/search?q={query}"
+
+[web_searches.gh]
+name = "GitHub"
+url = "https://github.com/search?q={query}"
+
+[web_searches.maps]
+name = "Apple Maps"
+url = "maps://?q={query}"
+
+[web_searches.yt]
+name = "YouTube"
+url = "https://www.youtube.com/results?search_query={query}"
+
+[snippets]
+
+[theme]
+panel_width = 680
+row_height = 52
+corner_radius = 14
+font_size = 15
+font_family = "system"
+
+[theme.light]
+
+[theme.dark]
+
+[calendar]
+enabled = false
+
+[clipboard]
+enabled = false
+max_entries = 200
+max_entry_bytes = 65536
+ignored_apps = ["com.apple.keychainaccess", "com.apple.Passwords", "com.1password.1password", "com.agilebits.onepassword7", "com.bitwarden.desktop"]

@@ -4,6 +4,12 @@ An extension is a WebAssembly module that answers one keyword. Type its keyword 
 
 ## Turning them on
 
+`extensions` turns on extensions: third-party Wasm modules in `extensions/` beside `config.toml`, each answering its own keyword. It is off by default; Settings → Search has the same switch.
+
+```toml
+extensions = false # run Wasm extensions from the extensions folder beside config.toml
+```
+
 Switch on **Extensions** in Settings → Search, or set this in `config.toml`:
 
 ```toml
@@ -28,7 +34,7 @@ Nothing else is reachable. A module that imports anything, including WASI, is re
 | Rows and actions per row | 50 and 8              |
 | Extensions read          | 64 folders            |
 
-Typing again cancels the running query. A trap, an exhausted budget or an invalid response becomes a "_Name_ failed" row with the reason; it never affects Dupin or other extensions. [The protocol](plugin-protocol.md) has the full message format and field limits.
+Typing again cancels the running query. A trap, an exhausted budget or an invalid response becomes a "_Name_ failed" row with the reason; it never affects Dupin or other extensions. [The protocol](../plugin-protocol.md) has the full message format and field limits.
 
 ## Views
 
@@ -95,7 +101,7 @@ The module exports a memory named `memory` and three functions:
 - `dupin_alloc(len: i32) -> i32` returns a buffer of `len` bytes;
 - `dupin_query(input: i32, len: i32, output: i32, cap: i32) -> i32` reads the JSON request at `input`, writes the JSON response to `output` and returns its length, or a negative number on failure.
 
-[`examples/extensions/word-count`](../examples/extensions/word-count) is a complete Rust extension. It uses the `dupin-plugin-protocol` crate for the message types. To build and install it with `rustup`:
+[`examples/extensions/word-count`](../../examples/extensions/word-count) is a complete Rust extension. It uses the `dupin-plugin-protocol` crate for the message types. To build and install it with `rustup`:
 
 ```sh
 rustup target add wasm32-unknown-unknown

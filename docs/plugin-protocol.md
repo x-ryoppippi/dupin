@@ -2,7 +2,7 @@
 
 This is the first executable part of [the plugin proposal](plugin-design.md),
 tracked by #6, #7 and #96. It is not a stable SDK. The launcher runs it for
-[user extensions](extensions.md), which have no host imports. Capability
+[user extensions](./features/extensions.md), which have no host imports. Capability
 brokerage, streaming, forms and state persistence remain separate work.
 
 `dupin-plugin-protocol` has only Serde dependencies and is shared by hosts and

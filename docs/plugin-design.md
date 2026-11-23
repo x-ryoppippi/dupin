@@ -4,7 +4,7 @@ Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96.
 
 ## Product boundary
 
-[Script commands](./scripts.md) are a separate trusted native path. They are not sandboxed extensions and give guest plugins no grants or access to process execution.
+[Script commands](./features/scripts.md) are a separate trusted native path. They are not sandboxed extensions and give guest plugins no grants or access to process execution.
 
 Dupin provides an input field, input routing, result selection, host-rendered views,
 actions and plugin execution. App search, file search, dictionary, calculator,
@@ -104,7 +104,7 @@ limits, with an explicit host import if an evaluator also needs cooperative chec
 The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
 messages, versions, correlation and per-request guest-memory ownership with a
 real calculator guest. Its runtime-independent Text/Detail/Pair view type is
-shared by launcher items. [User extensions](extensions.md) run it in the
+shared by launcher items. [User extensions](./features/extensions.md) run it in the
 launcher: an opt-in folder of manifests, one keyword command each, guest
 cancellation and deadlines, copy/web-URL actions, and views the guest pushes
 onto a host-owned navigation stack and describes as lists or detail pages. They
