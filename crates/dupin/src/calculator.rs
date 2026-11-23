@@ -1,6 +1,6 @@
 use std::borrow::Cow;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
@@ -44,6 +44,7 @@ pub(super) struct Calculator {
 enum Answer {
     Value { display: String, number: String },
     RatesUnavailable,
+    RateMissing(String),
 }
 
 impl Provider for Calculator {
@@ -62,6 +63,7 @@ impl Provider for Calculator {
             let (result, copy) = match answer {
                 Answer::Value { display, number } => (display, Some(number)),
                 Answer::RatesUnavailable => ("Exchange rates unavailable".into(), None),
+                Answer::RateMissing(code) => (format!("No ECB rate for {code}"), None),
             };
             emit(vec![Item {
                 id: "answer".into(),
@@ -111,7 +113,7 @@ fn calculate(
     let input = euro_input(input);
     let mut context = Context::new();
     let used = Arc::new(AtomicBool::new(false));
-    let missing = Arc::new(AtomicBool::new(false));
+    let missing = Arc::new(OnceLock::new());
     if currency_enabled {
         context.set_exchange_rate_handler_v2(RateLookup {
             rates: snapshot.map(|snapshot| snapshot.rates.clone()),
@@ -126,10 +128,12 @@ fn calculate(
             number,
         });
     }
-    if missing.load(Ordering::Relaxed) || snapshot.is_none() {
+    let Some(snapshot) = snapshot else {
         return Some(Answer::RatesUnavailable);
+    };
+    if let Some(code) = missing.get() {
+        return Some(Answer::RateMissing(code.clone()));
     }
-    let snapshot = snapshot?;
     let (amount, number) = if let Some(code) = result_currency(&result, &snapshot.rates) {
         let explicit = source
             .split_whitespace()
@@ -184,7 +188,7 @@ fn calculate(
 struct RateLookup {
     rates: Option<Arc<currency::Rates>>,
     used: Arc<AtomicBool>,
-    missing: Arc<AtomicBool>,
+    missing: Arc<OnceLock<String>>,
 }
 
 impl ExchangeRateFnV2 for RateLookup {
@@ -198,7 +202,7 @@ impl ExchangeRateFnV2 for RateLookup {
             return Ok(*rate);
         }
         // Allow fend to validate the expression. The caller discards any result using a placeholder.
-        self.missing.store(true, Ordering::Relaxed);
+        self.missing.get_or_init(|| currency.to_owned());
         Ok(1.0)
     }
 }
@@ -406,7 +410,7 @@ mod tests {
         }
         assert_eq!(
             currency_answer("100 usd to CHF", Some(&snapshot)),
-            Some(Answer::RatesUnavailable)
+            Some(Answer::RateMissing("CHF".into()))
         );
         for query in [
             "100 usd to",
