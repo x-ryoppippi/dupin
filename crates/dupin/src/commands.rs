@@ -8,6 +8,7 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+pub const SCRIPTS: &str = "scripts.search";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -18,6 +19,7 @@ pub struct Registration {
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
+    pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
 }
 
@@ -145,8 +147,19 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         )
         .with_fallback(),
     )?;
+    registry.register(CommandSpec::new(
+        id(SCRIPTS),
+        8,
+        presentation("Search scripts", None, None, None, false, 0.0),
+    ))?;
     registry.set_default_providers(
-        vec![apps_id, id(SETTINGS), id(WEB_KEYWORDS), id(WEB_FALLBACKS)],
+        vec![
+            apps_id,
+            id(SCRIPTS),
+            id(SETTINGS),
+            id(WEB_KEYWORDS),
+            id(WEB_FALLBACKS),
+        ],
         Some(id(WEB_KEYWORDS)),
     )?;
 
@@ -187,8 +200,13 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
+    let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
     let providers: HashMap<_, Arc<dyn Provider>> = [
         (apps_id, apps as Arc<dyn Provider>),
+        (
+            id(SCRIPTS),
+            Arc::new(crate::scripts::provider::ScriptsProvider(scripts.clone())) as Arc<dyn Provider>,
+        ),
         (
             id(SETTINGS),
             Arc::new(dupin_mac::SettingsProvider::default()) as Arc<dyn Provider>,
@@ -225,6 +243,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
         notice,
         web,
         file_demotions,
+        scripts,
     })
 }
 

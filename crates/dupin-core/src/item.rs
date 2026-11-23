@@ -16,6 +16,8 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    ScriptArguments(PathBuf),
+    RunScript(crate::script::ScriptRun),
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

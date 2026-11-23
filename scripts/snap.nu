@@ -17,7 +17,7 @@ def main [
     let tmp = mktemp --directory
     let config = $tmp | path join config
     cp --recursive scripts/headless/config $config
-    let shots = with-env {XDG_CONFIG_HOME: $config} { glob scripts/headless/*.json | sort | each {|script|
+    let shots = with-env {XDG_CONFIG_HOME: $config, XDG_DATA_HOME: ($tmp | path join data), HOME: $tmp} { glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
         let tree = $tmp | path join $"($name).json"
         headless $bin --script $script --realtime --tree $tree --at mark:end

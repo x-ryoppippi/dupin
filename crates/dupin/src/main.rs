@@ -118,6 +118,24 @@ fn main() {
         let running = running.clone();
         move || snapshots::Snapshots::new(panel, me, running)
     });
+    let scripts = App::new(AppSpec {
+        fonts,
+        families: FAMILIES,
+        on_key: Some(scripts::output::Output::key),
+        ..AppSpec::new(
+            "Dupin Script Output",
+            (900.0, 600.0),
+            || unreachable!(),
+            scripts::output::view,
+        )
+    })
+    .srgb_blend(true)
+    .on_close(scripts::output::Output::closed);
+    let scripts_handle = scripts.handle();
+    let scripts = scripts.init({
+        let panel = handle.clone();
+        move || scripts::output::Output::new(panel)
+    });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
@@ -154,6 +172,7 @@ fn main() {
                         panel: handle,
                         prefs: prefs_handle,
                         snapshots: snapshots_handle,
+                        scripts: scripts_handle,
                     },
                     updater,
                     configuration,
@@ -174,6 +193,7 @@ fn main() {
             }
         })
         .on_frame_encoded(trace::frame)
+        .on_quit(|s, _| s.kill_scripts())
         .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
             if !focused && !s.preview_focus_is_active() {
@@ -199,7 +219,13 @@ fn main() {
                 ..Default::default()
             })
             .into();
-        [panel, prefs, snapshots]
+        let scripts: rune::AnyWindowSpec = WindowSpec::from_app("scripts", scripts)
+            .options(WindowOptions {
+                min_size: Some((720.0, 420.0)),
+                ..Default::default()
+            })
+            .into();
+        [panel, prefs, snapshots, scripts]
     });
 }
 

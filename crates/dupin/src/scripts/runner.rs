@@ -398,7 +398,8 @@ mod tests {
     use dupin_core::script::OutputMode;
     use std::{fs, os::unix::fs::PermissionsExt, sync::Barrier};
 
-    fn lifecycle() -> (Arc<Lifecycle>, Arc<Mutex<Vec<(i32, i32)>>>) {
+    type RecordedSignals = Arc<Mutex<Vec<(i32, i32)>>>;
+    fn lifecycle() -> (Arc<Lifecycle>, RecordedSignals) {
         let signals = Arc::new(Mutex::new(Vec::new()));
         let captured = signals.clone();
         let lifecycle = Arc::new(Lifecycle {

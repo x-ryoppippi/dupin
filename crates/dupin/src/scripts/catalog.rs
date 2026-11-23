@@ -164,6 +164,20 @@ mod tests {
                 catalog.scripts[&root.0.join("echo.sh")].header.icon,
                 Some(root.0.join("icon.svg"))
             );
+            let provider =
+                super::super::provider::ScriptsProvider(std::sync::Arc::new(std::sync::RwLock::new(catalog)));
+            let mut rows = Vec::new();
+            dupin_core::Provider::search(
+                &provider,
+                &dupin_core::Request::detached("echo", 1),
+                &mut |items| rows.extend(items),
+            )
+            .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert!(matches!(
+                rows[0].action("run"),
+                Some(dupin_core::Action::RunScript(_))
+            ));
             assert!(!marker.exists());
         }
     }

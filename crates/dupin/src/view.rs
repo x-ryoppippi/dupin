@@ -97,6 +97,48 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                 .effect_data([accent.r, accent.g, accent.b, if dark { 1.0 } else { 0.0 }]),
         );
     }
+    if let Some(entry) = &s.script_entry {
+        let preview = if !s.script_entry_current() {
+            "Script list changed — Esc to go back".into()
+        } else {
+            entry
+                .command()
+                .map(|command| format!("{:?}", command.args))
+                .unwrap_or_else(|problem| problem)
+        };
+        return panel
+            .child(
+                row()
+                    .w_full()
+                    .h(HEADER_H)
+                    .px(18.0)
+                    .gap(12.0)
+                    .center_y()
+                    .child(
+                        text(&entry.script.header.title)
+                            .font(t.font(type_::BODY))
+                            .color(accent),
+                    )
+                    .child(
+                        text_input(&entry.query, t.font(TextStyle::new(22.0, 400.0)))
+                            .key("script-arguments")
+                            .label("Script arguments")
+                            .single_line()
+                            .grow(1.0)
+                            .color(t.text)
+                            .on_edit(|s: &mut Ui| &mut s.script_entry.as_mut().unwrap().query)
+                            .on_input_key(Ui::script_entry_key),
+                    ),
+            )
+            .child(divider(&t))
+            .child(
+                text(preview)
+                    .font(t.font(type_::BODY))
+                    .color(t.text_secondary)
+                    .padding(18.0)
+                    .wrap(),
+            );
+    }
     panel = panel.child(if s.action_screen.is_some() {
         action_header(s, &t)
     } else {
@@ -106,6 +148,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         ("config-problem", s.config_problem.as_deref()),
         ("notice", s.notice.as_deref()),
         ("registration-notice", s.registration_notice.as_deref()),
+        ("scripts-notice", s.scripts_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
@@ -117,6 +160,43 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
                     .wrap()
                     .w_full(),
             ),
+        );
+    }
+    if let Some(card) = &s.script_card {
+        use crate::scripts::runner::Status;
+        let status = match &card.status {
+            Status::Running => "Running… · ⌘. Cancel".into(),
+            Status::Exited(Some(0)) => "Finished · Enter to copy".into(),
+            Status::Exited(code) => format!("Exited {code:?}: {}", card.output.stderr_tail()),
+            Status::Cancelled => "Cancelled".into(),
+            Status::Failed(problem) => problem.clone(),
+        };
+        return panel.child(divider(&t)).child(
+            col()
+                .w_full()
+                .gap(12.0)
+                .padding(18.0)
+                .child(
+                    text(format!(
+                        "{} · {:.1}s",
+                        card.command.title,
+                        card.elapsed.as_secs_f64()
+                    ))
+                    .font(t.font(type_::BODY))
+                    .color(t.text_secondary),
+                )
+                .child(
+                    text(card.output.last_stdout().unwrap_or(""))
+                        .font(t.font(type_::BODY))
+                        .color(t.text)
+                        .wrap(),
+                )
+                .child(
+                    text(status)
+                        .font(t.font(type_::LABEL))
+                        .color(t.text_secondary)
+                        .wrap(),
+                ),
         );
     }
     for (origin, failure) in s.session.failures() {

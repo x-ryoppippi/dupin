@@ -58,6 +58,7 @@ pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
     pub snapshots: AppHandle<crate::snapshots::Snapshots>,
+    pub scripts: AppHandle<crate::scripts::output::Output>,
 }
 
 pub struct Configuration {
@@ -139,6 +140,12 @@ pub struct Ui {
     control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
+    pub script_entry: Option<crate::scripts::entry::Entry>,
+    pub script_card: Option<crate::scripts::runner::Snapshot>,
+    pub scripts_notice: Option<String>,
+    scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
+    runner: crate::scripts::runner::Runner,
+    _scripts_watcher: Option<dupin_mac::watcher::PathWatcher>,
     pub action_screen: Option<ActionScreen>,
     pub session: Session,
     pub query: TextEdit,
@@ -180,6 +187,8 @@ pub struct Ui {
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
     snapshots: AppHandle<crate::snapshots::Snapshots>,
+    script_output: AppHandle<crate::scripts::output::Output>,
+    script_output_after_close: Option<u64>,
 }
 
 impl Ui {
@@ -287,14 +296,26 @@ impl Ui {
             panel: me,
             prefs,
             snapshots,
+            scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
+        let runner = crate::scripts::runner::Runner::new(
+            std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default(),
+            running.clone(),
+            Arc::new({
+                let me = me.clone();
+                move |id| me.update(move |s, tx| s.script_changed(id, tx))
+            }),
+        );
+        let scripts_watcher = crate::scripts::watch(me.clone());
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
-            move || me.update(|s, tx| s.refresh_apps(tx))
+            move || me.update(|s, tx| s.refresh_default(tx))
         });
         let apps_watcher = match apps_watcher {
             Ok(watcher) => Some(watcher),
@@ -332,6 +353,14 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            script_output,
+            script_output_after_close: None,
+            script_entry: None,
+            script_card: None,
+            scripts_notice: None,
+            scripts: registration.scripts,
+            runner,
+            _scripts_watcher: scripts_watcher,
             picker: None,
             control_save: None,
             theme: config.theme.clone(),
@@ -498,7 +527,10 @@ impl Ui {
     /// Automatic updates wait for both windows to hide; an explicit request closes them.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
         if request == Restart::Update
-            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+            && (self.me.is_visible()
+                || self.prefs.is_visible()
+                || self.snapshots.is_visible()
+                || self.script_output.is_visible())
         {
             self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
@@ -616,6 +648,9 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if let Some(id) = self.script_output_after_close.take() {
+            self.show_script_output(id);
+        }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
         }
@@ -626,6 +661,8 @@ impl Ui {
     }
 
     fn hide(&mut self, tx: &mut Tx) {
+        self.script_entry = None;
+        self.script_card = None;
         crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
         if let Some(preview) = self.quick_look.borrow().as_ref() {
@@ -641,6 +678,7 @@ impl Ui {
         tx.close_window();
         if !self.settings_after_close
             && !self.snapshots_after_close
+            && self.script_output_after_close.is_none()
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -656,6 +694,7 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        self.script_card = None;
         if let Some(picker) = &mut self.picker {
             picker.selected = 0;
             tx.instant();
@@ -749,6 +788,28 @@ impl Ui {
             tx.instant();
             return true;
         }
+        if self.script_entry.is_some() {
+            return self.script_entry_key(ev, tx);
+        }
+        if let Some(card) = &self.script_card {
+            if ev.mods.cmd && matches!(ev.key, Key::Command('o')) {
+                self.show_script_output(card.id);
+                return true;
+            }
+            if matches!(ev.key, Key::Enter) {
+                if card.status != crate::scripts::runner::Status::Exited(Some(0)) {
+                    return true;
+                }
+                if let Some(text) = card.output.last_stdout() {
+                    tx.copy(text.to_owned());
+                }
+                return true;
+            }
+            if ev.mods.cmd && matches!(ev.key, Key::Command('.')) {
+                self.runner.cancel(card.id);
+                return true;
+            }
+        }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
             match self.session.capture() {
                 Ok(saved) => {
@@ -820,6 +881,23 @@ impl Ui {
         }
         let m = ev.mods;
         let plain = !(m.cmd || m.ctrl || m.alt);
+        if plain
+            && !m.shift
+            && matches!(ev.key, Key::Tab | Key::Right)
+            && self.query.anchor == self.query.focus
+            && self.query.focus == self.query.text.len()
+            && self
+                .session
+                .selected_item()
+                .is_some_and(|item| item.action(crate::scripts::provider::ARGUMENTS).is_some())
+        {
+            let key = self.session.result_key(self.session.selected());
+            let effects = self
+                .session
+                .run_key_action(&key, crate::scripts::provider::ARGUMENTS);
+            self.apply(effects, tx);
+            return true;
+        }
         let intent = match &ev.key {
             Key::Tab
                 if plain
@@ -913,7 +991,124 @@ impl Ui {
         }
     }
 
-    fn refresh_apps(&mut self, tx: &mut Tx) {
+    pub fn scripts_catalog(&mut self, catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
+        self.scripts_notice = catalog.notice.clone();
+        *self.scripts.write().unwrap() = catalog;
+        self.refresh_default(tx);
+    }
+
+    pub fn script_entry_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self
+            .script_entry
+            .as_ref()
+            .is_some_and(|entry| entry.query.is_composing())
+        {
+            return false;
+        }
+        if matches!(ev.key, Key::Escape)
+            || (matches!(ev.key, Key::Backspace)
+                && self
+                    .script_entry
+                    .as_ref()
+                    .is_some_and(|e| e.query.text.is_empty()))
+        {
+            self.script_entry = None;
+            tx.focus("query", false);
+            return true;
+        }
+        if matches!(ev.key, Key::Enter) {
+            let entry = self.script_entry.as_ref().unwrap();
+            if entry.is_current(&self.session, &self.scripts.read().unwrap())
+                && let Ok(command) = entry.command()
+            {
+                let entry = self.script_entry.take().unwrap();
+                let effects = self.session.run_key_followup(
+                    &entry.key,
+                    crate::scripts::provider::ARGUMENTS,
+                    crate::scripts::provider::run_action(command),
+                );
+                self.apply(effects, tx);
+            }
+            return true;
+        }
+        false
+    }
+
+    pub fn script_entry_current(&self) -> bool {
+        self.script_entry
+            .as_ref()
+            .is_some_and(|entry| entry.is_current(&self.session, &self.scripts.read().unwrap()))
+    }
+
+    pub fn kill_scripts(&mut self) {
+        self.runner.kill_all_now();
+    }
+
+    pub fn cancel_script(&mut self, id: u64) {
+        self.runner.cancel(id);
+    }
+    pub fn repeat_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        self.start_script(command, tx);
+    }
+    pub fn show_script_output(&self, id: u64) {
+        let runs = self.runner.snapshots();
+        self.script_output.update(move |s, _| s.update(runs, Some(id)));
+        self.script_output.open();
+    }
+
+    fn script_changed(&mut self, id: crate::scripts::runner::RunId, tx: &mut Tx) {
+        use crate::scripts::runner::Status;
+        let runs = self.runner.snapshots();
+        if let Some(snapshot) = runs.iter().find(|run| run.id == id) {
+            let failed = matches!(snapshot.status, Status::Failed(_) | Status::Exited(None))
+                || matches!(snapshot.status,Status::Exited(Some(code)) if code!=0);
+            if failed
+                && (snapshot.command.mode == dupin_core::script::OutputMode::Silent || !self.me.is_visible())
+            {
+                self.show_script_output(id);
+            }
+            if self.script_card.as_ref().is_some_and(|card| card.id == id) {
+                self.script_card = Some(snapshot.clone());
+                tx.instant();
+            }
+        }
+        self.script_output.update(move |s, _| s.update(runs, None));
+    }
+
+    fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
+        let valid = self
+            .scripts
+            .read()
+            .unwrap()
+            .scripts
+            .get(&command.path)
+            .is_some_and(|s| {
+                s.header.title == command.title
+                    && s.header.mode == command.mode
+                    && s.header.bind_args(&command.args).is_ok()
+            });
+        if !valid {
+            self.show_notice("Script changed — search again before running it.".into(), tx);
+            return;
+        }
+        let mode = command.mode;
+        match self.runner.start(command) {
+            Ok(id) => {
+                if mode == dupin_core::script::OutputMode::Inline {
+                    self.script_card = self.runner.snapshots().into_iter().find(|run| run.id == id);
+                } else if mode == dupin_core::script::OutputMode::Full {
+                    self.script_output_after_close = Some(id);
+                    if !self.me.is_visible() {
+                        self.script_output_after_close = None;
+                        self.show_script_output(id);
+                    }
+                }
+            }
+            Err(problem) => self.show_notice(problem, tx),
+        }
+    }
+
+    fn refresh_default(&mut self, tx: &mut Tx) {
         if self.session.command_id().as_str() == crate::commands::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
@@ -946,6 +1141,7 @@ impl Ui {
                     query,
                 } => {
                     self.action_screen = None;
+                    self.script_card = None;
                     let spec = self.session.provider_spec(&command).expect("registered provider");
                     let limit = spec.candidate_limit();
                     let due = tx.clock() + spec.deadline.as_secs_f64();
@@ -976,6 +1172,26 @@ impl Ui {
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
+                    dupin_core::Action::RunScript(command) => self.start_script(command, tx),
+                    dupin_core::Action::ScriptArguments(path) => {
+                        let script = self.scripts.read().unwrap().scripts.get(&path).cloned();
+                        if let Some(script) = script
+                            && self
+                                .session
+                                .selected_item()
+                                .and_then(|item| item.action(crate::scripts::provider::ARGUMENTS))
+                                == Some(&dupin_core::Action::ScriptArguments(path))
+                        {
+                            let mut query = TextEdit::new("");
+                            query.focused = true;
+                            self.script_entry = Some(crate::scripts::entry::Entry {
+                                key: self.session.result_key(self.session.selected()),
+                                script,
+                                query,
+                            });
+                            tx.focus("script-arguments", false);
+                        }
+                    }
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
