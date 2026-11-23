@@ -199,7 +199,7 @@ impl Session {
         }
         self.clear_results();
         self.command = command;
-        self.explicit = saved.explicit;
+        self.explicit = saved.explicit || self.command != *self.commands.default();
         self.query = saved.query.clone();
         self.recalled = None;
         self.deleting = false;

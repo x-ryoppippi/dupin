@@ -5,6 +5,7 @@ pub struct Snapshots {
     store: Store,
     query: TextEdit,
     selected: Option<String>,
+    pending_delete: Option<String>,
     problem: Option<String>,
     panel: AppHandle<crate::ui::Ui>,
 }
@@ -24,6 +25,7 @@ impl Snapshots {
             store: Store::load(directory),
             query,
             selected: None,
+            pending_delete: None,
             problem: None,
             panel,
         }
@@ -46,10 +48,12 @@ impl Snapshots {
             return false;
         }
         self.selected = Some(id.into());
+        self.pending_delete = None;
         true
     }
 
     pub fn delete(&mut self, id: &str) {
+        self.pending_delete = None;
         match self.store.delete(id) {
             Ok(()) => {
                 self.selected = None;
@@ -77,14 +81,10 @@ impl Snapshots {
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         match ev.key {
             Key::Command('f') => tx.focus("snapshot-search", false),
+            Key::Escape if self.pending_delete.is_some() => self.pending_delete = None,
             Key::Escape => tx.close_window(),
             Key::Command('r') => self.resume(),
             Key::Command('w') => tx.close_window(),
-            Key::Backspace if ev.mods.cmd => {
-                if let Some(id) = self.selected.clone() {
-                    self.delete(&id);
-                }
-            }
             Key::Down | Key::Up => {
                 let entries: Vec<_> = self
                     .store
@@ -157,6 +157,8 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
         .scroll(ScrollSpec { stick_bottom: false });
     if let Some(saved) = s.selected.as_deref().and_then(|id| s.store.open(id)) {
         let id = saved.id.clone();
+        let pending_delete = s.pending_delete.as_deref() == Some(id.as_str());
+        let delete_id = id.clone();
         detail = detail
             .child(
                 text("Historical snapshot · saved content")
@@ -185,12 +187,37 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
                             .on_press(|s: &mut Snapshots| s.resume()),
                     )
                     .child(
-                        text("Delete (⌘⌫)")
+                        text("Delete…")
                             .color(k.c.text_base)
                             .focusable(true)
-                            .on_press(move |s: &mut Snapshots| s.delete(&id)),
+                            .on_press(move |s: &mut Snapshots| s.pending_delete = Some(delete_id.clone())),
                     ),
             )
+            .children(pending_delete.then(|| {
+                col()
+                    .gap(8.0)
+                    .child(
+                        text("Delete this saved snapshot? This cannot be undone.")
+                            .wrap()
+                            .color(k.c.text_base),
+                    )
+                    .child(
+                        row()
+                            .gap(20.0)
+                            .child(
+                                text("Cancel")
+                                    .focusable(true)
+                                    .color(k.c.text_base)
+                                    .on_press(|s: &mut Snapshots| s.pending_delete = None),
+                            )
+                            .child(
+                                text("Delete snapshot")
+                                    .focusable(true)
+                                    .color(k.c.text_base)
+                                    .on_press(move |s: &mut Snapshots| s.delete(&id)),
+                            ),
+                    )
+            }))
             .child(
                 text(saved.content())
                     .font(k.ty.body_medium)
@@ -219,6 +246,7 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
         .child(
             text_input(&s.query, k.ty.body_medium)
                 .key("snapshot-search")
+                .label("Search saved snapshots")
                 .single_line()
                 .placeholder("Search titles and saved content", k.c.text_muted)
                 .color(k.c.text_base)

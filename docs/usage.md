@@ -44,7 +44,8 @@ When an app matches through one of those other names, the name shows before its 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.
 Open **Snapshots** from Settings, or press ⌘⇧O in the launcher. Its separate,
 resizable window searches titles and saved content. Click a title or use ↑/↓ to
-read it. ⌘⌫ deletes the selected snapshot; ⌘W closes the window.
+read it. Delete opens a confirmation before removing the selected snapshot;
+⌘W closes the window. Editing the search field never deletes saved content.
 
 Snapshots show historical content, including the visible result list, without
 running saved actions. **Resume search** (⌘R) explicitly runs the original mode
