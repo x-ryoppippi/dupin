@@ -70,6 +70,7 @@ unsafe_op_in_unsafe_fn = "deny"
 all = { level = "warn", priority = -1 }
 
 [profile.release]
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = true
