@@ -74,7 +74,8 @@ includes all of that.
   100 ms budget plus 10 ms, and the process's peak footprint stays within the 16 MiB
   heap limit plus 8 MiB for allocator and stack overhead. The parent kills a child
   after 10 s and also reports whether it ended within the design's two-second outer
-  limit.
+  limit. `dupin-js-runtime-bench contain <case>...` runs only the named cases with
+  the same rules.
 
 ## Results
 
@@ -108,13 +109,19 @@ on an idle machine before relying on the `-Oz` latency.
 | Cold first result, source             |    5.76 / 6.63 / 7.27 |    2.87 / 3.36 / 3.52 |
 | Cold process spawn to exit, bytecode  | 10.34 / 16.17 / 18.80 |   6.58 / 7.38 / 10.43 |
 
-The search module's bytecode is 57,508 bytes. In the footprint process, an idle
+The search module's bytecode is 57,502 bytes. In the footprint process, an idle
 process measured 1.27 MiB; an empty context added 0.17 MiB (98 KiB of QuickJS
 allocations) and a loaded context after one search 0.61 MiB in total (417 KiB of
 QuickJS allocations). After the first drop the footprint was 0.08 MiB over idle.
 Over 1,000 create/drop cycles it grew by 16 KiB at `-Oz` and 64 KiB at `-O3`, in
 allocator-page steps, and the lifetime peak was 0.67 MiB over
 idle. No idle context is kept alive.
+
+The `stack-json-stringify` row comes from a rerun of that case alone at both levels
+on the same day (load average 8–21), recorded with a `rerun` note in its results
+entry. The first run nested 200,000 objects, which exhausted the heap while building
+the value, so `JSON.stringify` never ran; at 100,000 the value builds and
+`stringify` stops with a stack overflow inside the native call.
 
 | Containment case       | Outcome (both levels)                      | `-Oz` / `-O3` ms | Highest peak over idle |
 | ---------------------- | ------------------------------------------ | ---------------: | ---------------------: |
@@ -128,7 +135,7 @@ idle. No idle context is kept alive.
 | `heap-typed-array`     | out of memory                              |            0 / 0 |                0.1 MiB |
 | `stack-recursion`      | `Maximum call stack size exceeded`         |            1 / 0 |                0.6 MiB |
 | `stack-json-parse`     | `Maximum call stack size exceeded`         |            8 / 4 |                2.0 MiB |
-| `stack-json-stringify` | out of memory (thrown value is `null`)     |          68 / 26 |               18.9 MiB |
+| `stack-json-stringify` | `Maximum call stack size exceeded`         |          19 / 12 |               12.9 MiB |
 | `promise-chain-storm`  | job limit after 10,000 jobs                |           16 / 9 |                5.8 MiB |
 | `promise-fanout-storm` | job limit after 10,000 jobs                |          44 / 18 |                6.3 MiB |
 | `regexp-backtracking`  | interrupted inside `RegExp.prototype.exec` |        100 / 100 |                0.2 MiB |
@@ -162,16 +169,16 @@ every gate, and containment fails at both levels.
   either engine patches that poll the interrupt in such loops, or a boundary the
   host can abandon (a killable helper process, or a thread the host stops waiting
   for, at the cost of its memory), before third-party packages can be enabled.
-- The process footprint for the heap and JSON cases peaked at up to 18.9 MiB over
-  idle, above the 16 MiB QuickJS limit, because the limit counts QuickJS's own
-  allocations, not allocator rounding and fragmentation. The 8 MiB slack in the
+- The process footprint for the heap cases peaked at up to 18.4 MiB over idle
+  (`heap-object-spike`), above the 16 MiB QuickJS limit, because the limit counts
+  QuickJS's own allocations, not allocator rounding and fragmentation. The 8 MiB slack in the
   pass rule is an assumption of this experiment, not a design figure.
 - Only `-Oz` fits the size budget, and its warm p95 sits near the 5 ms limit on a
   loaded machine. `-O3` halves the latency but exceeds 1 MiB by 8,752 bytes, before
   any real adapter code. The thrown value for an out-of-memory error can be `null`,
   so the host must classify failures itself rather than rely on the message.
 - `Module::load` trusts its input: QuickJS bytecode is not validated, so a bytecode
-  cache must be written only by the host from source it compiled, never accepted
+  cache must hold only bytecode compiled from source by Dupin, never accepted
   from a package.
 
 This experiment does not cover Linux compatibility, 64 installed packages, broker

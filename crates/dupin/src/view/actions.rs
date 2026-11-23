@@ -10,7 +10,7 @@ use super::theme::ResolvedTheme;
 
 pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
     let screen = s.action_screen.as_ref().unwrap();
-    let icon = item_icon(s, screen.item.icon.as_deref());
+    let icon = item_icon(s, screen.item.icon.as_deref(), false);
     let subtitle = match (&screen.stage, &screen.item.view) {
         (ActionStage::Receivers { .. }, _) => SEND_TO,
         (_, View::Text { subtitle, .. }) => subtitle.as_str(),
@@ -23,7 +23,7 @@ pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y()
-        .child(icon)
+        .children(icon)
         .child(
             col()
                 .grow(1.0)
@@ -105,7 +105,7 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                             .scroll(ScrollSpec { stick_bottom: false })
                             .children(apps.iter().enumerate().map(|(index, app)| {
                                 let on = index == *selected;
-                                let icon = item_icon(s, Some(&app.path));
+                                let icon = item_icon(s, Some(&app.path), true);
                                 row()
                                     .key(format!("action-{index}"))
                                     .w_full()
@@ -116,7 +116,7 @@ pub(super) fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                     .radius(8.0)
                                     .fill(if on { accent } else { Color::TRANSPARENT })
                                     .hover(if on { accent } else { t.hover })
-                                    .child(icon)
+                                    .children(icon)
                                     .child(
                                         col()
                                             .grow(1.0)

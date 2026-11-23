@@ -745,6 +745,7 @@ name = "dupin"
 version = "0.0.0"
 dependencies = [
  "dupin-core",
+ "dupin-host-services",
  "dupin-js-runtime",
  "dupin-mac",
  "dupin-plugin-protocol",
@@ -780,6 +781,14 @@ dependencies = [
  "toml",
  "unicode-normalization",
  "zeroize",
+]
+
+[[package]]
+name = "dupin-host-services"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
