@@ -3,12 +3,12 @@
 def --wrapped main [...args: string] {
     match ($env.CURRENT_FILE | path basename) {
         timeout => {
-            if ($args | take 3) != [--signal=INT --kill-after=5s 60s] { exit 20 }
+            if ($args | take 3) != [--signal=INT --kill-after=5s 105s] { exit 20 }
             run-external ...($args | skip 3)
         }
         ffmpeg => {
             if $env.VIDEO_DELAY == '1' { sleep 500ms }
-            if '-nostdin' not-in $args or 'Capture screen 0:none' not-in $args or '45' not-in $args { exit 21 }
+            if '-nostdin' not-in $args or 'Capture screen 0:none' not-in $args or '90' not-in $args { exit 21 }
             'capture-started' | save --append $env.VIDEO_TRACE
             print 'frame=1'
             sleep 1500ms

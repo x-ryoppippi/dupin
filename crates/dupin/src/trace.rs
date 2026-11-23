@@ -13,9 +13,27 @@ fn on() -> bool {
     *ON.get_or_init(|| std::env::var_os("DUPIN_TRACE").is_some_and(|v| v != "0"))
 }
 
+pub fn action_screen(stage: &str) {
+    if on() {
+        eprintln!("dupin-trace: action-screen {stage}");
+    }
+}
+
 pub fn settings(event: &str) {
     if on() {
         eprintln!("dupin-trace: settings {event} wall={:.3}", wall_ms());
+    }
+}
+
+pub fn results_done(query: &str, items: usize) {
+    if on() {
+        eprintln!("dupin-trace: results done query={query:?} items={items}");
+    }
+}
+
+pub fn snapshot(event: &str) {
+    if on() {
+        eprintln!("dupin-trace: snapshot {event}");
     }
 }
 

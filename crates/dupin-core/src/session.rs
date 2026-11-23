@@ -38,6 +38,10 @@ pub enum Effect {
     /// Stop whatever search is running; nothing should arrive for the current results.
     CancelSearch,
     Run(Action),
+    RunConsuming {
+        id: String,
+        action: Action,
+    },
     ShowActions {
         id: String,
         generation: u64,
@@ -167,6 +171,49 @@ impl Session {
         })
     }
 
+    /// Capture only settled content belonging to the current search generation.
+    pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
+        if self.results != Results::Done || self.items.is_empty() {
+            return Err("Wait for the current search to finish before saving.".into());
+        }
+        let snapshot = crate::snapshots::Snapshot {
+            saved_at: 0,
+            version: 1,
+            id: String::new(),
+            mode: self.command.as_str().into(),
+            explicit: self.explicit,
+            query: self.query.clone(),
+            title: self
+                .selected_item()
+                .map(|i| i.display_title())
+                .unwrap_or(&self.query)
+                .into(),
+            views: self.items.iter().map(|i| i.view.clone()).collect(),
+            state: None,
+        };
+        snapshot.validate()?;
+        Ok(snapshot)
+    }
+
+    /// Explicitly rerun a saved search without activating a result or recording a pick.
+    pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
+        saved.validate()?;
+        let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
+        if !self.commands.contains(&command) {
+            return Err("The source command is unavailable. Saved content remains readable.".into());
+        }
+        self.clear_results();
+        self.command = command;
+        self.explicit = saved.explicit || self.command != *self.commands.default();
+        self.query = saved.query.clone();
+        self.recalled = None;
+        self.deleting = false;
+        self.before_deletion = None;
+        let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
+        effects.extend(self.search());
+        Ok(effects)
+    }
+
     pub fn history(&self) -> &History {
         &self.history
     }
@@ -225,6 +272,15 @@ impl Session {
     }
 
     fn activate(&mut self, item: &Item, action: ItemAction) -> Vec<Effect> {
+        if action.confirmation().is_some() || matches!(action.action, Action::ChooseApplication(_)) {
+            return Vec::new();
+        }
+        if action.disposition == ActionDisposition::Consume {
+            return vec![Effect::RunConsuming {
+                id: self.result_key(self.selected),
+                action: action.action,
+            }];
+        }
         let mut effects = vec![Effect::Run(action.action)];
         if action.disposition == ActionDisposition::Dismiss {
             if item.record_usage {
@@ -440,6 +496,60 @@ impl Session {
             return Vec::new();
         };
         self.activate(&item, action)
+    }
+
+    pub fn run_confirmed_key_action(&mut self, key: &str, action_id: &str) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        let Some(mut action) = item.item_action(action_id).cloned() else {
+            return Vec::new();
+        };
+        if action.confirmation().is_none() || matches!(action.action, Action::ChooseApplication(_)) {
+            return Vec::new();
+        }
+        action.confirmation = None;
+        self.activate(&item, action)
+    }
+
+    pub fn run_key_choice(&mut self, key: &str, parent_id: &str, choice: Action) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        let Some(Action::ChooseApplication(parent)) = item.action(parent_id) else {
+            return Vec::new();
+        };
+        if !matches!(&choice, Action::OpenWith { path, .. } if path == parent) {
+            return Vec::new();
+        }
+        self.activate(&item, ItemAction::new(parent_id, "Open with", choice))
+    }
+
+    pub fn forget(&mut self, key: &str) -> bool {
+        let generation = self.generation;
+        let Some((origin, id)) = self.providers.iter().find_map(|(origin, state)| {
+            state
+                .items
+                .iter()
+                .find(|item| format!("{generation}:{origin}:{}", item.id) == key)
+                .map(|item| (origin.clone(), item.id.clone()))
+        }) else {
+            return false;
+        };
+        if let Some(provider) = self.providers.get_mut(&origin) {
+            provider.items.retain(|row| row.id != id);
+        }
+        if let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) {
+            self.items.remove(index);
+            self.origins.remove(index);
+            if index < self.selected {
+                self.selected -= 1;
+            }
+            self.selected = self.selected.min(self.items.len().saturating_sub(1));
+        }
+        true
     }
     #[cfg(test)]
     pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {

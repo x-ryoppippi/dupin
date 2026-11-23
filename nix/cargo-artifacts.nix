@@ -70,7 +70,10 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
-      buildPhaseCargoCommand = "cargo clippy --workspace --all-targets --offline --locked -- -D warnings";
+      buildPhaseCargoCommand = ''
+        cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+        cargo clippy -p dupin --all-targets --features extension-tools --offline --locked -- -D warnings
+      '';
       checkPhaseCargoCommand = "cargo test --workspace --offline --locked";
       doCheck = true;
       doInstallCargoArtifacts = false;

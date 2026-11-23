@@ -24,6 +24,21 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Busy(Arc<AtomicUsize>);
+
+impl Busy {
+    pub fn new(running: Arc<AtomicUsize>) -> Self {
+        running.fetch_add(1, Ordering::AcqRel);
+        Self(running)
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
         .into_iter()
@@ -37,6 +52,12 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     if edit.marks() != marks.as_slice() {
         edit.set_marks(marks);
     }
+}
+
+pub struct Windows {
+    pub panel: AppHandle<Ui>,
+    pub prefs: AppHandle<crate::prefs::Prefs>,
+    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
 }
 
 pub struct Configuration {
@@ -56,6 +77,29 @@ pub struct ActionScreen {
     pub item: dupin_core::Item,
     pub layout_key: String,
     pub selected: usize,
+    pub stage: ActionStage,
+}
+
+#[derive(Clone, Debug)]
+pub enum ApplicationState {
+    Loading,
+    Ready(Vec<dupin_mac::workspace::Application>),
+    Failed(String),
+}
+
+#[derive(Clone, Debug)]
+pub enum ActionStage {
+    List,
+    Applications {
+        parent: String,
+        token: u64,
+        state: ApplicationState,
+        selected: usize,
+    },
+    Confirm {
+        action_id: String,
+        selected: usize,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -63,10 +107,84 @@ enum ActionKey {
     Stay,
     Back,
     Run(String, String),
+    Confirm,
+    Choice(usize),
 }
 
 impl ActionScreen {
-    fn key(&mut self, key: &Key) -> ActionKey {
+    fn accept_applications(
+        &mut self,
+        key: &str,
+        token: u64,
+        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+    ) -> bool {
+        if self.key != key {
+            return false;
+        }
+        let ActionStage::Applications {
+            token: current,
+            state,
+            ..
+        } = &mut self.stage
+        else {
+            return false;
+        };
+        if *current != token {
+            return false;
+        }
+        *state = match result {
+            Ok(apps) => ApplicationState::Ready(apps),
+            Err(error) => ApplicationState::Failed(error),
+        };
+        true
+    }
+
+    fn selected_index(&self) -> usize {
+        match &self.stage {
+            ActionStage::Applications { selected, .. } | ActionStage::Confirm { selected, .. } => *selected,
+            ActionStage::List => self.selected,
+        }
+    }
+
+    fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
+        if matches!(key, Key::Enter) && repeat {
+            return ActionKey::Stay;
+        }
+        if matches!(key, Key::Left | Key::Escape) {
+            if matches!(self.stage, ActionStage::List) {
+                return ActionKey::Back;
+            }
+            self.stage = ActionStage::List;
+            crate::trace::action_screen("list");
+            return ActionKey::Stay;
+        }
+        match &mut self.stage {
+            ActionStage::Confirm { selected, .. } => {
+                match key {
+                    Key::Up => *selected = 0,
+                    Key::Down => *selected = 1,
+                    Key::Enter if *selected == 1 => return ActionKey::Confirm,
+                    Key::Enter => {
+                        self.stage = ActionStage::List;
+                        crate::trace::action_screen("list");
+                    }
+                    _ => {}
+                }
+                return ActionKey::Stay;
+            }
+            ActionStage::Applications { state, selected, .. } => {
+                if let ApplicationState::Ready(apps) = state {
+                    match key {
+                        Key::Up => *selected = selected.saturating_sub(1),
+                        Key::Down => *selected = (*selected + 1).min(apps.len().saturating_sub(1)),
+                        Key::Enter if !apps.is_empty() => return ActionKey::Choice(*selected),
+                        _ => {}
+                    }
+                }
+                return ActionKey::Stay;
+            }
+            ActionStage::List => {}
+        }
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
             Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
@@ -90,10 +208,37 @@ impl ActionScreen {
     }
 }
 
+pub fn pick_indices(values: &[serde_json::Value], query: &str) -> Vec<usize> {
+    let query = query.to_lowercase();
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let label = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
+            label.to_lowercase().contains(&query).then_some(index)
+        })
+        .collect()
+}
+
+pub struct Picker {
+    pub values: Vec<serde_json::Value>,
+    pub selected: usize,
+    original: TextEdit,
+    original_shown: bool,
+    call: crate::control::Call,
+}
+
 pub struct Ui {
+    pub picker: Option<Picker>,
+    control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
     pub action_screen: Option<ActionScreen>,
+    next_lookup: u64,
+    notice_until: Option<f64>,
     pub session: Session,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
@@ -126,14 +271,95 @@ pub struct Ui {
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
     settings_after_close: bool,
+    snapshots_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
+    snapshots: AppHandle<crate::snapshots::Snapshots>,
 }
 
 impl Ui {
+    pub fn control(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        use crate::control::Command;
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        match &call.request.command {
+            Command::Open { query } => {
+                if self.picker.is_some() {
+                    call.finish(Err("Busy: picker active".into()));
+                    return;
+                }
+                if let Some(query) = query {
+                    self.query = TextEdit::new(query);
+                    self.edited(tx);
+                }
+                self.show(tx);
+                call.finish(Ok(serde_json::Value::Null));
+            }
+            Command::Pick { values } => {
+                if self.picker.is_some() {
+                    call.finish(Err("Busy: picker active".into()));
+                    return;
+                }
+                let values = values.clone();
+                let original = std::mem::replace(&mut self.query, TextEdit::new(""));
+                self.action_screen = None;
+                tx.wake_at(tx.clock() + 0.05);
+                self.picker = Some(Picker {
+                    values,
+                    selected: 0,
+                    original,
+                    original_shown: self.shown,
+                    call,
+                });
+                self.show(tx);
+            }
+            Command::ConfigGet {} => call.finish(
+                serde_json::to_value(&*self.configuration.values.borrow())
+                    .map_err(|_| "could not encode settings".into()),
+            ),
+            Command::ConfigSet { base, desired } => {
+                if self.control_save.is_some() {
+                    call.finish(Err("Busy: settings save pending".into()));
+                    return;
+                }
+                if crate::settings::read_only() {
+                    call.finish(Err("settings are read-only".into()));
+                    return;
+                }
+                let checked = accept_config(
+                    (**desired).clone(),
+                    &self.configuration.values.borrow(),
+                    |shortcut| {
+                        if self.configuration.hotkey.is_installed(shortcut) {
+                            Ok(())
+                        } else {
+                            self.configuration.hotkey.replace(shortcut)
+                        }
+                    },
+                );
+                match checked.and_then(|desired| self.configuration.files.save(base, &desired)) {
+                    Ok(revision) => self.control_save = Some((revision, call)),
+                    Err(error) => call.finish(Err(error)),
+                }
+            }
+        }
+    }
+    fn finish_pick(&mut self, value: Option<serde_json::Value>, tx: &mut Tx) {
+        if let Some(picker) = self.picker.take() {
+            self.query = picker.original;
+            self.shown = picker.original_shown;
+            if !picker.original_shown {
+                self.hide(tx);
+            }
+            tx.instant();
+            picker.call.finish(value.ok_or_else(|| "Cancelled".into()));
+        }
+    }
+
     /// Cursor-only redraws do not emit Rune input-change callbacks.
     pub fn query_display(&self) -> TextEdit {
         let mut query = self.query.clone();
@@ -147,14 +373,19 @@ impl Ui {
     }
 
     pub fn new(
-        me: AppHandle<Ui>,
-        prefs: AppHandle<crate::prefs::Prefs>,
+        windows: Windows,
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
         notice: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
+        running: Arc<AtomicUsize>,
     ) -> Ui {
+        let Windows {
+            panel: me,
+            prefs,
+            snapshots,
+        } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
@@ -194,12 +425,18 @@ impl Ui {
                 )
             })
             .collect();
+        let sources = registration.registry.ids();
+        snapshots.update(move |s, _| s.set_sources(sources));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            picker: None,
+            control_save: None,
             theme: config.theme.clone(),
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
+            next_lookup: 0,
+            notice_until: None,
             acknowledged_config: config.clone(),
             session: Session::new(history, registration.registry)
                 .expect("built-in command registration is valid"),
@@ -226,11 +463,13 @@ impl Ui {
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
-            running: Arc::new(AtomicUsize::new(0)),
+            snapshots_after_close: false,
+            running,
             updater,
             quick_look,
             me,
             prefs,
+            snapshots,
         }
     }
 
@@ -256,6 +495,8 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        let sources = registration.registry.ids();
+        self.snapshots.update(move |s, _| s.set_sources(sources));
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
@@ -306,6 +547,7 @@ impl Ui {
             }
             Err(error) => Some(error),
         };
+        let save_error = problem.clone().or_else(|| update.save_problem.clone());
         let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
             .into_iter()
             .flatten()
@@ -317,6 +559,18 @@ impl Ui {
             crate::log::warn(problem);
         }
         self.config_problem = problem.clone();
+        if self
+            .control_save
+            .as_ref()
+            .is_some_and(|(revision, _)| *revision <= update.revision)
+        {
+            let (_, call) = self.control_save.take().unwrap();
+            call.finish(match &save_error {
+                Some(error) => Err(error.clone()),
+                None => serde_json::to_value(&*self.configuration.values.borrow())
+                    .map_err(|_| "could not encode settings".into()),
+            });
+        }
         let config = self.configuration.values.borrow().clone();
         self.prefs.update(move |prefs, _| {
             prefs.reflect_config(update.revision, config, update.read_only, problem);
@@ -342,7 +596,9 @@ impl Ui {
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
     /// Automatic updates wait for both windows to hide; an explicit request closes them.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
-        if request == Restart::Update && (self.me.is_visible() || self.prefs.is_visible()) {
+        if request == Restart::Update
+            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+        {
             self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
             self.relaunch_when_idle(request);
@@ -383,6 +639,10 @@ impl Ui {
 
     /// The hotkey: show the panel, or hide it when it already shows.
     pub fn toggle(&mut self, tx: &mut Tx) {
+        if self.picker.is_some() {
+            self.finish_pick(None, tx);
+            return;
+        }
         let visible = self.me.is_visible();
         crate::trace::panel("toggle", visible, self.shown);
         if visible {
@@ -439,6 +699,10 @@ impl Ui {
 
     /// Hide and reset, as Esc and losing focus do.
     pub fn dismiss(&mut self, tx: &mut Tx) {
+        if self.picker.is_some() {
+            self.finish_pick(None, tx);
+            return;
+        }
         let effects = self.session.reset();
         self.apply(effects, tx);
         self.hide(tx);
@@ -451,6 +715,9 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if std::mem::take(&mut self.snapshots_after_close) {
+            self.snapshots.open();
+        }
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
             self.prefs.open();
@@ -469,8 +736,10 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
+            && !self.snapshots_after_close
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -478,6 +747,7 @@ impl Ui {
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
+        self.notice_until = None;
         self.notice = Some(message);
         tx.instant();
         self.show(tx);
@@ -485,6 +755,11 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        if let Some(picker) = &mut self.picker {
+            picker.selected = 0;
+            tx.instant();
+            return;
+        }
         self.action_screen = None;
         crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
@@ -494,6 +769,9 @@ impl Ui {
 
     /// Keep panel shortcuts available while the definition owns the text selection.
     pub fn unfocused_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.picker.is_some() {
+            return self.key(ev, tx);
+        }
         if self.action_screen.is_some() {
             return self.key(ev, tx);
         }
@@ -517,8 +795,76 @@ impl Ui {
         self.key(ev, tx)
     }
 
+    pub fn snapshot_notice(&mut self, message: String, tx: &mut Tx) {
+        self.timed_notice(message, tx);
+    }
+
+    pub fn open_snapshots(&mut self) {
+        self.snapshots.open();
+    }
+
+    pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
+        match self.session.restore(&saved) {
+            Ok(effects) => {
+                self.action_screen = None;
+                self.apply(effects, tx);
+                self.show(tx);
+            }
+            Err(problem) => self.snapshots.update(move |s, _| s.report(problem)),
+        }
+    }
+
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.picker.is_some() {
+            match ev.key {
+                Key::Escape => self.finish_pick(None, tx),
+                Key::Enter => {
+                    let value = self
+                        .picker
+                        .as_ref()
+                        .and_then(|p| {
+                            pick_indices(&p.values, &self.query.text)
+                                .get(p.selected)
+                                .and_then(|index| p.values.get(*index))
+                        })
+                        .cloned();
+                    self.finish_pick(value, tx);
+                }
+                Key::Up => {
+                    let p = self.picker.as_mut().unwrap();
+                    p.selected = p.selected.saturating_sub(1);
+                }
+                Key::Down => {
+                    let p = self.picker.as_mut().unwrap();
+                    p.selected = (p.selected + 1)
+                        .min(pick_indices(&p.values, &self.query.text).len().saturating_sub(1));
+                }
+                _ => return false,
+            }
+            tx.instant();
+            return true;
+        }
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
+            match self.session.capture() {
+                Ok(saved) => {
+                    crate::trace::snapshot("capture accepted");
+                    let busy = Busy::new(self.running.clone());
+                    self.snapshots.update(move |s, _| s.save(saved, busy));
+                    self.snapshot_notice("Saving snapshot…".into(), tx);
+                }
+                Err(problem) => {
+                    crate::trace::snapshot("capture refused");
+                    self.snapshot_notice(problem, tx);
+                }
+            }
+            return true;
+        }
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+            return true;
+        }
         crate::trace::key(ev);
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
@@ -538,14 +884,16 @@ impl Ui {
             _ => {}
         }
         if let Some(screen) = &mut self.action_screen {
-            match screen.key(&ev.key) {
+            match screen.key(&ev.key, tx.key_repeat()) {
                 ActionKey::Back => {
                     self.action_screen = None;
                     tx.focus("query", false);
                 }
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
+                ActionKey::Confirm => self.confirm_action(tx),
+                ActionKey::Choice(index) => self.pick_application(index, tx),
                 ActionKey::Stay => {
-                    tx.scroll_into_view(format!("action-{}", screen.selected));
+                    tx.scroll_into_view(format!("action-{}", screen.selected_index()));
                 }
             }
             return true;
@@ -607,6 +955,9 @@ impl Ui {
 
     /// A click on a result row.
     pub fn open(&mut self, id: &str, tx: &mut Tx) {
+        if self.picker.is_some() {
+            return;
+        }
         if self.session.select_key(id)
             && let Some(effects) = self.session.intent(Intent::Open)
         {
@@ -615,27 +966,187 @@ impl Ui {
     }
 
     pub fn actions(&mut self, id: &str, tx: &mut Tx) {
+        if self.picker.is_some() {
+            return;
+        }
         if self.session.select_key(id) {
             let effects = self.session.intent(Intent::Actions).unwrap_or_default();
             self.apply(effects, tx);
         }
     }
 
+    pub fn action_back(&mut self, tx: &mut Tx) {
+        if let Some(screen) = &mut self.action_screen {
+            if matches!(screen.stage, ActionStage::List) {
+                self.action_screen = None;
+                tx.focus("query", false);
+            } else {
+                screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
+            }
+        }
+    }
+
     pub fn pick_action(&mut self, key: &str, action: &str, tx: &mut Tx) {
-        if !self
+        let Some(screen) = self
             .action_screen
             .as_ref()
-            .is_some_and(|screen| screen.key == key)
-        {
+            .filter(|screen| screen.key == key && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        let Some(item_action) = screen.item.item_action(action) else {
+            return;
+        };
+        if !matches!(screen.stage, ActionStage::List) {
             return;
         }
+        let selected = screen
+            .item
+            .actions
+            .iter()
+            .position(|candidate| candidate.id == action)
+            .unwrap();
+        if let Some(dupin_core::Action::ChooseApplication(path)) = screen.item.action(action) {
+            let path = path.clone();
+            self.next_lookup += 1;
+            let token = self.next_lookup;
+            self.action_screen.as_mut().unwrap().stage = ActionStage::Applications {
+                parent: action.into(),
+                token,
+                state: ApplicationState::Loading,
+                selected: 0,
+            };
+            self.action_screen.as_mut().unwrap().selected = selected;
+            crate::trace::action_screen("applications loading");
+            let me = self.me.clone();
+            let key = key.to_owned();
+            let running = self.running.clone();
+            running.fetch_add(1, Ordering::AcqRel);
+            std::thread::spawn(move || {
+                let result = dupin_mac::workspace::applications_for(&path);
+                me.update(move |ui, _| ui.applications_found(&key, token, result));
+                running.fetch_sub(1, Ordering::AcqRel);
+            });
+        } else if item_action.confirmation().is_some() {
+            self.action_screen.as_mut().unwrap().stage = ActionStage::Confirm {
+                action_id: action.into(),
+                selected: 0,
+            };
+            self.action_screen.as_mut().unwrap().selected = selected;
+            crate::trace::action_screen("confirm");
+        } else {
+            self.action_screen = None;
+            let effects = self.session.run_key_action(key, action);
+            self.apply(effects, tx);
+        }
+    }
+
+    fn applications_found(
+        &mut self,
+        key: &str,
+        token: u64,
+        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+    ) {
+        let Some(screen) = self
+            .action_screen
+            .as_mut()
+            .filter(|screen| screen.key == key && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        if !screen.accept_applications(key, token, result) {
+            return;
+        }
+        if let (
+            ActionStage::Applications {
+                state: ApplicationState::Ready(apps),
+                ..
+            },
+            Some(cache),
+        ) = (&screen.stage, &self.icon_cache)
+        {
+            for app in apps {
+                self.icons.insert(
+                    format!("choice-{}", app.path.display()),
+                    cache.app_icon(&app.path, ICON_SIZE),
+                );
+            }
+        }
+        crate::trace::action_screen(
+            if matches!(
+                screen.stage,
+                ActionStage::Applications {
+                    state: ApplicationState::Ready(_),
+                    ..
+                }
+            ) {
+                "applications ready"
+            } else {
+                "applications failed"
+            },
+        );
+    }
+
+    pub fn confirm_action(&mut self, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Confirm {
+            action_id,
+            selected: 1,
+        } = &screen.stage
+        else {
+            return;
+        };
+        let effects = self.session.run_confirmed_key_action(&screen.key, action_id);
         self.action_screen = None;
-        let effects = self.session.run_key_action(key, action);
+        self.apply(effects, tx);
+    }
+
+    pub fn select_confirmation(&mut self, selected: usize, tx: &mut Tx) {
+        if let Some(screen) = &mut self.action_screen
+            && let ActionStage::Confirm { selected: index, .. } = &mut screen.stage
+        {
+            *index = selected.min(1);
+            if selected == 0 {
+                screen.stage = ActionStage::List;
+                crate::trace::action_screen("list");
+            } else {
+                self.confirm_action(tx);
+            }
+        }
+    }
+
+    pub fn pick_application(&mut self, index: usize, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Applications {
+            parent,
+            state: ApplicationState::Ready(apps),
+            ..
+        } = &screen.stage
+        else {
+            return;
+        };
+        let Some(app) = apps.get(index) else { return };
+        let Some(dupin_core::Action::ChooseApplication(path)) = screen.item.action(parent) else {
+            return;
+        };
+        let effects = self.session.run_key_choice(
+            &screen.key,
+            parent,
+            dupin_core::Action::OpenWith {
+                path: path.clone(),
+                application: app.path.clone(),
+            },
+        );
+        self.action_screen = None;
         self.apply(effects, tx);
     }
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
+            if self.session.results() == dupin_core::session::Results::Done {
+                crate::trace::results_done(&self.query.text, self.session.items().len());
+            }
             if self
                 .deadlines
                 .get(&origin)
@@ -679,6 +1190,7 @@ impl Ui {
                         item: item.clone(),
                         layout_key: self.session.layout_key(self.session.selected()),
                         selected: 0,
+                        stage: ActionStage::List,
                     });
                 }
                 Effect::Search {
@@ -729,6 +1241,9 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
+                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::OpenWith { path, application } => self
+                        .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {
                         self.run_workspace_action(dupin_mac::workspace::Action::Open(path))
                     }
@@ -739,6 +1254,34 @@ impl Ui {
                         self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url))
                     }
                 },
+                Effect::RunConsuming {
+                    id,
+                    action: dupin_core::Action::Trash(path),
+                } => {
+                    self.action_screen = None;
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    let me = self.me.clone();
+                    let running = self.running.clone();
+                    running.fetch_add(1, Ordering::AcqRel);
+                    std::thread::spawn(move || {
+                        let result = dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path));
+                        me.update(move |ui, tx| match result {
+                            Ok(()) => {
+                                ui.session.forget(&id);
+                                ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
+                            }
+                            Err(error) => {
+                                ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
+                            }
+                        });
+                        running.fetch_sub(1, Ordering::AcqRel);
+                    });
+                }
+                Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {
                     if self.session.selected_item().is_some() {
@@ -753,14 +1296,23 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
-        let running = self.running.clone();
-        running.fetch_add(1, Ordering::AcqRel);
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
-            if !dupin_mac::workspace::run(&action) {
-                crate::log::warn(&format!("the system couldn't carry out {action:?}"));
+            if let Err(error) = dupin_mac::workspace::run(&action) {
+                me.update(move |ui, tx| ui.show_notice(error, tx));
             }
-            running.fetch_sub(1, Ordering::AcqRel);
+            drop(busy);
         });
+    }
+
+    fn timed_notice(&mut self, notice: String, tx: &mut Tx) {
+        if self.notice.is_some() && self.notice_until.is_none() {
+            return;
+        }
+        self.notice = Some(notice);
+        self.notice_until = Some(tx.clock() + 5.0);
+        tx.wake_at(tx.clock() + 5.0);
     }
 
     pub fn preview_focus_is_active(&self) -> bool {
@@ -785,14 +1337,33 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.call.cancelled.load(Ordering::Relaxed))
+        {
+            self.finish_pick(None, tx);
+        }
+        if self.picker.is_some() {
+            tx.wake_at(clock + 0.05);
+        }
         let due = take_due(&mut self.deadlines, clock);
         let mut changed = false;
+        if self.notice_until.is_some_and(|due| clock >= due) {
+            self.notice_until = None;
+            self.notice = None;
+            changed = true;
+        }
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
                 if let Some(worker) = self.searchers.get(&id) {
                     worker.cancel();
                 }
-                changed |= self.session.deliver_from(id, Delivery::Expired { generation });
+                let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
+                changed |= delivered;
+                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                    crate::trace::results_done(&self.query.text, self.session.items().len());
+                }
             }
         }
         if let Some(next) = self
@@ -1090,6 +1661,72 @@ mod action_screen_tests {
     use dupin_core::{Action, CommandRegistry, CommandSpec, Item, QueryPresentation};
     use std::path::PathBuf;
 
+    #[test]
+    fn enter_never_bypasses_cancel_and_repeats_never_confirm() {
+        let (_, mut screen) = fixture();
+        screen.item.actions.push(
+            dupin_core::ItemAction::new("trash", "Trash", Action::Trash("/fixture".into()))
+                .confirm("Trash?", "Trash")
+                .consumes(),
+        );
+        screen.selected = screen.item.actions.len() - 1;
+        for _ in 0..50 {
+            let action = screen.key(&Key::Enter, false);
+            assert_ne!(action, ActionKey::Confirm);
+            if matches!(action, ActionKey::Run(_, _)) {
+                screen.stage = ActionStage::Confirm {
+                    action_id: "trash".into(),
+                    selected: 0,
+                };
+            }
+        }
+        screen.stage = ActionStage::Confirm {
+            action_id: "trash".into(),
+            selected: 0,
+        };
+        screen.key(&Key::Down, false);
+        assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Confirm);
+    }
+
+    #[test]
+    fn substage_back_and_late_application_replies_keep_the_original_action() {
+        let (_, mut screen) = fixture();
+        screen.selected = 1;
+        for stage in [
+            ActionStage::Confirm {
+                action_id: "trash".into(),
+                selected: 0,
+            },
+            ActionStage::Applications {
+                parent: "choose".into(),
+                token: 8,
+                state: ApplicationState::Loading,
+                selected: 0,
+            },
+        ] {
+            screen.stage = stage;
+            assert_eq!(screen.key(&Key::Left, false), ActionKey::Stay);
+            assert!(matches!(screen.stage, ActionStage::List));
+            assert_eq!(screen.selected, 1);
+        }
+        screen.stage = ActionStage::Applications {
+            parent: "choose".into(),
+            token: 8,
+            state: ApplicationState::Loading,
+            selected: 0,
+        };
+        assert!(!screen.accept_applications("old-key", 8, Ok(vec![])));
+        let key = screen.key.clone();
+        assert!(!screen.accept_applications(&key, 7, Err("old failure".into())));
+        assert!(screen.accept_applications(&key, 8, Ok(vec![])));
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Stay);
+        assert!(screen.accept_applications(&key, 8, Err("Lookup failed".into())));
+        assert!(
+            matches!(&screen.stage, ActionStage::Applications { state: ApplicationState::Failed(error), .. } if error == "Lookup failed")
+        );
+    }
+
     fn fixture() -> (Session, ActionScreen) {
         let origin = CommandId::new("sample.search").unwrap();
         let mut registry = CommandRegistry::new(origin.clone(), None);
@@ -1133,6 +1770,7 @@ mod action_screen_tests {
             layout_key: session.layout_key(0),
             item: session.items()[0].clone(),
             selected: 0,
+            stage: ActionStage::List,
         };
         (session, screen)
     }
@@ -1140,18 +1778,18 @@ mod action_screen_tests {
     #[test]
     fn keyboard_navigation_is_bounded_and_runs_the_captured_key() {
         let (_, mut screen) = fixture();
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(screen.selected, 0);
         for _ in 0..10 {
-            screen.key(&Key::Down);
+            screen.key(&Key::Down, false);
         }
         assert_eq!(screen.selected, 2);
-        screen.key(&Key::Up);
+        screen.key(&Key::Up, false);
         assert_eq!(
-            screen.key(&Key::Enter),
+            screen.key(&Key::Enter, false),
             ActionKey::Run(screen.key.clone(), "reveal".into())
         );
-        assert_eq!(screen.key(&Key::Text("x".into())), ActionKey::Stay);
+        assert_eq!(screen.key(&Key::Text("x".into()), false), ActionKey::Stay);
     }
 
     #[test]
@@ -1163,7 +1801,7 @@ mod action_screen_tests {
             session.result_key(0),
         );
         for key in [Key::Left, Key::Escape] {
-            assert_eq!(screen.key(&key), ActionKey::Back);
+            assert_eq!(screen.key(&key, false), ActionKey::Back);
             assert_eq!(
                 (
                     session.query().to_owned(),
@@ -1194,7 +1832,7 @@ mod action_screen_tests {
     fn enter_uses_the_selected_action_without_running_external_effects() {
         let (mut session, mut screen) = fixture();
         screen.selected = 2;
-        let ActionKey::Run(key, action) = screen.key(&Key::Enter) else {
+        let ActionKey::Run(key, action) = screen.key(&Key::Enter, false) else {
             panic!("expected action")
         };
         let effects = session.run_key_action(&key, &action);

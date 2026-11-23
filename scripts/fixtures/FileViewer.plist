@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>org.dupin.e2e.viewer</string>
+<key>CFBundleName</key><string>DupinE2EViewer</string>
+<key>CFBundleExecutable</key><string>viewer</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSUIElement</key><true/>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>Dupin E2E document</string>
+<key>CFBundleTypeRole</key><string>Editor</string>
+<key>LSHandlerRank</key><string>Owner</string>
+<key>LSItemContentTypes</key><array><string>org.dupin.e2e.document</string></array>
+</dict></array>
+<key>UTExportedTypeDeclarations</key><array><dict>
+<key>UTTypeIdentifier</key><string>org.dupin.e2e.document</string>
+<key>UTTypeConformsTo</key><array><string>public.plain-text</string></array>
+<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>dupine2e</string></array></dict>
+</dict></array>
+</dict></plist>

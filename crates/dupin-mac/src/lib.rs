@@ -5,6 +5,7 @@ pub mod apps;
 pub mod bundle;
 mod bundle_names;
 pub mod dictionary;
+mod file_actions;
 pub mod font;
 pub mod input_source;
 pub mod login_item;

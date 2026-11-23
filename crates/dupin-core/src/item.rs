@@ -7,6 +7,12 @@ pub use dupin_plugin_protocol::View;
 pub enum Action {
     /// Open with the default handler: launch an app, open a document or folder.
     Open(PathBuf),
+    ChooseApplication(PathBuf),
+    OpenWith {
+        path: PathBuf,
+        application: PathBuf,
+    },
+    Trash(PathBuf),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
@@ -26,6 +32,13 @@ pub(crate) enum ActionDisposition {
     Dismiss,
     /// Run the action without recording a pick or dismissing the launcher.
     KeepOpen,
+    Consume,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Confirmation {
+    pub prompt: String,
+    pub button: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +47,7 @@ pub struct ItemAction {
     pub title: String,
     pub(crate) action: Action,
     pub(crate) disposition: ActionDisposition,
+    pub(crate) confirmation: Option<Confirmation>,
 }
 
 impl ItemAction {
@@ -43,12 +57,30 @@ impl ItemAction {
             title: title.into(),
             action,
             disposition: ActionDisposition::Dismiss,
+            confirmation: None,
         }
     }
 
     /// Leave the current search open after this action runs.
     pub fn keep_open(mut self) -> Self {
         self.disposition = ActionDisposition::KeepOpen;
+        self
+    }
+
+    pub fn confirm(mut self, prompt: &str, button: &str) -> Self {
+        self.confirmation = Some(Confirmation {
+            prompt: prompt.into(),
+            button: button.into(),
+        });
+        self
+    }
+
+    pub fn confirmation(&self) -> Option<&Confirmation> {
+        self.confirmation.as_ref()
+    }
+
+    pub fn consumes(mut self) -> Self {
+        self.disposition = ActionDisposition::Consume;
         self
     }
 }
@@ -126,7 +158,7 @@ impl Item {
 }
 
 /// `$HOME/x` as `~/x`, as Finder and shells show it.
-fn tilde(path: &str) -> String {
+pub fn tilde(path: &str) -> String {
     match std::env::var("HOME") {
         Ok(home) if !home.is_empty() && path.starts_with(&home) => {
             let rest = &path[home.len()..];
