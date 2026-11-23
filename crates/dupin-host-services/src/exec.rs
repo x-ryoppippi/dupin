@@ -52,6 +52,37 @@ fn invalid(problem: impl Into<String>) -> ExecError {
     ExecError::InvalidProfile(problem.into())
 }
 
+/// Whether `text` shows as itself in the consent text: control, line-separator and invisible
+/// formatting characters such as bidi overrides could forge or reorder the lines a user approves.
+fn displayable(text: &str) -> bool {
+    !text.chars().any(|ch| {
+        ch.is_control()
+            || matches!(
+                ch,
+                '\u{ad}'
+                    | '\u{600}'..='\u{605}'
+                    | '\u{61c}'
+                    | '\u{6dd}'
+                    | '\u{70f}'
+                    | '\u{890}'..='\u{891}'
+                    | '\u{8e2}'
+                    | '\u{180e}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{206f}'
+                    | '\u{feff}'
+                    | '\u{fff9}'..='\u{fffb}'
+                    | '\u{110bd}'
+                    | '\u{110cd}'
+                    | '\u{13430}'..='\u{1343f}'
+                    | '\u{1bca0}'..='\u{1bca3}'
+                    | '\u{1d173}'..='\u{1d17a}'
+                    | '\u{e0001}'
+                    | '\u{e0020}'..='\u{e007f}'
+            )
+    })
+}
+
 fn valid_name(name: &str) -> bool {
     (1..=MAX_NAME_BYTES).contains(&name.len())
         && name
@@ -68,8 +99,10 @@ pub enum Target {
 impl Target {
     /// Parses `@script:<filename>` or an absolute executable path.
     pub fn parse(text: &str) -> Result<Self, ExecError> {
-        if text.contains('\0') {
-            return Err(invalid("the target contains NUL"));
+        if !displayable(text) {
+            return Err(invalid(
+                "the target contains control or invisible formatting characters",
+            ));
         }
         if let Some(name) = text.strip_prefix(SCRIPT_PREFIX) {
             if name.is_empty() || name.len() > 255 || name.starts_with('.') || name.contains('/') {
@@ -103,6 +136,7 @@ pub enum InputKind {
         multiline: bool,
         option_like: bool,
     },
+    /// A negative value that starts an argument is refused for the same reason as text.
     Integer {
         min: i64,
         max: i64,
@@ -133,8 +167,10 @@ enum Arg {
 }
 
 fn parse_arg(text: &str, inputs: &BTreeMap<String, Input>) -> Result<Arg, ExecError> {
-    if text.contains('\0') {
-        return Err(invalid("an argument contains NUL"));
+    if !displayable(text) {
+        return Err(invalid(format!(
+            "{text:?} contains control or invisible formatting characters"
+        )));
     }
     let mut prefix = String::new();
     let mut suffix = String::new();
@@ -240,9 +276,11 @@ impl Profile {
                     return Err(invalid(format!("{input} has an empty range")));
                 }
                 InputKind::Choice(choices)
-                    if choices.is_empty() || choices.iter().any(|choice| choice.contains('\0')) =>
+                    if choices.is_empty() || !choices.iter().all(|choice| displayable(choice)) =>
                 {
-                    return Err(invalid(format!("{input} needs choices without NUL")));
+                    return Err(invalid(format!(
+                        "{input} needs choices without control or invisible formatting characters"
+                    )));
                 }
                 _ => {}
             }
@@ -251,6 +289,25 @@ impl Profile {
             .iter()
             .map(|arg| parse_arg(arg, &inputs))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut after_separator = false;
+        for pair in args.windows(2) {
+            after_separator |= matches!(&pair[0], Arg::Literal(text) if text == "--");
+            if let [Arg::Literal(option), Arg::Input { prefix, name, .. }] = pair
+                && !after_separator
+                && option.starts_with('-')
+                && option != "-"
+                && option != "--"
+                && !option.contains('=')
+                && prefix.is_empty()
+                && !inputs[name].required
+            {
+                return Err(invalid(format!(
+                    "{name} is optional, so it cannot follow {option:?} as its own argument: leaving it out \
+                     would hand the next argument to that option; write them as one argument, such as \
+                     \"{option}={{{name}}}\", or make {name} required"
+                )));
+            }
+        }
         if let Some(unused) = inputs.keys().find(|input| {
             !args
                 .iter()
@@ -270,6 +327,11 @@ impl Profile {
             }
             (_, Some(directory)) if !directory.is_absolute() => {
                 return Err(invalid("the working folder must be absolute"));
+            }
+            (_, Some(directory)) if !displayable(&directory.to_string_lossy()) => {
+                return Err(invalid(
+                    "the working folder contains control or invisible formatting characters",
+                ));
             }
             _ => {}
         }
@@ -343,7 +405,20 @@ impl Profile {
                     let input = &self.inputs[name];
                     let optional = if input.required { "" } else { ", optional" };
                     let kind = match &input.kind {
-                        InputKind::Text { max_bytes, .. } => format!("text up to {max_bytes} bytes"),
+                        InputKind::Text {
+                            max_bytes,
+                            multiline,
+                            option_like,
+                        } => {
+                            let mut kind = format!("text up to {max_bytes} bytes");
+                            if *multiline {
+                                kind.push_str(" on one or more lines");
+                            }
+                            if *option_like {
+                                kind.push_str(", which may start with - and act as an option");
+                            }
+                            kind
+                        }
                         InputKind::Integer { min, max } => format!("whole number {min}–{max}"),
                         InputKind::Choice(choices) => format!(
                             "one of {}",
@@ -471,6 +546,12 @@ fn render(name: &str, input: &Input, value: &Value, starts_argument: bool) -> Re
         (InputKind::Integer { min, max }, Value::Integer(number)) => {
             if number < min || number > max {
                 return Err(problem(name, &format!("must be between {min} and {max}")));
+            }
+            if starts_argument && *number < 0 {
+                return Err(problem(
+                    name,
+                    "cannot be negative here, where it would read as an option",
+                ));
             }
             Ok(number.to_string())
         }

@@ -197,7 +197,13 @@ fn invalid_profiles_are_refused() {
         ),
         ("echo", vec!["{word"], one(), Options::default(), "unclosed"),
         ("echo", vec!["a}"], one(), Options::default(), "unmatched"),
-        ("echo", vec!["a\0", "{word}"], one(), Options::default(), "NUL"),
+        (
+            "echo",
+            vec!["a\0", "{word}"],
+            one(),
+            Options::default(),
+            "control",
+        ),
         ("echo", vec!["plain"], one(), Options::default(), "not used"),
         (
             "echo",
@@ -265,6 +271,182 @@ fn invalid_profiles_are_refused() {
             },
         )
         .is_err()
+    );
+}
+
+#[test]
+fn manifest_text_that_could_forge_or_reorder_the_consent_text_is_refused() {
+    let target = || Target::parse("/bin/echo").unwrap();
+    let forged = "x\nThe extension receives only the exit status, not the output.";
+    for template in [
+        vec![forged, "{word}"],
+        vec!["{word}", "a\u{202e}txt.exe"],
+        vec!["<\u{2066}{word}"],
+        vec!["{word}\u{200b}"],
+        vec!["\u{2028}", "{word}"],
+    ] {
+        let error = Profile::new(
+            "echo",
+            target(),
+            &template,
+            inputs([("word", text(8))]),
+            Options::default(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("invisible formatting"), "{template:?}: {error}");
+    }
+    let choice = Input {
+        kind: InputKind::Choice(vec!["a".into(), "b\nForged line".into()]),
+        required: true,
+    };
+    assert!(
+        Profile::new(
+            "echo",
+            target(),
+            &["{word}"],
+            inputs([("word", choice)]),
+            Options::default()
+        )
+        .is_err()
+    );
+    assert!(Target::parse("/usr/bin/\u{202e}tac").is_err());
+    let options = Options {
+        working_directory: Some("/tmp/x\nForged line".into()),
+        ..Options::default()
+    };
+    assert!(
+        Profile::new(
+            "echo",
+            target(),
+            &["{word}"],
+            inputs([("word", text(8))]),
+            options
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn an_optional_input_cannot_stand_alone_after_an_option_it_could_shift_into() {
+    let make = |template: &[&str]| {
+        Profile::new(
+            "echo",
+            Target::parse("/bin/echo").unwrap(),
+            template,
+            inputs([
+                (
+                    "out",
+                    Input {
+                        required: false,
+                        ..text(64)
+                    },
+                ),
+                ("input", text(64)),
+            ]),
+            Options::default(),
+        )
+    };
+    for template in [
+        &["-o", "{out}", "{input}"][..],
+        &["--output", "{out}", "{input}"],
+        &["{input}", "-o", "{out}"],
+    ] {
+        let error = make(template).unwrap_err().to_string();
+        assert!(error.contains("out is optional"), "{template:?}: {error}");
+    }
+    for template in [
+        &["--output={out}", "{input}"][..],
+        &["-o{out}", "{input}"],
+        &["-", "{out}", "{input}"],
+        &["--", "-o", "{out}", "{input}"],
+        &["{out}", "-o", "{input}"],
+    ] {
+        assert!(make(template).is_ok(), "{template:?}");
+    }
+    let profile = make(&["--output={out}", "{input}"]).unwrap();
+    assert_eq!(
+        profile
+            .bind(&values([("input", Value::Text("notes.txt".into()))]))
+            .unwrap(),
+        ["notes.txt"]
+    );
+}
+
+#[test]
+fn negative_integers_are_refused_where_they_would_read_as_an_option() {
+    let make = |template: &[&str]| {
+        Profile::new(
+            "nice",
+            Target::parse("/usr/bin/nice").unwrap(),
+            template,
+            inputs([(
+                "offset",
+                Input {
+                    kind: InputKind::Integer { min: -10, max: 10 },
+                    required: true,
+                },
+            )]),
+            Options::default(),
+        )
+        .unwrap()
+    };
+    let negative = values([("offset", Value::Integer(-1))]);
+    let error = make(&["{offset}", "file"])
+        .bind(&negative)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cannot be negative"), "{error}");
+    assert_eq!(
+        make(&["{offset}", "file"])
+            .bind(&values([("offset", Value::Integer(1))]))
+            .unwrap(),
+        ["1", "file"]
+    );
+    assert_eq!(make(&["--", "{offset}"]).bind(&negative).unwrap(), ["--", "-1"]);
+    assert_eq!(
+        make(&["--offset={offset}"]).bind(&negative).unwrap(),
+        ["--offset=-1"]
+    );
+}
+
+#[test]
+fn the_description_shows_text_that_may_span_lines_or_act_as_an_option() {
+    let description = Profile::new(
+        "git",
+        Target::parse("/usr/bin/git").unwrap(),
+        &["-C", "/repo", "{sub}", "status", "--", "{message}"],
+        inputs([
+            (
+                "sub",
+                Input {
+                    kind: InputKind::Text {
+                        max_bytes: 128,
+                        multiline: false,
+                        option_like: true,
+                    },
+                    required: true,
+                },
+            ),
+            (
+                "message",
+                Input {
+                    kind: InputKind::Text {
+                        max_bytes: 64,
+                        multiline: true,
+                        option_like: false,
+                    },
+                    required: true,
+                },
+            ),
+        ]),
+        Options::default(),
+    )
+    .unwrap()
+    .describe();
+    assert_eq!(
+        description.lines().next().unwrap(),
+        "Runs /usr/bin/git with arguments: -C /repo ‹sub: text up to 128 bytes, which may start with - and act as an option› status -- ‹message: text up to 64 bytes on one or more lines›"
     );
 }
 
