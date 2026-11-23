@@ -30,10 +30,31 @@ pub enum Command {
         values: Vec<Value>,
     },
     ConfigGet {},
+    SnapshotsList {},
+    SnapshotsOpen {
+        id: Option<String>,
+    },
+    SnapshotsClose {},
     ConfigSet {
         base: Box<dupin_core::Config>,
         desired: Box<dupin_core::Config>,
     },
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotSummary {
+    pub id: String,
+    pub saved_at: u64,
+    pub mode: String,
+    pub title: String,
+    pub query: String,
+}
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnapshotList {
+    pub entries: Vec<SnapshotSummary>,
+    pub truncated: bool,
+    pub problem: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -48,6 +69,16 @@ pub struct Call {
 }
 impl Call {
     pub fn finish(self, result: Result<Value, String>) {
+        let kind = match &self.request.command {
+            Command::Open { .. } => "open",
+            Command::Pick { .. } => "pick",
+            Command::ConfigGet {} => "config get",
+            Command::ConfigSet { .. } => "config set",
+            Command::SnapshotsList {} => "snapshots list",
+            Command::SnapshotsOpen { .. } => "snapshots open",
+            Command::SnapshotsClose {} => "snapshots close",
+        };
+        crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {
             id: self.request.id,
             result,
@@ -87,6 +118,9 @@ pub fn write_frame(output: &mut impl Write, value: &impl Serialize) -> io::Resul
 }
 pub fn validate(request: &Request) -> io::Result<()> {
     match &request.command {
+        Command::SnapshotsOpen { id: Some(id) } if id.is_empty() || id.len() > 128 => {
+            Err(io::Error::other("invalid snapshot id"))
+        }
         Command::Open { query: Some(query) } if query.len() > 4096 => {
             Err(io::Error::other("query too large"))
         }
@@ -314,6 +348,41 @@ fn serve(stream: &mut UnixStream, dispatch: impl Fn(Call)) -> io::Result<()> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn snapshot_messages_are_bounded_and_strict() {
+        use super::*;
+        for command in [
+            Command::SnapshotsList {},
+            Command::SnapshotsOpen {
+                id: Some("日本語".into()),
+            },
+            Command::SnapshotsClose {},
+        ] {
+            let request = Request { id: 42, command };
+            let mut bytes = Vec::new();
+            write_frame(&mut bytes, &request).unwrap();
+            let decoded: Request = read_frame(&mut bytes.as_slice()).unwrap();
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                serde_json::to_value(request).unwrap()
+            );
+        }
+        assert!(
+            serde_json::from_value::<Command>(
+                serde_json::json!({"kind":"snapshots_open", "id":null, "save":true})
+            )
+            .is_err()
+        );
+        for id in [String::new(), "x".repeat(129)] {
+            assert!(
+                validate(&Request {
+                    id: 1,
+                    command: Command::SnapshotsOpen { id: Some(id) }
+                })
+                .is_err()
+            );
+        }
+    }
     use super::*;
     fn subprocess(mode: &str, dir: &std::path::Path, tmp: &str) {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())

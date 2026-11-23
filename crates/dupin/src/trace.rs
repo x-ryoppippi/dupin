@@ -31,6 +31,12 @@ pub fn snapshot(event: &str) {
     }
 }
 
+pub fn control(kind: &str, ok: bool) {
+    if on() {
+        eprintln!("dupin-trace: control {kind} ok={ok}");
+    }
+}
+
 pub fn panel(event: &str, visible: bool, shown: bool) {
     if on() {
         eprintln!(

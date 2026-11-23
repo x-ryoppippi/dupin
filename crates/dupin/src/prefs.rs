@@ -564,7 +564,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
                 .font(k.ty.small)
                 .color(c.text_muted)
                 .focusable(true)
-                .on_press(|s: &mut Prefs| s.panel.update(|ui, _| ui.open_snapshots())),
+                .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
         )
         .child(config)
         .children(s.updater.available().then(|| update_footer(s, k)))

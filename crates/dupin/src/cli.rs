@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Reply, Request};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -9,6 +9,9 @@ enum Action {
     Open(Option<String>),
     Pick(bool),
     Get,
+    SnapshotsList,
+    SnapshotsOpen(Option<String>),
+    SnapshotsClose,
     Set(String, String),
     Snap(String, String),
     Ext(String, String, Option<String>),
@@ -28,6 +31,12 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
         ["pick"] => Ok(Action::Pick(false)),
         ["pick", "--input-json"] => Ok(Action::Pick(true)),
+        ["snapshots", "list"] => Ok(Action::SnapshotsList),
+        ["snapshots", "close"] => Ok(Action::SnapshotsClose),
+        ["snapshots", "open"] => Ok(Action::SnapshotsOpen(None)),
+        ["snapshots", "open", "--id", id] if !id.starts_with("-") && !id.is_empty() && id.len() <= 128 => {
+            Ok(Action::SnapshotsOpen(Some(id.to_string())))
+        }
         ["config", "get"] => Ok(Action::Get),
         ["config", "set", base, desired] if !base.starts_with('-') && !desired.starts_with('-') => {
             Ok(Action::Set(base.to_string(), desired.to_string()))
@@ -206,6 +215,9 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
         Action::Pick(json_input) => exchange(Command::Pick {
             values: selection(&bounded(io::stdin().lock(), control::MAX_FRAME / 2)?, json_input)?,
         }),
+        Action::SnapshotsList => exchange(Command::SnapshotsList {}),
+        Action::SnapshotsOpen(id) => exchange(Command::SnapshotsOpen { id }),
+        Action::SnapshotsClose => exchange(Command::SnapshotsClose {}),
         Action::Get => exchange(Command::ConfigGet {}),
         Action::Set(base, desired) => exchange(Command::ConfigSet {
             base: serde_json::from_slice(&file(&base, 65536)?).map_err(|_| "invalid base configuration")?,
@@ -299,6 +311,30 @@ fn render(response: dupin_plugin_protocol::Response, output: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn snapshot_arguments() {
+        for (args, expected) in [
+            (vec!["snapshots", "list", "--json"], Action::SnapshotsList),
+            (vec!["snapshots", "close"], Action::SnapshotsClose),
+            (vec!["snapshots", "open"], Action::SnapshotsOpen(None)),
+            (
+                vec!["snapshots", "open", "--id", "日本語"],
+                Action::SnapshotsOpen(Some("日本語".into())),
+            ),
+        ] {
+            assert_eq!(
+                parse(&args.into_iter().map(String::from).collect::<Vec<_>>()).unwrap(),
+                expected
+            );
+        }
+        for args in [
+            vec!["snapshots", "delete"],
+            vec!["snapshots", "resume"],
+            vec!["snapshots", "open", "--id", "-x"],
+        ] {
+            assert!(parse(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
+        }
+    }
     #[test]
     fn picker_filters_indices_without_transforming_values() {
         let values = vec![

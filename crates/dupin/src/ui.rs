@@ -189,6 +189,12 @@ impl Ui {
             return;
         }
         match &call.request.command {
+            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
+                call.finish(Err("Busy: picker active".into()));
+            }
+            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } | Command::SnapshotsClose {} => {
+                self.snapshots.update(move |s, tx| s.control(call, tx));
+            }
             Command::Open { query } => {
                 if self.picker.is_some() {
                     call.finish(Err("Busy: picker active".into()));
@@ -703,8 +709,13 @@ impl Ui {
         tx.wake_at(due);
     }
 
-    pub fn open_snapshots(&mut self) {
-        self.snapshots.open();
+    pub fn show_snapshots(&mut self, tx: &mut Tx) {
+        if self.me.is_visible() {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+        } else {
+            self.snapshots.open();
+        }
     }
 
     pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
@@ -765,8 +776,7 @@ impl Ui {
             return true;
         }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
-            self.snapshots_after_close = true;
-            self.dismiss(tx);
+            self.show_snapshots(tx);
             return true;
         }
         crate::trace::key(ev);

@@ -60,6 +60,12 @@ entry and 8 MiB in total; a save that exceeds a limit reports an error. Invalid
 or unsupported archives remain on disk and block edits, with the problem shown
 in the Snapshots window.
 
+Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
+[--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
+The list includes only id, saved time, command, title and query; it reports archive
+problems and marks truncated replies. These commands never save, delete, resume a
+query, activate a result or change history. Opening is refused while a picker is active.
+
 ## Settings
 
 Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`, alongside apps. Enter opens the pane in System Settings. Dupin discovers panes that the installed macOS declares as settings extensions and explicitly allows opening through its settings URL scheme; availability and names follow that macOS version. Searching does not open or change settings.
