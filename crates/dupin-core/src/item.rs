@@ -13,7 +13,6 @@ pub struct Page {
     pub context: Option<serde_json::Value>,
 }
 
-/// Whether an item action completes the pick or leaves the current search available.
 /// What running a result does. Providers decide; the platform layer carries it out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
