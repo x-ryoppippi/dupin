@@ -166,6 +166,7 @@ pub struct Server {
     thread: Option<std::thread::JoinHandle<()>>,
     path: PathBuf,
     inode: u64,
+    _directory_lock: std::fs::File,
 }
 impl Server {
     pub fn start(dispatch: impl Fn(Call) + Send + Sync + 'static) -> io::Result<Self> {
@@ -178,10 +179,19 @@ impl Server {
             .ok_or_else(|| io::Error::other("missing control directory"))?;
         owned(parent, true)?;
         let directory = std::fs::File::open(parent)?;
-        // Serialize recovery and bind so another starter cannot unlink a fresh listener.
+        // A full accept queue can also return ECONNREFUSED. Hold the lock until
+        // shutdown and unlink finish so another starter cannot mistake us for a stale socket.
         // SAFETY: directory owns a valid descriptor for the duration of the lock.
-        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(io::Error::last_os_error());
+        if unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            let error = io::Error::last_os_error();
+            return Err(if error.kind() == io::ErrorKind::WouldBlock {
+                io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "control server already owns the directory",
+                )
+            } else {
+                error
+            });
         }
         let listener = match UnixListener::bind(&path) {
             Ok(listener) => listener,
@@ -200,7 +210,6 @@ impl Server {
         };
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         let inode = std::fs::symlink_metadata(&path)?.ino();
-        drop(directory);
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let thread = std::thread::spawn(move || {
@@ -243,6 +252,7 @@ impl Server {
             thread: Some(thread),
             path,
             inode,
+            _directory_lock: directory,
         })
     }
 }
@@ -428,12 +438,23 @@ mod tests {
                 })
             })
             .collect();
-        let servers: Vec<_> = workers
-            .into_iter()
-            .filter_map(|worker| worker.join().unwrap().ok())
-            .collect();
+        let mut servers = Vec::new();
+        for worker in workers {
+            match worker.join().unwrap() {
+                Ok(server) => servers.push(server),
+                Err(error) => assert_eq!(error.kind(), io::ErrorKind::AddrInUse, "{error}"),
+            }
+        }
         assert_eq!(servers.len(), 1);
+        let directory = std::fs::File::open(&dir).unwrap();
+        use std::os::fd::AsRawFd;
+        // SAFETY: directory owns a valid descriptor.
+        let lock = unsafe { libc::flock(directory.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        assert_eq!(lock, -1, "the running server must keep the directory locked");
+        assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
+
         let mut client = UnixStream::connect(&path).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         write_frame(
             &mut client,
             &Request {
@@ -442,7 +463,9 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(read_frame::<Reply>(&mut client).unwrap().id, 17);
+        let reply: Reply = read_frame(&mut client).unwrap();
+        assert_eq!(reply.id, 17);
+        assert_eq!(reply.result.unwrap(), Value::Null);
         drop(client);
         drop(servers);
         std::fs::remove_dir(dir).unwrap();
