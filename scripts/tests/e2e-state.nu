@@ -19,5 +19,21 @@ def main [] {
     )
     assert not (is-focused-query {ok: true, data: {match: null}} calculator)
     assert not (is-focused-query {ok: true} calculator)
+    for value in [null ''] {
+        assert (
+            is-focused-query {ok: true, data: {match: {value: $value, states: [focused]}}} ''
+        )
+    }
+    assert not (is-focused-query {ok: true, data: {match: {states: [focused]}}} '')
+    assert not (
+        is-focused-query {ok: true, data: {match: {value: null, states: [focused]}}} calculator
+    )
+    assert not (is-focused-query {ok: true, data: {match: {value: null, states: []}}} '')
+    assert not (
+        is-focused-query {ok: false, data: {match: {value: null, states: [focused]}}} ''
+    )
+    assert not (is-focused-query {data: {match: {value: null, states: [focused]}}} '')
+    assert not (is-focused-query {ok: true, data: {match: null}} '')
+    assert not (is-focused-query {ok: true} '')
     print 'E2E query state tests passed'
 }

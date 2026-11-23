@@ -24,6 +24,21 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Busy(Arc<AtomicUsize>);
+
+impl Busy {
+    pub fn new(running: Arc<AtomicUsize>) -> Self {
+        running.fetch_add(1, Ordering::AcqRel);
+        Self(running)
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
         .into_iter()
@@ -37,6 +52,12 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     if edit.marks() != marks.as_slice() {
         edit.set_marks(marks);
     }
+}
+
+pub struct Windows {
+    pub panel: AppHandle<Ui>,
+    pub prefs: AppHandle<crate::prefs::Prefs>,
+    pub snapshots: AppHandle<crate::snapshots::Snapshots>,
 }
 
 pub struct Configuration {
@@ -124,6 +145,7 @@ pub struct Ui {
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
     pub notice: Option<String>,
+    snapshot_notice_until: Option<f64>,
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
     configuration: Configuration,
@@ -151,11 +173,13 @@ pub struct Ui {
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
     settings_after_close: bool,
+    snapshots_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
+    snapshots: AppHandle<crate::snapshots::Snapshots>,
 }
 
 impl Ui {
@@ -251,14 +275,19 @@ impl Ui {
     }
 
     pub fn new(
-        me: AppHandle<Ui>,
-        prefs: AppHandle<crate::prefs::Prefs>,
+        windows: Windows,
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
         notice: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
+        running: Arc<AtomicUsize>,
     ) -> Ui {
+        let Windows {
+            panel: me,
+            prefs,
+            snapshots,
+        } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
@@ -298,6 +327,8 @@ impl Ui {
                 )
             })
             .collect();
+        let sources = registration.registry.ids();
+        snapshots.update(move |s, _| s.set_sources(sources));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -312,6 +343,7 @@ impl Ui {
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
+            snapshot_notice_until: None,
             config_problem: notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
@@ -332,11 +364,13 @@ impl Ui {
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
-            running: Arc::new(AtomicUsize::new(0)),
+            snapshots_after_close: false,
+            running,
             updater,
             quick_look,
             me,
             prefs,
+            snapshots,
         }
     }
 
@@ -362,6 +396,8 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        let sources = registration.registry.ids();
+        self.snapshots.update(move |s, _| s.set_sources(sources));
         self.session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
@@ -461,7 +497,9 @@ impl Ui {
     /// The decision is made here, on the UI thread, so it sees the windows as they are now.
     /// Automatic updates wait for both windows to hide; an explicit request closes them.
     fn restart(&mut self, request: Restart, tx: &mut Tx) {
-        if request == Restart::Update && (self.me.is_visible() || self.prefs.is_visible()) {
+        if request == Restart::Update
+            && (self.me.is_visible() || self.prefs.is_visible() || self.snapshots.is_visible())
+        {
             self.relaunch = Some(request);
         } else if self.running.load(Ordering::Acquire) > 0 {
             self.relaunch_when_idle(request);
@@ -578,6 +616,9 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if std::mem::take(&mut self.snapshots_after_close) {
+            self.snapshots.open();
+        }
         if std::mem::take(&mut self.settings_after_close) {
             crate::trace::settings("panel closed");
             self.prefs.open();
@@ -596,8 +637,10 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.snapshot_notice_until = None;
         tx.close_window();
         if !self.settings_after_close
+            && !self.snapshots_after_close
             && let Some(request) = self.relaunch.take()
         {
             self.relaunch_when_idle(request);
@@ -605,6 +648,7 @@ impl Ui {
     }
 
     pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
+        self.snapshot_notice_until = None;
         self.notice = Some(message);
         tx.instant();
         self.show(tx);
@@ -652,6 +696,28 @@ impl Ui {
         self.key(ev, tx)
     }
 
+    pub fn snapshot_notice(&mut self, message: String, tx: &mut Tx) {
+        self.notice = Some(message);
+        let due = tx.clock() + 5.0;
+        self.snapshot_notice_until = Some(due);
+        tx.wake_at(due);
+    }
+
+    pub fn open_snapshots(&mut self) {
+        self.snapshots.open();
+    }
+
+    pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
+        match self.session.restore(&saved) {
+            Ok(effects) => {
+                self.action_screen = None;
+                self.apply(effects, tx);
+                self.show(tx);
+            }
+            Err(problem) => self.snapshots.update(move |s, _| s.report(problem)),
+        }
+    }
+
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
         if self.picker.is_some() {
@@ -681,6 +747,26 @@ impl Ui {
                 _ => return false,
             }
             tx.instant();
+            return true;
+        }
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
+            match self.session.capture() {
+                Ok(saved) => {
+                    crate::trace::snapshot("capture accepted");
+                    let busy = Busy::new(self.running.clone());
+                    self.snapshots.update(move |s, _| s.save(saved, busy));
+                    self.snapshot_notice("Saving snapshot…".into(), tx);
+                }
+                Err(problem) => {
+                    crate::trace::snapshot("capture refused");
+                    self.snapshot_notice(problem, tx);
+                }
+            }
+            return true;
+        }
+        if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
             return true;
         }
         crate::trace::key(ev);
@@ -806,6 +892,9 @@ impl Ui {
 
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
+            if self.session.results() == dupin_core::session::Results::Done {
+                crate::trace::results_done(&self.query.text, self.session.items().len());
+            }
             if self
                 .deadlines
                 .get(&origin)
@@ -923,13 +1012,12 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
-        let running = self.running.clone();
-        running.fetch_add(1, Ordering::AcqRel);
+        let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             if !dupin_mac::workspace::run(&action) {
                 crate::log::warn(&format!("the system couldn't carry out {action:?}"));
             }
-            running.fetch_sub(1, Ordering::AcqRel);
+            drop(busy);
         });
     }
 
@@ -967,12 +1055,21 @@ impl Ui {
         }
         let due = take_due(&mut self.deadlines, clock);
         let mut changed = false;
+        if self.snapshot_notice_until.is_some_and(|due| clock >= due) {
+            self.snapshot_notice_until = None;
+            self.notice = None;
+            changed = true;
+        }
         for (id, generation) in due {
             if self.session.pending(&id, generation) {
                 if let Some(worker) = self.searchers.get(&id) {
                     worker.cancel();
                 }
-                changed |= self.session.deliver_from(id, Delivery::Expired { generation });
+                let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
+                changed |= delivered;
+                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                    crate::trace::results_done(&self.query.text, self.session.items().len());
+                }
             }
         }
         if let Some(next) = self

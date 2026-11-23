@@ -19,6 +19,18 @@ pub fn settings(event: &str) {
     }
 }
 
+pub fn results_done(query: &str, items: usize) {
+    if on() {
+        eprintln!("dupin-trace: results done query={query:?} items={items}");
+    }
+}
+
+pub fn snapshot(event: &str) {
+    if on() {
+        eprintln!("dupin-trace: snapshot {event}");
+    }
+}
+
 pub fn panel(event: &str, visible: bool, shown: bool) {
     if on() {
         eprintln!(

@@ -8,10 +8,10 @@ export def record [out: path, scenario: closure] {
     rm --force $published $movie $progress $errors ($logs | path join metadata.json) ($logs | path join ffprobe.stderr)
     job spawn {
         let status = try {
-            (^timeout --signal=INT --kill-after=5s 60s
+            (^timeout --signal=INT --kill-after=5s 105s
                 ffmpeg -nostdin -hide_banner -y
                 -f avfoundation -framerate 15 -capture_cursor 1 -capture_mouse_clicks 1
-                -i 'Capture screen 0:none' -t 45 -an
+                -i 'Capture screen 0:none' -t 90 -an
                 -vf 'scale=1920:1080:force_original_aspect_ratio=decrease:force_divisible_by=2'
                 -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p
                 -movflags +faststart -map_metadata -1 -progress pipe:1 $movie
@@ -29,7 +29,7 @@ export def record [out: path, scenario: closure] {
         null
     } catch {|error| $error }
     let recording_error = try {
-        let status = job recv --tag 1 --timeout 75sec
+        let status = job recv --tag 1 --timeout 120sec
         if $status != 0 { error make {msg: 'Screen recording failed; see recording/capture.stderr'} }
         let result = ^ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,nb_frames:format=duration -of json $movie | complete
         $result.stderr | save --force ($logs | path join ffprobe.stderr)

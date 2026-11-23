@@ -11,6 +11,7 @@ mod log;
 mod prefs;
 mod settings;
 mod shader;
+mod snapshots;
 mod store;
 mod trace;
 mod ui;
@@ -95,6 +96,27 @@ fn main() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
+    let snapshots = App::new(AppSpec {
+        fonts,
+        families: FAMILIES,
+        on_key: Some(snapshots::Snapshots::key),
+        ..AppSpec::new(
+            "Dupin Snapshots",
+            (900.0, 600.0),
+            || unreachable!(),
+            snapshots::view,
+        )
+    })
+    .windowless()
+    .on_close(snapshots::Snapshots::closed);
+    let snapshots_handle = snapshots.handle();
+    let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let snapshots = snapshots.init({
+        let panel = handle.clone();
+        let me = snapshots_handle.clone();
+        let running = running.clone();
+        move || snapshots::Snapshots::new(panel, me, running)
+    });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
         move |update| panel.update(move |s, tx| s.reload_config(update, tx))
@@ -127,13 +149,17 @@ fn main() {
             };
             move || {
                 ui::Ui::new(
-                    handle,
-                    prefs_handle,
+                    ui::Windows {
+                        panel: handle,
+                        prefs: prefs_handle,
+                        snapshots: snapshots_handle,
+                    },
                     updater,
                     configuration,
                     history,
                     config_problem,
                     quick_look,
+                    running,
                 )
             }
         })
@@ -166,7 +192,13 @@ fn main() {
                 ..Default::default()
             })
             .into();
-        [panel, prefs]
+        let snapshots: rune::AnyWindowSpec = WindowSpec::from_app("snapshots", snapshots)
+            .options(WindowOptions {
+                min_size: Some((720.0, 420.0)),
+                ..Default::default()
+            })
+            .into();
+        [panel, prefs, snapshots]
     });
 }
 
