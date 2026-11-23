@@ -180,6 +180,14 @@ pub fn send(command: Command) -> Result<Pending, String> {
     })
 }
 impl Pending {
+    /// Closing the connection is how the host learns a caller gave up: it cancels the command,
+    /// so a picker left on screen goes away with its caller.
+    pub fn abort_handle(&self) -> Result<impl FnOnce() + Send + 'static, String> {
+        let stream = self.stream.try_clone().map_err(|e| e.to_string())?;
+        Ok(move || {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        })
+    }
     pub fn wait(mut self) -> Result<Value, String> {
         let reply: Reply = read_frame(&mut self.stream).map_err(|e| e.to_string())?;
         if reply.id != self.id {

@@ -425,16 +425,7 @@ fn parse_problem(source: &str, error: &toml::de::Error) -> String {
     let Some(span) = error.span() else {
         return "config.toml is invalid (location unavailable)".into();
     };
-    let mut start = span.start.min(source.len());
-    while !source.is_char_boundary(start) {
-        start -= 1;
-    }
-    let prefix = &source[..start];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
-    let column = prefix
-        .rsplit('\n')
-        .next()
-        .map_or(1, |line| line.chars().count() + 1);
+    let (line, column) = super::location(source, span.start);
     format!("config.toml is invalid at line {line}, column {column}")
 }
 

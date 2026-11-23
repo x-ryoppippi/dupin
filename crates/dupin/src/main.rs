@@ -8,6 +8,7 @@ mod control;
 mod hotkey;
 mod icons;
 mod log;
+mod mcp;
 mod prefs;
 mod settings;
 mod shader;
