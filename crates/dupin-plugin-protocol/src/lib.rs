@@ -80,7 +80,18 @@ pub enum View {
 pub struct PluginAction {
     pub id: String,
     pub title: String,
+    pub effect: Effect,
 }
+
+/// What an action does when chosen. The host carries it out; there is no other operation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Effect {
+    Copy { text: String },
+    OpenUrl { url: String },
+}
+
+pub const MAX_URL_BYTES: usize = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -186,6 +197,10 @@ impl Response {
                     for action in &item.actions {
                         identifier(&action.id, "action.id")?;
                         bounded(&action.title, 512, "action.title")?;
+                        match &action.effect {
+                            Effect::Copy { text } => bounded(text, 16 * 1024, "effect.text")?,
+                            Effect::OpenUrl { url } => web_url(url)?,
+                        }
                         if !actions.insert(&action.id) {
                             return Err(ProtocolError::DuplicateId("action.id"));
                         }
@@ -214,6 +229,24 @@ fn identifier(value: &str, field: &'static str) -> Result<(), ProtocolError> {
     bounded(value, 128, field)?;
     if value.chars().any(char::is_control) {
         return Err(ProtocolError::InvalidField(field));
+    }
+    Ok(())
+}
+fn web_url(url: &str) -> Result<(), ProtocolError> {
+    bounded(url, MAX_URL_BYTES, "effect.url")?;
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &url[8..]
+    } else if lower.starts_with("http://") {
+        &url[7..]
+    } else {
+        return Err(ProtocolError::InvalidField("effect.url"));
+    };
+    if rest.is_empty()
+        || rest.starts_with(['/', '?', '#'])
+        || url.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(ProtocolError::InvalidField("effect.url"));
     }
     Ok(())
 }
@@ -318,10 +351,22 @@ mod tests {
                             title: "日本語 🦀".into(),
                             subtitle: "A subtitle".into(),
                         },
-                        actions: vec![PluginAction {
-                            id: "copy".into(),
-                            title: "Copy result".into(),
-                        }],
+                        actions: vec![
+                            PluginAction {
+                                id: "copy".into(),
+                                title: "Copy result".into(),
+                                effect: Effect::Copy {
+                                    text: "日本語 🦀".into(),
+                                },
+                            },
+                            PluginAction {
+                                id: "open".into(),
+                                title: "Open".into(),
+                                effect: Effect::OpenUrl {
+                                    url: "https://example.com/?q=%F0%9F%A6%80".into(),
+                                },
+                            },
+                        ],
                     },
                     PluginItem {
                         id: "detail".into(),
@@ -449,6 +494,7 @@ mod tests {
             "/outcome/items/0",
             "/outcome/items/0/view",
             "/outcome/items/0/actions/0",
+            "/outcome/items/0/actions/0/effect",
         ] {
             let mut value = serde_json::to_value(response()).unwrap();
             value
@@ -462,7 +508,11 @@ mod tests {
                 Err(ProtocolError::InvalidJson)
             );
         }
-        for pointer in ["/outcome/kind", "/outcome/items/0/view/kind"] {
+        for pointer in [
+            "/outcome/kind",
+            "/outcome/items/0/view/kind",
+            "/outcome/items/0/actions/0/effect/kind",
+        ] {
             let mut value = serde_json::to_value(response()).unwrap();
             *value.pointer_mut(pointer).unwrap() = json!("Text");
             assert!(Response::decode(&serde_json::to_vec(&value).unwrap(), &req).is_err());
@@ -570,7 +620,9 @@ mod tests {
         value = serde_json::to_value(response()).unwrap();
         value["outcome"]["items"][0]["actions"] = json!(
             (0..9)
-                .map(|i| json!({"id": i.to_string(), "title": "Copy"}))
+                .map(
+                    |i| json!({"id": i.to_string(), "title": "Copy", "effect": {"kind": "copy", "text": "x"}})
+                )
                 .collect::<Vec<_>>()
         );
         assert_eq!(
@@ -601,6 +653,65 @@ mod tests {
         assert_eq!(
             Response::decode(&bytes, &zero),
             Err(ProtocolError::TooManyResults)
+        );
+    }
+
+    #[test]
+    fn actions_only_copy_text_or_open_web_urls() {
+        let req = request();
+        let with_effect = |effect: serde_json::Value| {
+            let mut value = serde_json::to_value(response()).unwrap();
+            value["outcome"]["items"][0]["actions"][0]["effect"] = effect;
+            Response::decode(&serde_json::to_vec(&value).unwrap(), &req)
+        };
+        for url in [
+            "http://example.com",
+            "HTTPS://example.com/path?q=1#top",
+            "https://[::1]:8080/",
+        ] {
+            assert!(
+                with_effect(json!({"kind": "open_url", "url": url})).is_ok(),
+                "{url}"
+            );
+        }
+        for url in [
+            "",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "x-apple.systempreferences:com.apple.preference",
+            "https://",
+            "https:///path",
+            "https://example.com/a b",
+            "https://example.com/\n",
+            "http//example.com",
+        ] {
+            assert_eq!(
+                with_effect(json!({"kind": "open_url", "url": url})),
+                Err(ProtocolError::InvalidField("effect.url")),
+                "{url}"
+            );
+        }
+        let long = format!("https://example.com/{}", "a".repeat(MAX_URL_BYTES));
+        assert!(with_effect(json!({"kind": "open_url", "url": long})).is_err());
+        assert_eq!(
+            with_effect(json!({"kind": "copy", "text": ""})),
+            Err(ProtocolError::InvalidField("effect.text"))
+        );
+        for effect in [
+            json!({"kind": "run", "command": "rm"}),
+            json!({"kind": "open_path", "path": "/"}),
+            json!(null),
+        ] {
+            assert_eq!(with_effect(effect), Err(ProtocolError::InvalidJson));
+        }
+        let mut value = serde_json::to_value(response()).unwrap();
+        value["outcome"]["items"][0]["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("effect");
+        assert_eq!(
+            Response::decode(&serde_json::to_vec(&value).unwrap(), &req),
+            Err(ProtocolError::InvalidJson)
         );
     }
 }
