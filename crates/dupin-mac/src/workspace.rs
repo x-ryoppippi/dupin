@@ -86,7 +86,8 @@ fn open_app(bundle_id: &str, hide_if_frontmost: bool) -> Result<(), String> {
     let identifier = NSString::from_str(bundle_id);
     if hide_if_frontmost
         && let Some(app) = workspace.frontmostApplication()
-        && app.bundleIdentifier().as_deref() == Some(&*identifier)
+        && let Some(frontmost) = app.bundleIdentifier()
+        && frontmost.caseInsensitiveCompare(&identifier) == objc2_foundation::NSComparisonResult::Same
     {
         return app
             .hide()

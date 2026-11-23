@@ -156,8 +156,7 @@ pub struct Prefs {
     current: Rc<RefCell<Config>>,
     page: Page,
     recorder: ShortcutRecorderState,
-    /// Who holds the chord the last refusal was for, when known.
-    owner: Option<String>,
+    shortcut_problem: Option<String>,
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
     updater: Updater,
@@ -189,7 +188,7 @@ impl Prefs {
             current,
             page: Page::General,
             recorder,
-            owner: None,
+            shortcut_problem: None,
             binding,
             panel,
             updater,
@@ -218,7 +217,7 @@ impl Prefs {
         let shortcut = crate::hotkey::parse(&config.hotkey).ok().flatten();
         if self.recorder.shortcut() != shortcut.as_ref() {
             self.recorder = ShortcutRecorderState::new(shortcut);
-            self.owner = None;
+            self.shortcut_problem = None;
         }
         if self.binding.failed_at_launch() {
             self.recorder.mark_unregistered();
@@ -242,13 +241,17 @@ impl Prefs {
     }
 
     fn change_hotkey(&mut self, next: Option<&Shortcut>, _: &mut Tx) -> Result<(), ShortcutError> {
-        let result = self.binding.replace(next);
-        self.owner = match (&result, next) {
-            (Err(ShortcutError::Conflict), Some(next)) => self.binding.owner(next),
-            _ => None,
-        };
-        result?;
         let base = self.current.borrow().clone();
+        let result =
+            if next.is_some_and(|shortcut| crate::hotkey::binding_targets(&base).contains_key(shortcut)) {
+                Err(ShortcutError::Conflict)
+            } else {
+                self.binding.replace(next)
+            };
+        self.shortcut_problem = next
+            .filter(|_| result == Err(ShortcutError::Conflict))
+            .and_then(|next| self.binding.recorder_conflict(next, &base));
+        result?;
         self.config = base.clone();
         self.config.hotkey = next.map(ToString::to_string).unwrap_or_default();
         self.save(&base);
@@ -630,10 +633,11 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
 }
 
 fn general(s: &Prefs, k: &Kit) -> Vec<El> {
-    let owner = s.owner.clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| match (chord, &owner) {
-        (Some(chord), Some(owner)) => format!("{} is used by {owner}.", chord.keycaps().join("")),
-        _ => shortcut_error_message(error, chord),
+    let shortcut_problem = s.shortcut_problem.clone();
+    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
+        shortcut_problem
+            .clone()
+            .unwrap_or_else(|| shortcut_error_message(error, chord))
     };
     let hotkey = ShortcutRecorder::new("hotkey", &s.recorder, |s: &mut Prefs| &mut s.recorder)
         .label("Show Dupin")

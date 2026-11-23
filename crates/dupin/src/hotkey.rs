@@ -94,12 +94,12 @@ impl Binding {
         Ok(())
     }
 
-    pub fn apply_config(&self, config: &Config, previous: &Config) -> Result<(), String> {
+    pub fn apply_config(&self, config: &Config, previous: &Config) -> Result<Option<String>, String> {
         self.configure(config, previous, false)
     }
 
     pub fn reserve_for_save(&self, config: &Config, previous: &Config) -> Result<(), String> {
-        self.configure(config, previous, true)
+        self.configure(config, previous, true).map(|_| ())
     }
 
     pub fn discard_reservations(&self) {
@@ -110,8 +110,9 @@ impl Binding {
         }
     }
 
-    fn configure(&self, config: &Config, previous: &Config, reserve: bool) -> Result<(), String> {
+    fn configure(&self, config: &Config, previous: &Config, reserve: bool) -> Result<Option<String>, String> {
         let (panel, mut targets) = configured_targets(config)?;
+        let previous_bindings = binding_targets(previous);
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let keep_unavailable = state.panel_unavailable && parse(&previous.hotkey).ok() == Some(panel.clone());
         if keep_unavailable
@@ -133,19 +134,40 @@ impl Binding {
         if reserve {
             targets.extend(state.targets.clone());
         }
-        self.update_registrations(&mut state, &targets)
-            .map_err(|(shortcut, error)| {
+        let mut problems = Vec::new();
+        let register = |shortcut: &Shortcut| self.claim(shortcut);
+        let unregister = |id| self.panel.unregister_shortcut(id);
+        let skip = |shortcut: &Shortcut, error: &ShortcutError| {
+            if *error != ShortcutError::Conflict || !unchanged_binding(shortcut, &targets, &previous_bindings)
+            {
+                return false;
+            }
+            problems.push(format!(
+                "Couldn't register the {} binding: {}.",
+                shortcut.keycaps().join(""),
+                self.why(shortcut, error),
+            ));
+            true
+        };
+        let State {
+            ids, targets: active, ..
+        } = &mut *state;
+        sync_transaction(ids, active, &targets, register, unregister, skip).map_err(
+            |(shortcut, error)| {
                 format!(
                     "Couldn't apply {}: {}.",
                     shortcut.keycaps().join(""),
-                    self.why(&shortcut, &error),
+                    self.why(&shortcut, &error)
                 )
-            })?;
+            },
+        )?;
         if !reserve {
+            targets.retain(|shortcut, _| state.ids.contains_key(shortcut));
             state.targets = targets;
             state.panel_unavailable &= keep_unavailable;
         }
-        Ok(())
+        problems.sort_unstable();
+        Ok((!problems.is_empty()).then(|| problems.join(" ")))
     }
 
     pub fn target(&self, shortcut: &Shortcut) -> Option<Target> {
@@ -181,9 +203,22 @@ impl Binding {
         })
     }
 
-    /// Who holds `shortcut`, for a refusal message.
-    pub fn owner(&self, shortcut: &Shortcut) -> Option<String> {
+    fn owner(&self, shortcut: &Shortcut) -> Option<String> {
         self.panel.shortcut_owner(shortcut)
+    }
+
+    pub fn recorder_conflict(&self, shortcut: &Shortcut, config: &Config) -> Option<String> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if matches!(state.targets.get(shortcut), Some(Target::Configured(_)))
+            || binding_targets(config).contains_key(shortcut)
+        {
+            return Some(format!(
+                "{} is assigned to a binding in config.toml.",
+                shortcut.keycaps().join("")
+            ));
+        }
+        self.owner(shortcut)
+            .map(|owner| format!("{} is used by {owner}.", shortcut.keycaps().join("")))
     }
 
     fn report(&self, accelerator: &str, reason: &str) {
@@ -207,6 +242,22 @@ impl Binding {
             (e, _) => e.to_string(),
         }
     }
+}
+
+pub fn binding_targets(config: &Config) -> HashMap<Shortcut, &HotkeyTarget> {
+    config
+        .bindings
+        .iter()
+        .filter_map(|(accelerator, target)| Some((accelerator.parse().ok()?, target)))
+        .collect()
+}
+
+fn unchanged_binding(
+    shortcut: &Shortcut,
+    targets: &HashMap<Shortcut, Target>,
+    previous: &HashMap<Shortcut, &HotkeyTarget>,
+) -> bool {
+    matches!(targets.get(shortcut), Some(Target::Configured(target)) if previous.get(shortcut) == Some(&target))
 }
 
 fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shortcut, Target>), String> {
@@ -249,13 +300,19 @@ fn sync<Id: Copy>(
     targets: &HashMap<Shortcut, Target>,
     register: impl Fn(&Shortcut) -> Result<Id, ShortcutError>,
     unregister: impl Fn(Id) -> Result<(), ShortcutError>,
+    mut skip: impl FnMut(&Shortcut, &ShortcutError) -> bool,
 ) -> Result<(), (Shortcut, ShortcutError)> {
     // Keep current registrations until all new chords have been acquired. A chord that
     // changes target keeps its registration, so two bindings can swap on reload.
     for shortcut in targets.keys() {
         if let std::collections::hash_map::Entry::Vacant(slot) = ids.entry(shortcut.clone()) {
-            let id = register(shortcut).map_err(|error| (shortcut.clone(), error))?;
-            slot.insert(id);
+            match register(shortcut) {
+                Ok(id) => {
+                    slot.insert(id);
+                }
+                Err(error) if skip(shortcut, &error) => {}
+                Err(error) => return Err((shortcut.clone(), error)),
+            }
         }
     }
     let removed: Vec<_> = ids
@@ -277,8 +334,19 @@ fn update_registrations<Id: Copy>(
     register: impl Fn(&Shortcut) -> Result<Id, ShortcutError>,
     unregister: impl Fn(Id) -> Result<(), ShortcutError>,
 ) -> Result<(), (Shortcut, ShortcutError)> {
-    if let Err(error) = sync(ids, targets, &register, &unregister) {
-        if let Err((shortcut, error)) = sync(ids, previous, register, unregister) {
+    sync_transaction(ids, previous, targets, register, unregister, |_, _| false)
+}
+
+fn sync_transaction<Id: Copy>(
+    ids: &mut HashMap<Shortcut, Id>,
+    previous: &HashMap<Shortcut, Target>,
+    targets: &HashMap<Shortcut, Target>,
+    register: impl Fn(&Shortcut) -> Result<Id, ShortcutError>,
+    unregister: impl Fn(Id) -> Result<(), ShortcutError>,
+    skip: impl FnMut(&Shortcut, &ShortcutError) -> bool,
+) -> Result<(), (Shortcut, ShortcutError)> {
+    if let Err(error) = sync(ids, targets, &register, &unregister, skip) {
+        if let Err((shortcut, error)) = sync(ids, previous, register, unregister, |_, _| false) {
             crate::log::warn(&format!("Couldn't restore the {shortcut} shortcut: {error}."));
         }
         return Err(error);
@@ -425,6 +493,42 @@ mod tests {
         assert_eq!(error.1, ShortcutError::Conflict);
         assert_eq!(release.get(), Some(2));
         assert_eq!(ids, HashMap::from([(panel, 1)]));
+    }
+
+    #[test]
+    fn an_unavailable_unchanged_binding_leaves_other_shortcuts_active() {
+        let mut previous = Config::default();
+        previous.bindings.insert("Control+Option+C".into(), app());
+        let blocked: Shortcut = "ctrl+alt+c".parse().unwrap();
+        let available: Shortcut = "ctrl+alt+d".parse().unwrap();
+        let (panel, active) = configured_targets(&Config::default()).unwrap();
+        let panel = panel.unwrap();
+        let mut config = previous.clone();
+        config.bindings.remove("Control+Option+C");
+        config.bindings.insert("ctrl+alt+c".into(), app());
+        config.bindings.insert("ctrl+alt+d".into(), app());
+        let (_, targets) = configured_targets(&config).unwrap();
+        let previous_bindings = binding_targets(&previous);
+        let mut ids = HashMap::from([(panel.clone(), 1)]);
+
+        sync_transaction(
+            &mut ids,
+            &active,
+            &targets,
+            |shortcut| {
+                if shortcut == &blocked {
+                    Err(ShortcutError::Conflict)
+                } else {
+                    Ok(2)
+                }
+            },
+            |_| panic!("keep the active panel shortcut"),
+            |shortcut, error| {
+                *error == ShortcutError::Conflict && unchanged_binding(shortcut, &targets, &previous_bindings)
+            },
+        )
+        .unwrap();
+        assert_eq!(ids, HashMap::from([(panel, 1), (available, 2)]));
     }
 
     #[test]
