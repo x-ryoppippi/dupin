@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub const MAPS_SEARCH_TEMPLATE: &str = "maps://?q={query}";
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -155,6 +157,13 @@ impl Default for Config {
                     },
                 ),
                 (
+                    "maps".into(),
+                    WebSearch {
+                        name: "Apple Maps".into(),
+                        url: MAPS_SEARCH_TEMPLATE.into(),
+                    },
+                ),
+                (
                     "yt".into(),
                     WebSearch {
                         name: "YouTube".into(),
@@ -239,6 +248,13 @@ web_fallbacks = ["docs", "g"]
         )
         .unwrap();
         assert_eq!(config.web_searches["docs"].name, "Docs");
+        assert_eq!(config.web_searches.len(), 1);
+        assert!(
+            Config::parse("web_searches = {}")
+                .unwrap()
+                .web_searches
+                .is_empty()
+        );
         assert_eq!(config.web_fallbacks, ["docs", "g"]);
 
         assert!(

@@ -27,7 +27,9 @@ Choose **Relaunch** in Settings → General to restart Dupin. File edits reload 
 
 ## Web searches
 
-The default keywords are `g` (Google), `gh` (GitHub) and `yt` (YouTube). Define `web_searches` to replace that set, or set it to `{}` to disable web searches. Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. Dupin encodes the text as UTF-8 URL data; it does not treat typed characters as URL syntax. Templates cannot contain credentials or put the placeholder in the origin.
+The default keywords are `g` (Google), `gh` (GitHub), `maps` (Apple Maps) and `yt` (YouTube). An explicit `web_searches` table replaces the defaults. Add the Maps entry below to use it with a custom table, or set `web_searches = {}` to disable all web searches.
+
+Each entry has a display name and an HTTP or HTTPS URL template with exactly one `{query}` in its path, query or fragment. The exact template `maps://?q={query}` opens Apple Maps directly. Dupin encodes the text as UTF-8 URL data. Templates cannot contain credentials or put the placeholder in the origin.
 
 ```toml
 web_fallbacks = ["gh"]
@@ -35,6 +37,10 @@ web_fallbacks = ["gh"]
 [web_searches.gh]
 name = "GitHub"
 url = "https://github.com/search?q={query}"
+
+[web_searches.maps]
+name = "Apple Maps"
+url = "maps://?q={query}"
 
 [web_searches.docs]
 name = "Rust documentation"
