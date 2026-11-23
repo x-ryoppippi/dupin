@@ -7,10 +7,9 @@ use std::path::Path;
 use rune::{El, el, row, text};
 use rune_kit::{Button, ButtonVariant, Keybind, Kit};
 
-use super::{
-    DESCRIPTION, GUTTER, Page, Prefs, card, hotkey_setting, login_setting, note, permissions, setting,
-    value_button,
-};
+use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, value_button};
+use super::general::{hotkey_setting, login_setting};
+use super::{GUTTER, Page, Prefs, permissions};
 use crate::icons;
 
 const MARKER: &str = "welcomed";
@@ -68,12 +67,12 @@ fn intro(k: &Kit, words: &str) -> El {
     text(words.to_owned())
         .font(DESCRIPTION)
         .color(k.c.text_base)
-        .mx(super::ROW_PX)
+        .mx(ROW_PX)
         .wrap()
 }
 
 fn hotkey_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let mut rows = vec![hotkey_setting(s, k), login_setting(s.login.as_ref(), k)];
+    let mut rows = vec![hotkey_setting(s, k), login_setting(s, k)];
     if permissions::available() {
         let review = value_button(k, "welcome-permissions", "Review", &icons::SHIELD)
             .on_press(|s: &mut Prefs| s.show(Page::Permissions));

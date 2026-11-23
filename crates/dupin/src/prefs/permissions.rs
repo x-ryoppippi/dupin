@@ -6,7 +6,8 @@ use dupin_mac::privacy::{Access, Permission};
 use rune::{El, Icon, row};
 use rune_kit::{Badge, BadgeVariant, Button, Kit};
 
-use super::{Prefs, card, setting};
+use super::Prefs;
+use super::controls::{card, note, setting};
 use crate::icons;
 
 /// A permission and the features that use it. A feature that needs a permission names itself
@@ -108,7 +109,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         .collect();
     vec![
         card(k, hair, rows),
-        super::note(
+        note(
             k,
             "Dupin asks for a permission only when you use a feature that needs it. File search reads \
              the Spotlight index and needs none.",
