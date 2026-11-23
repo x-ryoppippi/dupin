@@ -97,10 +97,6 @@ impl Renaming {
         &self.path
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     pub fn layout_key(&self) -> &str {
         &self.layout_key
     }

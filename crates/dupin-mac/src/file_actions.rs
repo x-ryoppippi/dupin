@@ -11,7 +11,7 @@ pub fn item(path: PathBuf, title: String, matched: Vec<usize>) -> Item {
     item
 }
 
-pub(crate) fn add(item: &mut Item) {
+fn add(item: &mut Item) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };

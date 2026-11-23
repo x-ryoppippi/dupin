@@ -137,7 +137,7 @@ fn claim(
 
 /// Whether the name ends in an extension Finder treats as one: files and packages have
 /// them, folders don't.
-pub fn has_extension(path: &Path) -> bool {
+pub(crate) fn has_extension(path: &Path) -> bool {
     !path.is_dir()
         || autoreleasepool(|_| {
             NSWorkspace::sharedWorkspace().isFilePackageAtPath(&NSString::from_str(&path.to_string_lossy()))

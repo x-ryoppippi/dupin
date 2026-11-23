@@ -1499,7 +1499,7 @@ fn rename_puts_the_name_in_the_field_with_its_stem_selected() {
     );
     let renaming = s.renaming().unwrap();
     assert_eq!(renaming.path(), std::path::Path::new("/x/report.pdf"));
-    assert_eq!(renaming.name(), "report.pdf");
+    assert_eq!(renaming.name, "report.pdf");
     assert_eq!(renaming.layout_key(), s.layout_key(1));
     assert_eq!(s.query(), "report");
     assert_eq!(s.history(), &history);
@@ -1510,7 +1510,7 @@ fn editing_a_name_never_searches_and_enter_renames_then_restores_the_search() {
     let (mut s, key) = rename_session();
     s.run_key_action(&key, "rename");
     assert!(s.set_query("summary.pdf").is_empty());
-    assert_eq!(s.renaming().unwrap().name(), "summary.pdf");
+    assert_eq!(s.renaming().unwrap().name, "summary.pdf");
     assert_eq!(s.intent(Intent::Up), Some(Vec::new()));
     assert_eq!(s.intent(Intent::Actions), Some(Vec::new()));
     assert_eq!(s.intent(Intent::Backspace), None);
