@@ -102,8 +102,8 @@ executing actions or loading configuration, history or application providers.
 Local control uses length-prefixed JSON, one correlated request/reply per connection,
 a 512 KiB frame cap, at most eight live connections and a five-minute request deadline.
 The socket lives in an owner-only Dupin directory under `XDG_RUNTIME_DIR` (or the system
-temporary directory). Existing sockets are never removed to take over an instance;
-a stale socket requires deliberate removal after checking its owner and live process.
+per-user temporary directory on macOS, independent of shell `TMPDIR`). A live instance
+is never replaced; an owner-only socket with no listener is recovered on restart.
 Picker and settings contention return Busy. Disconnecting cancels a pending picker.
 Snapshot window control will be integrated with #32's separate searchable snapshot
 window; the superseded tab proposal is not implemented here.
