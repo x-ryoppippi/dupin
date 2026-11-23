@@ -4,9 +4,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
-pub const MAX_ENTRIES: usize = 100;
-pub const MAX_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_ENTRY_BYTES: usize = 512 * 1024;
+const MAX_ENTRIES: usize = 100;
+const MAX_BYTES: usize = 8 * 1024 * 1024;
+const MAX_ENTRY_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,7 +23,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         if self.version != 1
             || self.title.is_empty()
             || self.title.len() > 4096
@@ -46,7 +46,7 @@ impl Snapshot {
         Ok(())
     }
 
-    pub fn content(&self) -> String {
+    fn content(&self) -> String {
         self.views
             .iter()
             .map(|v| match v {
@@ -60,10 +60,6 @@ impl Snapshot {
 
     pub fn search_text(&self) -> String {
         normalize(&format!("{}\n{}\n{}", self.title, self.query, self.content()))
-    }
-
-    pub fn matches(&self, query: &str) -> bool {
-        self.search_text().contains(&normalize(query))
     }
 }
 
@@ -129,7 +125,7 @@ impl Store {
     pub fn list(&self) -> &[Snapshot] {
         &self.entries
     }
-    pub fn open(&self, id: &str) -> Option<&Snapshot> {
+    fn open(&self, id: &str) -> Option<&Snapshot> {
         self.entries.iter().find(|s| s.id == id)
     }
     pub fn problem(&self) -> Option<&str> {
@@ -283,6 +279,9 @@ fn write_private(directory: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn matches(snapshot: &Snapshot, query: &str) -> bool {
+        snapshot.search_text().contains(&normalize(query))
+    }
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
@@ -367,10 +366,10 @@ mod tests {
         let mut reopened = Store::load(temp.0.clone());
         assert_eq!(store.list(), reopened.list());
         let saved = reopened.open(&id).unwrap();
-        assert!(saved.matches("CAFE\u{301}"));
-        assert!(saved.matches("本文"));
-        assert!(saved.matches("2 + 2"));
-        assert!(!saved.matches("missing"));
+        assert!(matches(saved, "CAFE\u{301}"));
+        assert!(matches(saved, "本文"));
+        assert!(matches(saved, "2 + 2"));
+        assert!(!matches(saved, "missing"));
         reopened.delete(&id).unwrap();
         assert!(Store::load(temp.0.clone()).list().is_empty());
         use std::os::unix::fs::PermissionsExt;

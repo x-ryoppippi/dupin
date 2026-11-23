@@ -1287,7 +1287,7 @@ fn snapshot_capture_rejects_inert_and_stale_results_and_restore_has_no_activatio
     let mut unavailable = saved.clone();
     unavailable.mode = "removed.extension".into();
     assert!(s.restore(&unavailable).is_err());
-    assert!(saved.content().contains("Historical content"));
+    assert!(saved.search_text().contains("historical content"));
     assert_eq!(s.query(), "first");
 }
 
