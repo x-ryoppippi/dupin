@@ -15,6 +15,7 @@ roxmltree = "0.21.2"
 dupin-plugin-protocol = { workspace = true }
 dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
+dupin-extension-install = { path = "../dupin-extension-install" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }

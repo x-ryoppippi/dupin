@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -19,6 +19,8 @@ enum Action {
     ExtCheck(String),
     /// Ask an extension folder for a query.
     ExtRun(String, String),
+    /// Install, list, update, remove or restore packages in the extensions folder.
+    ExtPackages(crate::extension_install::Command),
     Mcp,
 }
 
@@ -56,6 +58,7 @@ impl From<dupin_js_runtime::RunError> for Failure {
     }
 }
 fn parse(args: &[String]) -> Result<Action, String> {
+    use crate::extension_install::Command as Packages;
     let mut parser = pico_args::Arguments::from_vec(args.iter().map(std::ffi::OsString::from).collect());
     let json = parser.contains("--json");
     let rest = parser.finish();
@@ -83,6 +86,18 @@ fn parse(args: &[String]) -> Result<Action, String> {
         }
         ["snap", view, out] if !view.starts_with('-') && !out.starts_with('-') => {
             Ok(Action::Snap(view.to_string(), out.to_string()))
+        }
+        ["ext", "install", source] if !source.starts_with('-') => {
+            Ok(Action::ExtPackages(Packages::Install(source.to_string())))
+        }
+        ["ext", "list"] => Ok(Action::ExtPackages(Packages::List)),
+        ["ext", "sync"] => Ok(Action::ExtPackages(Packages::Sync)),
+        ["ext", "update"] => Ok(Action::ExtPackages(Packages::Update(None))),
+        ["ext", "update", name] if !name.starts_with('-') => {
+            Ok(Action::ExtPackages(Packages::Update(Some(name.to_string()))))
+        }
+        ["ext", "remove", name] if !name.starts_with('-') => {
+            Ok(Action::ExtPackages(Packages::Remove(name.to_string())))
         }
         ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
@@ -359,6 +374,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             print!("{}", describe_outcome(&outcome));
             Ok(Value::Null)
         }
+        Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
         Action::Mcp => crate::mcp::run()
             .map(|()| Value::Null)
             .map_err(|e| e.to_string().into()),
@@ -598,6 +614,22 @@ mod tests {
         );
         assert!(parse(&args(&["ext", "run", "word-count"])).is_err());
         assert!(parse(&args(&["ext", "check", "--query"])).is_err());
+        {
+            use crate::extension_install::Command as Packages;
+            assert_eq!(
+                parse(&args(&["ext", "install", "github:ryo/wc@v1", "--json"])).unwrap(),
+                Action::ExtPackages(Packages::Install("github:ryo/wc@v1".into()))
+            );
+            assert_eq!(
+                parse(&args(&["ext", "update"])).unwrap(),
+                Action::ExtPackages(Packages::Update(None))
+            );
+            assert_eq!(
+                parse(&args(&["ext", "remove", "wc"])).unwrap(),
+                Action::ExtPackages(Packages::Remove("wc".into()))
+            );
+            assert!(parse(&args(&["ext", "install", "--upload-pack=x"])).is_err());
+        }
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(
