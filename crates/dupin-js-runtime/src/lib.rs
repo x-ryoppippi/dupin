@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use dupin_plugin_protocol::PluginItem;
@@ -55,10 +56,24 @@ impl From<Diagnostic> for RunError {
     }
 }
 
+/// The QuickJS-ng release this build runs, which decides the bytecode format.
+pub fn engine_version() -> &'static str {
+    // SAFETY: QuickJS returns a pointer to a static, NUL-terminated string.
+    unsafe { std::ffi::CStr::from_ptr(rquickjs::qjs::JS_GetVersion()) }
+        .to_str()
+        .unwrap_or("unknown")
+}
+
 /// A package's modules, compiled once when it is loaded. A changed file means a new package.
 pub struct Package {
+    id: u64,
     entry: String,
     modules: Arc<HashMap<String, Box<[u8]>>>,
+}
+
+fn next_package_id() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl std::fmt::Debug for Package {
@@ -85,9 +100,41 @@ impl Package {
         let sources = package::read_sources(&files)?;
         let modules = compile(sources)?;
         Ok(Self {
+            id: next_package_id(),
             entry,
             modules: Arc::new(modules),
         })
+    }
+
+    /// Rebuilds a package from what [`Package::modules`] gave out, in another process.
+    ///
+    /// # Safety
+    ///
+    /// QuickJS does not validate bytecode. Every module must be bytes that [`Package::load`]
+    /// compiled, unchanged, in a build whose [`engine_version`] is this one's.
+    pub unsafe fn from_compiled(entry: String, modules: HashMap<String, Box<[u8]>>) -> Self {
+        Self {
+            id: next_package_id(),
+            entry,
+            modules: Arc::new(modules),
+        }
+    }
+
+    /// Unique among the packages this process made, so a changed package is never mistaken for
+    /// the one it replaced.
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    /// Each module's name and bytecode.
+    pub fn modules(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.modules
+            .iter()
+            .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
     }
 
     /// Links and evaluates the entry module, and checks that it exports `search`.
@@ -312,8 +359,8 @@ impl Loader for PackageModules {
             .modules
             .get(name)
             .ok_or_else(|| rquickjs::Error::new_loading(name))?;
-        // SAFETY: `compile` wrote these bytes with this same engine, in this process, from a
-        // module it had just parsed; nothing else can put bytes in the map.
+        // SAFETY: `compile` wrote these bytes from a module it had just parsed, and only
+        // `Package::load` or `Package::from_compiled`, whose contract is the same, fill the map.
         unsafe { Module::load(ctx.clone(), bytecode) }
     }
 }

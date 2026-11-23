@@ -495,7 +495,7 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
     ] {
         let diagnostic = failure(run(source, ""));
         assert_eq!(
-            (diagnostic.code, diagnostic.field.as_deref()),
+            (diagnostic.code.as_ref(), diagnostic.field.as_deref()),
             (code, field),
             "{source}: {diagnostic:?}"
         );
@@ -523,7 +523,7 @@ fn syntax_errors_and_missing_entries_are_reported_when_loading() {
     let (_folder, loaded) = package(&[("index.js", "export function search() { return []; }")]);
     let diagnostic = loaded.unwrap_err();
     assert_eq!(
-        (diagnostic.code, diagnostic.file.as_deref()),
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
         ("missing-entry", Some("main.js"))
     );
 
