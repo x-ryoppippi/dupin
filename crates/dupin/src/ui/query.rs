@@ -27,11 +27,19 @@ impl Ui {
         }
         self.action_screen = None;
         self.typed_at = tx.clock();
+        crate::latency::edit_started(self.typed_at, &self.query.text);
         let effects = self.session.set_query(&self.query.text);
         if !self.session.command().private_results {
             crate::trace::edited(&self.query.text);
         }
         self.apply(effects, tx);
+        crate::latency::edit_applied(
+            self.session.command_id(),
+            !matches!(
+                self.session.results(),
+                dupin_core::session::Results::Searching { .. }
+            ),
+        );
     }
 }
 

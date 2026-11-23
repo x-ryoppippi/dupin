@@ -165,6 +165,43 @@ nu scripts/footprint.nu
 
 `DUPIN_TRACE=1` prints when the launch hotkey is registered and, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
 
+## Keypress latency
+
+`scripts/latency.nu` measures how long Dupin takes from a typed key to the first frame that shows every provider's results for the new query. It drives a headless `--realtime` run with Rune's scripted keys, which reach the query field and the session as a window's keys do, against the same fixtures as the headless renders (calendar, dictionary, clipboard), so it needs no permissions. `DUPIN_LATENCY=<file>` makes a headless run write one JSON line per edit of the query; a window never writes it.
+
+```sh
+cargo build --profile latency -p dupin --features tooling   # target/latency/dupin
+nu scripts/latency.nu run                                    # target/latency/results.json
+nu scripts/latency.nu run --only calendar --runs 1           # a quick look at one feature
+nu scripts/latency.nu compare main.json pr.json              # fails on a p95 regression
+nu scripts/latency.nu parity target/latency/results.json     # extensions against native
+```
+
+`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and Rune's headless tooling, so numbers are only comparable between builds of that profile on one machine.
+
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`tom`). A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+
+For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
+
+- `dispatch_ms`: from the edit to the searches it starts being handed to their providers' workers.
+- `provider_ms`: from there to the last provider's final delivery leaving its worker. `providers` in the raw lines has each one's time.
+- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread, which may be drawing a frame.
+- `layout_ms`: from there to the next frame being built, laid out and encoded. Headless frames start at most every `1 / --fps` seconds, so this includes up to a millisecond of waiting at the default 1000 fps.
+
+`compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
+
+A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it and its extensions directory:
+
+```toml
+[features.calendar.extension]
+config = "scripts/latency/calendar-extension.toml"
+extensions = "scripts/latency/calendar-extension.extensions"
+```
+
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation.
+
+The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
+
 Scripts in this repository are written in Nushell.
 
 ## Rust visibility

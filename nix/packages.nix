@@ -28,6 +28,7 @@
     {
       packages = {
         inherit dupin dmg-background blacksmith;
+        dupin-latency = dupin.latencyBinary;
         default = dupin;
       };
     };
