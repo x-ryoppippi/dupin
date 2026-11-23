@@ -661,6 +661,13 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
     let relaunch = value_button(k, "relaunch", "Relaunch", &icons::REFRESH).on_press(|s: &mut Prefs| {
         s.panel.update(|ui, tx| ui.relaunch(tx));
     });
+    let automation_enabled = s.config.system_automation;
+    let automation = Switch::new(automation_enabled)
+        .label("System Command Automation")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.system_automation = !automation_enabled))
+        .build(k);
     vec![
         setting(
             k,
@@ -682,6 +689,13 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             "Input source",
             Some("ASCII switches an input method to Roman while the panel shows"),
             input_source,
+        ),
+        setting(
+            k,
+            &icons::REFRESH,
+            "System Command Automation",
+            Some("Allow Dupin to request macOS Automation when you confirm a system command"),
+            automation,
         ),
         setting(
             k,

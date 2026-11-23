@@ -45,6 +45,7 @@ pub enum Effect {
     ShowActions {
         id: String,
         generation: u64,
+        confirmation: Option<String>,
     },
     /// Hide the panel. The session has already reset itself for the next show.
     Hide,
@@ -244,7 +245,7 @@ impl Session {
         self.items.get(self.selected)
     }
 
-    fn actions(&mut self) -> Vec<Effect> {
+    fn actions(&mut self, confirmation: Option<String>) -> Vec<Effect> {
         let effects = self
             .actionable_items()
             .get(self.selected)
@@ -253,6 +254,7 @@ impl Session {
                 vec![Effect::ShowActions {
                     id: self.result_key(self.selected),
                     generation: self.generation,
+                    confirmation,
                 }]
             })
             .unwrap_or_default();
@@ -366,7 +368,7 @@ impl Session {
     pub fn intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
         let empty = self.query.is_empty();
         Some(match intent {
-            Intent::Actions => self.actions(),
+            Intent::Actions => self.actions(None),
             Intent::Complete => {
                 let completion = self.actionable_items().get(self.selected)?.completion.clone()?;
                 let mut effects = self.set_query(&completion);
@@ -426,7 +428,7 @@ impl Session {
                 };
                 let Some(id) = id else {
                     return Some(if intent == Intent::Open {
-                        self.actions()
+                        self.actions(None)
                     } else {
                         Vec::new()
                     });
@@ -434,6 +436,9 @@ impl Session {
                 let Some(action) = item.item_action(id).cloned() else {
                     return Some(Vec::new());
                 };
+                if action.confirmation().is_some() {
+                    return Some(self.actions(Some(action.id)));
+                }
                 let item = item.clone();
                 self.activate(&item, action)
             }

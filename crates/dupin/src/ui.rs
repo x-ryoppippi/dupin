@@ -272,7 +272,8 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
-    /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
+    system_runner: crate::system_commands::Runner,
+    /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
@@ -464,6 +465,11 @@ impl Ui {
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
+            system_runner: if cfg!(test) || rune::tooling::is_headless() {
+                |_| Err("System commands are unavailable in headless runs.".into())
+            } else {
+                crate::system_commands::run
+            },
             running,
             updater,
             quick_look,
@@ -1175,7 +1181,7 @@ impl Ui {
     fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {
         for effect in effects {
             match effect {
-                Effect::ShowActions { id, generation: _ } => {
+                Effect::ShowActions { id, confirmation, .. } => {
                     let Some(item) = self
                         .session
                         .items()
@@ -1185,12 +1191,28 @@ impl Ui {
                     else {
                         continue;
                     };
+                    let (selected, stage) = if let Some(action_id) = confirmation {
+                        let Some(selected) = item.actions.iter().position(|action| action.id == action_id)
+                        else {
+                            continue;
+                        };
+                        crate::trace::action_screen("confirm");
+                        (
+                            selected,
+                            ActionStage::Confirm {
+                                action_id,
+                                selected: 0,
+                            },
+                        )
+                    } else {
+                        (0, ActionStage::List)
+                    };
                     self.action_screen = Some(ActionScreen {
                         key: id,
                         item: item.clone(),
                         layout_key: self.session.layout_key(self.session.selected()),
-                        selected: 0,
-                        stage: ActionStage::List,
+                        selected,
+                        stage,
                     });
                 }
                 Effect::Search {
@@ -1231,6 +1253,13 @@ impl Ui {
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
+                    dupin_core::Action::System(command) => {
+                        let run = self.system_runner;
+                        let enabled = self.configuration.values.borrow().system_automation;
+                        self.run_native_action(move || {
+                            crate::system_commands::execute(command, enabled, run)
+                        });
+                    }
                     dupin_core::Action::Preview(path) => {
                         let shown = self
                             .quick_look
@@ -1296,10 +1325,14 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
+        self.run_native_action(move || dupin_mac::workspace::run(&action));
+    }
+
+    fn run_native_action(&self, run: impl FnOnce() -> Result<(), String> + Send + 'static) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
-            if let Err(error) = dupin_mac::workspace::run(&action) {
+            if let Err(error) = run() {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);

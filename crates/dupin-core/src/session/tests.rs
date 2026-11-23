@@ -33,10 +33,18 @@ fn file_action_session() -> (Session, String, u64) {
 
 #[test]
 fn confirmed_consumption_cannot_run_from_normal_activation() {
-    let (mut s, key, _) = file_action_session();
+    let (mut s, key, generation) = file_action_session();
     let history = s.history().clone();
-    assert!(s.intent(Intent::Open).unwrap().is_empty());
-    assert!(s.intent(Intent::OpenAlternate).unwrap().is_empty());
+    for intent in [Intent::Open, Intent::OpenAlternate] {
+        assert_eq!(
+            s.intent(intent).unwrap(),
+            [Effect::ShowActions {
+                id: key.clone(),
+                generation,
+                confirmation: Some("trash".into()),
+            }]
+        );
+    }
     assert!(s.run_key_action(&key, "trash").is_empty());
     assert!(s.run_key_action(&key, "choose").is_empty());
     assert!(s.run_confirmed_key_action(&key, "choose").is_empty());
@@ -280,7 +288,8 @@ fn actions_run_the_named_result_even_after_selection_moves() {
         s.intent(Intent::Actions).unwrap(),
         vec![Effect::ShowActions {
             id: s.result_key(0),
-            generation
+            generation,
+            confirmation: None,
         }]
     );
     s.intent(Intent::Down);
@@ -720,7 +729,8 @@ fn enter_offers_dictionary_actions_before_launching() {
         s.intent(Intent::Open).unwrap(),
         vec![Effect::ShowActions {
             id: s.result_key(0),
-            generation
+            generation,
+            confirmation: None,
         }]
     );
     let key = s.result_key(0);

@@ -13,6 +13,7 @@ pub enum Action {
         application: PathBuf,
     },
     Trash(PathBuf),
+    System(SystemCommand),
     /// Show in the file manager, selected.
     Reveal(PathBuf),
     /// Open a URL with its registered handler.
@@ -22,6 +23,18 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemCommand {
+    Sleep,
+    LockScreen,
+    SleepDisplays,
+    Restart,
+    ShutDown,
+    LogOut,
+    EmptyTrash,
+    ToggleDarkMode,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

@@ -39,6 +39,21 @@ Dupin finds the `.app` bundles in `/Applications`, `/System/Applications` and `~
 
 When an app matches through one of those other names, the name shows before its folder in the result.
 
+## System commands
+
+Search for **Sleep**, **Lock Screen**, **Sleep Displays**, **Restart**, **Shut Down**,
+**Log Out**, **Empty Trash** or **Toggle Dark Mode** alongside apps. Sleep suspends the
+Mac. Sleep Displays turns off the displays while the Mac stays awake. Lock Screen
+locks the current session. Toggle Dark Mode switches the system appearance.
+
+Restart, Shut Down, Log Out and Empty Trash open a confirmation with **Cancel**
+selected. Select the command and press Enter again to confirm. These commands send
+Apple events to loginwindow or Finder, which may require macOS Automation access.
+Enable **System Command Automation** in Dupin Settings under **General** to use
+them. macOS can ask for access once you confirm a command. If you deny access, review
+Dupin under **System Settings → Privacy & Security → Automation**. Failures appear
+in the launcher.
+
 ## Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.

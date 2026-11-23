@@ -13,6 +13,7 @@ mod settings;
 mod shader;
 mod snapshots;
 mod store;
+mod system_commands;
 mod trace;
 mod ui;
 mod update;

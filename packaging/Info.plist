@@ -28,5 +28,7 @@
 	<true/>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Dupin sends Apple events to macOS or Finder when you confirm a system command.</string>
 </dict>
 </plist>

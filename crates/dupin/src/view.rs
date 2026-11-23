@@ -328,8 +328,8 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
             let action = screen.item.item_action(action_id).unwrap();
             let confirmation = action.confirmation().unwrap();
             let path = match screen.item.action(action_id) {
-                Some(dupin_core::Action::Trash(path)) => path.to_string_lossy(),
-                _ => "".into(),
+                Some(dupin_core::Action::Trash(path)) => Some(path.to_string_lossy()),
+                _ => None,
             };
             return col()
                 .key("confirmation")
@@ -345,12 +345,12 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                                 .color(t.text)
                                 .wrap(),
                         )
-                        .child(
-                            text(path.as_ref())
+                        .children(path.as_deref().map(|path| {
+                            text(path)
                                 .font(t.font(type_::LABEL))
                                 .color(t.text_secondary)
-                                .wrap(),
-                        ),
+                                .wrap()
+                        })),
                 )
                 .children(
                     ["Cancel", confirmation.button.as_str()]
