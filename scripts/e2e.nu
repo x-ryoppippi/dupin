@@ -552,8 +552,8 @@ def scripts-stage [out: path] {
         let echo = (poll
             $out
             scripts-echo-in-history
-            $found
-            find --app Dupin --name 'E2E script echo' --exact --first
+            {|r| $r.ok and $r.data?.match?.ref_id? != null }
+            find --app Dupin --role button --name 'E2E script echo Finished' --exact --first
         )
         ad $out scripts-select-echo click $echo.data.match.ref_id | ignore
         ad $out scripts-repeat-echo press cmd+r | ignore
