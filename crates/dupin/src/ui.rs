@@ -718,6 +718,9 @@ impl Ui {
         self.shown_at = tx.clock();
         self.force_input_source();
         self.me.show();
+        if self.session.query().is_empty() {
+            self.refresh_apps(tx);
+        }
     }
 
     fn force_input_source(&mut self) {

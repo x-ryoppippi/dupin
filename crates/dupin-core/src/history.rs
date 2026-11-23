@@ -77,7 +77,7 @@ impl History {
     }
 
     /// Return up to `limit` item ids ordered by frecency at `now`.
-    pub fn ranked_ids(&self, limit: usize, now: u64) -> Vec<String> {
+    pub(crate) fn ranked_ids(&self, limit: usize, now: u64) -> Vec<String> {
         let mut ranked: Vec<_> = self
             .items
             .iter()

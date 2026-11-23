@@ -86,7 +86,15 @@ impl Provider for CalendarProvider {
                 Source::Fixtures => fixture_events(&now),
             };
             if !request.is_cancelled() {
-                emit(event_rows(events, &terms, request.limit, &start, &end, &zone));
+                emit(event_rows(
+                    events,
+                    &terms,
+                    request.limit,
+                    &now,
+                    &start,
+                    &end,
+                    &zone,
+                ));
             }
             Ok(())
         })
@@ -224,10 +232,12 @@ fn event_rows(
     mut events: Vec<Event>,
     terms: &[&str],
     limit: usize,
+    now: &NSDate,
     start: &NSDate,
     end: &NSDate,
     zone: &NSTimeZone,
 ) -> Vec<Item> {
+    let now = now.timeIntervalSince1970();
     let start = start.timeIntervalSince1970();
     let end = end.timeIntervalSince1970();
     events.retain(|event| {
@@ -244,10 +254,17 @@ fn event_rows(
             .iter()
             .all(|term| title.contains(term) || location.contains(term))
     });
+    let chronological_key = |event: &Event| {
+        let start = event.start.timeIntervalSince1970();
+        let past = start < now && event.end.timeIntervalSince1970() <= now;
+        (past, if past { -start } else { start })
+    };
     events.sort_by(|a, b| {
-        a.start
-            .timeIntervalSince1970()
-            .total_cmp(&b.start.timeIntervalSince1970())
+        let (a_past, a_start) = chronological_key(a);
+        let (b_past, b_start) = chronological_key(b);
+        a_past
+            .cmp(&b_past)
+            .then_with(|| a_start.total_cmp(&b_start))
             .then_with(|| a.id.cmp(&b.id))
     });
     let formatter = NSDateIntervalFormatter::new();
@@ -387,12 +404,40 @@ mod tests {
         events[1].end = end.dateByAddingTimeInterval(3600.0);
         events[2].start = now.dateByAddingTimeInterval(-86_400.0);
         events[2].end = now.clone();
-        let rows = event_rows(events, &[], 30, &start, &end, &zone);
+        let rows = event_rows(events, &[], 30, &now, &start, &end, &zone);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].display_title(), "Project planning");
         let (start, end) = bounds(&calendar, &now, false).unwrap();
         assert_eq!(now.timeIntervalSinceDate(&start), 30.0 * 86_400.0);
         assert_eq!(end.timeIntervalSinceDate(&now), 90.0 * 86_400.0);
+    }
+
+    #[test]
+    fn typed_search_keeps_ongoing_and_upcoming_occurrences_ahead_of_past_ones() {
+        let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
+        let zone = NSTimeZone::timeZoneForSecondsFromGMT(0);
+        let start = now.dateByAddingTimeInterval(-30.0 * 86_400.0);
+        let end = now.dateByAddingTimeInterval(90.0 * 86_400.0);
+        let events = [-7200.0, 7200.0, -3600.0, -900.0, 3600.0]
+            .into_iter()
+            .map(|offset| {
+                let start = now.dateByAddingTimeInterval(offset);
+                Event {
+                    id: "standup".into(),
+                    title: "Standup".into(),
+                    location: String::new(),
+                    calendar: "Work".into(),
+                    occurrence: Some(start.clone()),
+                    end: start.dateByAddingTimeInterval(1800.0),
+                    start,
+                    all_day: false,
+                }
+            })
+            .collect();
+        let rows = event_rows(events, &["standup"], 4, &now, &start, &end, &zone);
+        let expected =
+            [-900.0, 3600.0, 7200.0, -3600.0].map(|offset| format!("standup:{}", FIXTURE_NOW + offset));
+        assert_eq!(rows.into_iter().map(|row| row.id).collect::<Vec<_>>(), expected);
     }
 
     #[test]
