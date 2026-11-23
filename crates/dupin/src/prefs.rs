@@ -706,7 +706,9 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
 
 use dupin_core::config::{Colors, FontFamily, Theme};
 
-const PRESETS: [(&str, Option<(&str, &str, &str)>); 3] = [
+type Palette = (&'static str, &'static str, &'static str);
+
+const PRESETS: [(&str, Option<Palette>); 3] = [
     ("Default", None),
     ("Ocean", Some(("#E9F4FA", "#142734", "#176EA6"))),
     ("Rose", Some(("#FFF0F5", "#30202A", "#A52D61"))),
