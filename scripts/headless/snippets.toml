@@ -1,0 +1,22 @@
+hotkey = ""
+auto_update = false
+input_source = "keep"
+web_searches = {}
+
+[snippets.addr]
+name = "Home address"
+text = "221B Baker Street, London NW1 6XE"
+
+[snippets.sig]
+name = "Email signature"
+text = """
+Best wishes,
+Sherlock"""
+
+[snippets.stamp]
+name = "Checked stamp"
+text = "Checked on {datetime}"
+
+[snippets.quote]
+name = "Quote the clipboard"
+text = "> {clipboard}"

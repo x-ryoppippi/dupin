@@ -76,6 +76,27 @@ impl History {
         serde_json::to_string(self).expect("history serializes")
     }
 
+    /// Return up to `limit` item ids ordered by frecency at `now`.
+    pub(crate) fn ranked_ids(&self, limit: usize, now: u64) -> Vec<String> {
+        let mut ranked: Vec<_> = self
+            .items
+            .iter()
+            .map(|(id, entry)| {
+                (
+                    id,
+                    entry.frecency(now),
+                    entry.visits.iter().copied().max().unwrap_or(0),
+                )
+            })
+            .collect();
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(b.2.cmp(&a.2)).then(a.0.cmp(b.0)));
+        ranked
+            .into_iter()
+            .take(limit)
+            .map(|(id, _, _)| id.clone())
+            .collect()
+    }
+
     /// The item with this id was opened, after typing `query`, at `now` (Unix seconds).
     pub(crate) fn record(&mut self, id: &str, query: &str, now: u64) {
         let entry = self.items.entry(id.to_owned()).or_default();
@@ -201,6 +222,21 @@ mod tests {
         history.record("old", "", NOW - 200 * DAY);
         assert!(history.boost("recent", "q", NOW) > history.boost("old", "q", NOW));
         assert_eq!(history.boost("never", "q", NOW), 0);
+    }
+
+    #[test]
+    fn ranked_ids_are_frecent_bounded_and_deterministic_without_writing_history() {
+        let mut history = History::default();
+        history.record("old", "", NOW - 200 * DAY);
+        history.record("z", "", NOW - DAY);
+        history.record("a", "", NOW - DAY);
+        history.record("recent", "", NOW);
+        let before = history.clone();
+
+        assert_eq!(history.ranked_ids(3, NOW), ["recent", "a", "z"]);
+        assert_eq!(history.ranked_ids(usize::MAX, NOW), ["recent", "a", "z", "old"]);
+        assert!(history.ranked_ids(0, NOW).is_empty());
+        assert_eq!(history, before);
     }
 
     #[test]

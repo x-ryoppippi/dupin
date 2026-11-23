@@ -3,6 +3,8 @@
 //! effects for the UI and platform layers to carry out.
 
 use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::searcher::Delivery;
 use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
@@ -54,6 +56,15 @@ pub enum Effect {
     ClearQuery,
     /// Replace the input with the session's query after routing or recall.
     ReplaceQuery(String),
+    /// Focus the input and select the part of the name the platform treats as its stem.
+    SelectRenameStem(PathBuf),
+    /// Rename the entry at `path` to `name` in the same folder. `row` is the layout key of the
+    /// row showing it, which outlasts searches started while the rename runs.
+    Rename {
+        row: String,
+        path: PathBuf,
+        name: String,
+    },
     /// The history learned a pick; persist `Session::history`.
     SaveHistory,
 }
@@ -68,6 +79,32 @@ pub enum Results {
     Searching { replaced: bool },
     /// The search finished; the rows are all there is.
     Done,
+}
+
+/// A rename in progress: the input holds the proposed name, not a query, until Enter
+/// confirms or Esc cancels it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Renaming {
+    layout_key: String,
+    path: PathBuf,
+    name: String,
+    /// The search to put back afterwards.
+    query: String,
+}
+
+impl Renaming {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Why Enter can't rename to the proposed name.
+    pub fn problem(&self) -> Option<&'static str> {
+        crate::file_name::problem(&self.name)
+    }
+
+    fn unchanged(&self) -> bool {
+        self.path.file_name().is_some_and(|name| *name == *self.name)
+    }
 }
 
 #[derive(Debug)]
@@ -87,13 +124,30 @@ pub struct Session {
     generation: u64,
     results: Results,
     refresh_selection: Option<(CommandId, String)>,
-    history: History,
+    history: Arc<RwLock<History>>,
     /// Unix seconds; a parameter so tests can fix the time.
     clock: fn() -> u64,
     queries: VecDeque<(CommandId, String)>,
     recalled: Option<usize>,
     deleting: bool,
     before_deletion: Option<String>,
+    renaming: Option<Renaming>,
+}
+
+/// Read access to the session's ranked history for the recent-items provider.
+#[derive(Debug)]
+pub struct RecentHistory {
+    history: Arc<RwLock<History>>,
+    clock: fn() -> u64,
+}
+
+impl RecentHistory {
+    pub fn ranked_ids(&self) -> Vec<String> {
+        self.history
+            .read()
+            .unwrap()
+            .ranked_ids(usize::MAX, (self.clock)())
+    }
 }
 
 /// The result chosen for an action that needs more input.
@@ -127,7 +181,7 @@ enum ProviderPhase {
     Expired,
 }
 
-fn unix_now() -> u64 {
+pub fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
@@ -153,22 +207,28 @@ impl Session {
             generation: 0,
             results: Results::Idle,
             refresh_selection: None,
-            history,
+            history: Arc::new(RwLock::new(history)),
             clock: unix_now,
             queries: VecDeque::new(),
             recalled: None,
             deleting: false,
             before_deletion: None,
+            renaming: None,
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    /// Replace the command registry, returning effects if the active command disappears.
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
-        if !commands.contains(&self.command) {
-            return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
+        if commands.contains(&self.command) {
+            self.commands = commands;
+            return Ok(Vec::new());
         }
+        self.remember_query(false);
         self.commands = commands;
-        Ok(())
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.reset_to_default());
+        Ok(effects)
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -186,6 +246,9 @@ impl Session {
 
     /// Capture only settled content belonging to the current search generation.
     pub fn capture(&self) -> Result<crate::snapshots::Snapshot, String> {
+        if self.command().private_results {
+            return Err("This search cannot be saved as a snapshot.".into());
+        }
         if self.results != Results::Done || self.items.is_empty() {
             return Err("Wait for the current search to finish before saving.".into());
         }
@@ -212,10 +275,15 @@ impl Session {
     pub fn restore(&mut self, saved: &crate::snapshots::Snapshot) -> Result<Vec<Effect>, String> {
         saved.validate()?;
         let command = CommandId::new(saved.mode.clone()).map_err(|_| "Invalid saved mode.")?;
-        if !self.commands.contains(&command) {
+        if self
+            .commands
+            .command(&command)
+            .is_none_or(|spec| spec.private_results)
+        {
             return Err("The source command is unavailable. Saved content remains readable.".into());
         }
         self.clear_results();
+        self.renaming = None;
         self.command = command;
         self.explicit = saved.explicit || self.command != *self.commands.default();
         self.query = saved.query.clone();
@@ -227,12 +295,23 @@ impl Session {
         Ok(effects)
     }
 
-    pub fn history(&self) -> &History {
-        &self.history
+    pub fn history(&self) -> RwLockReadGuard<'_, History> {
+        self.history.read().unwrap()
+    }
+
+    pub fn recent_history(&self) -> RecentHistory {
+        RecentHistory {
+            history: self.history.clone(),
+            clock: self.clock,
+        }
     }
 
     pub fn command_id(&self) -> &CommandId {
         &self.command
+    }
+
+    pub fn command_ids(&self) -> Vec<String> {
+        self.commands.ids()
     }
 
     pub fn command(&self) -> &crate::CommandSpec {
@@ -255,6 +334,55 @@ impl Session {
 
     pub fn selected_item(&self) -> Option<&Item> {
         self.items.get(self.selected)
+    }
+
+    pub fn renaming(&self) -> Option<&Renaming> {
+        self.renaming.as_ref()
+    }
+
+    fn begin_rename(&mut self, path: PathBuf) -> Vec<Effect> {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return Vec::new();
+        };
+        let name = name.to_owned();
+        self.renaming = Some(Renaming {
+            layout_key: self.layout_key(self.selected),
+            path: path.clone(),
+            name: name.clone(),
+            query: self.query.clone(),
+        });
+        self.selection_held = true;
+        self.refresh_selection = None;
+        vec![Effect::ReplaceQuery(name), Effect::SelectRenameStem(path)]
+    }
+
+    fn rename_intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
+        Some(match intent {
+            Intent::Open => {
+                let renaming = self.renaming.as_ref()?;
+                if !renaming.unchanged() && renaming.problem().is_some() {
+                    return Some(Vec::new());
+                }
+                let renaming = self.renaming.take()?;
+                let mut effects = vec![Effect::ReplaceQuery(renaming.query.clone())];
+                if !renaming.unchanged() {
+                    effects.push(Effect::Rename {
+                        row: renaming.layout_key,
+                        path: renaming.path,
+                        name: renaming.name,
+                    });
+                }
+                effects
+            }
+            Intent::Dismiss => {
+                let renaming = self.renaming.take()?;
+                vec![Effect::ReplaceQuery(renaming.query)]
+            }
+            Intent::Space | Intent::Backspace => return None,
+            Intent::Up | Intent::Down | Intent::Complete | Intent::OpenAlternate | Intent::Actions => {
+                Vec::new()
+            }
+        })
     }
 
     fn actions(&mut self) -> Vec<Effect> {
@@ -288,6 +416,9 @@ impl Session {
         if action.confirmation().is_some() || matches!(action.action, Action::ChooseApplication(_)) {
             return Vec::new();
         }
+        if let Action::Rename(path) = action.action {
+            return self.begin_rename(path);
+        }
         if action.disposition == ActionDisposition::Consume {
             return vec![Effect::RunConsuming {
                 id: self.result_key(self.selected),
@@ -299,7 +430,10 @@ impl Session {
         let mut effects = vec![Effect::Run(action.action)];
         if picked {
             if item.record_usage {
-                self.history.record(&item.id, &self.query, (self.clock)());
+                self.history
+                    .write()
+                    .unwrap()
+                    .record(&item.id, &self.query, (self.clock)());
                 effects.push(Effect::SaveHistory);
             }
             self.remember_query(true);
@@ -316,6 +450,20 @@ impl Session {
 
     /// The text field's contents changed.
     pub fn set_query(&mut self, text: &str) -> Vec<Effect> {
+        if let Some(renaming) = &mut self.renaming {
+            renaming.name = text.to_owned();
+            return Vec::new();
+        }
+
+        self.update_query(text, true)
+    }
+
+    /// Set externally supplied search text without interpreting it as a command keyword.
+    pub fn set_literal_query(&mut self, text: &str) -> Vec<Effect> {
+        self.update_query(text, false)
+    }
+
+    fn update_query(&mut self, text: &str, route_keyword: bool) -> Vec<Effect> {
         if text == self.query {
             return Vec::new();
         }
@@ -338,16 +486,15 @@ impl Session {
             self.deleting = false;
         }
         self.recalled = None;
-        if self.command == *self.commands.default()
+        if route_keyword
+            && self.command == *self.commands.default()
             && let Some((command, term)) = self.keyword_query(text)
         {
             self.deleting = false;
             self.before_deletion = None;
-            self.items.clear();
-            self.selected = 0;
             self.query = term.to_owned();
             let mut effects = vec![Effect::ReplaceQuery(self.query.clone())];
-            effects.extend(self.switch(command));
+            effects.extend(self.switch(command, true));
             return effects;
         }
         self.query = text.to_owned();
@@ -381,6 +528,9 @@ impl Session {
     /// A key the UI recognized. None leaves the key to the text field (typing a space into a
     /// query, deleting a character); Some consumes it, even when nothing else happens.
     pub fn intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
+        if self.renaming.is_some() {
+            return self.rename_intent(intent);
+        }
         let empty = self.query.is_empty();
         Some(match intent {
             Intent::Actions => self.actions(),
@@ -401,22 +551,27 @@ impl Session {
                 .commands
                 .space_on_empty(&self.command)
                 .cloned()
-                .map_or_else(Vec::new, |command| self.switch(command)),
+                .map_or_else(Vec::new, |command| self.switch(command, true)),
             Intent::Space if self.command == *self.commands.default() => {
                 let command = self.commands.keyword(&self.query)?.clone();
                 self.query.clear();
                 let mut effects = vec![Effect::ClearQuery];
-                effects.extend(self.switch(command));
+                effects.extend(self.switch(command, true));
                 effects
             }
             Intent::Backspace if empty && self.command != *self.commands.default() => {
-                let effects = self.switch(self.commands.default().clone());
-                self.explicit = false;
-                effects
+                self.switch(self.commands.default().clone(), false)
             }
             Intent::Backspace if empty => return None,
             Intent::Space | Intent::Backspace => return None,
-            Intent::Up if empty || self.recalled.is_some() => self.recall(true),
+            Intent::Up
+                if self.recalled.is_some()
+                    || (empty
+                        && self.selected == 0
+                        && !(self.explicit && self.command().query_eligibility.allows(&self.query))) =>
+            {
+                self.recall(true)
+            }
             Intent::Down if self.recalled.is_some() => self.recall(false),
             Intent::Up | Intent::Down => {
                 self.refresh_selection = None;
@@ -462,11 +617,19 @@ impl Session {
         self.commands.command(id)
     }
     pub(crate) fn provider_ids(&self) -> Vec<CommandId> {
-        if self.explicit {
+        let candidates = if self.explicit {
             vec![self.command.clone()]
         } else {
             self.commands.providers(&self.command)
-        }
+        };
+        candidates
+            .into_iter()
+            .filter(|id| {
+                self.commands
+                    .command(id)
+                    .is_some_and(|spec| spec.query_eligibility.allows(&self.query))
+            })
+            .collect()
     }
     pub fn failures(&self) -> impl Iterator<Item = (&CommandId, &'static str)> {
         self.providers.iter().filter_map(|(id, state)| match state.phase {
@@ -492,7 +655,7 @@ impl Session {
         )
     }
     pub fn select_key(&mut self, key: &str) -> bool {
-        if matches!(self.results, Results::Searching { replaced: false }) {
+        if self.renaming.is_some() || matches!(self.results, Results::Searching { replaced: false }) {
             return false;
         }
         if let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) {
@@ -560,21 +723,62 @@ impl Session {
         self.activate(&item, ItemAction::new(parent_id, "Open with", choice))
     }
 
-    pub fn forget(&mut self, key: &str) -> bool {
-        let generation = self.generation;
-        let Some((origin, id)) = self.providers.iter().find_map(|(origin, state)| {
+    /// The provider and item ID behind a key of the current candidates, shown or not.
+    fn locate(&self, matches: impl Fn(&CommandId, &Item) -> bool) -> Option<(CommandId, String)> {
+        self.providers.iter().find_map(|(origin, state)| {
             state
                 .items
                 .iter()
-                .find(|item| format!("{generation}:{origin}:{}", item.id) == key)
+                .find(|item| matches(origin, item))
                 .map(|item| (origin.clone(), item.id.clone()))
-        }) else {
+        })
+    }
+
+    /// Put `item` where the row with layout key `row` was, as after the entry it showed was
+    /// renamed. The row keeps its place and rank; when `item` is already a candidate, the old
+    /// row just goes.
+    pub fn replace(&mut self, row: &str, mut item: Item) -> bool {
+        let Some((origin, id)) = self.locate(|origin, item| format!("{origin}:{}", item.id) == row) else {
             return false;
         };
-        if let Some(provider) = self.providers.get_mut(&origin) {
+        let provider = self.providers.get_mut(&origin).expect("located provider");
+        if provider.items.iter().any(|row| row.id == item.id) {
+            self.remove(&origin, &id);
+            return true;
+        }
+        let index = provider
+            .items
+            .iter()
+            .position(|row| row.id == id)
+            .expect("located item");
+        item.score = provider.items[index].score;
+        // The old ID stays known, so a late batch can't bring back the entry's previous name.
+        provider.ids.insert(item.id.clone());
+        provider.items[index] = item.clone();
+        if let Some(index) = (0..self.items.len()).find(|&i| self.layout_key(i) == row) {
+            self.items[index] = item;
+        }
+        true
+    }
+
+    pub fn forget(&mut self, key: &str) -> bool {
+        let generation = self.generation;
+        let Some((origin, id)) =
+            self.locate(|origin, item| format!("{generation}:{origin}:{}", item.id) == key)
+        else {
+            return false;
+        };
+        self.remove(&origin, &id);
+        true
+    }
+
+    fn remove(&mut self, origin: &CommandId, id: &str) {
+        if let Some(provider) = self.providers.get_mut(origin) {
             provider.items.retain(|row| row.id != id);
         }
-        if let Some(index) = (0..self.items.len()).find(|&i| self.result_key(i) == key) {
+        if let Some(index) =
+            (0..self.items.len()).find(|&i| self.origins[i] == *origin && self.items[i].id == id)
+        {
             self.items.remove(index);
             self.origins.remove(index);
             if index < self.selected {
@@ -582,10 +786,9 @@ impl Session {
             }
             self.selected = self.selected.min(self.items.len().saturating_sub(1));
         }
-        true
     }
     #[cfg(test)]
-    pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
+    fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.command.clone(), delivery)
     }
     pub fn deliver_from(&mut self, origin: CommandId, delivery: Delivery) -> bool {
@@ -612,7 +815,10 @@ impl Session {
                         state.items.push(item);
                     }
                 }
-                self.history.rerank(&mut state.items, &self.query, (self.clock)());
+                self.history
+                    .read()
+                    .unwrap()
+                    .rerank(&mut state.items, &self.query, (self.clock)());
             }
             Delivery::Done { .. } => state.phase = ProviderPhase::Done,
             Delivery::Failed { .. } => {
@@ -728,6 +934,11 @@ impl Session {
     /// Back to an empty default-command search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
         self.remember_query(false);
+        self.reset_to_default()
+    }
+
+    fn reset_to_default(&mut self) -> Vec<Effect> {
+        self.renaming = None;
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;
@@ -736,16 +947,17 @@ impl Session {
         self.explicit = false;
         self.query.clear();
         self.clear_results();
-        if was_searching {
+        let effects = self.search();
+        if effects.is_empty() && was_searching {
             vec![Effect::CancelSearch]
         } else {
-            Vec::new()
+            effects
         }
     }
 
     fn dismiss(&mut self) -> Vec<Effect> {
-        let mut effects = self.reset();
-        effects.push(Effect::Hide);
+        let mut effects = vec![Effect::Hide];
+        effects.extend(self.reset());
         effects
     }
 
@@ -765,6 +977,9 @@ impl Session {
     }
 
     fn record_query(&mut self, query: String) {
+        if self.command().private_results {
+            return;
+        }
         let previous = self
             .queries
             .iter()
@@ -798,20 +1013,20 @@ impl Session {
         effects
     }
 
-    fn switch(&mut self, command: CommandId) -> Vec<Effect> {
+    fn switch(&mut self, command: CommandId, explicit: bool) -> Vec<Effect> {
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;
         self.command = command;
-        self.explicit = true;
+        self.explicit = explicit;
         self.search()
     }
 
     fn search(&mut self) -> Vec<Effect> {
         self.refresh_selection = None;
         self.selection_held = false;
-        let query = self.query.trim();
-        if query.is_empty() {
+        let provider_ids = self.provider_ids();
+        if provider_ids.is_empty() {
             let was_searching = matches!(self.results, Results::Searching { .. });
             self.clear_results();
             return if was_searching {
@@ -822,14 +1037,22 @@ impl Session {
         }
         let query = self.query.clone();
         self.generation += 1;
-        // A command change clears the previous command's rows before starting a search.
+        if self.origins.iter().all(|origin| !provider_ids.contains(origin)) {
+            self.items.clear();
+            self.origins.clear();
+            self.selected = 0;
+        }
         self.results = Results::Searching { replaced: false };
-        self.active_order = self.provider_ids();
-        self.active_pin = self.commands.pinned().filter(|_| !self.explicit).cloned();
+        self.active_order.clone_from(&provider_ids);
+        self.active_pin = self
+            .commands
+            .pinned()
+            .filter(|pin| !self.explicit && provider_ids.contains(pin))
+            .cloned();
         self.active_limit = self.command().result_limit;
         self.providers = self
-            .provider_ids()
-            .into_iter()
+            .active_order
+            .iter()
             .map(|id| {
                 (
                     id.clone(),
@@ -837,14 +1060,14 @@ impl Session {
                         items: Vec::new(),
                         ids: HashSet::new(),
                         phase: ProviderPhase::Pending,
-                        fallback: !self.explicit && self.commands.command(&id).unwrap().is_fallback(),
-                        candidate_limit: self.commands.command(&id).unwrap().candidate_limit(),
-                        result_limit: self.commands.command(&id).unwrap().result_limit,
+                        fallback: !self.explicit && self.commands.command(id).unwrap().is_fallback(),
+                        candidate_limit: self.commands.command(id).unwrap().candidate_limit(),
+                        result_limit: self.commands.command(id).unwrap().result_limit,
                     },
                 )
             })
             .collect();
-        self.provider_ids()
+        provider_ids
             .into_iter()
             .map(|command| Effect::Search {
                 command,

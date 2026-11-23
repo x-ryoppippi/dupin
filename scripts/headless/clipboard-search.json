@@ -1,0 +1,7 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "clip " },
+		{ "t": 0.5, "type": "type", "text": "baker room" },
+		{ "t": 2.0, "type": "mark", "name": "end" }
+	]
+}

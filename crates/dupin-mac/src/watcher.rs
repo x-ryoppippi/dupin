@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::time::Duration;
 
 /// Watches filesystem roots and calls `changed` after their events settle.
 ///
@@ -20,29 +23,44 @@ unsafe impl Send for PathWatcher {}
 impl PathWatcher {
     pub(crate) fn start(
         roots: Vec<PathBuf>,
+        extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, true, move |_| changed())
+        Self::start_with_scope(roots, true, extra_paths, move |_| changed())
     }
 
-    /// Watches directory entries without forwarding descendant events. The callback receives
-    /// `true` when a watched root moved and the stream must be rebuilt.
+    /// Watches direct entries and reports when a watched root changes identity.
     pub fn start_shallow(
         roots: Vec<PathBuf>,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, false, changed)
+        Self::start_with_scope(roots, false, |_| Vec::new(), changed)
+    }
+
+    /// Watches directory entries without forwarding descendant events.
+    /// Reconciles the file's metadata to detect in-place writes when FSEvents is silent.
+    /// The callback receives `true` when a watched root changes identity.
+    pub fn start_shallow_with_file(
+        roots: Vec<PathBuf>,
+        file: PathBuf,
+        changed: impl Fn(bool) + Send + Sync + 'static,
+    ) -> Result<Self, &'static str> {
+        Self::start_with_scope(roots, false, move |_| vec![file.clone()], changed)
     }
 
     fn start_with_scope(
         roots: Vec<PathBuf>,
         recursive: bool,
+        extra_paths: impl Fn(&[PathBuf]) -> Vec<PathBuf> + Send + 'static,
         changed: impl Fn(bool) + Send + Sync + 'static,
     ) -> Result<Self, &'static str> {
+        let watched_roots = roots.clone();
+        let snapshot = move || Snapshot::read(&watched_roots, extra_paths(&watched_roots));
+        let initial = snapshot();
         let (events, received) = mpsc::channel();
         let debounce = std::thread::Builder::new()
             .name("dupin-path-watch-debounce".into())
-            .spawn(move || debounce_events(received, changed))
+            .spawn(move || debounce_events(received, snapshot, initial, changed))
             .map_err(|_| "could not spawn path watcher debounce")?;
         match watch_roots(roots, recursive, events) {
             Ok(mut watcher) => {
@@ -78,13 +96,73 @@ impl Drop for PathWatcher {
     }
 }
 
-fn debounce_events(events: mpsc::Receiver<bool>, changed: impl Fn(bool)) {
-    const QUIET: std::time::Duration = std::time::Duration::from_millis(300);
-    while let Ok(mut root_changed) = events.recv() {
+#[derive(PartialEq, Eq)]
+struct Stamp {
+    identity: (u64, u64),
+    changed: (i64, i64),
+}
+
+impl Stamp {
+    fn read(path: &Path) -> Option<Self> {
+        fs::metadata(path).ok().map(|metadata| Self {
+            identity: (metadata.dev(), metadata.ino()),
+            changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct Snapshot {
+    roots: Vec<Option<Stamp>>,
+    extra: BTreeMap<PathBuf, Option<Stamp>>,
+}
+
+impl Snapshot {
+    fn read(roots: &[PathBuf], extra: Vec<PathBuf>) -> Self {
+        Self {
+            roots: roots.iter().map(|path| Stamp::read(path)).collect(),
+            extra: extra
+                .into_iter()
+                .map(|path| {
+                    let stamp = Stamp::read(&path);
+                    (path, stamp)
+                })
+                .collect(),
+        }
+    }
+
+    fn roots_changed(&self, other: &Self) -> bool {
+        let identity = |stamp: &Option<Stamp>| stamp.as_ref().map(|stamp| stamp.identity);
+        self.roots
+            .iter()
+            .map(identity)
+            .ne(other.roots.iter().map(identity))
+    }
+}
+
+fn debounce_events(
+    events: mpsc::Receiver<bool>,
+    snapshot: impl Fn() -> Snapshot,
+    mut last: Snapshot,
+    changed: impl Fn(bool),
+) {
+    const QUIET: Duration = Duration::from_millis(300);
+    const RECONCILE: Duration = Duration::from_secs(2);
+    loop {
+        let mut root_changed = match events.recv_timeout(RECONCILE) {
+            Ok(root_changed) => root_changed,
+            // A busy FSEvents daemon can miss a notification without delivering a drop flag.
+            Err(mpsc::RecvTimeoutError::Timeout) if snapshot() == last => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
         loop {
             match events.recv_timeout(QUIET) {
                 Ok(root) => root_changed |= root,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
+                    let current = snapshot();
+                    root_changed |= last.roots_changed(&current);
+                    last = current;
                     changed(root_changed);
                     break;
                 }
@@ -301,11 +379,54 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn replacing_a_tracked_file_changes_the_snapshot_without_changing_root_identity() {
+        let root = std::env::temp_dir().join(format!("dupin-reconcile-file-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("config.toml");
+        let replacement = root.join("replacement");
+        std::fs::write(&file, "original").unwrap();
+        std::fs::write(&replacement, "updated").unwrap();
+        let read = || super::Snapshot::read(std::slice::from_ref(&root), vec![file.clone()]);
+        let before = read();
+        std::fs::rename(replacement, &file).unwrap();
+        let after = read();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(before.extra != after.extra);
+        assert!(!before.roots_changed(&after));
+    }
+
+    #[test]
+    fn reconciliation_reports_a_change_without_an_fsevent() {
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dupin-reconcile-{}-{id}", std::process::id()));
+        let tracked = [path.clone()];
+        let snapshot = move || super::Snapshot::read(&tracked, Vec::new());
+        let initial = snapshot();
+        std::fs::create_dir(&path).unwrap();
+        let (events, receiver) = std::sync::mpsc::channel();
+        let (fired, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            super::debounce_events(receiver, snapshot, initial, move |root| fired.send(root).unwrap());
+        });
+        let change = received.recv_timeout(std::time::Duration::from_secs(5));
+        drop(events);
+        worker.join().unwrap();
+        std::fs::remove_dir(path).unwrap();
+        assert!(change.expect("report the new directory even without an FSEvent"));
+    }
+
+    #[test]
     fn debouncing_keeps_a_root_change_between_ordinary_events() {
         let (events, receiver) = std::sync::mpsc::channel();
         let (fired, received) = std::sync::mpsc::channel();
         let worker = std::thread::spawn(move || {
-            super::debounce_events(receiver, move |root| fired.send(root).unwrap());
+            let snapshot = || super::Snapshot::read(&[], Vec::new());
+            super::debounce_events(receiver, snapshot, snapshot(), move |root| {
+                fired.send(root).unwrap()
+            });
         });
         for root in [false, true, false] {
             events.send(root).unwrap();

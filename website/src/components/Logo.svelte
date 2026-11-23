@@ -1,10 +1,16 @@
 <script lang="ts">
 	import mark from '../../../assets/logo/dupin-mark.svg?raw';
 
-	// The mark is square with the glasses across its middle; crop the viewBox to the glasses.
-	const svg = mark
-		.replace(/ width="\d+" height="\d+"/, '')
-		.replace(/viewBox="[^"]*"/, 'viewBox="100 350 870 415" class="logo" aria-hidden="true"');
+	let { width = 34, height = 16 }: { width?: number; height?: number } = $props();
+
+	// The mark is square with the glasses across its middle; the viewBox below crops it to the glasses.
+	const paths = mark.replace(/^[\s\S]*?<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
 </script>
 
-{@html svg}
+<svg class="logo" viewBox="100 350 870 415" {width} {height} aria-hidden="true">{@html paths}</svg>
+
+<style>
+	.logo {
+		color: var(--fg);
+	}
+</style>
