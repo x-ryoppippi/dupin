@@ -569,7 +569,7 @@ impl Files {
 }
 
 fn read_directory(directory: &OwnedFd, limit: usize) -> io::Result<(Vec<CString>, bool)> {
-    let copy = owned(unsafe { libc::dup(directory.as_raw_fd()) })?;
+    let copy = owned(unsafe { libc::fcntl(directory.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 0) })?;
     let stream = unsafe { libc::fdopendir(copy.as_raw_fd()) };
     if stream.is_null() {
         return Err(io::Error::last_os_error());
