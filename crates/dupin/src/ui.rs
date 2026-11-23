@@ -654,7 +654,7 @@ impl Ui {
                 Ok(installed) => {
                     if installed || request == Restart::Requested {
                         if request == Restart::Requested {
-                            self.kill_scripts();
+                            self.stop_child_processes(tx);
                         }
                         tx.relaunch();
                     }
@@ -1298,7 +1298,7 @@ impl Ui {
         entry.is_current(&self.session, &self.scripts.read().unwrap())
     }
 
-    pub fn kill_scripts(&mut self) {
+    pub fn stop_child_processes(&mut self, _: &mut Tx) {
         self.runner.kill_all_now();
     }
 

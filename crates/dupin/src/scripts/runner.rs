@@ -144,21 +144,30 @@ impl Lifecycle {
         lock(&self.state).groups.remove(&id);
     }
 
-    fn reap<T>(&self, id: RunId, poll: impl FnOnce() -> io::Result<Option<T>>) -> io::Result<Option<T>> {
+    fn reap<T>(
+        &self,
+        id: RunId,
+        leader_exited: impl FnOnce(i32) -> io::Result<bool>,
+        poll: impl FnOnce() -> io::Result<Option<T>>,
+    ) -> io::Result<Option<(T, bool)>> {
         let mut state = lock(&self.state);
-        // Reserve the leader's PID through cancellation so KILL still reaches its group.
-        if state
-            .groups
-            .get(&id)
-            .is_some_and(|group| group.terminated && !group.killed)
-        {
-            return Ok(None);
+        let mut cancelled = false;
+        if let Some(group) = state.groups.get_mut(&id) {
+            if group.terminated && !group.killed {
+                if !leader_exited(group.pgid)? {
+                    return Ok(None);
+                }
+                // The unreaped leader reserves the group ID while we kill any survivors.
+                (self.signal)(group.pgid, libc::SIGKILL);
+                group.killed = true;
+            }
+            cancelled = group.terminated;
         }
         let result = poll()?;
         if result.is_some() {
             state.groups.remove(&id);
         }
-        Ok(result)
+        Ok(result.map(|status| (status, cancelled)))
     }
 }
 
@@ -296,6 +305,26 @@ fn signal_group(pgid: i32, signal: i32) {
     }
 }
 
+fn leader_exited(pid: i32) -> io::Result<bool> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    if result == 0 {
+        return Ok(unsafe { info.si_pid() } == pid);
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::Interrupted {
+        return Ok(false);
+    }
+    Err(error)
+}
+
 fn publish(inner: &Inner, run: &Run, status: Status, output: OutputBuffer) {
     let finished = status != Status::Running;
     let snapshot = Arc::new(Snapshot {
@@ -418,8 +447,8 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
                 let force = started.elapsed() >= CANCEL_GRACE;
                 inner.lifecycle.cancel(run.id, force);
             }
-            match inner.lifecycle.reap(run.id, || child.try_wait()) {
-                Ok(Some(status)) => exited = Some((status, Instant::now())),
+            match inner.lifecycle.reap(run.id, leader_exited, || child.try_wait()) {
+                Ok(Some((status, cancelled))) => exited = Some((status, cancelled, Instant::now())),
                 Ok(None) => {}
                 Err(error) => {
                     inner.lifecycle.cancel(run.id, true);
@@ -430,12 +459,12 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
             }
         }
         let mut timeout_ms = POLL_INTERVAL_MS;
-        if let Some((status, at)) = exited {
+        if let Some((status, cancelled, at)) = exited {
             let remaining = EXIT_DRAIN.saturating_sub(at.elapsed());
             if (stdout.fd() == -1 && stderr.fd() == -1) || remaining.is_zero() {
                 stdout.close(output);
                 stderr.close(output);
-                return if cancel_at.is_some() {
+                return if cancelled {
                     Status::Cancelled
                 } else if let Some(error) = problem {
                     Status::Failed(error)
@@ -594,10 +623,14 @@ mod tests {
             .spawn(1, &AtomicBool::new(false), || Ok(((), 789)))
             .unwrap();
         lifecycle
-            .reap(1, || {
-                assert!(lifecycle.state.try_lock().is_err());
-                Ok(Some(()))
-            })
+            .reap(
+                1,
+                |_| panic!("observing exit of a run that was not cancelled"),
+                || {
+                    assert!(lifecycle.state.try_lock().is_err());
+                    Ok(Some(()))
+                },
+            )
             .unwrap();
         lifecycle.cancel(1, false);
         lifecycle.kill_all_now();
@@ -612,11 +645,18 @@ mod tests {
             .unwrap();
         lifecycle.cancel(1, false);
         assert_eq!(
-            lifecycle.reap::<()>(1, || panic!("reaping after TERM")).unwrap(),
+            lifecycle
+                .reap::<()>(1, |_| Ok(false), || panic!("reaping a live leader after TERM"))
+                .unwrap(),
             None
         );
         lifecycle.cancel(1, true);
-        assert_eq!(lifecycle.reap(1, || Ok(Some(()))).unwrap(), Some(()));
+        assert_eq!(
+            lifecycle
+                .reap(1, |_| panic!("observing exit after KILL"), || Ok(Some(())))
+                .unwrap(),
+            Some(((), true))
+        );
         assert_eq!(*lock(&signals), [(789, libc::SIGTERM), (789, libc::SIGKILL)]);
     }
 
@@ -708,6 +748,34 @@ mod tests {
         let start = Instant::now();
         while !fixture.0.join("stopped").exists() {
             assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn cancellation_finishes_promptly_when_the_leader_exits_on_term() {
+        let fixture = Fixture::new(
+            "trap 'exit 0' TERM\n(sh -c 'trap \"\" TERM; printf \"ready\\n\"; exec sleep 60') &\nwait\n",
+        );
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let id = runner.start(fixture.command(&[])).unwrap();
+        let start = Instant::now();
+        while runner.snapshot(id).unwrap().output.last_stdout() != Some("ready") {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(10));
+        }
+        let pgid = lock(&runner.inner.lifecycle.state).groups[&id].pgid;
+        let cancelled = Instant::now();
+        runner.cancel(id);
+        assert_eq!(wait(&runner, id).status, Status::Cancelled);
+        assert_eq!(runner.activity().load(Ordering::Acquire), 0);
+        assert!(cancelled.elapsed() < CANCEL_GRACE);
+        let deadline = Instant::now();
+        while unsafe { libc::killpg(pgid, 0) } == 0 {
+            assert!(
+                deadline.elapsed() < Duration::from_secs(2),
+                "fixture group survived"
+            );
             thread::sleep(Duration::from_millis(10));
         }
     }

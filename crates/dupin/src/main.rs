@@ -194,7 +194,7 @@ fn main() {
             }
         })
         .on_frame_encoded(trace::frame)
-        .on_quit(|s, _| s.kill_scripts())
+        .on_quit(ui::Ui::stop_child_processes)
         .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
             if !focused && !s.preview_focus_is_active() {
