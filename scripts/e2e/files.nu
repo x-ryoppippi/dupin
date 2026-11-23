@@ -46,16 +46,8 @@ export def file-actions-stage [out: path] {
         wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
         file-search $out trash-me $found
-        # The accessibility tree only exposes rows near the action list viewport.
-        let anchor = (find-file-action
-            $out
-            file-actions-trash-scroll-anchor
-            'Copy to…'
-        )
-        let scrolled = ad $out file-actions-trash-scroll --headed scroll $anchor.data.match.ref_id --direction down --amount 10
-        if not $scrolled.ok { error make {msg: 'Could not scroll the file action list'} }
         let confirm = log-count $log 'dupin-trace: action-screen confirm'
-        click-file-action $out file-actions-trash-review 'Move to Trash'
+        open-trash-confirmation $out file-actions-trash-review
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         (poll
             $out
@@ -86,11 +78,7 @@ export def file-actions-stage [out: path] {
         ad $out file-actions-trash-cancel press return | ignore
         wait-for-log --after $list $log 'dupin-trace: action-screen list'
         let confirm = log-count $log 'dupin-trace: action-screen confirm'
-        (click-file-action
-            $out
-            file-actions-trash-review-again
-            'Move to Trash'
-        )
+        open-trash-confirmation $out file-actions-trash-review-again
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
         snap $out file-actions-trash-cancelled
@@ -132,6 +120,29 @@ export def file-actions-stage [out: path] {
         try { cp $log ($out | path join file-actions-failure.log) }
         error make $failure
     }
+}
+
+def open-trash-confirmation [out: path, name: string] {
+    mut selected = ''
+    # Down reveals the next row, whose accessibility label includes the Return marker.
+    for step in 0..<20 {
+        let previous = $selected
+        let row = (poll
+            $out
+            $'($name)-selection-($step)'
+            {|r| (has-match $r) and $r.data.match.name != $previous }
+            find --app Dupin --role button --name '↩' --first
+        )
+        $selected = $row.data.match.name
+        if $selected == 'Move to Trash ↩' {
+            let opened = ad $out $name press return
+            if not $opened.ok { error make {msg: 'Could not open the Trash confirmation'} }
+            return
+        }
+        let pressed = ad $out $'($name)-down-($step)' press down
+        if not $pressed.ok { error make {msg: 'Could not select the next file action'} }
+    }
+    error make {msg: 'Could not select Move to Trash'}
 }
 
 def click-file-action [out: path, name: string, title: string] {
