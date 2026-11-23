@@ -148,13 +148,26 @@ def cli-stage [out: path, binary: path] {
             find
             --app
             Dupin
-            --role
-            textfield
+            --native-id
+            pick-query
             --first
         ) | ignore
-        poll $out cli-picker-window {|r| $r.ok and (
-            $r.data? | default [] | any {|w| $w.is_focused and $w.visible and $w.bounds.height >= 168 }
-        ) } list-windows --app Dupin | ignore
+        (poll
+            $out
+            cli-picker-panel
+            {|r| $r.ok and (
+                $r.data?.tree?.children?
+                | default []
+                | any {|window|
+                    let fits = $window.role == dialog and ($window.bounds?.height? | default 0) >= 168
+                    $fits and (mentions {data: $window} red) and (mentions {data: $window} blue)
+                }
+            ) }
+            snapshot
+            --app
+            Dupin
+            --include-bounds
+        ) | ignore
         snap $out cli-pick
         ^osascript -e 'tell application "System Events"
             key code 125
@@ -176,8 +189,8 @@ def cli-stage [out: path, binary: path] {
             find
             --app
             Dupin
-            --role
-            textfield
+            --native-id
+            pick-query
             --first
         ) | ignore
         ad $out cli-cancel press escape | ignore
@@ -190,10 +203,13 @@ def cli-stage [out: path, binary: path] {
         (poll
             $out
             cli-hidden
-            {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.is_focused }) }
-            list-windows
+            {|r| $r.ok and $r.data?.match? == null }
+            find
             --app
             Dupin
+            --role
+            textfield
+            --first
         ) | ignore
 
         let listed = ^$binary snapshots list --json | from json
