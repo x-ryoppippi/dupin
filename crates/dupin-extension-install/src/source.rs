@@ -60,7 +60,18 @@ impl Source {
                     "Use an https://, ssh:// or file:// URL; plain http:// and git:// aren't authenticated.",
                 ));
             }
-            let path_start = scheme.len() + 3 + after.find('/').unwrap_or(after.len());
+            let authority = &after[..after.find('/').unwrap_or(after.len())];
+            if authority
+                .rsplit_once('@')
+                .is_some_and(|(userinfo, _)| userinfo.contains(':'))
+            {
+                return Err(Error::new(
+                    "invalid-source",
+                    "carries a password or token, which would be stored in extensions.lock and shown in messages",
+                )
+                .hint("Drop it from the URL and let Git supply it, for example from a credential helper or an SSH key."));
+            }
+            let path_start = scheme.len() + 3 + authority.len();
             let (url, rev) = split_rev(spec, path_start)?;
             return Ok(Self::Git { url, rev });
         }
@@ -74,7 +85,9 @@ impl Source {
                 .ok_or_else(|| invalid("starts with `~/`, but HOME isn't set"))?,
             None => cwd.join(spec),
         };
-        Ok(Self::Path(path))
+        // One folder keeps one locator however it was spelt, so reinstalling it isn't taken
+        // for another source.
+        Ok(Self::Path(path.components().collect()))
     }
 
     /// The source without its ref, as the lock file records it.
@@ -216,13 +229,16 @@ mod tests {
         assert!(parse("https://example.com/a b.git").is_err());
         assert!(parse("git://example.com/x.git").is_err());
         assert!(parse("--upload-pack=touch").is_err());
+        let token = parse("https://me:ghp_secret@github.com/me/ext.git").unwrap_err();
+        assert!(!token.to_string().contains("ghp_secret"), "{token}");
+        assert!(parse("ssh://me:pw@example.com/ext.git").is_err());
     }
 
     #[test]
     fn anything_else_is_a_folder() {
         assert_eq!(
             parse("./word-count").unwrap(),
-            Source::Path(PathBuf::from("/work/./word-count"))
+            Source::Path(PathBuf::from("/work/word-count"))
         );
         assert_eq!(parse("/abs/x").unwrap(), Source::Path(PathBuf::from("/abs/x")));
         assert_eq!(parse("/My Extensions/x").unwrap().locator(), "/My Extensions/x");

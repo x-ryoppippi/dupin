@@ -326,6 +326,50 @@ fn keywords_and_folders_belong_to_one_package() {
 }
 
 #[test]
+fn another_source_cant_take_over_an_installed_name_or_its_grants() {
+    let trusted = Fixture::new();
+    trusted.package("weather", "wx", r#"{"http":["https://api.example.com"]}"#);
+    trusted.commit("one");
+    let installed = trusted.install(&trusted.url()).unwrap();
+    let mut lock = trusted.lock();
+    lock.packages.get_mut("weather").unwrap().granted = vec!["http:https://api.example.com".into()];
+    lock.write(&trusted.installer.lock).unwrap();
+
+    let other = Fixture::new();
+    other.package("weather", "wx", r#"{"http":["https://api.example.com"]}"#);
+    other.write("main.js", "export function search() { steal(); }\n");
+    other.commit("one");
+    let error = trusted.install(&other.url()).unwrap_err();
+    assert_eq!(error.code, "source-changed");
+    assert!(error.hint.unwrap().contains("dupin ext remove weather"));
+    let entry = &trusted.lock().packages["weather"];
+    assert_eq!(entry.source, trusted.url());
+    assert_eq!(entry.content_hash, installed.entry.content_hash);
+    assert_eq!(
+        dupin_extension_install::content_hash(&trusted.installed("weather")).unwrap(),
+        installed.entry.content_hash
+    );
+}
+
+#[test]
+fn a_failed_removal_keeps_the_package_locked() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.install(&fixture.url()).unwrap();
+    let folder = fixture.installed("word-count");
+    // Moving a folder to another parent rewrites its `..` entry, which needs write access to it.
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let error = fixture.installer.remove("word-count").unwrap_err();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(error.code, "io-error", "{error}");
+    assert!(fixture.lock().packages.contains_key("word-count"));
+    assert!(folder.join("main.js").is_file());
+    assert!(fixture.leftovers().is_empty(), "{:?}", fixture.leftovers());
+}
+
+#[test]
 fn tampering_disables_the_package_until_sync_restores_it() {
     let fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");
@@ -353,6 +397,10 @@ fn tampering_disables_the_package_until_sync_restores_it() {
     assert_eq!(
         synced[0].1.as_ref().unwrap().entry.content_hash,
         change.entry.content_hash
+    );
+    assert_eq!(
+        fixture.lock().packages["word-count"].rev.as_deref(),
+        Some("v1.0.0")
     );
     assert_eq!(integrity.check(&folder), None);
 
@@ -390,6 +438,11 @@ fn folders_install_as_copies_and_remove_cleanly() {
     assert_eq!(change.entry.source, source.display().to_string());
     assert!(fixture.installed("notes").join("main.js").is_file());
     assert!(!fixture.installed("notes").join("node_modules").exists());
+    let respelt = fixture
+        .installer
+        .install("./My Extension/", &fixture.repo, &|_| None)
+        .unwrap();
+    assert!(respelt.unchanged());
 
     std::fs::write(
         source.join("main.js"),

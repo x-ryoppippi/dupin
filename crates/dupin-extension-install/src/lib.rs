@@ -88,8 +88,8 @@ struct Target<'a> {
     source: Source,
     /// The installed package this replaces, for update and sync.
     name: Option<&'a str>,
-    /// The hash the result must have, for sync.
-    expected_hash: Option<&'a str>,
+    /// The lock entry the result must reproduce, for sync.
+    locked: Option<&'a Entry>,
 }
 
 impl Installer {
@@ -103,7 +103,7 @@ impl Installer {
             Target {
                 source,
                 name: None,
-                expected_hash: None,
+                locked: None,
             },
             taken,
         )
@@ -128,7 +128,7 @@ impl Installer {
                         Target {
                             source: source.with_rev(None),
                             name: Some(&name),
-                            expected_hash: None,
+                            locked: None,
                         },
                         taken,
                     )
@@ -156,7 +156,7 @@ impl Installer {
                         Target {
                             source,
                             name: Some(&name),
-                            expected_hash: Some(&entry.content_hash),
+                            locked: Some(&entry),
                         },
                         taken,
                     )
@@ -181,12 +181,20 @@ impl Installer {
                 error
             }
         })?;
-        lock.write(&self.lock)?;
+        // The folder goes first: a lock that drops the entry while the folder stays would leave
+        // it running as an unchecked, hand-made extension.
         let target = self.extensions.join(name);
-        if target.symlink_metadata().is_ok() {
-            let stage = Stage::new(&self.extensions, "remove")?;
+        let stage = Stage::new(&self.extensions, "remove")?;
+        let moved = target.symlink_metadata().is_ok();
+        if moved {
             std::fs::rename(&target, stage.package())
                 .map_err(|error| Error::io("io-error", format!("move {} aside", target.display()), error))?;
+        }
+        if let Err(error) = lock.write(&self.lock) {
+            if moved {
+                let _ = std::fs::rename(stage.package(), &target);
+            }
+            return Err(error);
         }
         Ok(entry)
     }
@@ -249,8 +257,8 @@ impl Installer {
             )));
         }
         let hash = content_hash(&staged).map_err(|error| Error::io("io-error", "hash the package", error))?;
-        if let Some(expected) = target.expected_hash
-            && expected != hash
+        if let Some(expected) = target.locked.map(|locked| &locked.content_hash)
+            && *expected != hash
         {
             return Err(Error::new(
                 "hash-mismatch",
@@ -262,6 +270,26 @@ impl Installer {
         let mut lock = Lock::read(&self.lock)?;
         let destination = self.extensions.join(&package.name);
         let previous = lock.packages.get(&package.name).cloned();
+        if target.name.is_none()
+            && let Some(previous) = &previous
+            && previous.source != target.source.locator()
+        {
+            return Err(Error::new(
+                "source-changed",
+                format!(
+                    "`{}` is already installed from {}, not {}",
+                    package.name,
+                    previous.source,
+                    target.source.locator()
+                ),
+            )
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+            .hint(format!(
+                "Its grants belong to that source. To replace it, run `dupin ext remove {}`, then install again.",
+                package.name
+            )));
+        }
         if previous.is_none() && destination.symlink_metadata().is_ok() {
             return Err(Error::new(
                 "folder-exists",
@@ -274,7 +302,12 @@ impl Installer {
         }
         self.check_keyword(&package, taken)?;
 
-        let (entry, added, removed) = next_entry(&target.source, fetched, &package, hash, previous.as_ref());
+        let (mut entry, added, removed) =
+            next_entry(&target.source, fetched, &package, hash, previous.as_ref());
+        if let Some(locked) = target.locked {
+            // Sync fetches the locked commit by SHA, which names no tag or branch of its own.
+            entry.rev.clone_from(&locked.rev);
+        }
         let change = Change {
             name: package.name.clone(),
             title: package.title.clone(),
