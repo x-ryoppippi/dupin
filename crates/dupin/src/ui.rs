@@ -208,7 +208,32 @@ impl ActionScreen {
     }
 }
 
+pub fn pick_indices(values: &[serde_json::Value], query: &str) -> Vec<usize> {
+    let query = query.to_lowercase();
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            let label = value
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| value.to_string());
+            label.to_lowercase().contains(&query).then_some(index)
+        })
+        .collect()
+}
+
+pub struct Picker {
+    pub values: Vec<serde_json::Value>,
+    pub selected: usize,
+    original: TextEdit,
+    original_shown: bool,
+    call: crate::control::Call,
+}
+
 pub struct Ui {
+    pub picker: Option<Picker>,
+    control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
     pub action_screen: Option<ActionScreen>,
@@ -256,6 +281,85 @@ pub struct Ui {
 }
 
 impl Ui {
+    pub fn control(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        use crate::control::Command;
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        match &call.request.command {
+            Command::Open { query } => {
+                if self.picker.is_some() {
+                    call.finish(Err("Busy: picker active".into()));
+                    return;
+                }
+                if let Some(query) = query {
+                    self.query = TextEdit::new(query);
+                    self.edited(tx);
+                }
+                self.show(tx);
+                call.finish(Ok(serde_json::Value::Null));
+            }
+            Command::Pick { values } => {
+                if self.picker.is_some() {
+                    call.finish(Err("Busy: picker active".into()));
+                    return;
+                }
+                let values = values.clone();
+                let original = std::mem::replace(&mut self.query, TextEdit::new(""));
+                self.action_screen = None;
+                tx.wake_at(tx.clock() + 0.05);
+                self.picker = Some(Picker {
+                    values,
+                    selected: 0,
+                    original,
+                    original_shown: self.shown,
+                    call,
+                });
+                self.show(tx);
+            }
+            Command::ConfigGet {} => call.finish(
+                serde_json::to_value(&*self.configuration.values.borrow())
+                    .map_err(|_| "could not encode settings".into()),
+            ),
+            Command::ConfigSet { base, desired } => {
+                if self.control_save.is_some() {
+                    call.finish(Err("Busy: settings save pending".into()));
+                    return;
+                }
+                if crate::settings::read_only() {
+                    call.finish(Err("settings are read-only".into()));
+                    return;
+                }
+                let checked = accept_config(
+                    (**desired).clone(),
+                    &self.configuration.values.borrow(),
+                    |shortcut| {
+                        if self.configuration.hotkey.is_installed(shortcut) {
+                            Ok(())
+                        } else {
+                            self.configuration.hotkey.replace(shortcut)
+                        }
+                    },
+                );
+                match checked.and_then(|desired| self.configuration.files.save(base, &desired)) {
+                    Ok(revision) => self.control_save = Some((revision, call)),
+                    Err(error) => call.finish(Err(error)),
+                }
+            }
+        }
+    }
+    fn finish_pick(&mut self, value: Option<serde_json::Value>, tx: &mut Tx) {
+        if let Some(picker) = self.picker.take() {
+            self.query = picker.original;
+            self.shown = picker.original_shown;
+            if !picker.original_shown {
+                self.hide(tx);
+            }
+            tx.instant();
+            picker.call.finish(value.ok_or_else(|| "Cancelled".into()));
+        }
+    }
+
     /// Cursor-only redraws do not emit Rune input-change callbacks.
     pub fn query_display(&self) -> TextEdit {
         let mut query = self.query.clone();
@@ -326,6 +430,8 @@ impl Ui {
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
+            picker: None,
+            control_save: None,
             theme: config.theme.clone(),
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
@@ -441,6 +547,7 @@ impl Ui {
             }
             Err(error) => Some(error),
         };
+        let save_error = problem.clone().or_else(|| update.save_problem.clone());
         let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
             .into_iter()
             .flatten()
@@ -452,6 +559,18 @@ impl Ui {
             crate::log::warn(problem);
         }
         self.config_problem = problem.clone();
+        if self
+            .control_save
+            .as_ref()
+            .is_some_and(|(revision, _)| *revision <= update.revision)
+        {
+            let (_, call) = self.control_save.take().unwrap();
+            call.finish(match &save_error {
+                Some(error) => Err(error.clone()),
+                None => serde_json::to_value(&*self.configuration.values.borrow())
+                    .map_err(|_| "could not encode settings".into()),
+            });
+        }
         let config = self.configuration.values.borrow().clone();
         self.prefs.update(move |prefs, _| {
             prefs.reflect_config(update.revision, config, update.read_only, problem);
@@ -520,6 +639,10 @@ impl Ui {
 
     /// The hotkey: show the panel, or hide it when it already shows.
     pub fn toggle(&mut self, tx: &mut Tx) {
+        if self.picker.is_some() {
+            self.finish_pick(None, tx);
+            return;
+        }
         let visible = self.me.is_visible();
         crate::trace::panel("toggle", visible, self.shown);
         if visible {
@@ -576,6 +699,10 @@ impl Ui {
 
     /// Hide and reset, as Esc and losing focus do.
     pub fn dismiss(&mut self, tx: &mut Tx) {
+        if self.picker.is_some() {
+            self.finish_pick(None, tx);
+            return;
+        }
         let effects = self.session.reset();
         self.apply(effects, tx);
         self.hide(tx);
@@ -628,6 +755,11 @@ impl Ui {
 
     /// The field's text changed.
     pub fn edited(&mut self, tx: &mut Tx) {
+        if let Some(picker) = &mut self.picker {
+            picker.selected = 0;
+            tx.instant();
+            return;
+        }
         self.action_screen = None;
         crate::trace::edited(&self.query.text);
         self.typed_at = tx.clock();
@@ -637,6 +769,9 @@ impl Ui {
 
     /// Keep panel shortcuts available while the definition owns the text selection.
     pub fn unfocused_key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.picker.is_some() {
+            return self.key(ev, tx);
+        }
         if self.action_screen.is_some() {
             return self.key(ev, tx);
         }
@@ -681,6 +816,35 @@ impl Ui {
 
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if self.picker.is_some() {
+            match ev.key {
+                Key::Escape => self.finish_pick(None, tx),
+                Key::Enter => {
+                    let value = self
+                        .picker
+                        .as_ref()
+                        .and_then(|p| {
+                            pick_indices(&p.values, &self.query.text)
+                                .get(p.selected)
+                                .and_then(|index| p.values.get(*index))
+                        })
+                        .cloned();
+                    self.finish_pick(value, tx);
+                }
+                Key::Up => {
+                    let p = self.picker.as_mut().unwrap();
+                    p.selected = p.selected.saturating_sub(1);
+                }
+                Key::Down => {
+                    let p = self.picker.as_mut().unwrap();
+                    p.selected = (p.selected + 1)
+                        .min(pick_indices(&p.values, &self.query.text).len().saturating_sub(1));
+                }
+                _ => return false,
+            }
+            tx.instant();
+            return true;
+        }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('s') | Key::Command('S')) {
             match self.session.capture() {
                 Ok(saved) => {
@@ -791,6 +955,9 @@ impl Ui {
 
     /// A click on a result row.
     pub fn open(&mut self, id: &str, tx: &mut Tx) {
+        if self.picker.is_some() {
+            return;
+        }
         if self.session.select_key(id)
             && let Some(effects) = self.session.intent(Intent::Open)
         {
@@ -799,6 +966,9 @@ impl Ui {
     }
 
     pub fn actions(&mut self, id: &str, tx: &mut Tx) {
+        if self.picker.is_some() {
+            return;
+        }
         if self.session.select_key(id) {
             let effects = self.session.intent(Intent::Actions).unwrap_or_default();
             self.apply(effects, tx);
@@ -1167,6 +1337,16 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.call.cancelled.load(Ordering::Relaxed))
+        {
+            self.finish_pick(None, tx);
+        }
+        if self.picker.is_some() {
+            tx.wake_at(clock + 0.05);
+        }
         let due = take_due(&mut self.deadlines, clock);
         let mut changed = false;
         if self.notice_until.is_some_and(|due| clock >= due) {

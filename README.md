@@ -66,3 +66,44 @@ See [docs/](./docs/README.md) for using, configuring and developing Dupin.
 ## License
 
 Dupin is licensed under [GPL-3.0-or-later](./LICENSE). Contributions need the [Contributor License Agreement](./CLA.md); see [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Local CLI
+
+With a resident Dupin instance, `dupin open --query 'Safari'` shows the panel without
+activating a result. `printf 'red\nblue\n' | dupin pick` opens a transient picker;
+Enter prints the original value and Esc exits unsuccessfully. For structured values,
+use `dupin pick --input-json` with a JSON array. Values are displayed as data, including
+objects containing paths or action names. Picker sessions never add history entries.
+
+`dupin config get --json` returns the current configuration. Save a copy as `base.json`,
+edit a second copy, then run `dupin config set base.json desired.json --json`.
+The base enables conflict detection against external edits. Changes use the settings
+service, including managed/read-only files and native shortcut validation; a successful
+reply follows reconciliation. `--json` emits JSON values on success and an `error` object
+on failure. `dupin --help` and `dupin --version` perform no app or configuration work.
+
+Pure headless examples (no resident instance required):
+
+```sh
+printf '%s' '{"kind":"text","title":"Hello","subtitle":"Headless fixture"}' > /tmp/dupin-view.json
+dupin snap /tmp/dupin-view.json /tmp/dupin-view.png --json
+dupin ext check fixture.wasm request.json --json
+dupin ext snap fixture.wasm request.json /tmp/dupin-extension.png --json
+```
+
+The extension commands require a build with the optional `extension-tools` Cargo
+feature; ordinary builds do not link the Wasm runtime. They accept the bounded
+versioned guest request contract, execute a
+module through the existing fuel/deadline-limited runtime, and validate its response.
+Imports (including OS/WASI imports) are forbidden. This is a guest-contract tool, not an
+extension loader. Headless rendering shows the returned text/detail/pair views without
+executing actions or loading configuration, history or application providers.
+
+Local control uses length-prefixed JSON, one correlated request/reply per connection,
+a 512 KiB frame cap, at most eight live connections and a five-minute request deadline.
+The socket lives in an owner-only Dupin directory under `XDG_RUNTIME_DIR` (or the system
+per-user temporary directory on macOS, independent of shell `TMPDIR`). A live instance
+is never replaced; an owner-only socket with no listener is recovered on restart.
+Picker and settings contention return Busy. Disconnecting cancels a pending picker.
+Snapshot window control will be integrated with #32's separate searchable snapshot
+window; the superseded tab proposal is not implemented here.
