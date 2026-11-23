@@ -1,4 +1,5 @@
 use dupin_core::script::{LineDecoder, OutputBuffer, ScriptRun, Stream};
+use dupin_host_services::exec;
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, Read},
@@ -28,6 +29,7 @@ const POLL_INTERVAL_MS: i32 = 20;
 const SHELL_LIMIT: usize = 4;
 const SHELL_TAIL_BYTES: usize = 512;
 const SHELL_TAIL_LINES: usize = 4;
+const EXTENSION_LIMIT: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -90,6 +92,7 @@ struct Group {
     pgid: i32,
     terminated: bool,
     killed: bool,
+    contained: bool,
 }
 
 struct Lifecycle {
@@ -119,9 +122,16 @@ impl Lifecycle {
                 pgid,
                 terminated: false,
                 killed: false,
+                contained: false,
             },
         );
         Ok(Some(child))
+    }
+
+    fn contain(&self, id: RunId) {
+        if let Some(group) = lock(&self.state).groups.get_mut(&id) {
+            group.contained = true;
+        }
     }
 
     fn cancel(&self, id: RunId, force: bool) {
@@ -161,7 +171,7 @@ impl Lifecycle {
         let mut state = lock(&self.state);
         let mut cancelled = false;
         if let Some(group) = state.groups.get_mut(&id) {
-            if group.terminated && !group.killed {
+            if (group.terminated || group.contained) && !group.killed {
                 if !leader_exited(group.pgid)? {
                     return Ok(None);
                 }
@@ -185,6 +195,7 @@ struct Inner {
     next: AtomicU64,
     running_scripts: Arc<AtomicUsize>,
     running_shells: AtomicUsize,
+    running_extension_commands: AtomicUsize,
     notify: Notify,
     home: PathBuf,
 }
@@ -205,6 +216,7 @@ impl Runner {
                 next: AtomicU64::new(1),
                 running_scripts: Arc::default(),
                 running_shells: AtomicUsize::default(),
+                running_extension_commands: AtomicUsize::default(),
                 notify,
                 home,
             }),
@@ -284,6 +296,7 @@ impl Runner {
                     &worker_run.cancelled,
                     command,
                     &mut Capture::Script(&mut output),
+                    Bounds::default(),
                     |output| publish(&inner, &worker_run, Status::Running, output.clone()),
                 );
                 publish(&inner, &worker_run, status, output);
@@ -339,6 +352,7 @@ impl Runner {
                     &AtomicBool::new(false),
                     command,
                     &mut Capture::Shell(&mut output),
+                    Bounds::default(),
                     |_| {},
                 );
                 let closing = lock(&slot.0.lifecycle.state).shutting_down;
@@ -387,6 +401,71 @@ struct ShellSlot(Arc<Inner>);
 impl Drop for ShellSlot {
     fn drop(&mut self) {
         self.0.running_shells.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+struct ExtensionSlot<'a>(&'a Inner);
+
+impl Drop for ExtensionSlot<'_> {
+    fn drop(&mut self) {
+        self.0.running_extension_commands.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl exec::Spawn for Runner {
+    fn spawn(&self, launch: &exec::Launch, cancel: &AtomicBool) -> Result<exec::Completion, String> {
+        let inner = &*self.inner;
+        inner
+            .running_extension_commands
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < EXTENSION_LIMIT).then_some(count + 1)
+            })
+            .map_err(|_| "Four extension commands are already running.")?;
+        let _slot = ExtensionSlot(inner);
+        let mut command = Command::new(&launch.program);
+        command
+            .args(&launch.args)
+            .current_dir(launch.working_directory.as_ref().unwrap_or(&inner.home));
+        if let exec::Environment::Minimal(variables) = &launch.environment {
+            command
+                .env_clear()
+                .envs(variables.iter().map(|(name, value)| (name, value)));
+        }
+        let id = inner.next.fetch_add(1, Ordering::Relaxed);
+        let deadline = Instant::now() + launch.timeout;
+        let mut output = BoundedOutput {
+            limit: launch.output_bytes,
+            ..BoundedOutput::default()
+        };
+        let status = execute(
+            &inner.lifecycle,
+            id,
+            cancel,
+            command,
+            &mut Capture::Bounded(&mut output),
+            Bounds {
+                deadline: Some(deadline),
+                contained: true,
+            },
+            |_| {},
+        );
+        let exit = match status {
+            Status::Exited(Some(code)) => exec::Exit::Code(code),
+            Status::Exited(None) => exec::Exit::Signal,
+            Status::Cancelled if cancel.load(Ordering::Acquire) => exec::Exit::Cancelled,
+            Status::Cancelled if Instant::now() >= deadline => exec::Exit::TimedOut,
+            Status::Cancelled => return Err("Dupin is shutting down.".into()),
+            Status::Failed(problem) => return Err(problem),
+            Status::Running => unreachable!("execute returns only after the process is reaped"),
+        };
+        Ok(exec::Completion {
+            exit,
+            output: exec::Captured {
+                stdout: output.stdout,
+                stderr: output.stderr,
+                truncated: output.truncated,
+            },
+        })
     }
 }
 
@@ -476,9 +555,37 @@ impl ShellOutput {
     }
 }
 
+#[derive(Default)]
+struct BoundedOutput {
+    limit: usize,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+impl BoundedOutput {
+    fn feed(&mut self, stream: Stream, bytes: &[u8]) {
+        let kept = match stream {
+            Stream::Stdout => &mut self.stdout,
+            Stream::Stderr => &mut self.stderr,
+        };
+        let room = self.limit - kept.len();
+        self.truncated |= bytes.len() > room;
+        kept.extend_from_slice(&bytes[..bytes.len().min(room)]);
+    }
+}
+
 enum Capture<'a> {
     Script(&'a mut OutputBuffer),
     Shell(&'a mut ShellOutput),
+    Bounded(&'a mut BoundedOutput),
+}
+
+// A contained run owns its whole process group, so survivors die with the leader.
+#[derive(Clone, Copy, Default)]
+struct Bounds {
+    deadline: Option<Instant>,
+    contained: bool,
 }
 
 fn set_nonblocking(fd: RawFd, enabled: bool) -> io::Result<()> {
@@ -529,6 +636,7 @@ impl<R: Read + AsRawFd> Pipe<R> {
                 match capture {
                     Capture::Script(output) => self.decoder.feed(&bytes[..count], self.stream, output),
                     Capture::Shell(output) => output.feed(&bytes[..count]),
+                    Capture::Bounded(output) => output.feed(self.stream, &bytes[..count]),
                 }
                 Ok(true)
             }
@@ -565,10 +673,11 @@ fn execute(
     cancelled: &AtomicBool,
     mut command: Command,
     capture: &mut Capture<'_>,
+    bounds: Bounds,
     mut notify: impl FnMut(&OutputBuffer),
 ) -> Status {
     let stdout = match capture {
-        Capture::Script(_) => Stdio::piped(),
+        Capture::Script(_) | Capture::Bounded(_) => Stdio::piped(),
         Capture::Shell(_) => Stdio::null(),
     };
     command
@@ -586,6 +695,9 @@ fn execute(
         Ok(None) => return Status::Cancelled,
         Err(error) => return Status::Failed(error.to_string()),
     };
+    if bounds.contained {
+        lifecycle.contain(id);
+    }
     let pipes = Pipe::new(child.stdout.take(), Stream::Stdout)
         .and_then(|stdout| Pipe::new(child.stderr.take(), Stream::Stderr).map(|stderr| (stdout, stderr)));
     let (mut stdout, mut stderr) = match pipes {
@@ -605,7 +717,9 @@ fn execute(
     let mut notified = Instant::now();
     loop {
         if exited.is_none() {
-            if cancelled.load(Ordering::Acquire) {
+            if cancelled.load(Ordering::Acquire)
+                || bounds.deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            {
                 let started = cancel_at.get_or_insert_with(Instant::now);
                 let force = started.elapsed() >= CANCEL_GRACE;
                 lifecycle.cancel(id, force);
@@ -1171,6 +1285,193 @@ mod tests {
         while !marker.with_extension("done").exists() {
             assert!(start.elapsed() < Duration::from_secs(2));
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn launch(program: PathBuf, args: &[&str]) -> exec::Launch {
+        exec::Launch {
+            program,
+            args: args.iter().map(|arg| (*arg).into()).collect(),
+            working_directory: None,
+            environment: exec::Environment::Minimal(exec::minimal_environment()),
+            timeout: Duration::from_secs(5),
+            output_bytes: 64 * 1024,
+        }
+    }
+
+    fn spawn(runner: &Runner, launch: &exec::Launch) -> Result<exec::Completion, String> {
+        exec::Spawn::spawn(runner, launch, &AtomicBool::new(false))
+    }
+
+    fn assert_gone(fixture: &Fixture, pid_file: &str) {
+        let pid: i32 = fs::read_to_string(fixture.0.join(pid_file))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let start = Instant::now();
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(start.elapsed() < Duration::from_secs(2), "{pid} survived");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn extension_commands_get_literal_argv_a_minimal_environment_and_their_working_folder() {
+        let fixture = Fixture::new("printf '%s\\n' \"$@\"\npwd -P\n");
+        let runner = Runner::new(
+            PathBuf::from("/"),
+            Arc::new(|_, _| panic!("extension run in script history")),
+        );
+        let mut run = launch(
+            fixture.0.join("run"),
+            &["$(touch pwned)", "a b", "; id", "*", "`id`"],
+        );
+        run.working_directory = Some(fixture.0.clone());
+        let completion = spawn(&runner, &run).unwrap();
+        assert_eq!(completion.exit, exec::Exit::Code(0));
+        assert_eq!(
+            String::from_utf8(completion.output.stdout).unwrap(),
+            format!("$(touch pwned)\na b\n; id\n*\n`id`\n{}\n", fixture.0.display())
+        );
+        assert!(!fixture.0.join("pwned").exists());
+        assert!(runner.snapshots().is_empty());
+
+        let completion = spawn(&runner, &launch(PathBuf::from("/usr/bin/env"), &[])).unwrap();
+        let environment = String::from_utf8(completion.output.stdout).unwrap();
+        assert!(
+            environment
+                .lines()
+                .any(|line| line == "PATH=/usr/bin:/bin:/usr/sbin:/sbin")
+        );
+        for line in environment.lines() {
+            let (name, _) = line.split_once('=').unwrap();
+            assert!(
+                ["PATH", "HOME", "TMPDIR", "LANG", "USER"].contains(&name),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn extension_timeouts_kill_the_whole_process_group() {
+        let fixture = Fixture::new("sleep 60 &\nprintf '%s\\n' $! > child\nwait\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let mut run = launch(fixture.0.join("run"), &[]);
+        run.timeout = Duration::from_millis(500);
+        let started = Instant::now();
+        assert_eq!(spawn(&runner, &run).unwrap().exit, exec::Exit::TimedOut);
+        assert!(started.elapsed() >= run.timeout);
+        assert!(started.elapsed() < run.timeout + CANCEL_GRACE);
+        assert_gone(&fixture, "child");
+        assert_eq!(runner.inner.running_extension_commands.load(Ordering::Acquire), 0);
+        assert!(lock(&runner.inner.lifecycle.state).groups.is_empty());
+    }
+
+    #[test]
+    fn extension_command_children_end_with_it() {
+        let fixture = Fixture::new("sleep 60 &\nprintf '%s\\n' $! > child\nprintf 'done\\n'\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let started = Instant::now();
+        let completion = spawn(&runner, &launch(fixture.0.join("run"), &[])).unwrap();
+        assert_eq!(completion.exit, exec::Exit::Code(0));
+        assert_eq!(completion.output.stdout, b"done\n");
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_gone(&fixture, "child");
+    }
+
+    #[test]
+    fn extension_commands_stop_on_cancellation_and_refuse_after_shutdown() {
+        let fixture = Fixture::new("printf '%s\\n' $$ > leader\nexec sleep 60\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let cancel = AtomicBool::new(false);
+        let run = launch(fixture.0.join("run"), &[]);
+        let completion = thread::scope(|scope| {
+            scope.spawn(|| {
+                fixture.wait_for("leader");
+                cancel.store(true, Ordering::Release);
+            });
+            exec::Spawn::spawn(&runner, &run, &cancel).unwrap()
+        });
+        assert_eq!(completion.exit, exec::Exit::Cancelled);
+        assert_gone(&fixture, "leader");
+
+        runner.kill_all_now();
+        assert_eq!(spawn(&runner, &run).unwrap_err(), "Dupin is shutting down.");
+    }
+
+    #[test]
+    fn extension_command_output_is_capped_per_stream() {
+        let fixture = Fixture::new(
+            "i=0\nwhile [ $i -lt 2000 ]; do printf '0123456789'; i=$((i+1)); done\nprintf 'err' >&2\n",
+        );
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let mut run = launch(fixture.0.join("run"), &[]);
+        run.output_bytes = 100;
+        let completion = spawn(&runner, &run).unwrap();
+        assert_eq!(completion.output.stdout, "0123456789".repeat(10).as_bytes());
+        assert_eq!(completion.output.stderr, b"err");
+        assert!(completion.output.truncated);
+        run.output_bytes = 0;
+        let completion = spawn(&runner, &run).unwrap();
+        assert_eq!(completion.exit, exec::Exit::Code(0));
+        assert!(completion.output.stdout.is_empty() && completion.output.stderr.is_empty());
+    }
+
+    #[test]
+    fn script_targets_run_the_installed_script_through_the_runner() {
+        let fixture =
+            Fixture::new("# @dupin.argument message\nprintf 'got %s in %s\\n' \"$1\" \"$(pwd -P)\"\n");
+        let catalog = super::super::catalog::Catalog::scan(&fixture.0);
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let inputs = [(
+            "message".to_owned(),
+            exec::Input {
+                kind: exec::InputKind::Text {
+                    max_bytes: 64,
+                    multiline: false,
+                    option_like: false,
+                },
+                required: true,
+            },
+        )]
+        .into();
+        let values = [("message".to_owned(), exec::Value::Text("hello world".into()))].into();
+        let options = exec::Options {
+            return_output: true,
+            ..exec::Options::default()
+        };
+        let profile = |target: &str, template: &[&str]| {
+            exec::Profile::new(
+                "say",
+                exec::Target::parse(target).unwrap(),
+                template,
+                std::collections::BTreeMap::clone(&inputs),
+                options.clone(),
+            )
+            .unwrap()
+        };
+        let cancel = AtomicBool::new(false);
+        let outcome = exec::run(
+            &profile("@script:run", &["{message}"]),
+            &values,
+            &catalog,
+            &runner,
+            &cancel,
+        )
+        .unwrap();
+        assert_eq!(outcome.exit, exec::Exit::Code(0));
+        assert_eq!(
+            outcome.output.unwrap().stdout,
+            format!("got hello world in {}\n", fixture.0.display())
+        );
+        for (target, template, problem) in [
+            ("@script:missing", &["{message}"][..], "was not found"),
+            ("@script:run", &["{message}", "extra"][..], "Too many arguments"),
+        ] {
+            let error =
+                exec::run(&profile(target, template), &values, &catalog, &runner, &cancel).unwrap_err();
+            assert!(error.to_string().contains(problem), "{error}");
         }
     }
 }
