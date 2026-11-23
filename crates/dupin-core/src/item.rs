@@ -18,6 +18,12 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    /// Copy a snippet's text with its placeholders filled in as it runs, then, with `paste`,
+    /// paste it into the frontmost app.
+    Snippet {
+        text: String,
+        paste: bool,
+    },
     /// Show the path in the platform's native preview UI.
     Preview(PathBuf),
     /// Open the host application's preferences.

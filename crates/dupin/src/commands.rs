@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use dupin_core::snippets::{SnippetCatalog, SnippetProvider};
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
 };
@@ -10,6 +11,7 @@ pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+pub const SNIPPETS: &str = "snippets.search";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -20,6 +22,7 @@ pub struct Registration {
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
+    pub snippets: Arc<RwLock<SnippetCatalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
 }
 
@@ -27,6 +30,7 @@ pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
     pub web: crate::web::WebCatalog,
+    pub snippets: SnippetCatalog,
 }
 
 fn parsed_file_query(
@@ -51,6 +55,26 @@ pub fn query_problem(command: &CommandId, raw: &str) -> Option<&'static str> {
         }
         _ => None,
     }
+}
+
+/// Register `keywords` for `command`, describing the ones that couldn't be, under `setting`.
+fn add_keywords(
+    registry: &mut CommandRegistry,
+    command: &CommandId,
+    keywords: &[String],
+    setting: &str,
+) -> Option<String> {
+    let rejected: Vec<_> = keywords
+        .iter()
+        .filter_map(|keyword| registry.add_keyword(command, keyword).err())
+        .map(|error| error.to_string())
+        .collect();
+    (!rejected.is_empty()).then(|| {
+        format!(
+            "Some keywords were not registered. Review {setting} in config.toml: {}",
+            rejected.join("; "),
+        )
+    })
 }
 
 fn id(value: &str) -> CommandId {
@@ -85,6 +109,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
     let dictionary_id = id(DICTIONARY);
+    let snippets_id = id(SNIPPETS);
     let mut registry = CommandRegistry::new(apps_id.clone(), Some(files_id.clone()));
     for command in [
         CommandSpec::new(
@@ -129,6 +154,19 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
                 3.0,
             ),
         ),
+        CommandSpec::new(
+            snippets_id.clone(),
+            50,
+            presentation(
+                "Search snippets",
+                Some("Snippets"),
+                Some("No snippets yet: add them to config.toml  ·  ⌫ back to apps"),
+                Some("No matching snippets"),
+                false,
+                0.0,
+            ),
+        )
+        .with_query_eligibility(QueryEligibility::Any),
     ] {
         registry.register(command)?;
     }
@@ -167,27 +205,37 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
     registry.set_default_providers(default_providers, Some(id(WEB_KEYWORDS)))?;
 
     registry.add_keyword(&contents_id, "in")?;
-    let mut rejected = Vec::new();
-    for keyword in &config.dictionary_keywords {
-        if let Err(error) = registry.add_keyword(&dictionary_id, keyword) {
-            rejected.push(error.to_string());
-        }
-    }
-    let dictionary_notice = (!rejected.is_empty()).then(|| {
-        format!(
-            "Some dictionary keywords were not registered. Review dictionary_keywords in config.toml: {}",
-            rejected.join("; "),
-        )
-    });
+    let dictionary_notice = add_keywords(
+        &mut registry,
+        &dictionary_id,
+        &config.dictionary_keywords,
+        "dictionary_keywords",
+    );
+    let snippet_keyword_notice = add_keywords(
+        &mut registry,
+        &snippets_id,
+        &config.snippet_keywords,
+        "snippet_keywords",
+    );
 
     let (web, web_notice) =
         crate::web::WebCatalog::compile(config, |keyword| registry.keyword(keyword).is_some());
-    let notices: Vec<_> = [dictionary_notice, web_notice].into_iter().flatten().collect();
+    let (snippets, snippets_notice) = SnippetCatalog::compile(config);
+    let notices: Vec<_> = [
+        dictionary_notice,
+        snippet_keyword_notice,
+        web_notice,
+        snippets_notice,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let notice = (!notices.is_empty()).then(|| notices.join("\n"));
     Ok(ConfiguredCommands {
         registry,
         notice,
         web,
+        snippets,
     })
 }
 
@@ -200,8 +248,10 @@ pub fn register(
         registry,
         notice,
         web,
+        snippets,
     } = configured(config)?;
     let web = Arc::new(RwLock::new(web));
+    let snippets = Arc::new(RwLock::new(snippets));
     let apps_id = id(APPS);
     let files_id = id(FILES);
     let contents_id = id(CONTENTS);
@@ -233,6 +283,10 @@ pub fn register(
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
         ),
         (
+            id(SNIPPETS),
+            Arc::new(SnippetProvider::new(snippets.clone())) as Arc<dyn Provider>,
+        ),
+        (
             id(WEB_KEYWORDS),
             Arc::new(crate::web::WebProvider::new(web.clone(), false)) as Arc<dyn Provider>,
         ),
@@ -248,6 +302,7 @@ pub fn register(
         providers,
         notice,
         web,
+        snippets,
         file_demotions,
     })
 }
@@ -344,8 +399,50 @@ mod tests {
         assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
         let notice = configured.notice.unwrap();
         assert!(notice.contains("dictionary_keywords"));
+        assert!(!notice.contains("snippet_keywords"));
         assert!(notice.contains("in"));
         assert!(notice.contains("must not be empty"));
+    }
+
+    #[test]
+    fn snippet_keywords_route_to_snippets_and_reserve_web_keywords() {
+        use dupin_core::config::{Snippet, WebSearch};
+        use dupin_core::{Effect, Session};
+
+        let config = Config {
+            snippet_keywords: vec!["s".into(), "in".into()],
+            snippets: [(
+                "sig".into(),
+                Snippet {
+                    name: None,
+                    text: "Best wishes".into(),
+                },
+            )]
+            .into(),
+            web_searches: [(
+                "s".into(),
+                WebSearch {
+                    name: "Search".into(),
+                    url: "https://example.com/?q={query}".into(),
+                },
+            )]
+            .into(),
+            ..Config::default()
+        };
+        let configured = configured(&config).unwrap();
+        assert_eq!(configured.registry.keyword("s"), Some(&id(SNIPPETS)));
+        assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
+        assert_eq!(configured.registry.keyword("snip"), None);
+        let notice = configured.notice.unwrap();
+        assert!(notice.contains("snippet_keywords"));
+        assert!(notice.contains("web searches"));
+        assert_ne!(configured.snippets, SnippetCatalog::default());
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        assert!(matches!(
+            session.set_query("s ").as_slice(),
+            [Effect::ReplaceQuery(text), Effect::Search { command, query, .. }]
+                if text.is_empty() && *command == id(SNIPPETS) && query.is_empty()
+        ));
     }
 
     #[test]

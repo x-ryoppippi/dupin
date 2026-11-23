@@ -79,6 +79,14 @@ Web searches are local URL templates: typing never sends a request to the engine
 
 Set `web_searches` and optional `web_fallbacks` in [configuration](./configuration.md). Fallback searches appear only after ordinary providers finish without results. They are disabled by default. File and Dictionary modes keep their own providers.
 
+## Snippets
+
+Type `snip`, then Space, to list your [snippets](./configuration.md#snippets) ("Snippets"); type to narrow them by name or keyword. Each row shows the snippet's name, its keyword and the start of its text. Enter copies the text, with any date, time or clipboard placeholders filled in, and closes the panel; paste it wherever you like. Backspace on an empty query returns to app search.
+
+With pasting turned on in Settings → Search, Enter pastes the snippet into the app you were using and ⌘Enter only copies it. The actions screen (Right Arrow or ⌘K) offers both. Pasting needs Accessibility access, which Dupin asks for only when you paste a snippet without it, once per launch; after that, it copies the snippet and explains how to allow access. Snippets don't expand as you type in other apps.
+
+Snippets you use often rank higher, as apps do.
+
 ## Files
 
 Space on an empty query switches to file search; a "Files" chip shows the mode. Every word of the query must appear in the file name or display name. Results appear as Spotlight finds them, then improve as more candidates arrive. Ranking combines filename match quality, your usage and previous query choices, last-used and modified dates, and path depth. Cache and build directories are demoted by the configurable [file ranking rules](./configuration.md#file-ranking).

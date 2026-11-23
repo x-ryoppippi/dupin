@@ -20,6 +20,7 @@ use rune::{
 
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
+const PASTE_ACCESS_NOTICE: &str = "Copied the snippet. To paste it into the front app as well, allow Dupin in System Settings › Privacy & Security › Accessibility, or turn off Paste snippets in Settings › Search.";
 /// The panel's top edge below the display's for `position = "top"`: about where Spotlight
 /// puts its field.
 const TOP_MARGIN: f32 = 180.0;
@@ -71,6 +72,12 @@ pub struct Configuration {
 enum Restart {
     Update,
     Requested,
+}
+
+/// A snippet's text as Enter found it, with the time its placeholders show.
+struct SnippetRun {
+    text: String,
+    now: dupin_core::snippets::LocalTime,
 }
 
 pub struct ActionScreen {
@@ -262,6 +269,13 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
+    snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
+    /// A snippet to paste once the panel has closed and the front app has its keys back.
+    paste_after_close: Option<SnippetRun>,
+    /// Why a snippet wasn't pasted, to show once the panel has closed.
+    notice_after_close: Option<String>,
+    /// Pasting has asked macOS for access once since launch; later attempts explain instead.
+    paste_access_asked: bool,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
@@ -458,6 +472,10 @@ impl Ui {
             icon_cache: None,
             searchers,
             web: registration.web,
+            snippets: registration.snippets,
+            paste_after_close: None,
+            notice_after_close: None,
+            paste_access_asked: false,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
@@ -499,6 +517,12 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        let snippets_changed = {
+            let mut snippets = self.snippets.write().unwrap();
+            let changed = *snippets != registration.snippets;
+            *snippets = registration.snippets;
+            changed
+        };
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let recent_changed = config.show_recent
@@ -516,6 +540,7 @@ impl Ui {
             || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (recent_changed && self.shown && is_apps && empty)
+            || (snippets_changed && self.session.command_id().as_str() == crate::commands::SNIPPETS)
         {
             self.action_screen = None;
             let effects = self.session.refresh();
@@ -734,8 +759,14 @@ impl Ui {
         self.settings_after_close = true;
     }
 
-    pub fn closed(&mut self, _: &mut Tx) {
+    pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
+        if let Some(snippet) = self.paste_after_close.take() {
+            self.deliver_snippet(snippet, true);
+        }
+        if let Some(notice) = self.notice_after_close.take() {
+            self.show_notice(notice, tx);
+        }
         if std::mem::take(&mut self.snapshots_after_close) {
             self.snapshots.open();
         }
@@ -1258,6 +1289,7 @@ impl Ui {
                 }
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
+                    dupin_core::Action::Snippet { text, paste } => self.run_snippet(text, paste),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
                         let shown = self
@@ -1321,6 +1353,48 @@ impl Ui {
             }
         }
         mark_query_qualifiers(&mut self.query, self.session.command_id());
+    }
+
+    /// Copy the snippet now, or, to paste it, once the panel closes. Pasting needs
+    /// Accessibility access: the first attempt without it asks macOS, and later ones explain.
+    fn run_snippet(&mut self, text: String, paste: bool) {
+        let snippet = SnippetRun {
+            text,
+            now: dupin_mac::clock::now(),
+        };
+        if paste && self.may_paste() {
+            self.paste_after_close = Some(snippet);
+        } else {
+            self.deliver_snippet(snippet, false);
+        }
+    }
+
+    fn may_paste(&mut self) -> bool {
+        if dupin_mac::paste::allowed() {
+            return true;
+        }
+        if std::mem::replace(&mut self.paste_access_asked, true) {
+            self.notice_after_close = Some(PASTE_ACCESS_NOTICE.into());
+        } else {
+            dupin_mac::paste::request();
+        }
+        false
+    }
+
+    /// The clipboard is read, when the snippet uses it, and written off the UI thread: an
+    /// app that promised its clipboard data lazily answers in its own time.
+    fn deliver_snippet(&self, snippet: SnippetRun, paste: bool) {
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        std::thread::spawn(move || {
+            let text = dupin_core::snippets::expand(&snippet.text, snippet.now, dupin_mac::pasteboard::text);
+            let result = dupin_mac::pasteboard::set_text(&text)
+                .and_then(|()| if paste { dupin_mac::paste::paste() } else { Ok(()) });
+            if let Err(error) = result {
+                me.update(move |ui, tx| ui.show_notice(error, tx));
+            }
+            drop(busy);
+        });
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {

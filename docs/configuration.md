@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows, whether Enter pastes snippets and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
 
@@ -12,6 +12,8 @@ show_recent = true # show recently and frequently used apps and files before typ
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
+snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets
+snippet_paste = false # whether Enter on a snippet also pastes it into the front app
 position = "center" # "center" puts the field at the middle of the display; "top" near its top
 input_source = "ascii" # "ascii", "keep", or an input source identifier such as "com.apple.keylayout.ABC"
 auto_update = true # whether a release build checks for and installs its channel's updates by itself
@@ -45,6 +47,40 @@ url = "https://doc.rust-lang.org/std/?search={query}"
 ```
 
 Keywords contain up to 32 ASCII letters, digits, underscores or hyphens, and are case-sensitive. `in` and configured Dictionary aliases keep their existing meaning. Invalid or conflicting web entries are skipped with a notice; valid entries still work. Optional `web_fallbacks` lists keywords in display order (up to 20), shown only when app-mode providers finish without a match. It defaults to `[]`. Changes apply live to the active search; no browser is opened by a configuration reload.
+
+## Snippets
+
+Each entry under `snippets` is keyed by a short keyword and holds the text to copy, with an optional display name. Type `snip`, then Space, to list and search them (see [usage](./usage.md#snippets)); `snippet_keywords` sets other aliases under the same rules as `dictionary_keywords`.
+
+```toml
+[snippets.sig]
+name = "Email signature"
+text = """
+Best wishes,
+Sherlock"""
+
+[snippets.stamp]
+text = "Checked on {datetime}"
+
+[snippets.quote]
+name = "Quote the clipboard"
+text = "> {clipboard}"
+```
+
+Placeholders are filled in when the snippet is used, not when it is listed:
+
+| Placeholder   | Becomes                                             |
+| ------------- | --------------------------------------------------- |
+| `{date}`      | The local date, as `2026-01-31`                     |
+| `{time}`      | The local time on a 24-hour clock, as `09:05`       |
+| `{datetime}`  | Both, as `2026-01-31 09:05`                         |
+| `{clipboard}` | The clipboard's text, or nothing when it holds none |
+
+Any other braces are ordinary text, so code snippets need no escaping. Dupin reads the clipboard only when the snippet uses `{clipboard}`.
+
+Keywords are case-sensitive, up to 32 bytes, without spaces. Names are up to 80 characters; text is required and up to 64 KiB. Invalid snippets are skipped with a notice in the panel; the rest still work. Edits apply live, including to an open snippet search.
+
+Enter copies a snippet's text to the clipboard and closes the panel. With `snippet_paste = true`, or Paste snippets turned on in Settings → Search, Enter also pastes it into the app you were using by pressing ⌘V for you, and ⌘Enter only copies. Pressing keys in another app needs Accessibility access. Turning the setting on does not ask for it, and neither does starting Dupin or opening Settings. The first paste without access since Dupin started asks macOS, which prompts only until you have answered, and copies the text instead. If access is still missing on a later paste, Dupin copies the text and explains in the panel rather than asking again. Settings → Search then shows an Open button for System Settings → Privacy & Security → Accessibility.
 
 ## File ranking
 
