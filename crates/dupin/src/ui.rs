@@ -9,9 +9,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
+    Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::{
+    AppsProvider, AppsWatcher, accessibility, quick_look::Previewer, selection::Selection,
+    window::DisplayNotice,
+};
+use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -19,10 +24,21 @@ use rune::{
 
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
-/// The panel's top edge below the display's for `position = "top"`: about where Spotlight
-/// puts its field.
+// Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
+
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+    let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
+    let top = frame.max().y - visible.max().y;
+    // Use the query field's height so results can grow below it.
+    let room = (visible.size.height - f64::from(crate::HEADER_HEIGHT)).max(0.0);
+    let offset = match position {
+        Position::Center => room / 2.0,
+        Position::Top => f64::from(TOP_MARGIN).min(room),
+    };
+    (inset as f32, (top + offset) as f32)
+}
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -51,6 +67,15 @@ fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
         .collect();
     if edit.marks() != marks.as_slice() {
         edit.set_marks(marks);
+    }
+}
+
+/// A proposed file name is plain text: qualifiers only mean something in a search.
+fn mark_session_query(edit: &mut TextEdit, session: &Session) {
+    if session.renaming().is_none() {
+        mark_query_qualifiers(edit, session.command_id());
+    } else if !edit.marks().is_empty() {
+        edit.set_marks(Vec::new());
     }
 }
 
@@ -231,6 +256,14 @@ pub struct Picker {
     call: crate::control::Call,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum SelectionRequest {
+    #[default]
+    Idle,
+    Reading,
+    Superseded,
+}
+
 pub struct Ui {
     pub picker: Option<Picker>,
     control_save: Option<(u64, crate::control::Call)>,
@@ -246,6 +279,8 @@ pub struct Ui {
     pub notice: Option<String>,
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
+    pub selection_permission_required: bool,
+    selection_request: SelectionRequest,
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
@@ -265,6 +300,8 @@ pub struct Ui {
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
     position: Position,
+    display: DisplaySelection,
+    pub display_notice: Option<DisplayNotice>,
     input_source: InputSource,
     /// The input source to put back when the panel hides, if showing it switched one.
     restore_input: Option<dupin_mac::input_source::Previous>,
@@ -272,8 +309,11 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
+    accessibility_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    running_hotkey_commands: Arc<AtomicUsize>,
+    hotkey_commands: Arc<crate::hotkey::command::Runner>,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -287,12 +327,29 @@ impl Ui {
             return;
         }
         match &call.request.command {
+            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
+                call.finish(Err("Busy: picker active".into()));
+            }
+            Command::SnapshotsList {} | Command::SnapshotsOpen { .. } => {
+                self.snapshots.update_if(move |s, _| {
+                    s.control(call);
+                    false
+                });
+            }
+            Command::SnapshotsClose {} => {
+                self.snapshots_after_close = false;
+                self.snapshots.update(move |s, _| s.control_close(call));
+            }
             Command::Open { query } => {
                 if self.picker.is_some() {
                     call.finish(Err("Busy: picker active".into()));
                     return;
                 }
                 if let Some(query) = query {
+                    if self.session.renaming().is_some() {
+                        let effects = self.session.intent(Intent::Dismiss).unwrap_or_default();
+                        self.apply(effects, tx);
+                    }
                     self.query = TextEdit::new(query);
                     self.edited(tx);
                 }
@@ -330,20 +387,17 @@ impl Ui {
                     call.finish(Err("settings are read-only".into()));
                     return;
                 }
-                let checked = accept_config(
-                    (**desired).clone(),
-                    &self.configuration.values.borrow(),
-                    |shortcut| {
-                        if self.configuration.hotkey.is_installed(shortcut) {
-                            Ok(())
-                        } else {
-                            self.configuration.hotkey.replace(shortcut)
-                        }
-                    },
-                );
-                match checked.and_then(|desired| self.configuration.files.save(base, &desired)) {
+                let previous = self.configuration.values.borrow();
+                if let Err(error) = self.configuration.hotkey.reserve_for_save(desired, &previous) {
+                    call.finish(Err(error));
+                    return;
+                }
+                match self.configuration.files.save(base, desired) {
                     Ok(revision) => self.control_save = Some((revision, call)),
-                    Err(error) => call.finish(Err(error)),
+                    Err(error) => {
+                        self.configuration.hotkey.discard_reservations();
+                        call.finish(Err(error));
+                    }
                 }
             }
         }
@@ -363,12 +417,12 @@ impl Ui {
     /// Cursor-only redraws do not emit Rune input-change callbacks.
     pub fn query_display(&self) -> TextEdit {
         let mut query = self.query.clone();
-        mark_query_qualifiers(&mut query, self.session.command_id());
+        mark_session_query(&mut query, &self.session);
         query
     }
 
     pub fn query_edit(&mut self) -> &mut TextEdit {
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
         &mut self.query
     }
 
@@ -438,6 +492,8 @@ impl Ui {
             action_screen: None,
             next_lookup: 0,
             notice_until: None,
+            running_hotkey_commands: Arc::default(),
+            hotkey_commands: Arc::default(),
             acknowledged_config: config.clone(),
             session: registration.session,
             saver: crate::store::Saver::spawn(),
@@ -445,6 +501,8 @@ impl Ui {
             notice: None,
             config_problem: notice,
             registration_notice: registration.notice,
+            selection_permission_required: false,
+            selection_request: SelectionRequest::Idle,
             icons: HashMap::new(),
             shown: false,
             shown_at: 0.0,
@@ -458,12 +516,15 @@ impl Ui {
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
             position: config.position,
+            display: config.display,
+            display_notice: None,
             input_source: config.input_source.clone(),
             configuration,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
+            accessibility_after_close: false,
             running,
             updater,
             quick_look,
@@ -518,6 +579,10 @@ impl Ui {
             self.apply(effects, tx);
         }
         self.position = config.position;
+        self.display = config.display;
+        if self.display != DisplaySelection::Active {
+            self.display_notice = None;
+        }
         self.input_source = config.input_source.clone();
         self.updater.set_enabled(config.auto_update);
         if self.backdrop_pick != config.backdrop {
@@ -537,30 +602,40 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            accept_config(config, &previous, |shortcut| {
-                if self.configuration.hotkey.is_installed(shortcut) {
-                    Ok(())
-                } else {
-                    self.configuration.hotkey.replace(shortcut)
-                }
-            })
+            let hotkey_problem = self
+                .configuration
+                .hotkey
+                .apply_config(&config, &previous)
+                .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
+            Ok((config, hotkey_problem))
         });
-        let problem = match accepted {
-            Ok(config) => {
+        let (problem, hotkey_problem) = match accepted {
+            Ok((config, hotkey_problem)) => {
                 self.acknowledged_config = config.clone();
                 if *self.configuration.values.borrow() != config {
                     *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config, tx);
                 }
-                None
+                (None, hotkey_problem)
             }
-            Err(error) => Some(error),
+            Err(error) => {
+                if self.control_save.is_some() {
+                    self.configuration.hotkey.discard_reservations();
+                }
+                (Some(error), None)
+            }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
-        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
-            .into_iter()
-            .flatten()
-            .collect();
+        let problems: Vec<_> = [
+            problem,
+            hotkey_problem,
+            read_problem,
+            update.save_problem,
+            update.watch_problem,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let problem = (!problems.is_empty()).then(|| problems.join("; "));
         if self.config_problem != problem
             && let Some(problem) = &problem
@@ -646,6 +721,113 @@ impl Ui {
         s.icon_cache = Some(ImageCache::new(waker));
     }
 
+    pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
+        use crate::hotkey::{LauncherShortcut, Target};
+        use dupin_core::config::HotkeyTarget;
+
+        match self.configuration.hotkey.target(shortcut) {
+            Some(Target::Launcher(LauncherShortcut::Panel)) => self.toggle(tx),
+            Some(Target::Launcher(LauncherShortcut::Selection)) => self.read_selection(tx),
+            Some(Target::Configured(HotkeyTarget::App {
+                bundle_id,
+                hide_if_frontmost,
+            })) => {
+                if self.shown {
+                    self.dismiss(tx);
+                }
+                self.run_workspace_action(dupin_mac::workspace::Action::OpenApp {
+                    bundle_id,
+                    hide_if_frontmost,
+                });
+            }
+            Some(Target::Configured(HotkeyTarget::Command { command })) => {
+                self.run_hotkey_command(shortcut, command, tx);
+            }
+            None => (),
+        }
+    }
+
+    fn run_hotkey_command(&mut self, shortcut: &rune::Shortcut, command: String, tx: &mut Tx) {
+        if self.running_hotkey_commands.load(Ordering::Relaxed) >= 4 {
+            self.show_notice("Four hotkey commands are already running.".into(), tx);
+            return;
+        }
+
+        let panel = self.me.clone();
+        let keys = shortcut.keycaps().join("");
+        let busy = Busy::new(self.running_hotkey_commands.clone());
+        let runner = self.hotkey_commands.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("dupin-hotkey-command".into())
+            .spawn(move || {
+                runner.run(&command, move |result| {
+                    drop(busy);
+                    if let Err(error) = result {
+                        panel.update(move |ui, tx| {
+                            ui.show_notice(format!("The {keys} command failed: {error}"), tx);
+                        });
+                    }
+                });
+            })
+        {
+            self.show_notice(
+                format!(
+                    "Couldn't start the {} command: {error}",
+                    shortcut.keycaps().join("")
+                ),
+                tx,
+            );
+        }
+    }
+
+    pub fn stop_hotkey_commands(&mut self, _: &mut Tx) {
+        self.hotkey_commands.stop();
+    }
+
+    fn read_selection(&mut self, tx: &mut Tx) {
+        if rune::tooling::is_headless()
+            || self.shown
+            || self.picker.is_some()
+            || self.selection_request != SelectionRequest::Idle
+        {
+            return;
+        }
+        self.selection_request = SelectionRequest::Reading;
+        let panel = self.me.clone();
+        if std::thread::Builder::new()
+            .name("selected-text".into())
+            .spawn(move || {
+                let result = dupin_mac::selection::read(|| {
+                    accessibility::request_once();
+                });
+                panel.update(move |s, tx| s.apply_selection(result, tx));
+            })
+            .is_err()
+        {
+            self.apply_selection(Selection::Empty, tx);
+        }
+    }
+
+    fn apply_selection(&mut self, result: Selection, tx: &mut Tx) {
+        if std::mem::take(&mut self.selection_request) != SelectionRequest::Reading {
+            return;
+        }
+        match result {
+            Selection::Text(text) => {
+                self.query = selection_query(&text);
+                self.typed_at = tx.clock();
+                let effects = self.session.set_literal_query(&self.query.text);
+                self.apply(effects, tx);
+            }
+            Selection::Empty => {}
+            Selection::PermissionRequired => {
+                self.selection_permission_required = !accessibility::is_trusted();
+            }
+        }
+        self.show(tx);
+        tx.focus_when_shown("query", false);
+    }
+
     /// The hotkey: show the panel, or hide it when it already shows.
     pub fn toggle(&mut self, tx: &mut Tx) {
         if self.picker.is_some() {
@@ -661,32 +843,18 @@ impl Ui {
         }
     }
 
-    /// The panel's top edge below the display's, for the configured position. Centering puts
-    /// the field (not the whole panel, which grows with results) at the display's middle.
-    fn top_margin(&self) -> f32 {
-        match self.position {
-            Position::Top => TOP_MARGIN,
-            Position::Center => dupin_mac::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
-                ((h as f32 - crate::view::HEADER_H) / 2.0).max(0.0)
-            }),
-        }
-    }
-
     fn show(&mut self, tx: &mut Tx) {
+        if self.selection_request == SelectionRequest::Reading {
+            self.selection_request = SelectionRequest::Superseded;
+        }
         crate::trace::summoned();
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
         self.query.focused = true;
-        self.me.place(
-            DisplayTarget::UnderPointer,
-            OverlayPlacement::Edge {
-                edge: ScreenEdge::Top,
-                margin: self.top_margin(),
-                align: Align::Center,
-                inset: 0.0,
-            },
-        );
+        if !self.shown {
+            self.place_panel();
+        }
         self.shown = true;
         self.shown_at = tx.clock();
         self.force_input_source();
@@ -694,6 +862,53 @@ impl Ui {
         if self.session.query().is_empty() {
             self.refresh_apps(tx);
         }
+    }
+
+    fn place_panel(&mut self) {
+        self.display_notice = None;
+        let (display, align, inset, margin) = if !rune::tooling::is_headless()
+            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
+        {
+            self.display_notice = screen.notice;
+            let (inset, margin) = panel_offsets(
+                screen.frame,
+                screen.visible_frame,
+                self.theme.panel_width,
+                self.position,
+            );
+            (
+                DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+                Align::Start,
+                inset,
+                margin,
+            )
+        } else {
+            let display = match self.display {
+                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
+                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
+            };
+            (display, Align::Center, 0.0, TOP_MARGIN)
+        };
+        self.me.place(
+            display,
+            OverlayPlacement::Edge {
+                edge: ScreenEdge::Top,
+                margin,
+                align,
+                inset,
+            },
+        );
+    }
+
+    pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
+        if rune::tooling::is_headless()
+            || (!self.selection_permission_required
+                && self.display_notice != Some(DisplayNotice::AccessibilityRequired))
+        {
+            return;
+        }
+        self.accessibility_after_close = true;
+        self.dismiss(tx);
     }
 
     fn force_input_source(&mut self) {
@@ -730,12 +945,30 @@ impl Ui {
 
     pub fn closed(&mut self, _: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
-        if std::mem::take(&mut self.snapshots_after_close) {
-            self.snapshots.open();
+        let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
+        let show_settings = std::mem::take(&mut self.settings_after_close);
+        if std::mem::take(&mut self.accessibility_after_close) {
+            let me = self.me.clone();
+            std::thread::spawn(move || {
+                if !accessibility::is_trusted() && accessibility::request_once() {
+                    return;
+                }
+                let settings = dupin_mac::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&settings) {
+                    me.update(move |ui, tx| ui.show_notice(error, tx));
+                }
+            });
         }
-        if std::mem::take(&mut self.settings_after_close) {
+        if show_snapshots {
+            self.snapshots.update(|s, _| s.show());
+        }
+        if show_settings {
             crate::trace::settings("panel closed");
             self.prefs.open();
+        }
+        if !show_snapshots && !show_settings && self.relaunch.is_some() {
+            // Rune clears the panel's visibility after this callback.
+            self.me.update(Self::resume_restart);
         }
     }
 
@@ -751,6 +984,7 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.selection_permission_required = false;
         self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
@@ -814,8 +1048,25 @@ impl Ui {
         self.timed_notice(message, tx);
     }
 
-    pub fn open_snapshots(&mut self) {
-        self.snapshots.open();
+    pub fn show_snapshots(&mut self, tx: &mut Tx) {
+        if self.me.is_visible() {
+            self.snapshots_after_close = true;
+            self.dismiss(tx);
+        } else {
+            self.snapshots.update(|s, _| s.show());
+        }
+    }
+
+    pub fn control_snapshots_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
+        if call.cancelled.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.picker.is_some() {
+            call.finish(Err("Busy: picker active".into()));
+        } else {
+            self.snapshots.update(move |s, _| s.accept_open(call));
+            self.show_snapshots(tx);
+        }
     }
 
     pub fn resume_snapshot(&mut self, saved: dupin_core::snapshots::Snapshot, tx: &mut Tx) {
@@ -876,8 +1127,7 @@ impl Ui {
             return true;
         }
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
-            self.snapshots_after_close = true;
-            self.dismiss(tx);
+            self.show_snapshots(tx);
             return true;
         }
         crate::trace::key(ev);
@@ -916,6 +1166,11 @@ impl Ui {
         if self.query.is_composing() {
             return false;
         }
+        // Enter that starts or confirms a rename changes what Enter means; held, it must not
+        // carry on into the next state.
+        if ev.key == Key::Enter && tx.key_repeat() {
+            return true;
+        }
         if is_quick_look_shortcut(&ev.key) {
             if !self
                 .session
@@ -942,7 +1197,9 @@ impl Ui {
             {
                 Intent::Complete
             }
-            Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
+            Key::Text(t) if t == " " && plain && !m.shift && self.query.anchor == self.query.focus => {
+                Intent::Space
+            }
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,
             Key::Down => Intent::Down,
@@ -1242,6 +1499,38 @@ impl Ui {
                 }
                 Effect::ClearQuery => self.query.clear(),
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
+                Effect::SelectRenameStem(path) => {
+                    let extension = dupin_mac::file_ops::has_extension(&path);
+                    let end = dupin_core::file_name::stem_len(&self.query.text, extension);
+                    tx.focus("query", false);
+                    self.query.set_selection(0, end);
+                }
+                Effect::Rename { row, path, name } => {
+                    let old = file_name(&path);
+                    self.on_worker(
+                        move || {
+                            dupin_mac::file_ops::rename(&path, &name).map(|renamed| {
+                                dupin_mac::file_actions::item(renamed, name.clone(), Vec::new())
+                            })
+                        },
+                        move |ui, result, tx| match result {
+                            Ok(item) => {
+                                let notice = format!("Renamed to “{}”", item.display_title());
+                                ui.session.replace(&row, item);
+                                if ui
+                                    .action_screen
+                                    .as_ref()
+                                    .is_some_and(|screen| !screen.is_current(&ui.session))
+                                {
+                                    ui.action_screen = None;
+                                }
+                                ui.fetch_icons();
+                                ui.timed_notice(notice, tx);
+                            }
+                            Err(error) => ui.show_notice(format!("Couldn't rename “{old}”: {error}"), tx),
+                        },
+                    );
+                }
                 Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
@@ -1256,7 +1545,37 @@ impl Ui {
                             crate::log::warn("couldn't show the Quick Look preview");
                         }
                     }
-                    dupin_core::Action::ChooseApplication(_) | dupin_core::Action::Trash(_) => {}
+                    dupin_core::Action::ChooseApplication(_)
+                    | dupin_core::Action::Trash(_)
+                    | dupin_core::Action::Rename(_) => {}
+                    dupin_core::Action::Duplicate(path) => {
+                        let name = file_name(&path);
+                        self.on_worker(
+                            move || dupin_mac::file_ops::duplicate(&path),
+                            move |ui, result, tx| match result {
+                                Ok(copy) => {
+                                    ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't duplicate “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
+                    dupin_core::Action::Compress(path) => {
+                        let name = file_name(&path);
+                        self.on_worker(
+                            move || dupin_mac::file_ops::compress(&path),
+                            move |ui, result, tx| match result {
+                                Ok(archive) => {
+                                    ui.timed_notice(format!("Compressed to “{}”", file_name(&archive)), tx)
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't compress “{name}”: {error}"), tx)
+                                }
+                            },
+                        );
+                    }
                     dupin_core::Action::OpenWith { path, application } => self
                         .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
                     dupin_core::Action::Open(path) => {
@@ -1274,17 +1593,10 @@ impl Ui {
                     action: dupin_core::Action::Trash(path),
                 } => {
                     self.action_screen = None;
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let me = self.me.clone();
-                    let running = self.running.clone();
-                    running.fetch_add(1, Ordering::AcqRel);
-                    std::thread::spawn(move || {
-                        let result = dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path));
-                        me.update(move |ui, tx| match result {
+                    let name = file_name(&path);
+                    self.on_worker(
+                        move || dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path)),
+                        move |ui, result, tx| match result {
                             Ok(()) => {
                                 ui.session.forget(&id);
                                 ui.timed_notice(format!("Moved “{name}” to the Trash"), tx);
@@ -1292,9 +1604,8 @@ impl Ui {
                             Err(error) => {
                                 ui.show_notice(format!("Couldn't move “{name}” to the Trash: {error}"), tx)
                             }
-                        });
-                        running.fetch_sub(1, Ordering::AcqRel);
-                    });
+                        },
+                    );
                 }
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
@@ -1307,7 +1618,7 @@ impl Ui {
                 }
             }
         }
-        mark_query_qualifiers(&mut self.query, self.session.command_id());
+        mark_session_query(&mut self.query, &self.session);
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
@@ -1317,6 +1628,22 @@ impl Ui {
             if let Err(error) = dupin_mac::workspace::run(&action) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
+            drop(busy);
+        });
+    }
+
+    /// Run a file operation off the main thread and report its result back on it. A relaunch
+    /// waits until it has finished.
+    fn on_worker<T: Send + 'static>(
+        &self,
+        work: impl FnOnce() -> T + Send + 'static,
+        done: impl FnOnce(&mut Ui, T, &mut Tx) + Send + 'static,
+    ) {
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        std::thread::spawn(move || {
+            let result = work();
+            me.update(move |ui, tx| done(ui, result, tx));
             drop(busy);
         });
     }
@@ -1437,26 +1764,37 @@ fn reconcile_snapshot(
     }
 }
 
-fn accept_config(
-    config: Config,
-    previous: &Config,
-    install: impl FnOnce(Option<&rune::Shortcut>) -> Result<(), rune::ShortcutError>,
-) -> Result<Config, String> {
-    let shortcut = crate::hotkey::parse(&config.hotkey).map_err(|_| {
-        "The hotkey in config.toml is invalid; keeping the previous configuration.".to_owned()
-    })?;
-    if let Err(error) = install(shortcut.as_ref())
-        && crate::hotkey::parse(&previous.hotkey).ok().as_ref() != Some(&shortcut)
-    {
-        return Err(format!(
-            "Couldn't apply the hotkey from config.toml: {error}; keeping the previous configuration."
-        ));
-    }
-    Ok(config)
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn is_quick_look_shortcut(key: &Key) -> bool {
     matches!(key, Key::Command('y'))
+}
+
+fn selection_query(text: &str) -> TextEdit {
+    const MAX_QUERY_CHARS: usize = 500;
+    let mut chars = text.trim().chars().peekable();
+    let query: String = std::iter::from_fn(|| {
+        let next = chars.next()?;
+        if next == '\r' {
+            chars.next_if_eq(&'\n');
+        }
+        Some(match next {
+            '\r' | '\n' | '\t' | '\u{2028}' | '\u{2029}' => ' ',
+            other => other,
+        })
+    })
+    .take(MAX_QUERY_CHARS)
+    .collect();
+    let mut edit = TextEdit::new("");
+    edit.set_single_line(true);
+    edit.insert(query.trim_end());
+    edit.set_selection(0, edit.text.len());
+    edit
 }
 
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
@@ -1500,6 +1838,33 @@ mod ui_helper_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+    use objc2_foundation::{NSPoint, NSSize};
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    #[test]
+    fn places_the_query_inside_the_selected_screens_visible_frame() {
+        let frame = rect(100.0, -900.0, 1440.0, 900.0);
+        let visible = rect(160.0, -850.0, 1380.0, 820.0);
+        assert_eq!(
+            panel_offsets(frame, visible, 680, Position::Center),
+            (410.0, 408.0)
+        );
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (410.0, 210.0));
+        assert_eq!(
+            panel_offsets(frame, visible, 400, Position::Center),
+            (550.0, 408.0)
+        );
+    }
+
+    #[test]
+    fn top_spacing_cannot_push_the_query_below_the_visible_area() {
+        let frame = rect(-800.0, 200.0, 800.0, 150.0);
+        let visible = rect(-800.0, 200.0, 800.0, 120.0);
+        assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
+    }
 
     #[test]
     fn cosmetic_configuration_retains_query_selection_history_and_pending_search() {
@@ -1567,25 +1932,20 @@ mod config_tests {
     }
 
     #[test]
-    fn an_unavailable_unchanged_hotkey_does_not_reject_other_settings() {
-        let previous = Config::default();
-        let changed = Config {
-            file_limit: 50,
-            ..previous.clone()
-        };
-        let accepted = accept_config(changed.clone(), &previous, |_| Err(rune::ShortcutError::Conflict));
-        assert_eq!(accepted, Ok(changed));
+    fn typing_replaces_the_entire_selected_query() {
+        let mut edit = selection_query("\t 日本語\r\nsecond line\u{2029} ");
+        assert_eq!(edit.text, "日本語 second line");
+        assert_eq!(edit.range(), (0, edit.text.len()));
+        edit.insert("calculator");
+        assert_eq!(edit.text, "calculator");
     }
 
     #[test]
-    fn an_unavailable_changed_hotkey_keeps_the_previous_config() {
-        let previous = Config::default();
-        let changed = Config {
-            hotkey: "ctrl+alt+k".into(),
-            file_limit: 50,
-            ..previous.clone()
-        };
-        assert!(accept_config(changed, &previous, |_| Err(rune::ShortcutError::Conflict)).is_err());
+    fn a_document_selection_becomes_a_bounded_unicode_query() {
+        let text = format!("{}\r\n続き", "猫".repeat(500));
+        let edit = selection_query(&text);
+        assert_eq!(edit.text, "猫".repeat(500));
+        assert_eq!(edit.range(), (0, edit.text.len()));
     }
 }
 
