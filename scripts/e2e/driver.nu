@@ -171,7 +171,7 @@ export def --wrapped poll [
     ...args: string
 ] {
     mut reply = {ok: false}
-    for attempt in 1..$tries {
+    for _ in (attempts $tries) {
         $reply = ad $out $name ...$args
         if (do $done $reply) { return $reply }
         sleep 1sec
@@ -185,7 +185,7 @@ export def wait-for-log [
     --tries: int = 30
     --after: int = 0
 ] {
-    for attempt in 1..$tries {
+    for _ in (attempts $tries) {
         if ($log | path exists) and ((log-count $log $line) > $after) { return }
         sleep 1sec
     }
@@ -208,7 +208,7 @@ export def snap [out: path, name: string, --app: string = 'Dupin'] {
 export def wait-frontmost [app: string, --tries: int = 20] {
     let script = 'tell application "System Events" to get name of first application process whose frontmost is true'
     mut front = ''
-    for attempt in 1..$tries {
+    for _ in (attempts $tries) {
         let reply = (^osascript -e $script | complete)
         $front = ($reply.stdout | str trim)
         if (
@@ -218,4 +218,9 @@ export def wait-frontmost [app: string, --tries: int = 20] {
         sleep 500ms
     }
     error make {msg: $"timed out waiting for ($app) to be frontmost; ($front) is"}
+}
+
+def attempts [tries: int]: nothing -> range {
+    if $tries < 1 { error make {msg: '--tries must be at least 1'} }
+    1..$tries
 }
