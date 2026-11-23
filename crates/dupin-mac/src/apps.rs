@@ -73,7 +73,7 @@ impl AppsProvider {
     ) -> Result<AppsWatcher, &'static str> {
         let roots = self.roots.clone();
         let provider = Arc::downgrade(self);
-        AppsWatcher::start(roots, move || {
+        AppsWatcher::start(roots, app_subfolders, move || {
             if let Some(provider) = provider.upgrade() {
                 provider.invalidate();
                 changed();
@@ -220,6 +220,21 @@ fn scan(roots: &[PathBuf]) -> Vec<App> {
     apps
 }
 
+fn app_subfolders(roots: &[PathBuf]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .filter_map(|root| fs::read_dir(root).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| !is_bundle(path) && path.is_dir())
+        .collect()
+}
+
+fn is_bundle(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "app")
+}
+
 fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = entries.flatten().collect();
@@ -232,7 +247,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
         if !is_dir {
             continue;
         }
-        if path.extension().is_some_and(|e| e == "app") {
+        if is_bundle(&path) {
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                 let icon = if kind.is_symlink() {
                     fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
@@ -292,6 +307,9 @@ mod tests {
             .map(|a| a.name)
             .collect();
         assert_eq!(names, ["Safari", "Terminal", "Xcode"]);
+        let mut subfolders = app_subfolders(std::slice::from_ref(&root));
+        subfolders.sort();
+        assert_eq!(subfolders, [root.join("NotAnApp"), root.join("Utilities")]);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -435,7 +453,7 @@ mod tests {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             event
                 .recv_timeout(remaining)
-                .expect("FSEvents should report an app bundle created in a watched root");
+                .expect("the watcher should invalidate the index after a bundle is added");
             if provider.apps().iter().any(|app| app.name == "Watched App") {
                 break;
             }
