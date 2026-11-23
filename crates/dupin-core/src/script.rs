@@ -24,7 +24,7 @@ pub struct ScriptRun {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ArgKind {
+enum ArgKind {
     Required,
     Optional,
     ZeroOrMore,
@@ -33,8 +33,8 @@ pub enum ArgKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArgSpec {
-    pub name: String,
-    pub kind: ArgKind,
+    name: String,
+    kind: ArgKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -344,7 +344,7 @@ impl LineDecoder {
     }
 }
 
-pub fn strip_sgr(text: &str) -> String {
+fn strip_sgr(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut clean = String::new();
     let mut at = 0;
