@@ -15,6 +15,11 @@ pub enum Action {
     Trash(PathBuf),
     /// Ask for a new name in the query field; the session then renames the entry.
     Rename(PathBuf),
+    /// Search for a destination folder before transferring the entry.
+    ChooseDestination {
+        path: PathBuf,
+        transfer: Transfer,
+    },
     /// Copy beside the original under a name that is not taken.
     Duplicate(PathBuf),
     /// Zip beside the original under a name that is not taken.
@@ -42,6 +47,12 @@ pub enum Action {
     OpenPreferences,
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Transfer {
+    Move,
+    Copy,
 }
 
 /// Whether an item action completes the pick or leaves the current search available.

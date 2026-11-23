@@ -123,7 +123,8 @@ fn consumed_candidates_cannot_return_after_becoming_hidden() {
     assert!(s.forget(&key));
     assert_eq!(s.selected_item().unwrap().id, selected);
     assert!(
-        s.providers
+        s.search
+            .providers
             .values()
             .all(|state| state.items.iter().all(|item| item.id != row.id))
     );
@@ -363,7 +364,7 @@ fn explicit_blank_commands_resume_default_providers_only_after_backspace() {
     assert_eq!(provider, empty);
     assert_eq!(query, "");
     assert_eq!(s.command_id(), &default);
-    assert!(!s.explicit);
+    assert!(!s.search.explicit);
     assert!(s.pending(&empty, generation));
     assert!(!s.pending(&default, generation));
 }
@@ -374,7 +375,7 @@ fn an_explicit_empty_only_command_searches_its_own_provider() {
     s.set_query("blank");
     let effects = s.intent(Intent::Space).unwrap();
     assert_eq!(s.command_id(), &empty);
-    assert!(s.explicit);
+    assert!(s.search.explicit);
     let generation = match effects.as_slice() {
         [
             Effect::ClearQuery,
@@ -1450,7 +1451,7 @@ fn query_recall_walks_backwards_and_forwards_to_the_empty_draft() {
         s.intent(intent);
         assert_eq!(s.query(), expected);
     }
-    assert!(s.recalled.is_none());
+    assert!(s.search.recalled.is_none());
 }
 
 #[test]
@@ -1862,7 +1863,7 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     original.deliver(Delivery::Done { generation });
     let saved = original.capture().unwrap();
     original.restore(&saved).unwrap();
-    assert!(!original.explicit);
+    assert!(!original.search.explicit);
 
     let mut registry = CommandRegistry::new(files_command(), None);
     for id in [app_command(), files_command()] {
@@ -1873,7 +1874,7 @@ fn restoring_an_old_default_is_explicit_under_a_new_default() {
     let mut changed = Session::new(History::default(), registry).unwrap();
     let effects = changed.restore(&saved).unwrap();
     assert_eq!(changed.command_id(), &app_command());
-    assert!(changed.explicit);
+    assert!(changed.search.explicit);
     assert_eq!(effects[0], Effect::ReplaceQuery("saved".into()));
     assert_eq!(searched(&effects[1..]).0, app_command());
 }
@@ -1911,9 +1912,121 @@ fn rename_puts_the_name_in_the_field_with_its_stem_selected() {
     let renaming = s.renaming().unwrap();
     assert_eq!(renaming.path(), std::path::Path::new("/x/report.pdf"));
     assert_eq!(renaming.name, "report.pdf");
-    assert_eq!(renaming.layout_key(), s.layout_key(1));
+    assert_eq!(renaming.layout_key, s.layout_key(1));
     assert_eq!(s.query(), "report");
     assert_eq!(*s.history(), history);
+}
+
+fn destination_session(transfer: Transfer, settled: bool) -> (Session, u64) {
+    let mut s = session();
+    s.commands.set_destination_search(files_command()).unwrap();
+    s.set_query("in ");
+    let generation = searched(&s.set_query("report")).1;
+    let path = PathBuf::from("/x/report.pdf");
+    let mut source = Item::path(path.clone(), "Report".into(), vec![]);
+    source.actions.push(ItemAction::new(
+        "transfer",
+        "Transfer",
+        Action::ChooseDestination { path, transfer },
+    ));
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("Other"), source.clone()],
+    });
+    if settled {
+        s.deliver(Delivery::Done { generation });
+    }
+    let index = s.items().iter().position(|item| item.id == source.id).unwrap();
+    let key = s.result_key(index);
+    assert_eq!(
+        s.run_key_action(&key, "transfer"),
+        [
+            Effect::CancelSearch,
+            Effect::ClearQuery,
+            Effect::SelectQuery(0..0)
+        ]
+    );
+    (s, generation)
+}
+
+#[test]
+fn cancelling_a_destination_restores_the_original_search_and_selection() {
+    let (mut s, _) = destination_session(Transfer::Move, true);
+    let history = s.history().clone();
+    assert_eq!(s.destination().unwrap().transfer(), Transfer::Move);
+    assert_eq!(s.destination().unwrap().path(), Path::new("/x/report.pdf"));
+    assert_eq!(s.command_id(), &files_command());
+    assert_eq!(s.query(), "");
+    assert!(s.items().is_empty());
+    assert_eq!(s.intent(Intent::Open), Some(Vec::new()));
+    assert_eq!(s.intent(Intent::Backspace), None);
+    let effects = s.set_query("in:~/Work Archive");
+    let (command, generation, query) = searched(&effects);
+    assert_eq!(command, files_command());
+    assert_eq!(query, "kind:folder in:~/Work Archive");
+    assert_eq!(s.query(), "in:~/Work Archive");
+    assert_eq!(
+        s.intent(Intent::Dismiss).unwrap(),
+        [
+            Effect::CancelSearch,
+            Effect::ReplaceQuery("report".into()),
+            Effect::RevealSelection,
+        ]
+    );
+    assert!(!s.deliver_from(command, Delivery::Done { generation }));
+    assert!(s.destination().is_none());
+    assert_eq!(s.command_id(), &contents_command());
+    assert_eq!(s.query(), "report");
+    assert_eq!(s.results(), Results::Done);
+    assert_eq!(s.items().len(), 2);
+    assert_eq!(s.selected_item().unwrap().id, "/x/report.pdf");
+    assert_eq!(*s.history(), history);
+}
+
+#[test]
+fn enter_transfers_to_the_current_folder_and_resumes_a_pending_search() {
+    let (mut s, original_generation) = destination_session(Transfer::Copy, false);
+    assert!(!s.deliver_from(
+        contents_command(),
+        Delivery::Done {
+            generation: original_generation
+        }
+    ));
+    let (command, generation, _) = searched(&s.set_query("Archive"));
+    let folder = PathBuf::from("/x/Archive");
+    s.deliver_from(
+        command,
+        Delivery::Batch {
+            generation,
+            items: vec![Item::path(folder.clone(), "Archive".into(), vec![])],
+        },
+    );
+    let key = s.result_key(0);
+    assert!(s.run_key_action(&key, "open").is_empty());
+    assert_eq!(s.intent(Intent::OpenAlternate), Some(Vec::new()));
+    let new_effects = s.set_query("Archive kind:folder");
+    let (command, generation, query) = searched(&new_effects);
+    assert_eq!(query, "Archive kind:folder");
+    assert_eq!(s.intent(Intent::Open), Some(Vec::new()));
+    s.deliver_from(
+        command,
+        Delivery::Batch {
+            generation,
+            items: vec![Item::path(folder.clone(), "Archive".into(), vec![])],
+        },
+    );
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(matches!(&effects[..], [
+        Effect::CancelSearch,
+        Effect::ReplaceQuery(query),
+        Effect::Search { command, generation, .. },
+        Effect::RevealSelection,
+        Effect::Transfer { transfer: Transfer::Copy, path, folder: destination },
+    ] if query == "report" && *command == contents_command() && *generation > original_generation
+        && path == Path::new("/x/report.pdf") && destination == &folder));
+    assert!(s.destination().is_none());
+    assert_eq!(s.selected_item().unwrap().id, "/x/report.pdf");
+    assert_eq!(s.items().len(), 2);
 }
 
 #[test]
@@ -1990,14 +2103,15 @@ fn hiding_or_selecting_elsewhere_cannot_reach_a_pending_rename() {
 fn a_renamed_entry_replaces_its_row_and_its_old_path_cannot_return() {
     let (mut s, _) = rename_session();
     let key = s.layout_key(1);
-    let generation = s.generation;
+    let generation = s.search.generation;
     let renamed = item("summary.pdf");
     assert!(s.replace(&key, renamed.clone()));
     assert_eq!(s.items()[1].id, renamed.id);
     assert_eq!(s.selected(), 1);
     assert!(!s.replace(&key, renamed));
-    s.generation = generation;
-    s.providers
+    s.search.generation = generation;
+    s.search
+        .providers
         .values_mut()
         .for_each(|p| p.phase = ProviderPhase::Pending);
     s.deliver(Delivery::Batch {
@@ -2052,6 +2166,39 @@ fn a_search_started_during_a_rename_still_receives_the_renamed_row() {
         s.items().iter().map(|i| i.display_title()).collect::<Vec<_>>(),
         ["other", "summary.pdf"]
     );
+}
+
+#[test]
+fn rename_during_refresh_updates_the_retained_row_without_reintroducing_it_as_a_match() {
+    let (mut s, _) = rename_session();
+    let row = s.layout_key(1);
+    let generation = searched(&s.refresh()).1;
+    assert!(s.replace(&row, item("summary.pdf")));
+    assert_eq!(s.selected_item().unwrap().id, "/x/summary.pdf");
+
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("report.pdf"), item("report-archive.pdf")],
+    });
+    s.deliver(Delivery::Done { generation });
+    assert_eq!(
+        s.items().iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+        ["/x/report-archive.pdf"]
+    );
+}
+
+#[test]
+fn a_renamed_selection_stays_selected_when_the_refresh_finishes() {
+    let (mut s, _) = rename_session();
+    let row = s.layout_key(1);
+    let generation = searched(&s.refresh()).1;
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("other"), item("report.pdf")],
+    });
+    assert!(s.replace(&row, item("summary.pdf")));
+    s.deliver(Delivery::Done { generation });
+    assert_eq!(s.selected_item().unwrap().id, "/x/summary.pdf");
 }
 
 #[test]

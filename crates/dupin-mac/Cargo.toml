@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+libc = { workspace = true }
 rune = { workspace = true }
 objc2 = { workspace = true }
 block2 = "0.6"
@@ -86,6 +87,7 @@ objc2-core-foundation = { workspace = true, features = [
 ] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
 memmap2 = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -172,6 +172,7 @@ impl std::error::Error for CommandError {}
 pub struct CommandRegistry {
     default: CommandId,
     space_on_empty: Option<CommandId>,
+    destination_search: Option<CommandId>,
     commands: HashMap<CommandId, CommandSpec>,
     keywords: HashMap<String, CommandId>,
     defaults: Vec<CommandId>,
@@ -185,9 +186,23 @@ impl CommandRegistry {
             pinned: None,
             default,
             space_on_empty,
+            destination_search: None,
             commands: HashMap::new(),
             keywords: HashMap::new(),
         }
+    }
+
+    /// Use this file-name search provider for the destination picker.
+    pub fn set_destination_search(&mut self, command: CommandId) -> Result<(), CommandError> {
+        if !self.contains(&command) {
+            return Err(CommandError::UnknownCommand(command));
+        }
+        self.destination_search = Some(command);
+        Ok(())
+    }
+
+    pub(crate) fn destination_search(&self) -> Option<&CommandId> {
+        self.destination_search.as_ref()
     }
 
     pub fn set_default_providers(

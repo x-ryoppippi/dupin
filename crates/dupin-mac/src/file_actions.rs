@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
+use dupin_core::item::Transfer;
 use dupin_core::{Action, Item, ItemAction};
+
+use crate::file_ops::file_name_of;
 
 /// A file or folder result with every file action, as Spotlight results and renamed entries
 /// show it.
@@ -34,27 +37,50 @@ fn add(item: &mut Item) {
             Action::Copy(name.to_string_lossy().into_owned()),
         ));
     }
-    // The input edits text, so a name that isn't valid Unicode can't be shown for editing.
-    if path.file_name().is_some_and(|name| name.to_str().is_some()) {
-        item.actions
-            .push(ItemAction::new("rename", "Rename…", Action::Rename(path.clone())));
+    if file_name_of(&path).is_ok() {
+        item.actions.extend([
+            ItemAction::new("rename", "Rename…", Action::Rename(path.clone())),
+            ItemAction::new(
+                "move-to",
+                "Move to…",
+                Action::ChooseDestination {
+                    path: path.clone(),
+                    transfer: Transfer::Move,
+                },
+            ),
+            ItemAction::new(
+                "copy-to",
+                "Copy to…",
+                Action::ChooseDestination {
+                    path: path.clone(),
+                    transfer: Transfer::Copy,
+                },
+            ),
+            ItemAction::new("duplicate", "Duplicate", Action::Duplicate(path.clone())).keep_open(),
+            ItemAction::new("compress", "Compress", Action::Compress(path.clone())).keep_open(),
+        ]);
     }
-    item.actions.extend([
-        ItemAction::new("duplicate", "Duplicate", Action::Duplicate(path.clone())).keep_open(),
-        ItemAction::new("compress", "Compress", Action::Compress(path.clone())).keep_open(),
+    item.actions.push(
         ItemAction::new("trash", "Move to Trash", Action::Trash(path))
             .confirm(&prompt, "Move to Trash")
             .consumes(),
-    ]);
+    );
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
     use super::*;
 
     #[test]
     fn files_offer_ordered_choices_and_confirmed_trash() {
-        for path in ["/fixture/file.txt", "/fixture/folder", "/fixture/Example.app"] {
+        for path in [
+            r"/fixture/file\name.txt",
+            "/fixture/folder",
+            "/fixture/Example.app",
+        ] {
             let item = item(path.into(), "Example".into(), vec![]);
             assert_eq!(
                 item.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
@@ -66,6 +92,8 @@ mod tests {
                     "copy-path",
                     "copy-name",
                     "rename",
+                    "move-to",
+                    "copy-to",
                     "duplicate",
                     "compress",
                     "trash"
@@ -73,6 +101,24 @@ mod tests {
             );
             assert!(item.item_action("trash").unwrap().confirmation().is_some());
         }
+    }
+
+    #[test]
+    fn a_non_unicode_basename_hides_actions_that_require_a_usable_name() {
+        let path = PathBuf::from(OsStr::from_bytes(b"/fixture/file-\xff.txt"));
+        let item = item(path, "Example".into(), vec![]);
+        assert_eq!(
+            item.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+            [
+                "open",
+                "open-with",
+                "reveal",
+                "quick-look",
+                "copy-path",
+                "copy-name",
+                "trash"
+            ]
+        );
     }
 
     #[test]

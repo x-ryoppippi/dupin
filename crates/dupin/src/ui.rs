@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use dupin_core::item::Transfer;
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, DisplaySelection, Effect, History, InputSource, Intent, Position,
     Searcher, Session,
@@ -350,6 +351,7 @@ pub struct Ui {
     accessibility_after_close: bool,
     /// Actions handed to Launch Services that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
+    file_transfers: dupin_mac::file_ops::FileTransfers,
     running_hotkey_commands: Arc<AtomicUsize>,
     hotkey_commands: Arc<crate::hotkey::command::Runner>,
     updater: crate::update::Updater,
@@ -386,7 +388,7 @@ impl Ui {
                     return;
                 }
                 if let Some(query) = query {
-                    if self.session.renaming().is_some() {
+                    if self.session.renaming().is_some() || self.session.destination().is_some() {
                         let effects = self.session.intent(Intent::Dismiss).unwrap_or_default();
                         self.apply(effects, tx);
                     }
@@ -609,6 +611,7 @@ impl Ui {
             snapshots_after_close: false,
             accessibility_after_close: false,
             running,
+            file_transfers: dupin_mac::file_ops::FileTransfers::default(),
             updater,
             quick_look,
             me,
@@ -1305,12 +1308,11 @@ impl Ui {
         if self.query.is_composing() {
             return false;
         }
-        // Enter that starts or confirms a rename changes what Enter means; held, it must not
-        // carry on into the next state.
+        // Held Enter must not confirm an operation whose prompt it just opened.
         if ev.key == Key::Enter && tx.key_repeat() {
             return true;
         }
-        if is_quick_look_shortcut(&ev.key) {
+        if self.session.destination().is_none() && is_quick_look_shortcut(&ev.key) {
             if !self
                 .session
                 .selected_item()
@@ -1386,10 +1388,13 @@ impl Ui {
         if self.picker.is_some() {
             return;
         }
-        if self.session.select_key(id)
-            && let Some(effects) = self.session.intent(Intent::Open)
-        {
-            self.apply(effects, tx);
+        if self.session.select_key(id) {
+            if self.session.destination().is_some() {
+                tx.focus("query", false);
+                self.apply(vec![Effect::RevealSelection], tx);
+            } else if let Some(effects) = self.session.intent(Intent::Open) {
+                self.apply(effects, tx);
+            }
         }
     }
 
@@ -1800,6 +1805,10 @@ impl Ui {
                     self.script_entry = None;
                     self.query.replace_text(text);
                 }
+                Effect::SelectQuery(range) => {
+                    tx.focus("query", false);
+                    self.query.set_selection(range.start, range.end);
+                }
                 Effect::SelectRenameStem(path) => {
                     let extension = dupin_mac::file_ops::has_extension(&path);
                     let end = dupin_core::file_name::stem_len(&self.query.text, extension);
@@ -1829,6 +1838,51 @@ impl Ui {
                                 ui.timed_notice(notice, tx);
                             }
                             Err(error) => ui.show_notice(format!("Couldn't rename “{old}”: {error}"), tx),
+                        },
+                    );
+                }
+                Effect::Transfer {
+                    transfer,
+                    path,
+                    folder,
+                } => {
+                    let name = file_name(&path);
+                    let destination = file_name(&folder);
+                    let files = self.file_transfers.clone();
+                    self.on_worker(
+                        move || {
+                            let result = match transfer {
+                                Transfer::Move => files.move_to(&path, &folder),
+                                Transfer::Copy => files.copy_to(&path, &folder),
+                            };
+                            (path, result)
+                        },
+                        move |ui, (path, result), tx| {
+                            let (done, verb) = match transfer {
+                                Transfer::Move => ("Moved", "move"),
+                                Transfer::Copy => ("Copied", "copy"),
+                            };
+                            match result {
+                                Ok(output) => {
+                                    if transfer == Transfer::Move {
+                                        ui.session.forget_path(&path);
+                                        if ui
+                                            .action_screen
+                                            .as_ref()
+                                            .is_some_and(|screen| !screen.is_current(&ui.session))
+                                        {
+                                            ui.action_screen = None;
+                                        }
+                                    }
+                                    ui.timed_notice(
+                                        format!("{done} “{}” to “{destination}”", file_name(&output)),
+                                        tx,
+                                    );
+                                }
+                                Err(error) => {
+                                    ui.show_notice(format!("Couldn't {verb} “{name}”: {error}"), tx)
+                                }
+                            }
                         },
                     );
                 }
@@ -1878,6 +1932,7 @@ impl Ui {
                     dupin_core::Action::ChooseApplication(_)
                     | dupin_core::Action::Trash(_)
                     | dupin_core::Action::Rename(_)
+                    | dupin_core::Action::ChooseDestination { .. }
                     | dupin_core::Action::DeleteClipboardEntry(_)
                     | dupin_core::Action::ClearClipboardHistory => {}
                     dupin_core::Action::RequestClipboardAccess => {
@@ -1889,8 +1944,9 @@ impl Ui {
                     }
                     dupin_core::Action::Duplicate(path) => {
                         let name = file_name(&path);
+                        let files = self.file_transfers.clone();
                         self.on_worker(
-                            move || dupin_mac::file_ops::duplicate(&path),
+                            move || files.duplicate(&path),
                             move |ui, result, tx| match result {
                                 Ok(copy) => {
                                     ui.timed_notice(format!("Duplicated as “{}”", file_name(&copy)), tx)

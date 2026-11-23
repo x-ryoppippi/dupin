@@ -39,6 +39,11 @@ fn main() {
     }
     let headless = rune::tooling::is_headless();
     if !headless {
+        std::thread::spawn(|| {
+            if let Err(error) = dupin_mac::file_ops::FileTransfers::default().recover_abandoned_copies() {
+                log::warn(&format!("couldn't clean up abandoned copies: {error}"));
+            }
+        });
         rune::prewarm_gpu();
     }
     let (config, config_problem) = settings::load();
