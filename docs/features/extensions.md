@@ -125,7 +125,7 @@ dupin ext install https://git.example.com/me/notes.git@main # an https://, ssh:/
 dupin ext install ./word-count                              # a folder, copied as it is now
 ```
 
-Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release), or the default branch when the repository has no version tag. A commit is named by its full SHA.
+Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA.
 
 The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
 
@@ -134,7 +134,7 @@ Installing never runs anything from the package. Dupin runs `git` to fetch the o
 - `package.json` has a valid `dupin` key and `name`;
 - `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
-- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep;
+- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch that writes more than 64 MiB is stopped before it finishes;
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install`.
 
