@@ -93,10 +93,12 @@ fn main() {
     .windowless()
     .on_close(snapshots::Snapshots::closed);
     let snapshots_handle = snapshots.handle();
+    let running = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let snapshots = snapshots.init({
         let panel = handle.clone();
         let me = snapshots_handle.clone();
-        move || snapshots::Snapshots::new(panel, me)
+        let running = running.clone();
+        move || snapshots::Snapshots::new(panel, me, running)
     });
     let settings = Arc::new(settings::Service::new(settings::path(), {
         let panel = handle.clone();
@@ -140,6 +142,7 @@ fn main() {
                     history,
                     config_problem,
                     quick_look,
+                    running,
                 )
             }
         })

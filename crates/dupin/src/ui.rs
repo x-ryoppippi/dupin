@@ -24,6 +24,21 @@ const ICON_CAP: usize = 512;
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
 
+pub struct Busy(Arc<AtomicUsize>);
+
+impl Busy {
+    pub fn new(running: Arc<AtomicUsize>) -> Self {
+        running.fetch_add(1, Ordering::AcqRel);
+        Self(running)
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn mark_query_qualifiers(edit: &mut TextEdit, command: &CommandId) {
     let marks: Vec<_> = crate::commands::query_qualifier_ranges(command, &edit.text)
         .into_iter()
@@ -162,6 +177,7 @@ impl Ui {
         history: History,
         notice: Option<String>,
         quick_look: Rc<RefCell<Option<Previewer>>>,
+        running: Arc<AtomicUsize>,
     ) -> Ui {
         let Windows {
             panel: me,
@@ -243,7 +259,7 @@ impl Ui {
             relaunch: None,
             settings_after_close: false,
             snapshots_after_close: false,
-            running: Arc::new(AtomicUsize::new(0)),
+            running,
             updater,
             quick_look,
             me,
@@ -573,7 +589,8 @@ impl Ui {
             match self.session.capture() {
                 Ok(saved) => {
                     crate::trace::snapshot("capture accepted");
-                    self.snapshots.update(move |s, _| s.save(saved));
+                    let busy = Busy::new(self.running.clone());
+                    self.snapshots.update(move |s, _| s.save(saved, busy));
                     self.snapshot_notice("Saving snapshot…".into(), tx);
                 }
                 Err(problem) => {
@@ -825,13 +842,12 @@ impl Ui {
     }
 
     fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
-        let running = self.running.clone();
-        running.fetch_add(1, Ordering::AcqRel);
+        let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             if !dupin_mac::workspace::run(&action) {
                 crate::log::warn(&format!("the system couldn't carry out {action:?}"));
             }
-            running.fetch_sub(1, Ordering::AcqRel);
+            drop(busy);
         });
     }
 

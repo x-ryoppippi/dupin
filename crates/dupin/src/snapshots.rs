@@ -13,10 +13,15 @@ pub struct Snapshots {
     pending_delete: Option<String>,
     problem: Option<String>,
     panel: AppHandle<crate::ui::Ui>,
+    running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl Snapshots {
-    pub fn new(panel: AppHandle<crate::ui::Ui>, me: AppHandle<Self>) -> Self {
+    pub fn new(
+        panel: AppHandle<crate::ui::Ui>,
+        me: AppHandle<Self>,
+        running: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) -> Self {
         let (writer, rx) = std::sync::mpsc::channel();
         std::thread::Builder::new()
             .name("dupin-snapshots".into())
@@ -52,6 +57,7 @@ impl Snapshots {
             pending_delete: None,
             problem: None,
             panel,
+            running,
         }
     }
 
@@ -76,8 +82,8 @@ impl Snapshots {
         }
     }
 
-    pub fn save(&mut self, snapshot: Snapshot) {
-        if self.writer.send(Request::Save(snapshot)).is_err() {
+    pub fn save(&mut self, snapshot: Snapshot, busy: crate::ui::Busy) {
+        if self.writer.send(Request::Save(snapshot, busy)).is_err() {
             self.problem = Some("Snapshot writer is unavailable.".into());
             self.panel
                 .update(|ui, tx| ui.snapshot_notice("Snapshot writer is unavailable.".into(), tx));
@@ -106,7 +112,8 @@ impl Snapshots {
                 .or_else(|| index.checked_sub(1).and_then(|i| self.filtered.get(i)))
                 .map(|&i| self.entries[i].id.clone());
         }
-        let _ = self.writer.send(Request::Delete(id.into()));
+        let busy = crate::ui::Busy::new(self.running.clone());
+        let _ = self.writer.send(Request::Delete(id.into(), busy));
     }
 
     fn resume(&mut self) {
@@ -390,8 +397,8 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
 }
 
 enum Request {
-    Save(Snapshot),
-    Delete(String),
+    Save(Snapshot, crate::ui::Busy),
+    Delete(String, crate::ui::Busy),
 }
 
 fn publish(
@@ -494,10 +501,11 @@ fn write_requests(
 ) {
     emit(store, None);
     while let Ok(request) = rx.recv() {
-        let result = match request {
-            Request::Save(saved) => store.save(saved).map(Some),
-            Request::Delete(id) => store.delete(&id).map(|_| None),
+        let (result, busy) = match request {
+            Request::Save(saved, busy) => (store.save(saved).map(Some), busy),
+            Request::Delete(id, busy) => (store.delete(&id).map(|_| None), busy),
         };
+        drop(busy);
         emit(store, Some(result));
     }
 }
@@ -554,6 +562,7 @@ mod tests {
             pending_delete: None,
             problem: None,
             panel,
+            running: Default::default(),
         };
         let app = rune::App::new(rune::AppSpec::new(
             "Snapshots",
@@ -609,11 +618,18 @@ mod tests {
         let dir = dir.canonicalize().unwrap();
         let (send, rx) = std::sync::mpsc::channel();
         let (reply, results) = std::sync::mpsc::channel();
+        let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let worker_ready = ready.clone();
         let path = dir.clone();
         let thread = std::thread::spawn(move || {
             let mut store = Store::load(path);
             write_requests(&mut store, rx, |store, result| {
+                let loading = result.is_none();
                 reply.send((store.list().to_vec(), result)).unwrap();
+                if loading {
+                    worker_ready.wait();
+                }
             });
         });
         assert!(results.recv().unwrap().0.is_empty());
@@ -631,14 +647,32 @@ mod tests {
             }],
             state: None,
         };
-        send.send(Request::Save(saved.clone())).unwrap();
+        send.send(Request::Save(
+            saved.clone(),
+            crate::ui::Busy::new(running.clone()),
+        ))
+        .ok()
+        .unwrap();
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 1);
+        ready.wait();
         let (entries, result) = results.recv().unwrap();
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
         let id = result.unwrap().unwrap().unwrap();
         assert_eq!(entries[0].id, id);
         assert!(entries[0].saved_at > 0);
+        send.send(Request::Delete(id, crate::ui::Busy::new(running.clone())))
+            .ok()
+            .unwrap();
+        let (entries, result) = results.recv().unwrap();
+        assert!(entries.is_empty());
+        assert_eq!(result.unwrap().unwrap(), None);
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
         std::fs::write(dir.join("archive.json"), b"external corruption").unwrap();
-        send.send(Request::Save(saved)).unwrap();
+        send.send(Request::Save(saved, crate::ui::Busy::new(running.clone())))
+            .ok()
+            .unwrap();
         assert!(results.recv().unwrap().1.unwrap().is_err());
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
         assert_eq!(
             std::fs::read(dir.join("archive.json")).unwrap(),
             b"external corruption"
@@ -646,6 +680,17 @@ mod tests {
         drop(send);
         thread.join().unwrap();
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unavailable_writer_releases_pending_work() {
+        let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (send, receive) = std::sync::mpsc::channel();
+        drop(receive);
+        let request = Request::Delete("fixture".into(), crate::ui::Busy::new(running.clone()));
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 1);
+        drop(send.send(request));
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
     }
     #[test]
     fn focused_search_command_backspace_and_confirmation_cancel_never_delete() {
@@ -669,6 +714,7 @@ mod tests {
             pending_delete: Some("saved".into()),
             problem: None,
             panel,
+            running: Default::default(),
         };
         s.query.focused = true;
         let mut tx = Tx::default();

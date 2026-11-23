@@ -165,13 +165,7 @@ impl Store {
                 "Snapshot archive version or entry limit is unsupported; original data retained.".into(),
             );
         }
-        let mut ids = std::collections::HashSet::new();
-        for entry in &archive.entries {
-            entry.validate()?;
-            if entry.id.is_empty() || entry.id.len() > 128 || !ids.insert(&entry.id) {
-                return Err("Snapshot archive contains invalid identifiers; original data retained.".into());
-            }
-        }
+        check_entries(&archive.entries)?;
         Ok(archive.entries)
     }
 
@@ -180,7 +174,6 @@ impl Store {
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| "Clock unavailable.")?
             .as_secs();
-        snapshot.validate()?;
         snapshot.id = format!(
             "{:x}",
             std::time::SystemTime::now()
@@ -221,6 +214,7 @@ impl Store {
         if entries.len() > MAX_ENTRIES {
             return Err("Snapshot limit reached. Delete an entry before saving.".into());
         }
+        check_entries(&entries)?;
         let bytes = serde_json::to_vec(&Archive {
             version: 1,
             entries: entries.clone(),
@@ -232,8 +226,22 @@ impl Store {
         self.safe_directory()?;
         write_private(&self.directory, &bytes).map_err(|_| "Cannot write snapshot archive safely.")?;
         self.entries = entries;
+        std::fs::File::open(&self.directory)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| "Snapshot archive was updated but could not be flushed to disk.")?;
         Ok(())
     }
+}
+
+fn check_entries(entries: &[Snapshot]) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    for entry in entries {
+        entry.validate()?;
+        if entry.id.is_empty() || entry.id.len() > 128 || !ids.insert(&entry.id) {
+            return Err("Snapshot archive contains invalid identifiers; original data retained.".into());
+        }
+    }
+    Ok(())
 }
 
 fn write_private(directory: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -267,8 +275,7 @@ fn write_private(directory: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let result = (|| {
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&temp, path)?;
-        std::fs::File::open(directory)?.sync_all()
+        std::fs::rename(&temp, path)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(temp);
@@ -358,6 +365,34 @@ mod tests {
                 .is_some()
         );
     }
+    #[test]
+    fn generated_identifier_cannot_make_a_saved_entry_unreadable() {
+        let temp = Temp::new();
+        let mut store = Store::load(temp.0.clone());
+        store.save(fixture()).unwrap();
+        let before = std::fs::read(temp.0.join("archive.json")).unwrap();
+        let mut saved = fixture();
+        saved.saved_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        saved.views = vec![View::Detail {
+            title: "body".into(),
+            body: String::new(),
+        }];
+        let remaining = MAX_ENTRY_BYTES - serde_json::to_vec(&saved).unwrap().len();
+        if let View::Detail { body, .. } = &mut saved.views[0] {
+            *body = "x".repeat(remaining);
+        }
+        assert_eq!(serde_json::to_vec(&saved).unwrap().len(), MAX_ENTRY_BYTES);
+        saved.validate().unwrap();
+        assert!(store.save(saved).is_err());
+        assert_eq!(std::fs::read(temp.0.join("archive.json")).unwrap(), before);
+        let reopened = Store::load(temp.0.clone());
+        assert!(reopened.problem().is_none());
+        assert_eq!(reopened.list(), store.list());
+    }
+
     #[test]
     fn persistence_search_and_explicit_delete() {
         let temp = Temp::new();
