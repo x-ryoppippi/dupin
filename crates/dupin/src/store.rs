@@ -5,9 +5,15 @@ use std::sync::mpsc::{self, Sender};
 
 use dupin_core::History;
 
+/// `~/Library/Application Support/Dupin`, where Dupin keeps what it learns about its user.
+pub fn support_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/Dupin"))
+}
+
+pub const FILE: &str = "history.json";
+
 fn path() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join("Library/Application Support/Dupin/history.json"))
+    support_dir().map(|dir| dir.join(FILE))
 }
 
 /// The saved history, or an empty one (saying why, when the file exists but can't be used).

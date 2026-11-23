@@ -4,27 +4,18 @@ use std::ptr::{self, NonNull};
 use dupin_core::window_management::{Display, Frame, Layout, target_frame};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSScreen, NSWorkspace};
-use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
+use objc2_core_foundation::{CFRetained, CFString, CFType};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use crate::accessibility;
+use crate::accessibility::{self, AX_NO_VALUE, AX_POINT, AX_SIZE, attribute};
 
 const MESSAGING_TIMEOUT_SECONDS: f32 = 0.25;
 const AX_ATTRIBUTE_UNSUPPORTED: i32 = -25205;
-const AX_NO_VALUE: i32 = -25212;
-const AX_POINT: u32 = 1;
-const AX_SIZE: u32 = 2;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
-    fn AXUIElementCreateApplication(pid: i32) -> *mut CFType;
-    fn AXUIElementGetTypeID() -> CFTypeID;
-    fn AXUIElementSetMessagingTimeout(element: &CFType, seconds: f32) -> i32;
-    fn AXUIElementCopyAttributeValue(element: &CFType, name: &CFString, value: &mut *mut CFType) -> i32;
     fn AXUIElementIsAttributeSettable(element: &CFType, name: &CFString, settable: &mut u8) -> i32;
     fn AXUIElementSetAttributeValue(element: &CFType, name: &CFString, value: &CFType) -> i32;
-    fn AXValueGetTypeID() -> CFTypeID;
-    fn AXValueGetValue(value: &CFType, kind: u32, out: *mut c_void) -> u8;
     fn AXValueCreate(kind: u32, value: *const c_void) -> *mut CFType;
 }
 
@@ -103,8 +94,7 @@ pub fn arrange(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Err
 }
 
 fn arrange_trusted(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Error> {
-    let app = unsafe { NonNull::new(AXUIElementCreateApplication(pid)).map(|app| CFRetained::from_raw(app)) }
-        .ok_or(Error::WindowUnavailable)?;
+    let app = accessibility::application(pid).ok_or(Error::WindowUnavailable)?;
     let app = timed(app)?;
     let window = timed(focused_window(&app)?)?;
     let initial = read_frame(&window).ok_or(Error::WindowUnavailable)?;
@@ -113,11 +103,8 @@ fn arrange_trusted(pid: i32, layout: Layout, displays: &[Display]) -> Result<(),
 }
 
 fn timed(element: CFRetained<CFType>) -> Result<CFRetained<CFType>, Error> {
-    if CFGetTypeID(Some(&element)) != unsafe { AXUIElementGetTypeID() } {
-        return Err(Error::WindowUnavailable);
-    }
     // A timeout on the system-wide element would affect other Accessibility features.
-    (unsafe { AXUIElementSetMessagingTimeout(&element, MESSAGING_TIMEOUT_SECONDS) } == 0)
+    accessibility::set_timeout(&element, MESSAGING_TIMEOUT_SECONDS)
         .then_some(element)
         .ok_or(Error::WindowUnavailable)
 }
@@ -132,32 +119,11 @@ fn focused_window(app: &CFType) -> Result<CFRetained<CFType>, Error> {
     }
 }
 
-fn attribute(element: &CFType, name: &str) -> Result<CFRetained<CFType>, i32> {
-    let mut value = ptr::null_mut();
-    let status = unsafe { AXUIElementCopyAttributeValue(element, &CFString::from_str(name), &mut value) };
-    if status != 0 {
-        return Err(status);
-    }
-    Ok(unsafe { CFRetained::from_raw(NonNull::new(value).ok_or(AX_NO_VALUE)?) })
-}
-
 fn read_frame(window: &CFType) -> Option<Frame> {
     let position = attribute(window, "AXPosition").ok()?;
     let size = attribute(window, "AXSize").ok()?;
-    let value_type = unsafe { AXValueGetTypeID() };
-    if CFGetTypeID(Some(&position)) != value_type || CFGetTypeID(Some(&size)) != value_type {
-        return None;
-    }
-    let mut point = NSPoint::ZERO;
-    let mut extent = NSSize::ZERO;
-    unsafe {
-        if AXValueGetValue(&position, AX_POINT, ptr::from_mut(&mut point).cast()) == 0
-            || AXValueGetValue(&size, AX_SIZE, ptr::from_mut(&mut extent).cast()) == 0
-        {
-            return None;
-        }
-    }
-    let frame = Frame::new(point.x, point.y, extent.width, extent.height);
+    let rect = accessibility::read_frame(&position, &size)?;
+    let frame = Frame::new(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height);
     frame.is_valid().then_some(frame)
 }
 

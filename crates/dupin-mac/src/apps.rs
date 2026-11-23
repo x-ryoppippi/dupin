@@ -73,7 +73,7 @@ impl AppsProvider {
     ) -> Result<AppsWatcher, &'static str> {
         let roots = self.roots.clone();
         let provider = Arc::downgrade(self);
-        AppsWatcher::start(roots, move || {
+        AppsWatcher::start(roots, app_subfolders, move || {
             if let Some(provider) = provider.upgrade() {
                 provider.invalidate();
                 changed();
@@ -88,6 +88,13 @@ impl AppsProvider {
     /// Scan before the first search so it doesn't wait for the disk.
     pub fn warm(&self) {
         drop(self.apps());
+    }
+
+    pub(crate) fn catalog_items(&self) -> HashMap<PathBuf, Item> {
+        self.apps()
+            .into_iter()
+            .map(|app| (app.path.clone(), app.item(Vec::new())))
+            .collect()
     }
 
     fn apps(&self) -> Vec<App> {
@@ -133,6 +140,15 @@ impl Provider for AppsProvider {
 }
 
 impl App {
+    fn item(&self, matched: Vec<usize>) -> Item {
+        let mut item = Item {
+            icon: Some(self.icon.clone()),
+            ..Item::path(self.path.clone(), self.name.clone(), matched)
+        };
+        crate::quick_look::add_action(&mut item);
+        item
+    }
+
     /// Take the displayed name and the extra names the system reports, keeping the file name
     /// as an alias when it differs. Names lose a trailing `.app`, and duplicates (ignoring
     /// case) and empty names are dropped.
@@ -193,13 +209,11 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
-            let mut item = Item::path(app.path.clone(), app.name.clone(), positions);
-            crate::quick_look::add_action(&mut item);
+            let mut item = app.item(positions);
             if let (Some(alias), View::Text { subtitle, .. }) = (alias, &mut item.view) {
                 *subtitle = format!("{alias} · {subtitle}");
             }
             Item {
-                icon: Some(app.icon.clone()),
                 score: Some(score),
                 completion: None,
                 ..item
@@ -220,6 +234,21 @@ fn scan(roots: &[PathBuf]) -> Vec<App> {
     apps
 }
 
+fn app_subfolders(roots: &[PathBuf]) -> Vec<PathBuf> {
+    roots
+        .iter()
+        .filter_map(|root| fs::read_dir(root).ok())
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| !is_bundle(path) && path.is_dir())
+        .collect()
+}
+
+fn is_bundle(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| extension == "app")
+}
+
 fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut entries: Vec<_> = entries.flatten().collect();
@@ -232,7 +261,7 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<App>) {
         if !is_dir {
             continue;
         }
-        if path.extension().is_some_and(|e| e == "app") {
+        if is_bundle(&path) {
             if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
                 let icon = if kind.is_symlink() {
                     fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
@@ -292,6 +321,9 @@ mod tests {
             .map(|a| a.name)
             .collect();
         assert_eq!(names, ["Safari", "Terminal", "Xcode"]);
+        let mut subfolders = app_subfolders(std::slice::from_ref(&root));
+        subfolders.sort();
+        assert_eq!(subfolders, [root.join("NotAnApp"), root.join("Utilities")]);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -435,7 +467,7 @@ mod tests {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             event
                 .recv_timeout(remaining)
-                .expect("FSEvents should report an app bundle created in a watched root");
+                .expect("the watcher should invalidate the index after a bundle is added");
             if provider.apps().iter().any(|app| app.name == "Watched App") {
                 break;
             }

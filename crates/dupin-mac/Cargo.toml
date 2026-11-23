@@ -10,17 +10,25 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+libc = { workspace = true }
+rune = { workspace = true }
 objc2 = { workspace = true }
 block2 = "0.6"
 objc2-foundation = { workspace = true, features = [
 	"std",
 	"NSArray",
 	"NSBundle",
+	"NSCalendar",
 	"NSDate",
+	"NSDateFormatter",
+	"NSDateIntervalFormatter",
 	"NSDictionary",
 	"NSEnumerator",
 	"NSError",
 	"NSFileManager",
+	"NSFormatter",
+	"NSGeometry",
+	"NSLocale",
 	"NSNotification",
 	"NSMetadata",
 	"NSMetadataAttributes",
@@ -30,6 +38,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSPredicate",
 	"NSRunLoop",
 	"NSString",
+	"NSTimeZone",
 	"NSURL",
 	"NSUserDefaults",
 	"NSValue",
@@ -37,7 +46,10 @@ objc2-foundation = { workspace = true, features = [
 objc2-app-kit = { workspace = true, features = [
 	"std",
 	"NSEvent",
+	"NSGraphics",
 	"NSApplication",
+	"NSPasteboard",
+	"NSPasteboardItem",
 	"NSResponder",
 	"NSScreen",
 	"NSView",
@@ -48,16 +60,34 @@ objc2-app-kit = { workspace = true, features = [
 	"libc",
 ] }
 objc2-quick-look-ui = { workspace = true }
+objc2-event-kit = { version = "0.3", default-features = false, features = [
+	"std",
+	"block2",
+	"EKCalendar",
+	"EKCalendarItem",
+	"EKEvent",
+	"EKEventStore",
+	"EKObject",
+	"EKTypes",
+] }
+objc2-service-management = { workspace = true, features = [
+	"objc2",
+	"objc2-foundation",
+	"SMAppService",
+] }
 
 objc2-core-foundation = { workspace = true, features = [
 	"std",
+	"CFArray",
 	"CFDictionary",
 	"CFNumber",
+	"CFPreferences",
 	"CFString",
 	"CFURL",
 ] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
 memmap2 = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true

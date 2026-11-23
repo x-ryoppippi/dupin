@@ -1,0 +1,13 @@
+#!/usr/bin/perl
+# @dupin.title E2E script echo
+# @dupin.argument values+
+# @dupin.output inline
+use strict;
+use warnings;
+use JSON::PP qw(encode_json);
+my $path = "$ENV{DUPIN_E2E_SCRIPT_OUT}/argv.json";
+print "Repeated echo\n" if -e $path;
+open my $out, '>', $path or die $!;
+print {$out} encode_json(\@ARGV);
+close $out or die $!;
+print join(' | ', @ARGV), "\n";

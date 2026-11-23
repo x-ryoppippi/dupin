@@ -2,6 +2,7 @@
   lib,
   rustPlatform,
   resvg,
+  oxipng,
   python3Packages,
   inter,
 }:
@@ -49,7 +50,7 @@ let
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-hUryCS5HJktYVV0tRUkA0DrlR+jb0DQynwX/bJzedCY=";
+    hash = "sha256-7e48fxqIrJzNxhnj9FIHAL9nwB3BtYivM9wFk6ALdkE=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the
@@ -68,6 +69,7 @@ let
     # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
     nativeBuildInputs = [
       resvg
+      oxipng
       python3Packages.icnsutil
     ];
     # cargoBuildHook overrides the profile's `strip` and leaves stripping to stdenv, whose
@@ -90,6 +92,7 @@ let
           resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $size -h $size "$1" $iconset/icon_''${size}x''${size}.png
           resvg --skip-system-fonts --use-fonts-dir ${inter}/share/fonts -w $((size * 2)) -h $((size * 2)) "$1" $iconset/icon_''${size}x''${size}@2x.png
         done
+        oxipng -o 4 --nx "$iconset"/*.png
         icnsutil compose --toc "$2" $iconset/*.png
         icnsutil test "$2"
       }

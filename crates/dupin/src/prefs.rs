@@ -3,11 +3,16 @@
 //! Changes apply to the panel at once and are written back to config.toml. A read-only
 //! config.toml (one Nix manages) shows its values, locked.
 
+mod permissions;
+pub mod welcome;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dupin_core::{Backdrop, Config, InputSource, Position};
+use dupin_core::{Backdrop, Config, DisplaySelection, InputSource, Position};
+use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
+use dupin_mac::privacy::Access;
 use rune::{
     AppHandle, Cx, El, Icon, PopupItem, PopupMenu, ScrollSpec, Shortcut, ShortcutError, TextStyle, Tx, col,
     el, icon, row, text,
@@ -17,7 +22,7 @@ use rune_kit::{
     Switch, shortcut_error_message,
 };
 
-use crate::hotkey::Binding;
+use crate::hotkey::{Binding, LauncherShortcut};
 use crate::icons;
 use crate::shader::EXAMPLES;
 use crate::ui::Ui;
@@ -40,6 +45,7 @@ const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 
 const POSITION: &str = "position";
+const DISPLAY: &str = "display";
 const INPUT_SOURCE: &str = "input-source";
 const FILE_LIMIT: &str = "file-limit";
 const BACKDROP: &str = "backdrop";
@@ -59,6 +65,7 @@ enum Page {
     General,
     Search,
     Appearance,
+    Permissions,
     Updates,
 }
 
@@ -68,6 +75,7 @@ impl Page {
             Page::General => "General",
             Page::Search => "Search",
             Page::Appearance => "Appearance",
+            Page::Permissions => "Permissions",
             Page::Updates => "Updates",
         }
     }
@@ -78,6 +86,7 @@ impl Page {
             Page::General => "page-general",
             Page::Search => "page-search",
             Page::Appearance => "page-appearance",
+            Page::Permissions => "page-permissions",
             Page::Updates => "page-updates",
         }
     }
@@ -87,6 +96,7 @@ impl Page {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
             Page::Appearance => &icons::SPARKLES,
+            Page::Permissions => &icons::SHIELD,
             Page::Updates => &icons::REFRESH,
         }
     }
@@ -96,6 +106,14 @@ fn position_title(position: Position) -> &'static str {
     match position {
         Position::Center => "Center",
         Position::Top => "Top",
+    }
+}
+
+fn display_option(display: DisplaySelection) -> (&'static str, &'static str) {
+    match display {
+        DisplaySelection::Mouse => ("mouse", "Mouse pointer"),
+        DisplaySelection::Main => ("main", "Main display"),
+        DisplaySelection::Active => ("active", "Focused window"),
     }
 }
 
@@ -155,17 +173,44 @@ pub struct Prefs {
     config: Config,
     current: Rc<RefCell<Config>>,
     page: Page,
-    recorder: ShortcutRecorderState,
-    /// Who holds the chord the last refusal was for, when known.
-    owner: Option<String>,
+    recorders: [ShortcutRecorderState; 2],
+    shortcut_problems: [Option<String>; 2],
     binding: Arc<Binding>,
     panel: AppHandle<Ui>,
     updater: Updater,
     read_only: bool,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
+    login: Option<LoginPreference>,
+    /// Each permission's status, in `permissions::ENTRIES` order, read while the page shows.
+    permissions: Vec<Access>,
+    /// The first-run welcome's step while it covers the pages.
+    welcome: Option<welcome::Step>,
+    pub(crate) hotkey_problem: Option<String>,
+    pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
+}
+
+struct LoginPreference {
+    item: LoginItem,
+    status: LoginStatus,
+    error: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoginAction {
+    SetEnabled(bool),
+    OpenSettings,
+}
+
+fn login_action(status: LoginStatus) -> Option<LoginAction> {
+    match status {
+        LoginStatus::NotRegistered | LoginStatus::NotFound => Some(LoginAction::SetEnabled(true)),
+        LoginStatus::Enabled => Some(LoginAction::SetEnabled(false)),
+        LoginStatus::RequiresApproval => Some(LoginAction::OpenSettings),
+        _ => None,
+    }
 }
 
 impl Prefs {
@@ -175,12 +220,17 @@ impl Prefs {
         panel: AppHandle<Ui>,
         updater: Updater,
         settings: Arc<crate::settings::Service>,
+        welcome: bool,
     ) -> Prefs {
         let config = current.borrow().clone();
-        let mut recorder = ShortcutRecorderState::new(config.hotkey.parse().ok());
-        if binding.failed_at_launch() {
-            recorder.mark_unregistered();
-        }
+        let recorders = LauncherShortcut::ALL.map(|kind| {
+            let mut recorder =
+                ShortcutRecorderState::new(crate::hotkey::parse(kind.accelerator(&config)).ok().flatten());
+            if binding.launch_problem(kind, recorder.shortcut()).is_some() {
+                recorder.mark_unregistered();
+            }
+            recorder
+        });
         let active_radius = config.theme.corner_radius;
         Prefs {
             preview_dark: None,
@@ -188,14 +238,62 @@ impl Prefs {
             config,
             current,
             page: Page::General,
-            recorder,
-            owner: None,
+            recorders,
+            shortcut_problems: [None, None],
             binding,
             panel,
             updater,
             read_only: crate::settings::read_only(),
             settings,
             config_problem: None,
+            hotkey_problem: None,
+            scripts_notice: None,
+            login: objc2::MainThreadMarker::new()
+                .and_then(LoginItem::for_current_app)
+                .map(|item| LoginPreference {
+                    status: item.status(),
+                    item,
+                    error: None,
+                }),
+            permissions: Vec::new(),
+            welcome: welcome.then_some(welcome::Step::Hotkey),
+        }
+    }
+
+    pub fn refresh_login_item(&mut self) {
+        if let Some(login) = &mut self.login {
+            login.status = login.item.status();
+            login.error = None;
+        }
+    }
+
+    pub fn refresh_permissions(&mut self) {
+        if self.welcome.is_none() && self.page == Page::Permissions {
+            self.permissions = permissions::read();
+        }
+    }
+
+    fn show(&mut self, page: Page) {
+        self.welcome = None;
+        self.page = page;
+        self.refresh_permissions();
+    }
+
+    fn change_login_item(&mut self, action: LoginAction) {
+        self.refresh_login_item();
+        let Some(login) = &mut self.login else {
+            return;
+        };
+        // System Settings can change the item between rendering the button and pressing it.
+        if login_action(login.status) != Some(action) {
+            return;
+        }
+        match action {
+            LoginAction::SetEnabled(enabled) => {
+                login.error = login.item.set_enabled(enabled).err();
+                login.status = login.item.status();
+            }
+            LoginAction::OpenSettings => login.item.open_settings(),
         }
     }
 
@@ -215,15 +313,43 @@ impl Prefs {
     }
 
     fn adopt(&mut self, config: Config) {
-        let shortcut = crate::hotkey::parse(&config.hotkey).ok().flatten();
-        if self.recorder.shortcut() != shortcut.as_ref() {
-            self.recorder = ShortcutRecorderState::new(shortcut);
-            self.owner = None;
+        for kind in LauncherShortcut::ALL {
+            let i = kind as usize;
+            let shortcut = crate::hotkey::parse(kind.accelerator(&config)).ok().flatten();
+            if self.recorders[i].shortcut() != shortcut.as_ref() {
+                self.recorders[i] = ShortcutRecorderState::new(shortcut);
+                self.shortcut_problems[i] = None;
+            }
         }
-        if self.binding.failed_at_launch() {
-            self.recorder.mark_unregistered();
-        }
+        self.reflect_launch_hotkey();
         self.config = config;
+    }
+
+    /// The panel registers hotkeys after Settings constructs its recorders.
+    pub fn reflect_launch_hotkey(&mut self) {
+        for kind in LauncherShortcut::ALL {
+            let recorder = &mut self.recorders[kind as usize];
+            if self.binding.launch_problem(kind, recorder.shortcut()).is_some() {
+                recorder.mark_unregistered();
+            }
+        }
+    }
+
+    pub fn refresh_hotkey(&mut self) {
+        for kind in LauncherShortcut::ALL {
+            let restored = self.binding.refresh_launch_conflict(kind);
+            let recorder = &mut self.recorders[kind as usize];
+            if let Some(refused) = recorder.refused()
+                && Some(refused) == recorder.shortcut()
+                && recorder.error() == Some(&ShortcutError::Conflict)
+            {
+                self.shortcut_problems[kind as usize] =
+                    self.binding.recorder_conflict(kind, refused, &self.config);
+                if restored {
+                    recorder.cancel();
+                }
+            }
+        }
     }
 
     fn set_problem(&mut self, problem: Option<String>) {
@@ -237,20 +363,30 @@ impl Prefs {
     }
 
     pub fn closed(&mut self, _: &mut Tx) {
+        // Closing the window ends the welcome, so ⌘, next opens Settings itself.
+        self.welcome = None;
         // Queue the decision so Rune publishes Settings' hidden state before it runs.
         self.panel.update(Ui::resume_restart);
     }
 
-    fn change_hotkey(&mut self, next: Option<&Shortcut>, _: &mut Tx) -> Result<(), ShortcutError> {
-        let result = self.binding.replace(next);
-        self.owner = match (&result, next) {
-            (Err(ShortcutError::Conflict), Some(next)) => self.binding.owner(next),
-            _ => None,
-        };
-        result?;
+    fn change_hotkey(
+        &mut self,
+        kind: LauncherShortcut,
+        next: Option<&Shortcut>,
+    ) -> Result<(), ShortcutError> {
         let base = self.current.borrow().clone();
+        let result =
+            if next.is_some_and(|shortcut| crate::hotkey::binding_targets(&base).contains_key(shortcut)) {
+                Err(ShortcutError::Conflict)
+            } else {
+                self.binding.replace(kind, next)
+            };
+        self.shortcut_problems[kind as usize] = next
+            .filter(|_| result == Err(ShortcutError::Conflict))
+            .and_then(|next| self.binding.recorder_conflict(kind, next, &base));
+        result?;
         self.config = base.clone();
-        self.config.hotkey = next.map(ToString::to_string).unwrap_or_default();
+        kind.set(&mut self.config, next);
         self.save(&base);
         Ok(())
     }
@@ -345,6 +481,30 @@ impl Prefs {
         );
     }
 
+    fn pick_display(&mut self, tx: &mut Tx) {
+        const CHOICES: [DisplaySelection; 3] = [
+            DisplaySelection::Mouse,
+            DisplaySelection::Main,
+            DisplaySelection::Active,
+        ];
+        let options = CHOICES
+            .into_iter()
+            .map(display_option)
+            .map(|(id, label)| (id.to_owned(), label.to_owned()))
+            .collect();
+        Prefs::choose(
+            tx,
+            DISPLAY,
+            options,
+            display_option(self.config.display).0,
+            |s, id| {
+                if let Some(value) = CHOICES.into_iter().find(|value| display_option(*value).0 == id) {
+                    s.set(|config| config.display = value);
+                }
+            },
+        );
+    }
+
     fn pick_position(&mut self, tx: &mut Tx) {
         let options = [(Position::Center, "center"), (Position::Top, "top")]
             .map(|(p, id)| (id.to_owned(), position_title(p).to_owned()))
@@ -418,11 +578,18 @@ impl Prefs {
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = rune_theme_opencode::kit(cx.system_dark());
     let hair = 1.0 / cx.env().scale;
-    let rows = match s.page {
-        Page::General => general(s, k),
-        Page::Search => search(s, k),
-        Page::Appearance => appearance(s, k, cx.system_dark()),
-        Page::Updates => updates(s, k),
+    let rows = match (s.welcome, s.page) {
+        (Some(step), _) => welcome::page(s, k, hair, step),
+        (None, Page::General) => general(s, k),
+        (None, Page::Search) => search(s, k),
+        (None, Page::Appearance) => appearance(s, k, cx.system_dark()),
+        (None, Page::Permissions) => permissions::page(s, k, hair),
+        (None, Page::Updates) => updates(s, k),
+    };
+    let title = s.welcome.map_or(s.page.title(), welcome::Step::title);
+    let shows_config = match s.welcome {
+        Some(step) => step == welcome::Step::Hotkey,
+        None => s.page != Page::Permissions,
     };
     let panel = col()
         .key("panel")
@@ -445,7 +612,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 .center_y()
                 .window_drag()
                 .child(
-                    text(s.page.title())
+                    text(title)
                         .role("heading")
                         .font(k.ty.body_medium)
                         .color(k.c.text_base),
@@ -460,27 +627,74 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                 .scroll(ScrollSpec { stick_bottom: false })
                 .px(GUTTER - ROW_PX)
                 .gap(12.0)
-                .children(s.config_problem.as_ref().map(|problem| {
-                    text(problem)
-                        .key("config-problem")
-                        .w_full()
-                        .font(DESCRIPTION)
-                        .color(k.c.text_base)
-                        .wrap()
-                }))
-                .children(if s.page == Page::Appearance {
-                    rows
-                } else {
-                    vec![card(k, hair, rows)]
-                })
-                .children(s.read_only.then(|| {
-                    text("config.toml is read-only, so change these where it's managed.")
-                        .font(DESCRIPTION)
-                        .color(k.c.text_muted)
-                        .mx(ROW_PX)
-                        .wrap()
-                })),
-        );
+                .children(
+                    [
+                        ("config-problem", s.config_problem.as_deref()),
+                        ("hotkey-problem", s.hotkey_problem.as_deref()),
+                    ]
+                    .into_iter()
+                    .filter_map(|(key, problem)| Some((key, problem?)))
+                    .map(|(key, problem)| {
+                        text(problem)
+                            .key(key)
+                            .w_full()
+                            .font(DESCRIPTION)
+                            .color(k.c.text_base)
+                            .wrap()
+                    }),
+                )
+                .children(
+                    if s.welcome.is_some() || matches!(s.page, Page::Appearance | Page::Permissions) {
+                        rows
+                    } else {
+                        vec![card(k, hair, rows)]
+                    },
+                )
+                .children(
+                    (s.welcome.is_none() && s.page == Page::General && !s.config.bindings.is_empty()).then(
+                        || {
+                            col()
+                                .key("configured-hotkeys")
+                                .gap(4.0)
+                                .child(
+                                    text("Configured hotkeys")
+                                        .mx(ROW_PX)
+                                        .font(k.ty.body_medium)
+                                        .color(k.c.text_base),
+                                )
+                                .child(card(k, hair, configured_hotkeys(s, k)))
+                        },
+                    ),
+                )
+                .children(
+                    s.scripts_notice
+                        .as_ref()
+                        .filter(|_| s.welcome.is_none() && s.page == Page::Search)
+                        .map(|notice| {
+                            col()
+                                .key("scripts-notice")
+                                .mx(ROW_PX)
+                                .gap(4.0)
+                                .child(
+                                    text("Script discovery")
+                                        .font(k.ty.body_medium)
+                                        .color(k.c.text_base),
+                                )
+                                .child(
+                                    text(notice)
+                                        .w_full()
+                                        .font(DESCRIPTION)
+                                        .color(k.c.text_muted)
+                                        .wrap(),
+                                )
+                        }),
+                )
+                .children(
+                    (s.read_only && shows_config)
+                        .then(|| note(k, "config.toml is read-only, so change these where it's managed.")),
+                ),
+        )
+        .children(s.welcome.map(|step| welcome::footer(k, step)));
     row()
         .key("prefs")
         .w_full()
@@ -498,8 +712,12 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_group()
         .focus_follows()
         .gap(4.0);
-    for page in [Page::General, Page::Search, Page::Appearance] {
-        let on = s.page == page;
+    let permissions = permissions::available().then_some(Page::Permissions);
+    for page in [Page::General, Page::Search, Page::Appearance]
+        .into_iter()
+        .chain(permissions)
+    {
+        let on = s.welcome.is_none() && s.page == page;
         let mut item = row()
             .key(page.key())
             .role("listitem")
@@ -514,7 +732,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             .radius(k.radius.sm)
             .hover(c.hover)
             .press(c.pressed)
-            .on_press(move |s: &mut Prefs| s.page = page)
+            .on_press(move |s: &mut Prefs| s.show(page))
             .child(icon(page.icon(), 16.0).color(if on { c.icon_base } else { c.icon_muted }))
             .child(
                 text(page.title())
@@ -527,26 +745,13 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         }
         pages = pages.child(item);
     }
-    let config = row()
-        .key("open-config")
-        .role("button")
-        .label("Open config.toml")
-        .focusable(true)
-        .h(20.0)
-        .px(6.0)
-        .self_start()
-        .center_y()
-        .radius(k.radius.sm)
-        .hover(c.hover)
-        .press(c.pressed)
-        .on_press(|_: &mut Prefs| {
-            if let Some(path) = crate::settings::path()
-                && path.exists()
-            {
-                std::thread::spawn(move || dupin_mac::workspace::open(&path));
-            }
-        })
-        .child(text("Open config.toml").font(k.ty.small).color(c.text_muted));
+    let config = footer_link(k, "open-config", "Open config.toml").on_press(|_: &mut Prefs| {
+        if let Some(path) = crate::settings::path()
+            && path.exists()
+        {
+            std::thread::spawn(move || dupin_mac::workspace::open(&path));
+        }
+    });
     col()
         .key("sidebar")
         .role("navigation")
@@ -560,14 +765,34 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .child(pages)
         .child(el().grow(1.0))
         .child(
-            text("Open Snapshots")
-                .font(k.ty.small)
-                .color(c.text_muted)
-                .focusable(true)
-                .on_press(|s: &mut Prefs| s.panel.update(|ui, _| ui.open_snapshots())),
+            footer_link(k, "show-welcome", "Show Welcome")
+                .on_press(|s: &mut Prefs| s.welcome = Some(welcome::Step::Hotkey)),
+        )
+        .child(
+            footer_link(k, "open-snapshots", "Open Snapshots")
+                .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
         )
         .child(config)
         .children(s.updater.available().then(|| update_footer(s, k)))
+}
+
+/// A quiet link at the foot of the sidebar.
+fn footer_link(k: &Kit, key: &str, label: &str) -> El {
+    let c = &k.c;
+    row()
+        .key(key)
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .h(20.0)
+        .px(6.0)
+        .self_start()
+        .center_y()
+        .radius(k.radius.sm)
+        .hover(c.hover)
+        .press(c.pressed)
+        .child(text(label.to_owned()).font(k.ty.small).color(c.text_muted))
 }
 
 fn update_footer(s: &Prefs, k: &Kit) -> El {
@@ -629,19 +854,58 @@ fn update_footer(s: &Prefs, k: &Kit) -> El {
         )
 }
 
-fn general(s: &Prefs, k: &Kit) -> Vec<El> {
-    let owner = s.owner.clone();
-    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| match (chord, &owner) {
-        (Some(chord), Some(owner)) => format!("{} is used by {owner}.", chord.keycaps().join("")),
-        _ => shortcut_error_message(error, chord),
+fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, label: &str) -> El {
+    let i = kind as usize;
+    let shortcut_problem = s.shortcut_problems[i].clone();
+    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
+        shortcut_problem
+            .as_ref()
+            .filter(|_| *error == ShortcutError::Conflict)
+            .cloned()
+            .unwrap_or_else(|| shortcut_error_message(error, chord))
     };
-    let hotkey = ShortcutRecorder::new("hotkey", &s.recorder, |s: &mut Prefs| &mut s.recorder)
-        .label("Show Dupin")
+    ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
+        .label(label)
         .width(180.0)
-        .on_change(Prefs::change_hotkey)
+        .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
         .error_message(refusal)
         .disabled(s.read_only)
-        .build(k);
+        .build(k)
+}
+
+/// The panel hotkey's row, on General and in the welcome.
+fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
+    let kind = LauncherShortcut::Panel;
+    let shortcut = s.recorders[kind as usize].shortcut();
+    let detail = match (s.binding.launch_problem(kind, shortcut), shortcut) {
+        (Some(crate::hotkey::LaunchProblem::Occupied(owner)), Some(chord)) => format!(
+            "{owner} already uses {}, so choose another or free it there",
+            chord.keycaps().join("")
+        ),
+        (Some(_), Some(chord)) => format!(
+            "Dupin couldn't register {}, so choose another",
+            chord.keycaps().join("")
+        ),
+        _ => "Shows the panel from any app".to_owned(),
+    };
+    setting(
+        k,
+        &icons::KEYBOARD,
+        "Hotkey",
+        Some(&detail),
+        shortcut_recorder(s, k, kind, "hotkey", "Show Dupin"),
+    )
+}
+
+fn general(s: &Prefs, k: &Kit) -> Vec<El> {
+    let display = menu_value(
+        s,
+        k,
+        DISPLAY,
+        "Display",
+        display_option(s.config.display).1,
+        Prefs::pick_display,
+    );
     let position = menu_value(
         s,
         k,
@@ -662,12 +926,30 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
         s.panel.update(|ui, tx| ui.relaunch(tx));
     });
     vec![
+        hotkey_setting(s, k),
         setting(
             k,
             &icons::KEYBOARD,
-            "Hotkey",
-            Some("Shows the panel from any app"),
-            hotkey,
+            "Selection hotkey",
+            Some("Searches selected text. Requires Accessibility access."),
+            shortcut_recorder(
+                s,
+                k,
+                LauncherShortcut::Selection,
+                "selection-hotkey",
+                "Search selected text",
+            ),
+        ),
+        setting(
+            k,
+            &icons::PANEL,
+            "Display",
+            Some(if s.config.display == DisplaySelection::Active {
+                "Uses the focused window's display when Accessibility access allows"
+            } else {
+                "Which display the panel opens on"
+            }),
+            display,
         ),
         setting(
             k,
@@ -683,17 +965,88 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             Some("ASCII switches an input method to Roman while the panel shows"),
             input_source,
         ),
+        login_setting(s.login.as_ref(), k),
         setting(
             k,
             &icons::REFRESH,
             "Relaunch Dupin",
-            Some("Restart and reload configuration"),
+            Some("Restart, reload configuration and cancel running scripts"),
             relaunch,
         ),
     ]
 }
 
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> Vec<El> {
+    use dupin_core::config::HotkeyTarget;
+
+    s.config
+        .bindings
+        .iter()
+        .map(|(chord, target)| {
+            let keys = chord
+                .parse::<Shortcut>()
+                .map_or_else(|_| chord.clone(), |shortcut| shortcut.keycaps().join(""));
+            let (kind, name) = match target {
+                HotkeyTarget::App { bundle_id, .. } => ("App", bundle_id),
+                HotkeyTarget::Command { command } => ("Command", command),
+                HotkeyTarget::Script { script, .. } => ("Script", script),
+            };
+            setting(
+                k,
+                &icons::KEYBOARD,
+                kind,
+                Some(name),
+                text(keys).font(k.ty.ui).color(k.c.text_base),
+            )
+            .key(chord)
+        })
+        .collect()
+}
+
+fn login_setting(login: Option<&LoginPreference>, k: &Kit) -> El {
+    let status = login.map(|login| login.status);
+    let detail = match status {
+        Some(LoginStatus::NotRegistered | LoginStatus::Enabled) => "Open Dupin when you log in",
+        Some(LoginStatus::RequiresApproval) => "Approval required in System Settings",
+        Some(LoginStatus::NotFound) => "Login item not found",
+        Some(_) => "macOS returned an unknown login item status",
+        None => "Requires a signed Dupin.app outside the Nix store",
+    };
+    let detail = match login.and_then(|login| login.error.as_deref()) {
+        Some(error) => format!("{detail}. {error}"),
+        None => detail.to_owned(),
+    };
+    let control = match status.and_then(login_action) {
+        Some(LoginAction::OpenSettings) => Button::new("Open Login Items")
+            .on_press(|s: &mut Prefs| s.change_login_item(LoginAction::OpenSettings))
+            .build(k),
+        action => {
+            let enabled = action == Some(LoginAction::SetEnabled(false));
+            Switch::new(enabled)
+                .label("Launch at login")
+                .hide_label()
+                .disabled(action.is_none())
+                .on_toggle(move |s: &mut Prefs| s.change_login_item(LoginAction::SetEnabled(!enabled)))
+                .build(k)
+        }
+    };
+    setting(
+        k,
+        &icons::LOGIN,
+        "Launch at login",
+        Some(&detail),
+        control.key("launch-at-login"),
+    )
+}
+
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {
+    let show_recent = !s.config.show_recent;
+    let recent = Switch::new(s.config.show_recent)
+        .label("Show recent items")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.show_recent = show_recent))
+        .build(k);
     let limit = menu_value(
         s,
         k,
@@ -702,6 +1055,27 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
+    let calendar_enabled = !s.config.calendar.enabled;
+    let calendar = Switch::new(s.config.calendar.enabled)
+        .label("Calendar search")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar.enabled = calendar_enabled))
+        .build(k);
+    let next_clipboard = !s.config.clipboard.enabled;
+    let clipboard = Switch::new(s.config.clipboard.enabled)
+        .label("Clipboard history")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.enabled = next_clipboard))
+        .build(k);
+    let next_paste = !s.config.snippet_paste;
+    let paste = Switch::new(s.config.snippet_paste)
+        .label("Paste snippets")
+        .hide_label()
+        .disabled(s.read_only)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.snippet_paste = next_paste))
+        .build(k);
     let enabled = s.config.window_management;
     let window_management = Switch::new(enabled)
         .label("Window Management")
@@ -709,7 +1083,14 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         .disabled(s.read_only)
         .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
         .build(k);
-    vec![
+    let mut rows = vec![
+        setting(
+            k,
+            &icons::PANEL,
+            "Show recent items",
+            Some("Show recently and frequently used apps and files when the search is empty"),
+            recent,
+        ),
         setting(
             k,
             &icons::FILES,
@@ -719,12 +1100,59 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         ),
         setting(
             k,
+            &icons::SEARCH,
+            "Calendar search",
+            Some("Type cal then Space to search events"),
+            calendar,
+        ),
+        setting(
+            k,
+            &icons::CLIPBOARD,
+            "Clipboard history",
+            Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
+            clipboard,
+        ),
+        setting(
+            k,
+            &icons::KEYBOARD,
+            "Paste snippets",
+            Some("Enter pastes a snippet into the front app instead of only copying it"),
+            paste,
+        ),
+        setting(
+            k,
             &icons::PANEL,
             "Window Management",
             Some("Show commands to move and resize windows. Requires Accessibility on first use."),
             window_management,
         ),
-    ]
+    ];
+    // Checking doesn't ask macOS for access; only pasting a snippet does.
+    if s.config.snippet_paste && !dupin_mac::paste::allowed() {
+        let open = value_button(
+            k,
+            "open-accessibility",
+            "Open",
+            &rune_theme_opencode::icons::CHEVRON_RIGHT,
+        )
+        .on_press(|_: &mut Prefs| {
+            std::thread::spawn(|| {
+                let action =
+                    dupin_mac::workspace::Action::OpenUrl(dupin_mac::accessibility::SETTINGS_URL.into());
+                if let Err(error) = dupin_mac::workspace::run(&action) {
+                    crate::log::warn(&error);
+                }
+            });
+        });
+        rows.push(setting(
+            k,
+            &icons::INFO,
+            "Accessibility access",
+            Some("Pasting needs Dupin allowed in Privacy & Security › Accessibility"),
+            open,
+        ));
+    }
+    rows
 }
 
 use dupin_core::config::{Colors, FontFamily, Theme};
@@ -1073,7 +1501,10 @@ fn updates(s: &Prefs, k: &Kit) -> Vec<El> {
             .on_press(|s: &mut Prefs| s.updater.check_now()),
     }
     .build(k);
-    let line = status.text(s.config.auto_update, s.updater.download_only());
+    let mut line = status.text(s.config.auto_update, s.updater.download_only());
+    if matches!(status, Status::Ready(_)) {
+        line.push_str(". Restarting cancels running scripts.");
+    }
     vec![
         setting(
             k,
@@ -1154,6 +1585,15 @@ fn card(k: &Kit, hair: f32, rows: Vec<El>) -> El {
     card
 }
 
+/// A muted remark under a page's cards.
+fn note(k: &Kit, words: &str) -> El {
+    text(words.to_owned())
+        .font(DESCRIPTION)
+        .color(k.c.text_muted)
+        .mx(ROW_PX)
+        .wrap()
+}
+
 /// `$HOME/x` as `~/x`.
 fn tilde(path: &str) -> String {
     match std::env::var("HOME") {
@@ -1229,11 +1669,14 @@ mod tests {
         let current = Rc::new(RefCell::new(Config::default()));
         let binding = Arc::new(Binding::new(panel.clone()));
         let updater = Updater::start(false, panel.clone(), prefs);
-        let mut state = Prefs::new(current.clone(), binding, panel, updater, settings.clone());
+        let mut state = Prefs::new(current.clone(), binding, panel, updater, settings.clone(), false);
         let external = Config {
             hotkey: "ctrl+alt+k".into(),
             dictionary_keywords: vec!["lookup".into()],
-            ..Config::default()
+            ..Config::parse(
+                "[bindings.\"ctrl+alt+c\"]\ntarget = \"app\"\nbundle_id = \"com.apple.calculator\"",
+            )
+            .unwrap()
         };
         std::fs::write(&path, toml::to_string(&external).unwrap()).unwrap();
         *current.borrow_mut() = external.clone();
@@ -1244,14 +1687,14 @@ mod tests {
         };
         assert_eq!(*current.borrow(), expected);
         assert_eq!(
-            state.recorder.shortcut(),
+            state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
         );
         let saved = received.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(saved.result.as_ref().unwrap(), &expected);
         state.reflect_config(saved.revision, expected.clone(), false, None);
         assert_eq!(
-            state.recorder.shortcut(),
+            state.recorders[LauncherShortcut::Panel as usize].shortcut(),
             crate::hotkey::parse(&expected.hotkey).unwrap().as_ref()
         );
         assert_eq!(saved.revision, settings.revision());
