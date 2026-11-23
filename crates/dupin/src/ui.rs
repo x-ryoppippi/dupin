@@ -287,6 +287,7 @@ pub struct Ui {
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
     sharing: dupin_mac::sharing::Picker,
+    panel_window: Option<rune::WindowHandle>,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
@@ -482,6 +483,7 @@ impl Ui {
             searchers,
             web: registration.web,
             sharing: dupin_mac::sharing::Picker::default(),
+            panel_window: None,
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
@@ -1298,8 +1300,11 @@ impl Ui {
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::Share { target, paths } => {
+                        let panel = self.me.clone();
                         if !rune::tooling::is_headless()
-                            && let Err(error) = self.sharing.share(target, &paths)
+                            && let Err(error) = self.sharing.share(target, &paths, move || {
+                                panel.update(|ui, tx| ui.dismiss_if_unfocused(tx));
+                            })
                         {
                             self.me.update(move |ui, tx| ui.show_notice(error, tx));
                         }
@@ -1389,15 +1394,41 @@ impl Ui {
         tx.wake_at(tx.clock() + 5.0);
     }
 
-    pub fn preview_focus_is_active(&self) -> bool {
-        self.quick_look
-            .borrow()
-            .as_ref()
-            .is_some_and(|preview| preview.panel_is_key() || preview.owner_is_key())
+    pub fn set_panel_window(&mut self, window: rune::WindowHandle) {
+        self.panel_window = Some(window);
     }
 
-    pub fn share_picker_is_active(&self) -> bool {
-        self.sharing.is_active()
+    pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        if !focused {
+            self.dismiss_if_unfocused(tx);
+        }
+    }
+
+    fn dismiss_if_unfocused(&mut self, tx: &mut Tx) {
+        let auxiliary_owns_focus = self.sharing.is_active()
+            || self
+                .quick_look
+                .borrow()
+                .as_ref()
+                .is_some_and(Previewer::panel_is_key);
+        if self.shown && !auxiliary_owns_focus && !self.panel_is_key() {
+            self.dismiss(tx);
+        }
+    }
+
+    fn panel_is_key(&self) -> bool {
+        use rune::raw_window_handle::RawWindowHandle;
+        self.panel_window.as_ref().is_some_and(|window| {
+            window
+                .with_raw_handle(|handle| match handle.as_raw() {
+                    // SAFETY: Rune lends this live view only for this main-thread callback.
+                    RawWindowHandle::AppKit(appkit) => unsafe {
+                        dupin_mac::window::is_key_window(appkit.ns_view)
+                    },
+                    _ => false,
+                })
+                .unwrap_or(false)
+        })
     }
 
     pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
@@ -1410,7 +1441,7 @@ impl Ui {
             .as_ref()
             .is_some_and(|preview| preview.finish_focus_transfer());
         if !keep {
-            self.dismiss(tx);
+            self.dismiss_if_unfocused(tx);
         }
     }
 

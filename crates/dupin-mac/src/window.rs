@@ -27,6 +27,18 @@ pub unsafe fn appear_instantly(ns_view: NonNull<c_void>) -> bool {
     true
 }
 
+/// # Safety
+///
+/// `ns_view` must point to a live AppKit `NSView` on the main thread.
+pub unsafe fn is_key_window(ns_view: NonNull<c_void>) -> bool {
+    let Some(_main) = MainThreadMarker::new() else {
+        return false;
+    };
+    // SAFETY: The caller guarantees a live NSView for this borrow.
+    let view = unsafe { ns_view.cast::<NSView>().as_ref() };
+    view.window().is_some_and(|window| window.isKeyWindow())
+}
+
 /// The height in points of the display the pointer is on, where Rune's
 /// `DisplayTarget::UnderPointer` places the panel. Rune reports displays only at startup, and
 /// placing the panel at a display's center needs the current one. None off the main thread or

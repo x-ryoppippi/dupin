@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 use dupin_core::ShareTarget;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
-use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
     NSApplication, NSSharingService, NSSharingServiceNameComposeEmail, NSSharingServiceNameSendViaAirDrop,
     NSSharingServicePicker, NSSharingServicePickerDelegate,
@@ -37,9 +37,28 @@ pub fn targets() -> [(&'static str, &'static str, ShareTarget); 3] {
     }
 }
 
+struct PickerCompletion(RefCell<Option<Box<dyn FnOnce()>>>);
+
+impl PickerCompletion {
+    fn is_pending(&self) -> bool {
+        self.0.borrow().is_some()
+    }
+
+    fn take(&self) -> Option<Box<dyn FnOnce()>> {
+        self.0.borrow_mut().take()
+    }
+
+    fn finish(&self) {
+        if let Some(callback) = self.take() {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback));
+        }
+    }
+}
+
 define_class!(
     #[unsafe(super(NSObject))]
-    #[ivars = Cell<bool>]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = PickerCompletion]
     struct PickerDelegate;
 
     unsafe impl NSObjectProtocol for PickerDelegate {}
@@ -51,7 +70,7 @@ define_class!(
             _picker: &NSSharingServicePicker,
             _service: Option<&NSSharingService>,
         ) {
-            self.ivars().set(false);
+            self.ivars().finish();
         }
     }
 );
@@ -65,18 +84,23 @@ impl Picker {
     pub fn is_active(&self) -> bool {
         self.picker
             .as_ref()
-            .is_some_and(|(_, delegate)| delegate.ivars().get())
+            .is_some_and(|(_, delegate)| delegate.ivars().is_pending())
     }
 
     pub fn close(&mut self) {
         if let Some((picker, delegate)) = self.picker.take()
-            && delegate.ivars().replace(false)
+            && delegate.ivars().take().is_some()
         {
             picker.close();
         }
     }
 
-    pub fn share(&mut self, target: ShareTarget, paths: &[PathBuf]) -> Result<(), String> {
+    pub fn share(
+        &mut self,
+        target: ShareTarget,
+        paths: &[PathBuf],
+        on_picker_finished: impl FnOnce() + 'static,
+    ) -> Result<(), String> {
         let main = MainThreadMarker::new().ok_or("Sharing requires the main thread.")?;
         let urls = paths
             .iter()
@@ -92,9 +116,10 @@ impl Picker {
                     .and_then(|window| window.contentView())
                     .ok_or("Couldn't find a window for the share sheet.")?;
                 self.close();
+                let completion = PickerCompletion(RefCell::new(Some(Box::new(on_picker_finished))));
                 // SAFETY: The delegate's superclass is NSObject and its ivars are set before init.
                 let delegate: Retained<PickerDelegate> =
-                    unsafe { msg_send![super(PickerDelegate::alloc().set_ivars(Cell::new(true))), init] };
+                    unsafe { msg_send![super(PickerDelegate::alloc(main).set_ivars(completion)), init] };
                 // SAFETY: File URLs conform to NSPasteboardWriting.
                 let picker =
                     unsafe { NSSharingServicePicker::initWithItems(NSSharingServicePicker::alloc(), items) };
@@ -132,4 +157,31 @@ fn file_url(path: &Path) -> Result<Retained<NSURL>, String> {
             None,
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[test]
+    fn picker_completion_rechecks_focus_once_after_releasing_it() {
+        let calls = Rc::new(Cell::new(0));
+        let completion = Rc::new(PickerCompletion(RefCell::new(None)));
+        let pending = Rc::downgrade(&completion);
+        *completion.0.borrow_mut() = Some(Box::new({
+            let calls = calls.clone();
+            move || {
+                assert!(!pending.upgrade().unwrap().is_pending());
+                calls.set(calls.get() + 1);
+            }
+        }));
+
+        assert!(completion.is_pending());
+        completion.finish();
+        completion.finish();
+        assert!(!completion.is_pending());
+        assert_eq!(calls.get(), 1);
+    }
 }
