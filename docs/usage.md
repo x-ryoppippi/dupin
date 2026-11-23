@@ -2,6 +2,14 @@
 
 Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Space by default; see [configuration](./configuration.md)) shows the panel; pressing it again, Esc, or clicking elsewhere hides it.
 
+## First run
+
+The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, and see which keys switch modes. ⌘Space is Spotlight's shortcut too; to give it to Dupin, turn off Show Spotlight search in System Settings → Keyboard → Keyboard Shortcuts → Spotlight, or choose another hotkey. When another app holds the chord you press, Dupin names it.
+
+The welcome appears once. It is skipped when `history.json` already exists in `~/Library/Application Support/Dupin`, as it does for anyone who used Dupin before. **Show Welcome** in the Settings sidebar brings it back.
+
+Settings → Permissions lists the macOS permissions Dupin's features can use and whether each is granted, with a button to its pane in System Settings. Dupin asks for a permission only when you use a feature that needs it, never at launch or when Settings opens.
+
 ## Keys
 
 | Key                                     | In the panel                                          |

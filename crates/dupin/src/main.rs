@@ -127,6 +127,7 @@ fn main() {
     }));
     let updater = update::Updater::start(config.auto_update, handle.clone(), prefs_handle.clone());
     let current_config = Rc::new(RefCell::new(config.clone()));
+    let welcome = prefs::welcome::first_run();
     let prefs = prefs.init({
         let (config, binding, panel, updater, settings) = (
             current_config.clone(),
@@ -135,10 +136,14 @@ fn main() {
             updater.clone(),
             settings.clone(),
         );
-        move || prefs::Prefs::new(config, binding, panel, updater, settings)
+        move || prefs::Prefs::new(config, binding, panel, updater, settings, welcome)
     });
+    if welcome {
+        prefs_handle.open();
+    }
 
     let hotkey = config.hotkey.clone();
+    let settings_window = prefs_handle.clone();
     let radius = config.theme.corner_radius as f32;
     let mut registered = false;
     let quick_look = Rc::new(RefCell::new(None));
@@ -172,7 +177,10 @@ fn main() {
             install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
-                binding.register_at_launch(&hotkey);
+                binding.register_at_launch(&hotkey, !welcome);
+                if binding.failed_at_launch() {
+                    settings_window.update(|s, _| s.hotkey_failed_at_launch());
+                }
                 settings.activate();
             }
         })

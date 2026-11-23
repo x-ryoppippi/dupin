@@ -1,6 +1,7 @@
 //! The global shortcut that toggles the panel. A failed registration is never silent: it is
 //! logged, posted as a notification when the app can post them, and shown in the panel,
-//! which opens to show it, since an accessory app has no other surface.
+//! which opens to show it, since an accessory app has no other surface. On a first run the
+//! welcome in Settings shows it instead.
 //!
 //! What can't be detected: another app holding the chord through a non-exclusive Carbon
 //! registration (Raycast's, for one). Both registrations succeed and macOS delivers the key
@@ -39,19 +40,21 @@ impl Binding {
         *self.failed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Register the configured hotkey at launch, reporting any failure.
-    pub fn register_at_launch(&self, accelerator: &str) {
+    /// Register the configured hotkey at launch, reporting any failure. Without `announce`,
+    /// a failure is only logged: the first-run welcome shows the hotkey and explains the clash
+    /// itself, and the panel opening over it would bury that.
+    pub fn register_at_launch(&self, accelerator: &str, announce: bool) {
         let shortcut = match parse(accelerator) {
             Ok(Some(shortcut)) => shortcut,
             Ok(None) => return,
-            Err(e) => return self.report(accelerator, &e.to_string()),
+            Err(e) => return self.report(accelerator, &e.to_string(), announce),
         };
         // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
         // (Spotlight's ⌘Space) take the key first without making registration fail, so ask who
         // holds it beforehand. Register anyway: freeing the chord later then works without a
         // restart.
         if let Some(owner) = self.panel.shortcut_owner(&shortcut) {
-            self.report(accelerator, &format!("{owner} already uses it"));
+            self.report(accelerator, &format!("{owner} already uses it"), announce);
         }
         match self
             .panel
@@ -62,7 +65,7 @@ impl Binding {
                     Some(Registration { id, shortcut });
                 crate::trace::registered(accelerator);
             }
-            Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
+            Err(e) => self.report(accelerator, &self.why(&shortcut, &e), announce),
         }
     }
 
@@ -114,13 +117,16 @@ impl Binding {
         self.panel.shortcut_owner(shortcut)
     }
 
-    fn report(&self, accelerator: &str, reason: &str) {
+    fn report(&self, accelerator: &str, reason: &str, announce: bool) {
         *self.failed.lock().unwrap_or_else(|e| e.into_inner()) = true;
         let message = format!(
             "Couldn't register the {} hotkey: {reason}. Free it in the app that holds it, or pick another in Settings (⌘,).",
             keycaps(accelerator)
         );
         crate::log::warn(&message);
+        if !announce {
+            return;
+        }
         notify(&message);
         self.panel.update(move |s, tx| s.show_notice(message, tx));
     }
