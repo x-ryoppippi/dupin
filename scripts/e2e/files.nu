@@ -46,6 +46,14 @@ export def file-actions-stage [out: path] {
         wait-condition 'fixture viewer quitting' { not (viewer-running) }
 
         file-search $out trash-me $found
+        # The accessibility tree only exposes rows near the action list viewport.
+        let anchor = (find-file-action
+            $out
+            file-actions-trash-scroll-anchor
+            'Copy to…'
+        )
+        let scrolled = ad $out file-actions-trash-scroll --headed scroll $anchor.data.match.ref_id --direction down --amount 10
+        if not $scrolled.ok { error make {msg: 'Could not scroll the file action list'} }
         let confirm = log-count $log 'dupin-trace: action-screen confirm'
         click-file-action $out file-actions-trash-review 'Move to Trash'
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
@@ -127,17 +135,21 @@ export def file-actions-stage [out: path] {
 }
 
 def click-file-action [out: path, name: string, title: string] {
-    let action = (poll
+    let action = find-file-action $out $'($name)-button' $title
+    let clicked = ad $out $name click $action.data.match.ref_id
+    if not $clicked.ok { error make {msg: $'Could not activate ($title)'} }
+}
+
+def find-file-action [out: path, name: string, title: string]: nothing -> record {
+    (poll
         $out
-        $'($name)-button'
+        $name
         {|r|
             let label = $r.data?.match?.name? | default '' | str replace --regex '\s*↩$' '' | str trim
             $r.ok and $r.data?.match?.ref_id? != null and $label == $title
         }
         find --app Dupin --role button --name $title --first
     )
-    let clicked = ad $out $name click $action.data.match.ref_id
-    if not $clicked.ok { error make {msg: $'Could not activate ($title)'} }
 }
 
 def file-row-name [out: path, name: string]: nothing -> string {
