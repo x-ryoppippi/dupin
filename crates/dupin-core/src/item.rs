@@ -48,6 +48,12 @@ pub enum Action {
         paths: Vec<PathBuf>,
     },
     CopyFiles(Vec<PathBuf>),
+    /// Put a clipboard history entry back on the clipboard as it was copied, then, with
+    /// `paste`, paste it into the frontmost app.
+    RestoreClipboardEntry {
+        entry: u64,
+        paste: bool,
+    },
     /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
     DeleteClipboardEntry(u64),
     ClearClipboardHistory,

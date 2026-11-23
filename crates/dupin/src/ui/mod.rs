@@ -53,6 +53,11 @@ use search::spawn_searcher;
 use selection::SelectionRequest;
 use snippets::SnippetRun;
 
+enum PendingPaste {
+    Snippet(SnippetRun),
+    ClipboardEntry(u64),
+}
+
 pub struct Windows {
     pub panel: AppHandle<Ui>,
     pub prefs: AppHandle<crate::prefs::Prefs>,
@@ -105,9 +110,9 @@ pub struct Ui {
     pub(crate) currency: crate::calculator::Currency,
     pub(crate) web: Arc<RwLock<crate::web::WebCatalog>>,
     pub(crate) snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
-    /// A snippet to paste once the panel has closed and the front app has its keys back.
-    paste_after_close: Option<SnippetRun>,
-    /// Why a snippet wasn't pasted, to show once the panel has closed.
+    /// What to paste once the panel has closed and the front app has its keys back.
+    paste_after_close: Option<PendingPaste>,
+    /// Why something wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
     sharing: dupin_mac::sharing::Picker,
     panel_window: Option<rune::WindowHandle>,

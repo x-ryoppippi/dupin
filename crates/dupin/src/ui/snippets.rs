@@ -1,6 +1,6 @@
 use rune::Tx;
 
-use super::{Busy, Ui};
+use super::{Busy, PendingPaste, Ui};
 
 const PASTE_ACCESS_NOTICE: &str = "Copied the snippet. To paste it into the front app as well, allow Dupin in System Settings › Privacy & Security › Accessibility, or turn off Paste snippets in Settings › Search.";
 
@@ -17,19 +17,21 @@ impl Ui {
             text,
             now: dupin_mac::clock::now(),
         };
-        if paste && !rune::tooling::is_headless() && self.may_paste() {
-            self.paste_after_close = Some(snippet);
+        if paste && !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
+            self.paste_after_close = Some(PendingPaste::Snippet(snippet));
         } else {
             self.deliver_snippet(snippet, false, tx);
         }
     }
 
-    fn may_paste(&mut self) -> bool {
+    /// Whether Dupin may paste for the user; when it may not, `notice` explains why once the
+    /// panel has closed, unless macOS is asking right now.
+    pub(super) fn may_paste(&mut self, notice: &str) -> bool {
         if dupin_mac::paste::allowed() {
             return true;
         }
         if !dupin_mac::paste::request_once() {
-            self.notice_after_close = Some(PASTE_ACCESS_NOTICE.into());
+            self.notice_after_close = Some(notice.into());
         }
         false
     }

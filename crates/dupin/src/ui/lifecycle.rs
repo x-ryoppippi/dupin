@@ -7,7 +7,7 @@ use objc2_foundation::NSRect;
 use rune::raw_window_handle::RawWindowHandle;
 use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge, Tx};
 
-use super::{Ui, selection::SelectionRequest};
+use super::{PendingPaste, Ui, selection::SelectionRequest};
 
 // Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
@@ -190,8 +190,10 @@ impl Ui {
                 }
             });
         }
-        if let Some(snippet) = self.paste_after_close.take() {
-            self.deliver_snippet(snippet, true, tx);
+        match self.paste_after_close.take() {
+            Some(PendingPaste::Snippet(snippet)) => self.deliver_snippet(snippet, true, tx),
+            Some(PendingPaste::ClipboardEntry(entry)) => self.deliver_clipboard_entry(entry, true, tx),
+            None => {}
         }
         if let Some(notice) = self.notice_after_close.take() {
             self.show_notice(notice, tx);
