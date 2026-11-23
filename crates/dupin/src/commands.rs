@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use dupin_core::clipboard::ClipboardProvider;
 use dupin_core::{
     CommandId, CommandRegistry, CommandSpec, Config, History, Provider, QueryEligibility, QueryPresentation,
+    Session,
 };
 use dupin_mac::{
     AppsProvider, CalendarProvider, DictionaryProvider, RecentProvider, SpotlightProvider, Target,
@@ -21,7 +22,7 @@ const WEB_FALLBACKS: &str = "web.fallbacks";
 const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub struct Registration {
-    pub registry: CommandRegistry,
+    pub session: Session,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
@@ -84,10 +85,7 @@ fn presentation(
     }
 }
 
-pub fn configured(
-    config: &Config,
-    calendar_fixtures: bool,
-) -> Result<ConfiguredCommands, dupin_core::CommandError> {
+pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::CommandError> {
     let file_limit = config.file_limit.min(MAX_FILE_CANDIDATES);
     let apps_id = id(APPS);
     let files_id = id(FILES);
@@ -199,7 +197,7 @@ pub fn configured(
 
     registry.add_keyword(&contents_id, "in")?;
     registry.add_keyword(&clipboard_id, "clip")?;
-    if config.calendar_enabled || calendar_fixtures {
+    if config.calendar.enabled {
         let calendar = id(CALENDAR);
         let mut spec = CommandSpec::new(
             calendar.clone(),
@@ -210,7 +208,7 @@ pub fn configured(
                 Some("No upcoming events"),
                 Some("No matching events"),
                 true,
-                0.0,
+                5.0,
             ),
         )
         .with_query_eligibility(QueryEligibility::Any);
@@ -245,8 +243,7 @@ pub fn configured(
 pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
-    history: Arc<RwLock<History>>,
-    calendar_fixtures: bool,
+    history: History,
     calendar: CalendarProvider,
     clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
 ) -> Result<Registration, dupin_core::CommandError> {
@@ -254,7 +251,8 @@ pub fn register(
         registry,
         notice,
         web,
-    } = configured(config, calendar_fixtures)?;
+    } = configured(config)?;
+    let session = Session::new(history, registry)?;
     let web = Arc::new(RwLock::new(web));
     let apps_id = id(APPS);
     let files_id = id(FILES);
@@ -265,7 +263,7 @@ pub fn register(
         (apps_id, apps.clone() as Arc<dyn Provider>),
         (
             recent_id(),
-            Arc::new(RecentProvider::new(apps, history)) as Arc<dyn Provider>,
+            Arc::new(RecentProvider::new(apps, session.recent_history())) as Arc<dyn Provider>,
         ),
         (id(CALENDAR), Arc::new(calendar) as Arc<dyn Provider>),
         (
@@ -303,7 +301,7 @@ pub fn register(
     .into();
 
     Ok(Registration {
-        registry,
+        session,
         providers,
         notice,
         web,
@@ -320,8 +318,7 @@ mod tests {
         use dupin_core::{Effect, Session};
 
         let mut config = Config::default();
-        let mut session =
-            Session::new(History::default(), configured(&config, false).unwrap().registry).unwrap();
+        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
         assert!(matches!(
             session.refresh().as_slice(),
             [Effect::Search { command, query, .. }] if *command == recent_id() && query.is_empty()
@@ -329,7 +326,7 @@ mod tests {
 
         config.show_recent = false;
         session
-            .set_commands(configured(&config, false).unwrap().registry)
+            .set_commands(configured(&config).unwrap().registry)
             .unwrap();
         assert_eq!(session.refresh(), [Effect::CancelSearch]);
         assert!(session.items().is_empty());
@@ -339,11 +336,10 @@ mod tests {
     fn calendar_queries_use_an_opt_in_explicit_route_with_upcoming_results() {
         use dupin_core::{Action, Delivery, Effect, Intent, Request, Session};
 
-        let base = configured(&Config::default(), false).unwrap();
+        let base = configured(&Config::default()).unwrap();
         assert!(base.registry.keyword("cal").is_none());
-        let enabled = Config::parse("calendar_enabled = true").unwrap();
-        let mut session =
-            Session::new(History::default(), configured(&enabled, false).unwrap().registry).unwrap();
+        let enabled = Config::parse("[calendar]\nenabled = true").unwrap();
+        let mut session = Session::new(History::default(), configured(&enabled).unwrap().registry).unwrap();
         let calendar = id(CALENDAR);
         let ordinary = session.set_query("cal");
         assert!(
@@ -395,7 +391,7 @@ mod tests {
     fn web_results_use_the_registered_session_action_and_completion_paths() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
 
-        let configured = configured(&Config::default(), false).unwrap();
+        let configured = configured(&Config::default()).unwrap();
         let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         let effects = session.set_query("g");
@@ -461,7 +457,7 @@ mod tests {
                     url: "https://clips.example/?q={query}".into(),
                 },
             );
-            let configured = configured(&config, false).unwrap();
+            let configured = configured(&config).unwrap();
             assert_eq!(configured.registry.keyword("clip"), Some(&id(CLIPBOARD)));
             assert!(configured.notice.unwrap().contains("web searches were ignored"));
 
@@ -491,7 +487,7 @@ mod tests {
             ..Config::default()
         };
 
-        let configured = configured(&config, false).unwrap();
+        let configured = configured(&config).unwrap();
         let dictionary = id(DICTIONARY);
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
         assert_eq!(configured.registry.keyword("look up"), Some(&dictionary));
@@ -528,7 +524,7 @@ mod tests {
                 file_limit: requested,
                 ..Config::default()
             };
-            let configured = configured(&config, false).unwrap();
+            let configured = configured(&config).unwrap();
             let session =
                 dupin_core::Session::new(dupin_core::History::default(), configured.registry).unwrap();
             let names = session.provider_spec(&id(FILES)).unwrap();

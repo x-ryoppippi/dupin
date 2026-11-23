@@ -18,7 +18,6 @@ pub struct Config {
     pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
-    pub calendar_enabled: bool,
     /// Web search keywords and their URL templates. `{query}` is replaced when selected.
     pub web_searches: BTreeMap<String, WebSearch>,
     /// Web search keywords offered when no regular results match.
@@ -33,7 +32,14 @@ pub struct Config {
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
     pub theme: Theme,
+    pub calendar: Calendar,
     pub clipboard: Clipboard,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Calendar {
+    pub enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -143,7 +149,6 @@ impl Default for Config {
             .map(str::to_owned)
             .collect(),
             dictionary_keywords: vec!["define".into(), "d".into()],
-            calendar_enabled: false,
             web_searches: BTreeMap::from([
                 (
                     "g".into(),
@@ -173,6 +178,7 @@ impl Default for Config {
             auto_update: true,
             backdrop: Backdrop::Off,
             theme: Theme::default(),
+            calendar: Calendar::default(),
             clipboard: Clipboard::default(),
         }
     }

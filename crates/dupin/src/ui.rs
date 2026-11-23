@@ -10,7 +10,6 @@ use std::sync::{Arc, RwLock};
 
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
-    session::Results,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
 use rune::{
@@ -241,7 +240,6 @@ pub struct Ui {
     next_lookup: u64,
     notice_until: Option<f64>,
     pub session: Session,
-    recent_history: Arc<RwLock<History>>,
     pub query: TextEdit,
     /// A problem to show above the results until the panel next hides (a hotkey that
     /// couldn't be registered, a broken config file).
@@ -392,9 +390,7 @@ impl Ui {
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
-        let recent_history = Arc::new(RwLock::new(history.clone()));
-        let headless = rune::tooling::is_headless();
-        let calendar = if headless {
+        let calendar = if rune::tooling::is_headless() {
             dupin_mac::CalendarProvider::fixtures()
         } else {
             let panel = me.clone();
@@ -410,8 +406,7 @@ impl Ui {
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
-            recent_history.clone(),
-            headless,
+            history,
             calendar,
             clipboard.history(),
         )
@@ -451,8 +446,9 @@ impl Ui {
                 )
             })
             .collect();
-        let sources = registration.registry.ids();
+        let sources = registration.session.command_ids();
         snapshots.update(move |s, _| s.set_sources(sources));
+        me.update(|s, tx| s.refresh_apps(tx));
         let mut query = TextEdit::new("");
         query.focused = true;
         Ui {
@@ -464,9 +460,7 @@ impl Ui {
             next_lookup: 0,
             notice_until: None,
             acknowledged_config: config.clone(),
-            session: Session::new(history, registration.registry)
-                .expect("built-in command registration is valid"),
-            recent_history,
+            session: registration.session,
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
@@ -516,8 +510,8 @@ impl Ui {
             changed
         };
         let clipboard_changed = self.clipboard.apply(&config.clipboard);
-        let registration = crate::commands::configured(config, rune::tooling::is_headless())
-            .expect("built-in command registration is valid");
+        let registration =
+            crate::commands::configured(config).expect("built-in command registration is valid");
         let web_changed = {
             let mut web = self.web.write().unwrap();
             let changed = *web != registration.web;
@@ -525,32 +519,25 @@ impl Ui {
             changed
         };
         let sources = registration.registry.ids();
-        if !sources.iter().any(|id| id == self.session.command_id().as_str()) {
-            let effects = self.session.reset();
-            self.apply(effects, tx);
-            self.action_screen = None;
-            if let Some(picker) = &mut self.picker {
-                picker.original.clear();
-            } else {
-                self.query.clear();
-            }
-        }
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let recent_changed = config.show_recent
             != self
                 .session
                 .provider_spec(&crate::commands::recent_id())
                 .is_some();
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
         let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
         let empty = self.session.query().trim().is_empty();
-        if self.session.command().result_limit != previous_limit
+        if !effects.is_empty() {
+            self.apply(effects, tx);
+        } else if self.session.command().result_limit != previous_limit
             || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
-            || (recent_changed && self.shown && is_apps && empty)
+            || (recent_changed && is_apps && empty)
             || (clipboard_changed && self.session.command_id().as_str() == crate::commands::CLIPBOARD)
         {
             self.action_screen = None;
@@ -714,14 +701,6 @@ impl Ui {
 
     fn show(&mut self, tx: &mut Tx) {
         crate::trace::summoned();
-        if !self.shown
-            && self.picker.is_none()
-            && self.session.query().trim().is_empty()
-            && self.session.results() == Results::Idle
-        {
-            let effects = self.session.refresh();
-            self.apply(effects, tx);
-        }
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
         }
@@ -760,9 +739,12 @@ impl Ui {
             self.finish_pick(None, tx);
             return;
         }
+        if !self.shown {
+            return;
+        }
         let effects = self.session.reset();
-        self.apply(effects, tx);
         self.hide(tx);
+        self.apply(effects, tx);
     }
 
     fn prepare_settings(&mut self) {
@@ -1229,7 +1211,7 @@ impl Ui {
     }
 
     fn refresh_apps(&mut self, tx: &mut Tx) {
-        if self.shown && self.session.command_id().as_str() == crate::commands::APPS {
+        if self.session.command_id().as_str() == crate::commands::APPS {
             let effects = self.session.refresh();
             self.apply(effects, tx);
         }
@@ -1288,16 +1270,16 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
-                Effect::ReplaceQuery(text) => self.query.replace_text(text),
-                Effect::SaveHistory => {
-                    let history = self.session.history();
-                    self.recent_history
-                        .write()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .clone_from(history);
-                    self.saver.save(history);
+                Effect::ClearQuery => {
+                    self.action_screen = None;
+                    if let Some(picker) = &mut self.picker {
+                        picker.original.clear();
+                    } else {
+                        self.query.clear();
+                    }
                 }
+                Effect::ReplaceQuery(text) => self.query.replace_text(text),
+                Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
@@ -1597,7 +1579,7 @@ mod config_tests {
         let base = Config::default();
         let mut session = Session::new(
             History::default(),
-            crate::commands::configured(&base, false).unwrap().registry,
+            crate::commands::configured(&base).unwrap().registry,
         )
         .unwrap();
         let effects = session.set_query("example");
@@ -1619,7 +1601,7 @@ mod config_tests {
         themed.theme.row_height = 100;
         themed.theme.light.accent = Some("#123456".into());
         session
-            .set_commands(crate::commands::configured(&themed, false).unwrap().registry)
+            .set_commands(crate::commands::configured(&themed).unwrap().registry)
             .unwrap();
         assert_eq!(
             (

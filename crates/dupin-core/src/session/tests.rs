@@ -47,7 +47,7 @@ fn confirmed_consumption_cannot_run_from_normal_activation() {
             action: Action::Trash("/file".into())
         }]
     );
-    assert_eq!(s.history(), &history);
+    assert_eq!(&*s.history(), &history);
     s.set_query("other");
     assert!(s.run_confirmed_key_action(&key, "trash").is_empty());
 }
@@ -454,6 +454,31 @@ fn up_can_return_to_the_first_suggestion_after_moving_down() {
 }
 
 #[test]
+fn opening_a_result_starts_the_empty_search_with_the_new_pick() {
+    let (mut s, default, recent) = session_with_empty_provider();
+    let history = s.recent_history();
+    let generation = searched(&s.set_query("example")).1;
+    s.deliver_from(
+        default,
+        Delivery::Batch {
+            generation,
+            items: vec![item("example")],
+        },
+    );
+
+    let effects = s.intent(Intent::Open).unwrap();
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [Effect::Run(_), Effect::SaveHistory, Effect::Hide, Effect::Search { command, query, .. }]
+                if *command == recent && query.is_empty()
+        ),
+        "{effects:?}"
+    );
+    assert_eq!(history.ranked_ids(), ["/x/example"]);
+}
+
+#[test]
 fn removing_the_only_empty_query_provider_cancels_and_rejects_its_delivery() {
     let (mut s, _, empty) = session_with_empty_provider();
     let generation = searched(&s.refresh()).1;
@@ -523,7 +548,7 @@ fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
         assert_eq!(s.items(), before);
         assert_eq!(s.result_key(1), key);
         assert_eq!(s.selected_item(), before.get(1));
-        assert_eq!(s.history(), &History::default());
+        assert_eq!(&*s.history(), &History::default());
         assert!(s.queries.is_empty());
     }
 }
@@ -556,7 +581,7 @@ fn keep_open_actions_cannot_preview_stale_or_retained_results() {
         vec![Effect::Run(Action::Preview("/x/notes.md".into()))]
     );
     assert_eq!(s.query(), "new");
-    assert_eq!(s.history(), &History::default());
+    assert_eq!(&*s.history(), &History::default());
 }
 
 #[test]
@@ -616,7 +641,7 @@ fn retained_rows_are_not_actionable_until_the_new_search_replaces_them() {
         assert!(s.run_key_action(&old_key, "open").is_empty());
         let retained_key = s.result_key(0);
         assert!(s.run_key_action(&retained_key, "open").is_empty());
-        assert_eq!(s.history(), &History::default());
+        assert_eq!(&*s.history(), &History::default());
         s.deliver(Delivery::Batch {
             generation,
             items: vec![item("new.md")],
@@ -658,7 +683,7 @@ fn opening_a_dictionary_result_does_not_change_ranking_history() {
     let effects = s.run_key_action(&key, "dictionary");
     assert!(effects.contains(&Effect::Run(action)));
     assert!(!effects.contains(&Effect::SaveHistory));
-    assert_eq!(s.history(), &history);
+    assert_eq!(&*s.history(), &history);
 }
 
 #[test]
@@ -1096,7 +1121,7 @@ fn command_enter_reveals_in_the_file_manager() {
         effects.contains(&Effect::CancelSearch),
         "the unfinished search stops: {effects:?}"
     );
-    assert_eq!(effects.last(), Some(&Effect::Hide));
+    assert!(effects.contains(&Effect::Hide));
 }
 
 #[test]
@@ -1406,7 +1431,7 @@ fn dictionary_words_are_recalled_without_opening_dictionary() {
     let effects = s.intent(Intent::Up).unwrap();
     assert_eq!(effects[0], Effect::ReplaceQuery("serendipity".into()));
     assert_eq!(searched(&effects[1..]).0, dictionary_command());
-    assert_eq!(s.history(), &History::default());
+    assert_eq!(&*s.history(), &History::default());
 }
 
 #[test]
