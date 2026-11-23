@@ -15,6 +15,7 @@ pub(super) const FEATURE: Feature = Feature {
     prepare,
     start,
     reload,
+    ..Feature::EMPTY
 };
 
 fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {

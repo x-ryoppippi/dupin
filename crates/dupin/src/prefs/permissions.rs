@@ -8,49 +8,40 @@ use rune_kit::{Badge, BadgeVariant, Button, Kit};
 
 use super::Prefs;
 use super::controls::{card, note, setting};
+use crate::features::{Capability, PermissionUse, permission_uses};
 use crate::icons;
 
-/// A permission and the features that use it. A feature that needs a permission names itself
-/// here, so the page explains why Dupin may ask.
-pub(super) struct Entry {
-    pub permission: Permission,
-    pub used_by: &'static [&'static str],
-}
-
-pub(super) const ENTRIES: &[Entry] = &[
-    Entry {
-        permission: Permission::Accessibility,
-        used_by: &[
-            "focused window display",
-            "selected-text search",
-            "snippet pasting",
-            "window management",
-        ],
-    },
-    Entry {
-        permission: Permission::Calendars,
-        used_by: &["calendar search"],
-    },
+const ROW_ORDER: [Permission; 2] = [Permission::Accessibility, Permission::Calendars];
+const REQUEST_ORDER: [Capability; 3] = [
+    Capability::Permission(Permission::Calendars),
+    Capability::Permission(Permission::Accessibility),
+    Capability::PostEvent,
 ];
 
-fn used_entries() -> impl Iterator<Item = &'static Entry> {
-    ENTRIES.iter().filter(|entry| !entry.used_by.is_empty())
+fn uses_of(permission: Permission) -> impl Iterator<Item = &'static PermissionUse> {
+    permission_uses().filter(move |usage| usage.capability.settings_permission() == permission)
+}
+
+fn used_permissions() -> impl Iterator<Item = Permission> {
+    ROW_ORDER
+        .into_iter()
+        .filter(|&permission| uses_of(permission).next().is_some())
 }
 
 pub(super) fn available() -> bool {
-    used_entries().next().is_some()
+    used_permissions().next().is_some()
 }
 
 /// Status reads are cheap and never prompt, so the page rereads them whenever Settings gains
 /// focus, such as on returning from System Settings.
 pub(super) fn read(calendar: &CalendarAccess) -> Vec<PermissionStatus> {
-    used_entries()
-        .map(|entry| {
+    used_permissions()
+        .map(|permission| {
             if rune::tooling::is_headless() {
                 return PermissionStatus::Access(Access::NotDetermined);
             }
-            match entry.permission {
-                Permission::Accessibility => PermissionStatus::Access(entry.permission.status()),
+            match permission {
+                Permission::Accessibility => PermissionStatus::Access(permission.status()),
                 Permission::Calendars => calendar.status(),
             }
         })
@@ -90,24 +81,18 @@ fn used_by(features: &[&str]) -> Option<String> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Request {
-    Permission(Permission),
-    PostEvent,
-}
-
-fn request_access(calendar: &CalendarAccess, request: Request) {
+fn request_access(calendar: &CalendarAccess, capability: Capability) {
     if cfg!(test) || rune::tooling::is_headless() {
         return;
     }
-    match request {
-        Request::Permission(Permission::Calendars) => calendar.request(),
-        Request::Permission(permission @ Permission::Accessibility) => {
+    match capability {
+        Capability::Permission(Permission::Calendars) => calendar.request(),
+        Capability::Permission(permission @ Permission::Accessibility) => {
             if permission.status() == Access::NotDetermined {
                 dupin_mac::accessibility::request_once();
             }
         }
-        Request::PostEvent => {
+        Capability::PostEvent => {
             if !dupin_mac::paste::allowed() {
                 dupin_mac::paste::request_once();
             }
@@ -115,17 +100,16 @@ fn request_access(calendar: &CalendarAccess, request: Request) {
     }
 }
 
-fn request_enabled(before: &Config, after: &Config, mut request: impl FnMut(Request)) {
-    if !before.calendar.enabled && after.calendar.enabled {
-        request(Request::Permission(Permission::Calendars));
-    }
-    if (!before.window_management && after.window_management)
-        || (before.selection_hotkey.trim().is_empty() && !after.selection_hotkey.trim().is_empty())
-    {
-        request(Request::Permission(Permission::Accessibility));
-    }
-    if !before.snippet_paste && after.snippet_paste {
-        request(Request::PostEvent);
+fn request_enabled(before: &Config, after: &Config, mut request: impl FnMut(Capability)) {
+    for capability in REQUEST_ORDER {
+        if permission_uses().any(|usage| {
+            usage.capability == capability
+                && usage.request_on_enable
+                && !(usage.enabled)(before)
+                && (usage.enabled)(after)
+        }) {
+            request(capability);
+        }
     }
 }
 
@@ -136,8 +120,7 @@ pub(super) fn settings_changed(s: &mut Prefs, before: &Config) {
     s.refresh_permissions();
 }
 
-fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: PermissionStatus) -> El {
-    let permission = entry.permission;
+fn entry_row(s: &Prefs, k: &Kit, index: usize, permission: Permission, status: PermissionStatus) -> El {
     let badge = Badge::new(status_title(status))
         .variant(if status == PermissionStatus::Access(Access::Allowed) {
             BadgeVariant::Accent
@@ -150,7 +133,7 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: Permission
         PermissionStatus::Access(Access::NotDetermined) | PermissionStatus::RequestIncomplete => {
             Button::new("Request Access")
                 .on_press(move |s: &mut Prefs| {
-                    request_access(&s.calendar_access, Request::Permission(permission));
+                    request_access(&s.calendar_access, Capability::Permission(permission));
                     s.refresh_permissions();
                 })
                 .build(k)
@@ -169,17 +152,15 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: Permission
             .build(k)
             .key(format!("permission-{index}-open")),
     };
-    let mut detail = used_by(entry.used_by).unwrap_or_default();
-    if permission == Permission::Calendars && !s.config.calendar.enabled {
-        detail = "Turn on Calendar search in Search to use it.".into();
-    }
-    if permission == Permission::Accessibility
-        && s.config.display != dupin_core::config::DisplaySelection::Active
-        && s.config.selection_hotkey.trim().is_empty()
-        && !s.config.snippet_paste
-        && !s.config.window_management
-    {
-        detail.push_str(". Turn on a feature that uses Accessibility in General or Search.");
+    let features: Vec<_> = uses_of(permission).map(|usage| usage.label).collect();
+    let mut detail = used_by(&features).unwrap_or_default();
+    if !uses_of(permission).any(|usage| (usage.enabled)(&s.config)) {
+        match permission {
+            Permission::Accessibility => {
+                detail.push_str(". Turn on a feature that uses Accessibility in General or Search.");
+            }
+            Permission::Calendars => detail = "Turn on Calendar search in Search to use it.".into(),
+        }
     }
     if status == PermissionStatus::Unavailable {
         detail.push_str(" Open the packaged Dupin.app to grant access.");
@@ -194,10 +175,10 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, entry: &Entry, status: Permission
 }
 
 pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
-    let rows = used_entries()
+    let rows = used_permissions()
         .zip(&s.permissions)
         .enumerate()
-        .map(|(i, (entry, status))| entry_row(s, k, i, entry, *status))
+        .map(|(i, (permission, status))| entry_row(s, k, i, permission, *status))
         .collect();
     vec![
         card(k, hair, rows),
@@ -220,7 +201,10 @@ mod tests {
         let mut requests = Vec::new();
         on.calendar.enabled = true;
         request_enabled(&off, &on, |request| requests.push(request));
-        assert_eq!(requests.as_slice(), &[Request::Permission(Permission::Calendars)]);
+        assert_eq!(
+            requests.as_slice(),
+            &[Capability::Permission(Permission::Calendars)]
+        );
 
         on = off.clone();
         on.window_management = true;
@@ -238,9 +222,9 @@ mod tests {
         assert_eq!(
             &requests[1..],
             [
-                Request::Permission(Permission::Accessibility),
-                Request::Permission(Permission::Accessibility),
-                Request::PostEvent,
+                Capability::Permission(Permission::Accessibility),
+                Capability::Permission(Permission::Accessibility),
+                Capability::PostEvent,
             ]
         );
     }
@@ -260,6 +244,54 @@ mod tests {
         let mut changed = on.clone();
         changed.selection_hotkey = "ctrl+shift+space".into();
         request_enabled(&on, &changed, unexpected);
+        changed = off.clone();
+        changed.display = dupin_core::config::DisplaySelection::Active;
+        request_enabled(&off, &changed, unexpected);
+    }
+
+    #[test]
+    fn simultaneous_enables_request_each_capability_once_in_order() {
+        let off = Config::default();
+        let mut on = off.clone();
+        on.calendar.enabled = true;
+        on.selection_hotkey = "alt+shift+space".into();
+        on.snippet_paste = true;
+        on.window_management = true;
+        let mut requests = Vec::new();
+        request_enabled(&off, &on, |request| requests.push(request));
+        assert_eq!(
+            requests,
+            [
+                Capability::Permission(Permission::Calendars),
+                Capability::Permission(Permission::Accessibility),
+                Capability::PostEvent,
+            ]
+        );
+    }
+
+    #[test]
+    fn permission_rows_list_manifest_features_in_display_order() {
+        let rows: Vec<_> = used_permissions()
+            .map(|permission| {
+                let features: Vec<_> = uses_of(permission).map(|usage| usage.label).collect();
+                (permission, features)
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (
+                    Permission::Accessibility,
+                    vec![
+                        "focused window display",
+                        "selected-text search",
+                        "snippet pasting",
+                        "window management",
+                    ],
+                ),
+                (Permission::Calendars, vec!["calendar search"]),
+            ]
+        );
     }
 
     #[test]

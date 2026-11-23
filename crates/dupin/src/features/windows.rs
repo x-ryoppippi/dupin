@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use dupin_core::{CommandError, CommandSpec, Config};
+use dupin_mac::privacy::Permission;
 
-use super::Feature;
+use super::{Capability, Feature, PermissionUse};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::ui::Ui;
 use crate::window_management::{COMMANDS, WindowProvider};
@@ -13,6 +14,12 @@ pub(super) const FEATURE: Feature = Feature {
     configure,
     start,
     reload,
+    permissions: &[PermissionUse {
+        capability: Capability::Permission(Permission::Accessibility),
+        label: "window management",
+        enabled: |config| config.window_management,
+        request_on_enable: true,
+    }],
     ..Feature::EMPTY
 };
 

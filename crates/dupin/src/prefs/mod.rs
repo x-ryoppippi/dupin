@@ -95,7 +95,7 @@ pub struct Prefs {
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
     login: Option<LoginPreference>,
-    /// Each permission's status, in `permissions::ENTRIES` order, read while the page shows.
+    /// Each visible permission's status in row order, read while the page shows.
     permissions: Vec<PermissionStatus>,
     calendar_access: CalendarAccess,
     /// The first-run welcome's step while it covers the pages.

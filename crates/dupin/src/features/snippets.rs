@@ -3,7 +3,7 @@ use std::sync::Arc;
 use dupin_core::snippets::{SnippetCatalog, SnippetProvider};
 use dupin_core::{CommandError, CommandSpec, Config, QueryEligibility};
 
-use super::Feature;
+use super::{Capability, Feature, PermissionUse};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::ui::Ui;
 
@@ -14,6 +14,12 @@ pub(super) const FEATURE: Feature = Feature {
     prepare,
     start,
     reload,
+    permissions: &[PermissionUse {
+        capability: Capability::PostEvent,
+        label: "snippet pasting",
+        enabled: |config| config.snippet_paste,
+        request_on_enable: true,
+    }],
 };
 
 fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {
