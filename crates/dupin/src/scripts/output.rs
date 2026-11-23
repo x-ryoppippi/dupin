@@ -86,7 +86,7 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                 })
                 .child(text(&run.command.title).font(k.ty.ui_medium).color(k.c.text_base))
                 .child(
-                    text(format!("{:?}", run.status))
+                    text(run.status.to_string())
                         .font(k.ty.small)
                         .color(k.c.text_muted),
                 )
@@ -100,7 +100,7 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
             .child(text(&run.command.title).font(k.ty.ui_medium).color(k.c.text_base))
             .child(
                 text(format!(
-                    "{:?} · {:.1}s · {:?}",
+                    "{} · {:.1}s · {:?}",
                     run.status,
                     run.elapsed.as_secs_f64(),
                     run.command.args
@@ -147,7 +147,11 @@ pub fn view(s: &Output, cx: &mut Cx<Output>) -> El {
                     line.text
                 ))
                 .font(style)
-                .color(k.c.text_base)
+                .color(if line.stream == dupin_core::script::Stream::Stderr {
+                    k.c.danger.fg
+                } else {
+                    k.c.text_base
+                })
                 .wrap()
                 .selectable(true)
                 .key(format!("output-{i}")),

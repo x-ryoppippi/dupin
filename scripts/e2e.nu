@@ -537,7 +537,7 @@ def scripts-stage [out: path] {
             --app
             Dupin
             --name
-            'Exited(Some(3))'
+            'Exit 3'
             --exact
             --first
         ) | ignore

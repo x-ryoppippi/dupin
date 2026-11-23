@@ -167,7 +167,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
         let status = match &card.status {
             Status::Running => "Running… · ⌘. Cancel".into(),
             Status::Exited(Some(0)) => "Finished · Enter to copy".into(),
-            Status::Exited(code) => format!("Exited {code:?}: {}", card.output.stderr_tail()),
+            Status::Exited(_) => format!("{}: {}", card.status, card.output.stderr_tail()),
             Status::Cancelled => "Cancelled".into(),
             Status::Failed(problem) => problem.clone(),
         };
