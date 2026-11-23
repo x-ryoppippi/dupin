@@ -1252,6 +1252,12 @@ impl Ui {
                     tx.focus("query", false);
                     self.query.set_selection(range.start, range.end);
                 }
+                Effect::SelectRenameStem(path) => {
+                    let extension = dupin_mac::file_ops::has_extension(&path);
+                    let end = dupin_core::file_name::stem_len(&self.query.text, extension);
+                    tx.focus("query", false);
+                    self.query.set_selection(0, end);
+                }
                 Effect::Rename { row, path, name } => {
                     let old = file_name(&path);
                     self.on_worker(
@@ -1338,7 +1344,7 @@ impl Ui {
                     }
                     dupin_core::Action::ChooseApplication(_)
                     | dupin_core::Action::Trash(_)
-                    | dupin_core::Action::Rename { .. }
+                    | dupin_core::Action::Rename(_)
                     | dupin_core::Action::ChooseDestination { .. } => {}
                     dupin_core::Action::Duplicate(path) => {
                         let name = file_name(&path);

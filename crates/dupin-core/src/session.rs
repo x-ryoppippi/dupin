@@ -60,6 +60,8 @@ pub enum Effect {
     ReplaceQuery(String),
     /// Select this byte range of the input, focusing it.
     SelectQuery(Range<usize>),
+    /// Focus the input and select the part of the name the platform treats as its stem.
+    SelectRenameStem(PathBuf),
     /// Rename the entry at `path` to `name` in the same folder. `row` is the layout key of the
     /// row showing it, which outlasts searches started while the rename runs.
     Rename {
@@ -102,10 +104,6 @@ pub struct Renaming {
 impl Renaming {
     pub fn path(&self) -> &Path {
         &self.path
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
     }
 
     pub fn layout_key(&self) -> &str {
@@ -476,21 +474,20 @@ impl Session {
         effects
     }
 
-    fn begin_rename(&mut self, path: PathBuf, extension: bool) -> Vec<Effect> {
+    fn begin_rename(&mut self, path: PathBuf) -> Vec<Effect> {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             return Vec::new();
         };
         let name = name.to_owned();
-        let stem = crate::file_name::stem_len(&name, extension);
         self.renaming = Some(Renaming {
             layout_key: self.layout_key(self.search.selected),
-            path,
+            path: path.clone(),
             name: name.clone(),
             query: self.search.query.clone(),
         });
         self.search.selection_held = true;
         self.search.refresh_selection = None;
-        vec![Effect::ReplaceQuery(name), Effect::SelectQuery(0..stem)]
+        vec![Effect::ReplaceQuery(name), Effect::SelectRenameStem(path)]
     }
 
     fn rename_intent(&mut self, intent: Intent) -> Option<Vec<Effect>> {
@@ -557,7 +554,7 @@ impl Session {
             return Vec::new();
         }
         match action.action {
-            Action::Rename { path, extension } => return self.begin_rename(path, extension),
+            Action::Rename(path) => return self.begin_rename(path),
             Action::ChooseDestination { path, transfer } => return self.begin_destination(path, transfer),
             _ => {}
         }

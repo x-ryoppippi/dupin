@@ -12,7 +12,7 @@ pub fn item(path: PathBuf, title: String, matched: Vec<usize>) -> Item {
     item
 }
 
-pub(crate) fn add(item: &mut Item) {
+fn add(item: &mut Item) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };
@@ -37,14 +37,8 @@ pub(crate) fn add(item: &mut Item) {
     }
     // The input edits text, so a name that isn't valid Unicode can't be shown for editing.
     if path.file_name().is_some_and(|name| name.to_str().is_some()) {
-        item.actions.push(ItemAction::new(
-            "rename",
-            "Rename…",
-            Action::Rename {
-                path: path.clone(),
-                extension: crate::file_ops::has_extension(&path),
-            },
-        ));
+        item.actions
+            .push(ItemAction::new("rename", "Rename…", Action::Rename(path.clone())));
     }
     item.actions.extend([
         ItemAction::new(

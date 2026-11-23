@@ -1472,10 +1472,7 @@ fn rename_session() -> (Session, String) {
     row.actions.push(ItemAction::new(
         "rename",
         "Rename…",
-        Action::Rename {
-            path: "/x/report.pdf".into(),
-            extension: true,
-        },
+        Action::Rename("/x/report.pdf".into()),
     ));
     s.deliver(Delivery::Batch {
         generation,
@@ -1495,12 +1492,12 @@ fn rename_puts_the_name_in_the_field_with_its_stem_selected() {
         s.run_key_action(&key, "rename"),
         vec![
             Effect::ReplaceQuery("report.pdf".into()),
-            Effect::SelectQuery(0..6)
+            Effect::SelectRenameStem("/x/report.pdf".into())
         ]
     );
     let renaming = s.renaming().unwrap();
     assert_eq!(renaming.path(), std::path::Path::new("/x/report.pdf"));
-    assert_eq!(renaming.name(), "report.pdf");
+    assert_eq!(renaming.name, "report.pdf");
     assert_eq!(renaming.layout_key(), s.layout_key(1));
     assert_eq!(s.query(), "report");
     assert_eq!(s.history(), &history);
@@ -1623,7 +1620,7 @@ fn editing_a_name_never_searches_and_enter_renames_then_restores_the_search() {
     let (mut s, key) = rename_session();
     s.run_key_action(&key, "rename");
     assert!(s.set_query("summary.pdf").is_empty());
-    assert_eq!(s.renaming().unwrap().name(), "summary.pdf");
+    assert_eq!(s.renaming().unwrap().name, "summary.pdf");
     assert_eq!(s.intent(Intent::Up), Some(Vec::new()));
     assert_eq!(s.intent(Intent::Actions), Some(Vec::new()));
     assert_eq!(s.intent(Intent::Backspace), None);
@@ -1766,10 +1763,7 @@ fn enter_on_an_unchanged_name_leaves_even_when_the_name_is_now_invalid() {
     row.actions.push(ItemAction::new(
         "rename",
         "Rename…",
-        Action::Rename {
-            path: format!("/x/{name}").into(),
-            extension: true,
-        },
+        Action::Rename(format!("/x/{name}").into()),
     ));
     s.deliver(Delivery::Batch {
         generation,
