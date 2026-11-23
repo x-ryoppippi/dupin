@@ -91,7 +91,9 @@ dupin ext check fixture.wasm request.json --json
 dupin ext snap fixture.wasm request.json /tmp/dupin-extension.png --json
 ```
 
-The extension commands accept the bounded versioned guest request contract, execute a
+The extension commands require a build with the optional `extension-tools` Cargo
+feature; ordinary builds do not link the Wasm runtime. They accept the bounded
+versioned guest request contract, execute a
 module through the existing fuel/deadline-limited runtime, and validate its response.
 Imports (including OS/WASI imports) are forbidden. This is a guest-contract tool, not an
 extension loader. Headless rendering shows the returned text/detail/pair views without

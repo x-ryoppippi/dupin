@@ -229,10 +229,7 @@ impl Ui {
             self.query = picker.original;
             self.shown = picker.original_shown;
             if !picker.original_shown {
-                if let Some(previous) = self.restore_input.take() {
-                    previous.restore();
-                }
-                tx.close_window();
+                self.hide(tx);
             }
             tx.instant();
             picker.call.finish(value.ok_or_else(|| "Cancelled".into()));
@@ -407,6 +404,7 @@ impl Ui {
             }
             Err(error) => Some(error),
         };
+        let save_error = problem.clone().or_else(|| update.save_problem.clone());
         let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
             .into_iter()
             .flatten()
@@ -424,7 +422,7 @@ impl Ui {
             .is_some_and(|(revision, _)| *revision <= update.revision)
         {
             let (_, call) = self.control_save.take().unwrap();
-            call.finish(match &problem {
+            call.finish(match &save_error {
                 Some(error) => Err(error.clone()),
                 None => serde_json::to_value(&*self.configuration.values.borrow())
                     .map_err(|_| "could not encode settings".into()),
