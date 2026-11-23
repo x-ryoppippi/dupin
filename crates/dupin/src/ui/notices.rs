@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
 use dupin_core::item::Transfer;
+use rune::Tx;
+
+use super::Ui;
 
 #[derive(PartialEq, Eq)]
 pub(super) enum FileAction {
@@ -68,6 +71,38 @@ impl Notices {
             return true;
         }
         false
+    }
+}
+
+impl Ui {
+    pub fn show_notice(&mut self, message: String, tx: &mut Tx) {
+        self.show_persistent_notice(message, None, tx);
+    }
+
+    pub(super) fn show_persistent_notice(
+        &mut self,
+        message: String,
+        owner: Option<FileOperation>,
+        tx: &mut Tx,
+    ) {
+        self.notices.persistent(message, owner);
+        tx.instant();
+        self.show(tx);
+    }
+
+    pub fn notice(&self) -> Option<&str> {
+        self.notices.message()
+    }
+
+    pub(super) fn timed_notice(&mut self, notice: String, tx: &mut Tx) {
+        self.show_timed_notice(notice, None, tx);
+    }
+
+    pub(super) fn show_timed_notice(&mut self, message: String, owner: Option<&FileOperation>, tx: &mut Tx) {
+        let until = tx.clock() + 5.0;
+        if self.notices.timed(message, owner, until) {
+            tx.wake_at(until);
+        }
     }
 }
 
