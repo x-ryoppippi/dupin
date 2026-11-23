@@ -124,18 +124,11 @@ mod tests {
     #[test]
     fn a_non_unicode_basename_hides_actions_that_require_a_usable_name() {
         let path = PathBuf::from(OsStr::from_bytes(b"/fixture/file-\xff.txt"));
-        let item = item(path, "Example".into(), vec![]);
+        let item = item(path.clone(), "Example".into(), vec![]);
+        assert_eq!(item.payload.paths, [path]);
         assert_eq!(
             item.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
-            [
-                "open",
-                "open-with",
-                "reveal",
-                "quick-look",
-                "copy-path",
-                "copy-name",
-                "trash"
-            ]
+            ["open", "open-with", "reveal", "quick-look", "copy-name", "trash"]
         );
     }
 
