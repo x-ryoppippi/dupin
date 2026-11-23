@@ -7,7 +7,7 @@ use objc2_app_kit::{NSScreen, NSWorkspace};
 use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-use crate::permission::Permission;
+use crate::accessibility;
 
 const MESSAGING_TIMEOUT_SECONDS: f32 = 0.25;
 const AX_ATTRIBUTE_UNSUPPORTED: i32 = -25205;
@@ -82,14 +82,13 @@ pub fn arrange(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Err
     if displays.is_empty() {
         return Err(Error::NoDisplay);
     }
-    let permission = Permission::Accessibility;
-    if !permission.is_granted() {
-        permission.request_once();
+    if !accessibility::is_trusted() {
+        accessibility::request_once();
         return Err(Error::PermissionRequired);
     }
 
     arrange_trusted(pid, layout, displays).map_err(|error| {
-        if permission.is_granted() {
+        if accessibility::is_trusted() {
             error
         } else {
             Error::PermissionRequired

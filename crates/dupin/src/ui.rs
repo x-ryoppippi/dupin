@@ -1372,7 +1372,7 @@ impl Ui {
             return;
         }
         self.window_permission_required = false;
-        let url = dupin_mac::permission::Permission::Accessibility.settings_url();
+        let url = dupin_mac::accessibility::SETTINGS_URL;
         self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url.into()));
         self.dismiss(tx);
     }
