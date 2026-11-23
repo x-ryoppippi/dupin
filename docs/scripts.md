@@ -1,6 +1,6 @@
 # Script commands
 
-Install executable scripts in `$XDG_CONFIG_HOME/dupin/scripts/`, or `~/.config/dupin/scripts/` when `XDG_CONFIG_HOME` is unset. Dupin searches their titles alongside applications. Scripts run only when you activate a result or choose Run again; discovery, searching and reloading do not execute them.
+Install executable scripts in `$XDG_CONFIG_HOME/dupin/scripts/`, or `~/.config/dupin/scripts/` when `XDG_CONFIG_HOME` is unset. Dupin searches their titles alongside applications. You can run them from a result, a hotkey or Run again. Discovery, searching and reloading do not execute them.
 
 ```sh
 #!/bin/sh
@@ -22,6 +22,12 @@ Argument declarations use `name` for a required value, `name?` for an optional v
 Quotes group input into arguments. Backslashes escape characters outside quotes; double quotes allow escaped quotes and backslashes. Dupin passes the resulting values directly as argv. It does not expand variables, globs or `~`, and it does not invoke a shell to interpret the argument field. The limit is 64 arguments and 64 KiB of argument text.
 
 Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and reads at most 8 KiB or 64 lines. Dupin discovers up to 200 executable files at the top level, including symlinks, and ignores hidden files and editor backups. Settings → Search shows script discovery warnings for non-executable files, invalid headers and unknown metadata keys.
+
+## Hotkeys
+
+Use a [script binding](./configuration.md#hotkeys) to run a script by its filename. Each string in `args` becomes one argument. Omit `args` for a script that can run without arguments. Dupin checks the filename and arguments against the discovered script when loading the configuration.
+
+The script's output mode controls what the shortcut opens. `inline` opens the panel with the inline card. `full` opens Script Output. `silent` opens Script Output on failure.
 
 ## Output and cancellation
 

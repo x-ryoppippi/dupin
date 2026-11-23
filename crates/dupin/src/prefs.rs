@@ -479,6 +479,20 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                     vec![card(k, hair, rows)]
                 })
                 .children(
+                    (s.page == Page::General && !s.config.bindings.is_empty()).then(|| {
+                        col()
+                            .key("configured-hotkeys")
+                            .gap(4.0)
+                            .child(
+                                text("Configured hotkeys")
+                                    .mx(ROW_PX)
+                                    .font(k.ty.body_medium)
+                                    .color(k.c.text_base),
+                            )
+                            .child(card(k, hair, configured_hotkeys(s, k)))
+                    }),
+                )
+                .children(
                     s.scripts_notice
                         .as_ref()
                         .filter(|_| s.page == Page::Search)
@@ -720,6 +734,33 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             relaunch,
         ),
     ]
+}
+
+fn configured_hotkeys(s: &Prefs, k: &Kit) -> Vec<El> {
+    use dupin_core::config::HotkeyTarget;
+
+    s.config
+        .bindings
+        .iter()
+        .map(|(chord, target)| {
+            let keys = chord
+                .parse::<Shortcut>()
+                .map_or_else(|_| chord.clone(), |shortcut| shortcut.keycaps().join(""));
+            let (kind, name) = match target {
+                HotkeyTarget::App { bundle_id, .. } => ("App", bundle_id),
+                HotkeyTarget::Command { command } => ("Command", command),
+                HotkeyTarget::Script { script, .. } => ("Script", script),
+            };
+            setting(
+                k,
+                &icons::KEYBOARD,
+                kind,
+                Some(name),
+                text(keys).font(k.ty.ui).color(k.c.text_base),
+            )
+            .key(chord)
+        })
+        .collect()
 }
 
 fn search(s: &Prefs, k: &Kit) -> Vec<El> {

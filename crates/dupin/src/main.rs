@@ -36,7 +36,7 @@ fn main() {
         return;
     }
     rune::prewarm_gpu();
-    let (config, config_problem) = settings::load();
+    let (config, startup) = settings::load();
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
     let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
@@ -178,7 +178,7 @@ fn main() {
                     updater,
                     configuration,
                     history,
-                    config_problem,
+                    startup,
                     quick_look,
                     running,
                 )

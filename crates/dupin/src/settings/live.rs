@@ -219,6 +219,7 @@ where
                         original_base.as_ref().filter(|_| index == 0),
                     )?;
                 }
+                super::scripts_for_bindings(path, &current)?;
                 let source =
                     toml::to_string(&current).map_err(|_| "could not encode config.toml".to_owned())?;
                 ensure_unchanged(path, original_source.as_deref())?;
@@ -356,7 +357,12 @@ fn read(path: &Path) -> (Option<String>, Result<Config, String>, bool) {
     let read_only = !super::writable(path);
     match super::read_source(path) {
         Ok(source) => {
-            let result = Config::parse(&source).map_err(|error| parse_problem(&source, &error));
+            let result = Config::parse(&source)
+                .map_err(|error| parse_problem(&source, &error))
+                .and_then(|config| {
+                    super::scripts_for_bindings(path, &config)?;
+                    Ok(config)
+                });
             (Some(source), result, read_only)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => (None, Ok(Config::default()), read_only),
@@ -496,6 +502,63 @@ mod tests {
                 return update;
             }
         }
+    }
+
+    #[test]
+    fn reload_validates_script_bindings_against_discovered_headers() {
+        use dupin_core::script::OutputMode;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = TempDir::new();
+        let directory = root.path().join("scripts");
+        fs::create_dir(&directory).unwrap();
+        let config_path = root.path().join("config.toml");
+        let source = r#"
+[bindings."alt+cmd+t"]
+target = "script"
+script = "fixture.sh"
+args = ["a b", "$HOME * ~"]
+"#;
+        fs::write(&config_path, source).unwrap();
+        let script_path = directory.join("fixture.sh");
+        let header = "#!/bin/sh\n# @dupin.output full\n# @dupin.argument message\n# @dupin.argument note?\n";
+        fs::write(&script_path, format!("{header}touch executed\n")).unwrap();
+        assert!(read(&config_path).1.unwrap_err().contains("was not found"));
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let config = read(&config_path).1.unwrap();
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+        let catalog = super::super::scripts_for_bindings(&config_path, &config).unwrap();
+        let args = vec!["a b".to_owned(), "$HOME * ~".to_owned()];
+        let run = catalog
+            .bound_script("fixture.sh", &args)
+            .unwrap()
+            .run(args.clone());
+        assert_eq!(run.path, script_path);
+        assert_eq!(run.args, args);
+        assert_eq!(run.mode, OutputMode::Full);
+        assert!(catalog.bound_script("../fixture.sh", &args).is_err());
+        assert!(catalog.bound_script("fixture.sh", &["bad\0arg".into()]).is_err());
+
+        fs::write(
+            &config_path,
+            source
+                .lines()
+                .filter(|line| !line.starts_with("args"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .unwrap();
+        assert!(read(&config_path).1.unwrap_err().contains("Needs message"));
+        fs::write(
+            &script_path,
+            "#!/bin/sh\n# @dupin.output silent\ntouch executed\n",
+        )
+        .unwrap();
+        assert!(read(&config_path).1.is_ok());
+        fs::write(&config_path, source).unwrap();
+        assert!(read(&config_path).1.unwrap_err().contains("Too many arguments"));
+        assert!(!root.path().join("executed").exists());
     }
 
     #[test]

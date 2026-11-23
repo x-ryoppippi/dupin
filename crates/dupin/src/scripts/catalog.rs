@@ -3,7 +3,11 @@ use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use dupin_core::script::Header;
+use dupin_core::{
+    Config,
+    config::HotkeyTarget,
+    script::{Header, ScriptRun},
+};
 
 const MAX_SCRIPTS: usize = 200;
 
@@ -13,6 +17,17 @@ pub struct Script {
     pub header: Header,
 }
 
+impl Script {
+    pub fn run(&self, args: Vec<String>) -> ScriptRun {
+        ScriptRun {
+            path: self.path.clone(),
+            title: self.header.title.clone(),
+            args,
+            mode: self.header.mode,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Catalog {
     pub scripts: BTreeMap<PathBuf, Script>,
@@ -20,6 +35,27 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    pub fn bound_script(&self, name: &str, args: &[String]) -> Result<&Script, String> {
+        let script = self
+            .scripts
+            .values()
+            .find(|script| script.path.file_name().is_some_and(|file| file == name))
+            .ok_or_else(|| format!("Script {name:?} was not found in the scripts directory"))?;
+        script.header.bind_args(args)?;
+        Ok(script)
+    }
+
+    pub fn validate_bindings(&self, config: &Config) -> Result<(), String> {
+        for (shortcut, target) in &config.bindings {
+            if let HotkeyTarget::Script { script, args } = target {
+                self.bound_script(script, args).map_err(|problem| {
+                    format!("Invalid script binding {shortcut:?} for {script:?}. {problem}.")
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn scan(directory: &Path) -> Self {
         let entries = match std::fs::read_dir(directory) {
             Ok(entries) => entries,

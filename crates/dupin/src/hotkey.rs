@@ -275,7 +275,7 @@ fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shor
                 Some("an app bundle identifier")
             }
             HotkeyTarget::Command { command } if command.trim().is_empty() => Some("a shell command"),
-            HotkeyTarget::App { .. } | HotkeyTarget::Command { .. } => None,
+            HotkeyTarget::App { .. } | HotkeyTarget::Command { .. } | HotkeyTarget::Script { .. } => None,
         };
         if let Some(required) = problem {
             return Err(format!("{} needs {required}.", shortcut.keycaps().join(""),));

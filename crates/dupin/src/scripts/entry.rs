@@ -32,12 +32,7 @@ impl Entry {
     fn command(&self) -> Result<ScriptRun, String> {
         let args = split_args(&self.query.text)?;
         self.script.header.bind_args(&args)?;
-        Ok(ScriptRun {
-            path: self.script.path.clone(),
-            title: self.script.header.title.clone(),
-            args,
-            mode: self.script.header.mode,
-        })
+        Ok(self.script.run(args))
     }
 
     pub fn is_current(&self, session: &Session, catalog: &super::catalog::Catalog) -> bool {

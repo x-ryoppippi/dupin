@@ -372,15 +372,20 @@ impl Ui {
         }
     }
     fn finish_pick(&mut self, value: Option<serde_json::Value>, tx: &mut Tx) {
-        if let Some(picker) = self.picker.take() {
-            self.query = picker.original;
-            self.shown = picker.original_shown;
-            if !picker.original_shown {
+        if let Some(call) = self.restore_picker() {
+            if !self.shown {
                 self.hide(tx);
             }
             tx.instant();
-            picker.call.finish(value.ok_or_else(|| "Cancelled".into()));
+            call.finish(value.ok_or_else(|| "Cancelled".into()));
         }
+    }
+
+    fn restore_picker(&mut self) -> Option<crate::control::Call> {
+        let picker = self.picker.take()?;
+        self.query = picker.original;
+        self.shown = picker.original_shown;
+        Some(picker.call)
     }
 
     /// Cursor-only redraws do not emit Rune input-change callbacks.
@@ -400,7 +405,7 @@ impl Ui {
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
-        notice: Option<String>,
+        startup: crate::settings::Startup,
         quick_look: Rc<RefCell<Option<Previewer>>>,
         running: Arc<AtomicUsize>,
     ) -> Ui {
@@ -414,6 +419,7 @@ impl Ui {
         let apps_provider = Arc::new(AppsProvider::standard());
         let registration = crate::commands::register(&config, apps_provider.clone())
             .expect("built-in command registration is valid");
+        *registration.scripts.write().unwrap() = startup.scripts;
         let runner = crate::scripts::runner::Runner::new(
             std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
@@ -484,7 +490,7 @@ impl Ui {
             saver: crate::store::Saver::spawn(),
             query,
             notice: None,
-            config_problem: notice,
+            config_problem: startup.notice,
             registration_notice: registration.notice,
             icons: HashMap::new(),
             shown: false,
@@ -716,6 +722,9 @@ impl Ui {
             Some(Target::Configured(HotkeyTarget::Command { command })) => {
                 self.run_hotkey_command(shortcut, command, tx);
             }
+            Some(Target::Configured(HotkeyTarget::Script { script, args })) => {
+                self.run_hotkey_script(&script, args, tx);
+            }
             None => (),
         }
     }
@@ -737,6 +746,42 @@ impl Ui {
                 ),
                 tx,
             );
+        }
+    }
+
+    fn run_hotkey_script(&mut self, name: &str, args: Vec<String>, tx: &mut Tx) {
+        use dupin_core::script::OutputMode;
+
+        let command = self
+            .scripts
+            .read()
+            .unwrap()
+            .bound_script(name, &args)
+            .map(|script| script.run(args));
+        let command = match command {
+            Ok(command) => command,
+            Err(problem) => {
+                self.show_notice(format!("Couldn't run {name:?}. {problem}."), tx);
+                return;
+            }
+        };
+        let mode = command.mode;
+        let start = self.runner.start(command);
+        let visible = self.me.is_visible();
+        let picker = self.restore_picker();
+        if mode == OutputMode::Inline {
+            self.action_screen = None;
+            self.script_entry = None;
+            if !self.shown {
+                self.show(tx);
+            }
+        }
+        self.present_script(mode, start, tx);
+        if mode != OutputMode::Inline && visible {
+            self.dismiss(tx);
+        }
+        if let Some(picker) = picker {
+            picker.finish(Err("Cancelled".into()));
         }
     }
 
@@ -1327,6 +1372,7 @@ impl Ui {
             changed
         };
         if changed {
+            self.configuration.files.activate();
             self.refresh_default(tx);
         }
     }
@@ -1428,17 +1474,32 @@ impl Ui {
     }
 
     fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
-        use dupin_core::script::OutputMode;
         let mode = command.mode;
         let start = self.launch_script(command);
+        self.present_script(mode, start, tx);
+    }
+
+    fn present_script(
+        &mut self,
+        mode: dupin_core::script::OutputMode,
+        start: crate::scripts::runner::Start,
+        tx: &mut Tx,
+    ) {
+        use dupin_core::script::OutputMode;
         match mode {
             OutputMode::Inline => {
                 self.script_card = self.runner.snapshot(start.id);
                 tx.focus("query", false);
             }
-            OutputMode::Full => self.script_output_after_close = Some(start.id),
-            OutputMode::Silent if start.refused => self.script_output_after_close = Some(start.id),
-            OutputMode::Silent => {}
+            OutputMode::Silent if !start.refused => {}
+            OutputMode::Full | OutputMode::Silent => {
+                if self.me.is_visible() {
+                    self.script_output_after_close = Some(start.id);
+                } else {
+                    self.show_script_output(start.id);
+                    return;
+                }
+            }
         }
         if self.script_output_after_close.is_none() && self.script_output.is_visible() {
             let runs = self.runner.snapshots();

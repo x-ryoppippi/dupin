@@ -50,7 +50,16 @@ Dupin runs commands in the background from your home directory using `$SHELL -lc
 
 Commands share [the script runner's lifecycle](./scripts.md#output-and-cancellation). They can run until they exit, or until Dupin quits or relaunches. A background job can keep running after its shell exits, which frees the command slot. Redirect that job's standard error if it needs to keep writing after Dupin quits.
 
-Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
+A [script binding](./scripts.md#hotkeys) uses the executable's filename, including its extension, and can pass an array of arguments.
+
+```toml
+[bindings."alt+cmd+t"]
+target = "script"
+script = "echo-message.sh"
+args = ["Hello from Dupin"]
+```
+
+Each shortcut must be distinct from the panel shortcut and other bindings. Settings → General lists the configured bindings. Edits reload automatically. Dupin reports clashes and invalid script bindings in Settings and in the panel, keeping the active shortcuts on reload.
 
 ## Web searches
 

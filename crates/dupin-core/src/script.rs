@@ -189,6 +189,9 @@ impl Header {
         if args.len() > MAX_ARGS || args.iter().map(String::len).sum::<usize>() > MAX_ARG_BYTES {
             return Err("Too many argument bytes or values".into());
         }
+        if args.iter().any(|arg| arg.contains('\0')) {
+            return Err("Arguments cannot contain NUL characters".into());
+        }
         let mut used = 0;
         let mut bound = Vec::new();
         for (arg, values) in self.argument_values(args) {

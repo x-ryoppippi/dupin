@@ -26,12 +26,7 @@ impl Provider for ScriptsProvider {
             .filter_map(|script| {
                 let matched = dupin_core::fuzzy::score(&request.query, &script.header.title)?;
                 let action = if script.header.arguments.is_empty() {
-                    run_action(ScriptRun {
-                        path: script.path.clone(),
-                        title: script.header.title.clone(),
-                        args: vec![],
-                        mode: script.header.mode,
-                    })
+                    run_action(script.run(Vec::new()))
                 } else {
                     ItemAction::new(
                         ARGUMENTS,
