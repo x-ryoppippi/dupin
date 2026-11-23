@@ -341,8 +341,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             }
         }
         Action::ExtCheck(folder) => {
-            let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
-            extension.check(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE)?;
+            let extension = crate::extensions::check_folder(std::path::Path::new(&folder))?;
             if json {
                 return Ok(serde_json::json!({
                     "id": extension.id,
@@ -441,7 +440,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
 }
 
 fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagnostic> {
-    dupin_ext_sdk::check(folder).map(drop)
+    crate::extensions::check_folder(folder).map(drop)
 }
 
 /// `dupin ext dev` keeps running, so each revision is reported as it happens: a JSON line with
@@ -625,6 +624,64 @@ mod tests {
                 other => panic!("expected {code}, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn development_copies_publish_only_what_the_launcher_loads() {
+        let root = tempfile::tempdir().unwrap();
+        let extensions = tempfile::tempdir().unwrap();
+        let package = root.path().join("greeter");
+        dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::JavaScript).unwrap();
+        let publish = || {
+            let mut outcome = None;
+            dupin_ext_sdk::dev::DevCopy {
+                package_dir: &package,
+                extensions: extensions.path(),
+                bundler: None,
+                options: dupin_ext_sdk::BuildOptions::default(),
+                validate: &check_package,
+            }
+            .watch(std::time::Duration::ZERO, &|| false, &mut |published| {
+                outcome = Some(published)
+            });
+            outcome.unwrap()
+        };
+        let link = extensions.path().join("greeter");
+
+        assert_eq!(publish().unwrap().revision, 1);
+        let loaded = crate::extensions::check_folder(&link).unwrap();
+        assert_eq!((loaded.id.as_str(), loaded.runtime()), ("greeter", "javascript"));
+        let folder = package.to_string_lossy().into_owned();
+        assert_eq!(
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["id"],
+            "greeter"
+        );
+        assert_eq!(
+            execute(Action::ExtRun(folder.clone(), "Dupin".into()), true).unwrap()["items"][0]["view"]["title"],
+            "Hello, Dupin!"
+        );
+
+        let manifest = package.join("package.json");
+        let original = std::fs::read_to_string(&manifest).unwrap();
+        for (edit, code) in [
+            (
+                r#""keyword": "greeter", "capabilities": { "http": {} }"#,
+                "unsupported-capability",
+            ),
+            (r#""keyword": "greeter", "icon": "x""#, "invalid-manifest"),
+        ] {
+            std::fs::write(&manifest, original.replace(r#""keyword": "greeter""#, edit)).unwrap();
+            assert_eq!(publish().unwrap_err().code, code);
+            assert_eq!(
+                std::fs::read_link(&link).unwrap(),
+                std::path::Path::new(".dev/greeter/r1")
+            );
+            match execute(Action::ExtBuild(folder.clone(), Default::default()), true) {
+                Err(Failure::Diagnostic(diagnostic)) => assert_eq!(diagnostic.code, code),
+                other => panic!("expected {code}, got {other:?}"),
+            }
+        }
+        crate::extensions::check_folder(&link).unwrap();
     }
 
     #[test]

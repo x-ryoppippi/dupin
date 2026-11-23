@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::build::node_builtin_import;
 use crate::dev::{DevCopy, Fingerprint};
-use crate::{BuildOptions, Bundler, Diagnostic, Template, build, check, scaffold};
+use crate::{BuildOptions, Bundler, Diagnostic, Template, build, scaffold};
 
 fn write(path: &Path, contents: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -70,8 +70,19 @@ fn assert_fixture_matches(dir: &Path) {
     );
 }
 
+/// Links the entry with the launcher's JavaScript runtime. The launcher's full loader, which
+/// `dupin ext build` and `dupin ext dev` really validate with, is exercised by the `dupin` crate.
 fn validate(dir: &Path) -> Result<(), Diagnostic> {
-    check(dir).map(drop)
+    let package = crate::manifest::read_package(dir)?;
+    dupin_js_runtime::Package::load(dir, &package.main)?
+        .check(dupin_js_runtime::Control {
+            deadline: Instant::now() + Duration::from_secs(2),
+            is_cancelled: Box::new(|| false),
+        })
+        .map_err(|error| match error {
+            dupin_js_runtime::RunError::Failed(diagnostic) => diagnostic,
+            dupin_js_runtime::RunError::Cancelled => unreachable!("never cancelled"),
+        })
 }
 
 fn bundlers() -> Vec<Bundler> {
@@ -138,8 +149,8 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
     );
     assert!(!readme.contains("## Build"));
 
-    let package = check(&dir).unwrap();
-    assert_eq!(package.main, "main.js");
+    validate(&dir).unwrap();
+    assert_eq!(crate::manifest::read_package(&dir).unwrap().main, "main.js");
     assert_fixture_matches(&dir);
 
     let built = build(&dir, None, BuildOptions::default(), &validate).unwrap();

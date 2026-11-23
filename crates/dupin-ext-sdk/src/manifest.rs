@@ -7,9 +7,9 @@ use serde_json::{Map, Value};
 pub(crate) const MANIFEST_FILE: &str = "package.json";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
 
-/// The parts of `package.json` the author tools need. The launcher validates the manifest in
-/// full when it loads the package; this only rejects what would make a build or a development
-/// copy go to the wrong place.
+/// The parts of `package.json` that decide where a build or a development copy goes. Whether
+/// the package is a valid extension is for the launcher's own loader to say, which `build` and
+/// `dev` take as their `validate`; this only rejects what would put files in the wrong place.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageInfo {
     /// The extension's id, which also names its folder in the extensions directory.
@@ -70,38 +70,17 @@ pub(crate) fn read_package(dir: &Path) -> Result<PackageInfo, Diagnostic> {
             "Use a name such as `word-count`, without an npm scope.",
         ));
     }
-    string(root, "version", "version", "Use a version such as `0.1.0`.")?;
-    let Some(dupin) = root.get("dupin").and_then(Value::as_object) else {
-        return Err(invalid(
-            "dupin",
-            "must be an object with `title` and `keyword`",
-            "Add `\"dupin\": { \"title\": \"Word Count\", \"keyword\": \"wc\" }`.",
-        ));
-    };
-    string(
-        dupin,
-        "title",
-        "dupin.title",
-        "Use the name Settings should show.",
-    )?;
-    string(
-        dupin,
-        "keyword",
-        "dupin.keyword",
-        "Use a short word such as `wc`.",
-    )?;
-    let main = match dupin.get("main") {
+    let main = match root.get("dupin").and_then(|dupin| dupin.get("main")) {
         None => DEFAULT_ENTRY.to_owned(),
-        Some(_) => string(dupin, "main", "dupin.main", "Use a path such as `dist/main.js`.")?,
+        Some(Value::String(main)) => relative_path(main, "dupin.main")?,
+        Some(_) => {
+            return Err(invalid(
+                "dupin.main",
+                "must be a string",
+                "Use a path such as `dist/main.js`.",
+            ));
+        }
     };
-    let main = relative_path(&main, "dupin.main")?;
-    if !(main.ends_with(".js") || main.ends_with(".mjs")) {
-        return Err(invalid(
-            "dupin.main",
-            "must name a `.js` or `.mjs` file",
-            "Point it at the JavaScript that `dupin ext build` writes, such as `dist/main.js`.",
-        ));
-    }
     let source = match root.get("source") {
         None => None,
         Some(_) => Some(relative_path(
