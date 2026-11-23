@@ -175,18 +175,12 @@ fn keyword_item(catalog: &WebCatalog, raw: &str) -> Option<Item> {
     let keyword = &raw[..boundary];
     let search = catalog.searches.get(keyword)?;
     let query = raw[boundary..].trim();
-    let title = if query.is_empty() {
-        format!("Search {}", search.name)
-    } else {
-        format!("Search {} for {query}", search.name)
-    };
-    let url = fill_template(&search.url, query)?;
-    Some(search_item(
+    search_item(
         keyword,
-        title,
-        url,
+        search,
+        query,
         query.is_empty().then(|| format!("{keyword} ")),
-    ))
+    )
 }
 
 fn fallback_items(
@@ -207,13 +201,8 @@ fn fallback_items(
         let Some(search) = catalog.searches.get(keyword) else {
             continue;
         };
-        if let Some(url) = fill_template(&search.url, query) {
-            items.push(search_item(
-                keyword,
-                format!("Search {} for {query}", search.name),
-                url,
-                None,
-            ));
+        if let Some(item) = search_item(keyword, search, query, None) {
+            items.push(item);
         }
     }
     items
@@ -255,10 +244,24 @@ fn percent_encode(value: &str) -> String {
     encoded
 }
 
-fn search_item(keyword: &str, title: String, url: String, completion: Option<String>) -> Item {
-    Item {
+fn search_item(
+    keyword: &str,
+    search: &ValidatedSearch,
+    query: &str,
+    completion: Option<String>,
+) -> Option<Item> {
+    let url = fill_template(&search.url, query)?;
+    let (title, payload) = if query.is_empty() {
+        (format!("Search {}", search.name), Payload::default())
+    } else {
+        (
+            format!("Search {} for {query}", search.name),
+            Payload::text(query),
+        )
+    };
+    Some(Item {
         id: format!("web:{keyword}"),
-        payload: Payload::text(title.clone()),
+        payload,
         view: View::Text {
             title,
             subtitle: keyword.to_owned(),
@@ -271,7 +274,7 @@ fn search_item(keyword: &str, title: String, url: String, completion: Option<Str
         primary: Some("open".into()),
         alternate: None,
         actions: vec![ItemAction::new("open", "Open in Browser", Action::OpenUrl(url))],
-    }
+    })
 }
 
 #[cfg(test)]
@@ -332,14 +335,17 @@ mod tests {
 
         let item = collect(&provider, "g", 5).pop().unwrap();
         assert_eq!(item.display_title(), "Search Google");
+        assert!(item.payload.is_empty());
         assert_eq!(item.completion.as_deref(), Some("g "));
         assert_eq!(url(&item), "https://www.google.com/search?q=");
 
         let item = collect(&provider, "g ", 5).pop().unwrap();
         assert_eq!(item.completion.as_deref(), Some("g "));
+        assert!(item.payload.is_empty());
 
         let item = collect(&provider, "g  rust lifetimes", 5).pop().unwrap();
         assert_eq!(item.display_title(), "Search Google for rust lifetimes");
+        assert_eq!(item.payload.nonblank_text(), Some("rust lifetimes"));
         assert_eq!(item.completion, None);
         assert_eq!(url(&item), "https://www.google.com/search?q=rust%20lifetimes");
         assert!(collect(&provider, "", 5).is_empty());
@@ -451,6 +457,10 @@ mod tests {
         assert_eq!(all[0].display_title(), "Search Google for rust");
         assert_eq!(all[1].display_title(), "Search GitHub for rust");
         assert_eq!(all[2].display_title(), "Search YouTube for rust");
+        assert!(
+            all.iter()
+                .all(|item| item.payload.nonblank_text() == Some("rust"))
+        );
         assert_eq!(collect(&provider, "rust", 2).len(), 2);
         assert!(collect(&provider, "  ", 10).is_empty());
         assert!(collect(&provider, "rust", 0).is_empty());
