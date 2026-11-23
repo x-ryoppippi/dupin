@@ -1,20 +1,12 @@
-use dupin_mac::CalendarProvider;
-use rune::AppHandle;
+use rune::Tx;
 
 use super::Ui;
 
-pub(super) fn provider(me: &AppHandle<Ui>) -> CalendarProvider {
-    if rune::tooling::is_headless() {
-        dupin_mac::CalendarProvider::fixtures()
-    } else {
-        let panel = me.clone();
-        dupin_mac::CalendarProvider::new(move || {
-            panel.update(|ui, tx| {
-                if ui.session.command_id().as_str() == crate::features::calendar::CALENDAR {
-                    let effects = ui.session.refresh();
-                    ui.apply(effects, tx);
-                }
-            });
-        })
+impl Ui {
+    pub(crate) fn calendar_access_changed(&mut self, tx: &mut Tx) {
+        if self.session.command_id().as_str() == crate::features::calendar::CALENDAR {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
     }
 }

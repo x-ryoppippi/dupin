@@ -36,6 +36,12 @@ pub fn is_trusted() -> bool {
     unsafe { AXIsProcessTrusted() != 0 }
 }
 
+const REQUESTED_KEY: &str = "RequestedAccessibility";
+
+pub(crate) fn was_requested() -> bool {
+    NSUserDefaults::standardUserDefaults().boolForKey(&NSString::from_str(REQUESTED_KEY))
+}
+
 /// Requests the macOS prompt at most once per user. Returns whether this call requested it.
 pub fn request_once() -> bool {
     static REQUEST: Once = Once::new();
@@ -43,7 +49,7 @@ pub fn request_once() -> bool {
     REQUEST.call_once(|| {
         autoreleasepool(|_| {
             let defaults = NSUserDefaults::standardUserDefaults();
-            let key = NSString::from_str("RequestedAccessibility");
+            let key = NSString::from_str(REQUESTED_KEY);
             if defaults.boolForKey(&key) {
                 return;
             }

@@ -35,6 +35,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSCompoundPredicate",
 	"NSObjCRuntime",
 	"NSObject",
+	"NSOperation",
 	"NSPredicate",
 	"NSRunLoop",
 	"NSString",
@@ -42,6 +43,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSURL",
 	"NSUserDefaults",
 	"NSValue",
+	"block2",
 ] }
 objc2-app-kit = { workspace = true, features = [
 	"std",

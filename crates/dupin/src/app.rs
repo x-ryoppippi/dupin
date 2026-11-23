@@ -89,6 +89,14 @@ pub(crate) fn run() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
+    let calendar_access = dupin_mac::privacy::CalendarAccess::new({
+        let panel = handle.clone();
+        let prefs = prefs_handle.clone();
+        move || {
+            panel.update(ui::Ui::calendar_access_changed);
+            prefs.update(|s, _| s.refresh_permissions());
+        }
+    });
     let snapshots = App::new(AppSpec {
         fonts,
         families: FAMILIES,
@@ -137,6 +145,7 @@ pub(crate) fn run() {
     let current_config = Rc::new(RefCell::new(config.clone()));
     let welcome = prefs::welcome::first_run();
     let prefs = prefs.init({
+        let calendar_access = calendar_access.clone();
         let (config, binding, panel, updater, settings) = (
             current_config.clone(),
             binding.clone(),
@@ -144,7 +153,17 @@ pub(crate) fn run() {
             updater.clone(),
             settings.clone(),
         );
-        move || prefs::Prefs::new(config, binding, panel, updater, settings, welcome)
+        move || {
+            prefs::Prefs::new(
+                config,
+                binding,
+                panel,
+                updater,
+                settings,
+                welcome,
+                calendar_access,
+            )
+        }
     });
     if welcome {
         prefs_handle.open();
@@ -164,7 +183,7 @@ pub(crate) fn run() {
                 files: settings.clone(),
             };
             move || {
-                ui::Ui::new(
+                let mut ui = ui::Ui::new(
                     ui::Windows {
                         panel: handle,
                         prefs: prefs_handle,
@@ -174,10 +193,12 @@ pub(crate) fn run() {
                     updater,
                     configuration,
                     history,
-                    config_problem,
+                    calendar_access,
                     quick_look,
                     running,
-                )
+                );
+                ui.config_problem = config_problem;
+                ui
             }
         })
         .on_ready(move |window| {

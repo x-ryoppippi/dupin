@@ -16,7 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use dupin_core::Config;
-use dupin_mac::privacy::Access;
+use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, ShortcutRecorderState};
 
@@ -95,7 +95,8 @@ pub struct Prefs {
     config_problem: Option<String>,
     login: Option<LoginPreference>,
     /// Each permission's status, in `permissions::ENTRIES` order, read while the page shows.
-    permissions: Vec<Access>,
+    permissions: Vec<PermissionStatus>,
+    calendar_access: CalendarAccess,
     /// The first-run welcome's step while it covers the pages.
     welcome: Option<welcome::Step>,
     pub(crate) hotkey_problem: Option<String>,
@@ -114,6 +115,7 @@ impl Prefs {
         updater: Updater,
         settings: Arc<crate::settings::Service>,
         welcome: bool,
+        calendar_access: CalendarAccess,
     ) -> Prefs {
         let config = current.borrow().clone();
         let recorders = LauncherShortcut::ALL.map(|kind| {
@@ -144,13 +146,14 @@ impl Prefs {
             scripts_notice: None,
             login: LoginPreference::current(),
             permissions: Vec::new(),
+            calendar_access,
             welcome: welcome.then_some(welcome::Step::Hotkey),
         }
     }
 
     pub fn refresh_permissions(&mut self) {
         if self.welcome.is_none() && self.page == Page::Permissions {
-            self.permissions = permissions::read();
+            self.permissions = permissions::read(&self.calendar_access);
         }
     }
 
@@ -484,7 +487,15 @@ mod tests {
         .handle();
         let binding = Arc::new(Binding::new(panel.clone()));
         let updater = Updater::start(false, panel.clone(), prefs);
-        Prefs::new(current, binding, panel, updater, settings, welcome)
+        Prefs::new(
+            current,
+            binding,
+            panel,
+            updater,
+            settings,
+            welcome,
+            CalendarAccess::new(|| {}),
+        )
     }
 
     #[test]

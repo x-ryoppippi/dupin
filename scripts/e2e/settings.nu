@@ -1,0 +1,167 @@
+use driver.nu [
+    ad
+    log-count
+    poll
+    snap
+    wait-for-log
+    wait-frontmost
+]
+use ../e2e-state.nu [has-match is-focused-match]
+
+export def settings-stage [out: path] {
+    let focused = {|r| is-focused-match $r }
+    let found = {|r| has-match $r }
+    # Calculator can still be coming forward; summoned before then, the panel would lose focus
+    # to it and hide before ⌘, arrives.
+    wait-frontmost Calculator
+    ad $out press-hotkey-again press alt+space | ignore
+    poll $out field-again $focused find --app Dupin --role textfield --first
+    ^osascript -e 'tell application "System Events" to keystroke "," using command down'
+    let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
+    let appearance = (poll
+        $out
+        settings
+        $page
+        find
+        --app
+        Dupin
+        --name
+        Appearance
+        --exact
+        --first
+    )
+    # Accessory windows can receive keys while System Events names another frontmost app.
+    let settings = {|r| $r.ok and (
+        $r.data
+        | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
+    ) }
+    poll $out settings-window $settings list-windows --app Dupin
+    snap $out settings-created
+    let before_key = (ad
+        $out
+        settings-before-key
+        find
+        --app
+        Dupin
+        --role
+        group
+        --name
+        General
+        --exact
+        --first
+    )
+    if not $before_key.ok or $before_key.data?.match? == null or 'focused' in ($before_key.data?.match?.states? | default []) {
+        error make {msg: 'General must exist without keyboard focus before the Tab test'}
+    }
+    ad $out settings-tab press tab | ignore
+    (poll
+        $out
+        settings-keyboard-focused
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        group
+        --name
+        General
+        --exact
+        --first
+    )
+    snap $out settings-general
+    # Each page in the sidebar in turn: a ref from before a click goes stale once the page
+    # changes, so find the next one afresh.
+    let search = poll $out search $page find --app Dupin --name Search --exact --first
+    ad $out open-search click $search.data.match.ref_id | ignore
+    (poll
+        $out
+        search-page
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Files shown'
+        --exact
+        --first
+    )
+    snap $out settings-search
+    let appearance = (poll
+        $out
+        appearance
+        $page
+        find
+        --app
+        Dupin
+        --name
+        Appearance
+        --exact
+        --first
+    )
+    ad $out open-appearance click $appearance.data.match.ref_id | ignore
+    (poll
+        $out
+        appearance-page
+        $found
+        find
+        --app
+        Dupin
+        --name
+        Backdrop
+        --exact
+        --first
+    )
+    poll $out settings-window-again $settings list-windows --app Dupin
+    snap $out settings-appearance
+
+    ad $out close-settings press cmd+w | ignore
+    ad $out settings-search-hotkey press alt+space | ignore
+    (poll
+        $out
+        settings-search-field
+        $focused
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    ^osascript -e 'tell application "System Events"
+        repeat with typedKey in characters of "dupin settings"
+            keystroke (typedKey as text)
+            delay 0.12
+        end repeat
+    end tell'
+    (poll
+        $out
+        settings-search-query
+        {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    )
+    (poll
+        $out
+        settings-search-result
+        $found
+        find
+        --app
+        Dupin
+        --name
+        'Dupin Settings Preferences'
+        --exact
+        --first
+    )
+    let log = $out | path join dupin.log
+    let requests_before = log-count $log 'dupin-trace: settings requested '
+    let closed_before = log-count $log 'dupin-trace: settings panel closed '
+    ad $out open-settings-result press return | ignore
+    wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
+    wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
+    poll $out settings-from-result $settings list-windows --app Dupin
+    snap $out settings-from-result
+}
