@@ -497,6 +497,14 @@ fn a_registered_extension_command_owns_its_trigger_and_search_identity() {
 }
 
 #[test]
+fn a_literal_query_preserves_a_matching_keyword() {
+    let mut s = session();
+    let effects = s.set_literal_query("define a term");
+    assert_eq!(searched(&effects).0, app_command());
+    assert_eq!(s.query(), "define a term");
+}
+
+#[test]
 fn pasted_keywords_use_the_same_modes_and_aliases_as_typed_keywords() {
     for (keyword, mode) in [
         ("in", contents_command()),

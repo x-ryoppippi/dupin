@@ -1,6 +1,6 @@
 # Configuration
 
-Settings (⌘, in the panel) changes the hotkey, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
+Settings (⌘, in the panel) changes the hotkeys, where the panel opens, the input source, how many files a search shows and the backdrop. Changes apply at once and are written to `config.toml`, replacing any comments in it. A symlinked `config.toml` is written where it points, so the link stays; a read-only one, such as one [Nix manages](#nix), is shown in Settings but not changed there.
 
 Saving from Settings merges the changed fields into the latest valid file, preserving unrelated external edits observed before saving. If the same field changed differently in the file, or the file is invalid, Settings reports the problem and leaves the file untouched. The final source check is best-effort: an editor that writes between that check and the atomic replacement can still have its edit overwritten.
 
@@ -8,6 +8,7 @@ Dupin reads `$XDG_CONFIG_HOME/dupin/config.toml`, or `~/.config/dupin/config.tom
 
 ```toml
 hotkey = "cmd+space" # modifiers cmd, alt, ctrl, shift, joined with + to a key
+selection_hotkey = "" # optional shortcut for searching selected text
 file_limit = 200 # the most files a Spotlight search shows
 file_demotions = ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"]
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word
@@ -18,6 +19,8 @@ backdrop = "off" # "off", "flow", or the path to a WGSL shader
 ```
 
 At launch, a parse error makes Dupin use the defaults and report the problem. During a reload, a parse error or unavailable new hotkey keeps the previous configuration. The error appears in Settings and the next time the panel is shown; a reload never opens the panel itself. Fixing the file clears the error. An empty `hotkey` disables the panel shortcut.
+
+Leave `selection_hotkey` empty to keep selected-text search off. To enable it, record a **Selection hotkey** in Settings → General or set `selection_hotkey`. Dupin requests Accessibility access on the first press that needs it.
 
 Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
@@ -36,7 +39,7 @@ bundle_id = "com.apple.calculator"
 hide_if_frontmost = true # optional, defaults to false
 ```
 
-Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
+Each shortcut must be distinct from the panel and selection shortcuts and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 
 ## Web searches
 

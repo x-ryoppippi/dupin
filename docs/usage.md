@@ -2,6 +2,12 @@
 
 Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Space by default; see [configuration](./configuration.md)) shows the panel; pressing it again, Esc, or clicking elsewhere hides it.
 
+## Search selected text
+
+Set a **Selection hotkey** in Settings → General. Select text in another app and press the shortcut to open Dupin with that text in the query field. Type to replace the selection. If the app exposes no selected text, Dupin opens with an empty query.
+
+Dupin needs macOS Accessibility access for this shortcut. If access is missing, choose **Open System Settings** in the panel and enable Dupin under **Privacy & Security → Accessibility**, then try again.
+
 ## Keys
 
 | Key                                     | In the panel                                          |

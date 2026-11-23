@@ -10,6 +10,8 @@ pub struct Config {
     /// The global shortcut that shows and hides the panel, as Rune parses accelerators:
     /// modifiers (`cmd`, `alt`, `ctrl`, `shift`) and a key joined by `+`.
     pub hotkey: String,
+    /// Optional shortcut to search text selected in another app.
+    pub selection_hotkey: String,
     pub bindings: BTreeMap<String, HotkeyTarget>,
     /// The most files a Spotlight search shows.
     pub file_limit: usize,
@@ -136,6 +138,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             hotkey: "cmd+space".into(),
+            selection_hotkey: String::new(),
             bindings: BTreeMap::new(),
             file_limit: 200,
             file_demotions: [
@@ -198,14 +201,14 @@ mod tests {
     fn defaults_to_command_space() {
         assert_eq!(Config::parse("").unwrap(), Config::default());
         assert_eq!(Config::default().hotkey, "cmd+space");
+        assert!(Config::default().selection_hotkey.is_empty());
     }
 
     #[test]
-    fn reads_the_hotkey() {
-        assert_eq!(
-            Config::parse("hotkey = \"alt+space\"").unwrap().hotkey,
-            "alt+space"
-        );
+    fn reads_the_hotkeys() {
+        let config = Config::parse("hotkey = \"alt+space\"\nselection_hotkey = \"ctrl+alt+k\"").unwrap();
+        assert_eq!(config.hotkey, "alt+space");
+        assert_eq!(config.selection_hotkey, "ctrl+alt+k");
     }
 
     #[test]

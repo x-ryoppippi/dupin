@@ -11,7 +11,7 @@ use std::sync::{Arc, RwLock};
 use dupin_core::{
     Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer, selection::Selection};
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -231,6 +231,14 @@ pub struct Picker {
     call: crate::control::Call,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum SelectionRequest {
+    #[default]
+    Idle,
+    Reading,
+    Superseded,
+}
+
 pub struct Ui {
     pub picker: Option<Picker>,
     control_save: Option<(u64, crate::control::Call)>,
@@ -246,6 +254,8 @@ pub struct Ui {
     pub notice: Option<String>,
     pub config_problem: Option<String>,
     pub registration_notice: Option<String>,
+    pub selection_permission_required: bool,
+    selection_request: SelectionRequest,
     configuration: Configuration,
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
@@ -442,6 +452,8 @@ impl Ui {
             notice: None,
             config_problem: notice,
             registration_notice: registration.notice,
+            selection_permission_required: false,
+            selection_request: SelectionRequest::Idle,
             icons: HashMap::new(),
             shown: false,
             shown_at: 0.0,
@@ -638,9 +650,11 @@ impl Ui {
     }
 
     pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
+        use crate::hotkey::{LauncherShortcut, Target};
         match self.configuration.hotkey.target(shortcut) {
-            Some(crate::hotkey::Target::Panel) => self.toggle(tx),
-            Some(crate::hotkey::Target::Configured(dupin_core::config::HotkeyTarget::App {
+            Some(Target::Launcher(LauncherShortcut::Panel)) => self.toggle(tx),
+            Some(Target::Launcher(LauncherShortcut::Selection)) => self.read_selection(tx),
+            Some(Target::Configured(dupin_core::config::HotkeyTarget::App {
                 bundle_id,
                 hide_if_frontmost,
             })) => {
@@ -653,6 +667,55 @@ impl Ui {
                 });
             }
             None => (),
+        }
+    }
+
+    fn read_selection(&mut self, tx: &mut Tx) {
+        if rune::tooling::is_headless()
+            || self.shown
+            || self.picker.is_some()
+            || self.selection_request != SelectionRequest::Idle
+        {
+            return;
+        }
+        self.selection_request = SelectionRequest::Reading;
+        let panel = self.me.clone();
+        if std::thread::Builder::new()
+            .name("selected-text".into())
+            .spawn(move || {
+                let result = dupin_mac::selection::read();
+                panel.update(move |s, tx| s.apply_selection(result, tx));
+            })
+            .is_err()
+        {
+            self.apply_selection(Selection::Empty, tx);
+        }
+    }
+
+    fn apply_selection(&mut self, result: Selection, tx: &mut Tx) {
+        if std::mem::take(&mut self.selection_request) != SelectionRequest::Reading {
+            return;
+        }
+        match result {
+            Selection::Text(text) => {
+                self.query = selection_query(&text);
+                self.typed_at = tx.clock();
+                let effects = self.session.set_literal_query(&self.query.text);
+                self.apply(effects, tx);
+            }
+            Selection::Empty => {}
+            Selection::PermissionRequired => self.selection_permission_required = true,
+        }
+        self.show(tx);
+        tx.focus_when_shown("query", false);
+    }
+
+    pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
+        let url = dupin_mac::selection::ACCESSIBILITY_SETTINGS_URL;
+        let action = dupin_mac::workspace::Action::OpenUrl(url.into());
+        match dupin_mac::workspace::run(&action) {
+            Ok(()) => self.dismiss(tx),
+            Err(error) => self.show_notice(error, tx),
         }
     }
 
@@ -683,6 +746,9 @@ impl Ui {
     }
 
     fn show(&mut self, tx: &mut Tx) {
+        if self.selection_request == SelectionRequest::Reading {
+            self.selection_request = SelectionRequest::Superseded;
+        }
         crate::trace::summoned();
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);
@@ -755,6 +821,7 @@ impl Ui {
         self.query.clear();
         self.shown = false;
         self.notice = None;
+        self.selection_permission_required = false;
         self.notice_until = None;
         tx.close_window();
         if !self.settings_after_close
@@ -946,7 +1013,9 @@ impl Ui {
             {
                 Intent::Complete
             }
-            Key::Text(t) if t == " " && plain && !m.shift => Intent::Space,
+            Key::Text(t) if t == " " && plain && !m.shift && self.query.anchor == self.query.focus => {
+                Intent::Space
+            }
             Key::Backspace if plain => Intent::Backspace,
             Key::Up => Intent::Up,
             Key::Down => Intent::Down,
@@ -1445,6 +1514,18 @@ fn is_quick_look_shortcut(key: &Key) -> bool {
     matches!(key, Key::Command('y'))
 }
 
+fn selection_query(text: &str) -> TextEdit {
+    let mut edit = TextEdit::new("");
+    edit.set_single_line(true);
+    edit.insert(
+        &text
+            .replace("\r\n", "\n")
+            .replace(['\r', '\n', '\t', '\u{2028}', '\u{2029}'], " "),
+    );
+    edit.set_selection(0, edit.text.len());
+    edit
+}
+
 fn take_due(deadlines: &mut HashMap<CommandId, (u64, f64)>, clock: f64) -> Vec<(CommandId, u64)> {
     let due: Vec<_> = deadlines
         .iter()
@@ -1550,6 +1631,15 @@ mod config_tests {
                 .0
                 .is_err()
         );
+    }
+
+    #[test]
+    fn typing_replaces_the_entire_selected_query() {
+        let mut edit = selection_query("日本語\r\nsecond line");
+        assert_eq!(edit.text, "日本語 second line");
+        assert_eq!(edit.range(), (0, edit.text.len()));
+        edit.insert("calculator");
+        assert_eq!(edit.text, "calculator");
     }
 }
 

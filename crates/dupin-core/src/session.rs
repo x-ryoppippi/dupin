@@ -299,6 +299,15 @@ impl Session {
 
     /// The text field's contents changed.
     pub fn set_query(&mut self, text: &str) -> Vec<Effect> {
+        self.update_query(text, true)
+    }
+
+    /// Set externally supplied search text without interpreting it as a command keyword.
+    pub fn set_literal_query(&mut self, text: &str) -> Vec<Effect> {
+        self.update_query(text, false)
+    }
+
+    fn update_query(&mut self, text: &str, route_keyword: bool) -> Vec<Effect> {
         if text == self.query {
             return Vec::new();
         }
@@ -321,7 +330,8 @@ impl Session {
             self.deleting = false;
         }
         self.recalled = None;
-        if self.command == *self.commands.default()
+        if route_keyword
+            && self.command == *self.commands.default()
             && let Some((command, term)) = self.keyword_query(text)
         {
             self.deleting = false;

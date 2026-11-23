@@ -19,15 +19,47 @@ pub struct Binding {
 
 #[derive(Clone)]
 pub enum Target {
-    Panel,
+    Launcher(LauncherShortcut),
     Configured(HotkeyTarget),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LauncherShortcut {
+    Panel,
+    Selection,
+}
+
+impl LauncherShortcut {
+    pub const ALL: [Self; 2] = [Self::Panel, Self::Selection];
+
+    pub fn accelerator(self, config: &Config) -> &str {
+        match self {
+            Self::Panel => &config.hotkey,
+            Self::Selection => &config.selection_hotkey,
+        }
+    }
+
+    pub fn set(self, config: &mut Config, shortcut: Option<&Shortcut>) {
+        let field = match self {
+            Self::Panel => &mut config.hotkey,
+            Self::Selection => &mut config.selection_hotkey,
+        };
+        *field = shortcut.map(ToString::to_string).unwrap_or_default();
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Panel => "panel",
+            Self::Selection => "selection",
+        }
+    }
 }
 
 #[derive(Default)]
 struct State {
     ids: HashMap<Shortcut, ShortcutId>,
     targets: HashMap<Shortcut, Target>,
-    panel_unavailable: bool,
+    unavailable_at_launch: [bool; 2],
 }
 
 impl Binding {
@@ -38,57 +70,88 @@ impl Binding {
         }
     }
 
-    pub fn failed_at_launch(&self) -> bool {
+    pub fn failed_at_launch(&self, kind: LauncherShortcut) -> bool {
         self.state
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .panel_unavailable
+            .unavailable_at_launch[kind as usize]
     }
 
-    /// Register the configured hotkey at launch, reporting any failure.
-    pub fn register_at_launch(&self, accelerator: &str) {
+    pub fn register_at_launch(&self, config: &Config) {
+        let problems: Vec<_> = LauncherShortcut::ALL
+            .into_iter()
+            .filter_map(|kind| {
+                let accelerator = kind.accelerator(config);
+                let reason = self.register_launcher(kind, accelerator)?;
+                self.state
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .unavailable_at_launch[kind as usize] = true;
+                Some(format!(
+                    "Couldn't register the {} hotkey ({}): {reason}.",
+                    kind.name(),
+                    keycaps(accelerator)
+                ))
+            })
+            .collect();
+        if !problems.is_empty() {
+            let message = format!(
+                "{} Free the shortcut in the app that holds it, or pick another in Settings (⌘,).",
+                problems.join(" ")
+            );
+            crate::log::warn(&message);
+            notify(&message);
+            self.panel.update(move |s, tx| s.show_notice(message, tx));
+        }
+    }
+
+    fn register_launcher(&self, kind: LauncherShortcut, accelerator: &str) -> Option<String> {
         let shortcut = match parse(accelerator) {
             Ok(Some(shortcut)) => shortcut,
-            Ok(None) => return,
-            Err(e) => return self.report(accelerator, &e.to_string()),
+            Ok(None) => return None,
+            Err(e) => return Some(e.to_string()),
         };
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.ids.contains_key(&shortcut) {
+            return Some("already assigned to the panel".into());
+        }
         // Carbon only refuses a chord another app grabbed exclusively. macOS's own shortcuts
         // (Spotlight's ⌘Space) take the key first without making registration fail, so ask who
         // holds it beforehand. Register anyway: freeing the chord later then works without a
         // restart.
-        if let Some(owner) = self.panel.shortcut_owner(&shortcut) {
-            self.report(accelerator, &format!("{owner} already uses it"));
-        }
+        let owner = self.owner(&shortcut);
         match self.register(&shortcut) {
             Ok(id) => {
-                let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
                 state.ids.insert(shortcut.clone(), id);
-                state.targets.insert(shortcut, Target::Panel);
+                state.targets.insert(shortcut, Target::Launcher(kind));
                 crate::trace::registered(accelerator);
+                owner.map(|owner| format!("{owner} already uses it"))
             }
-            Err(e) => self.report(accelerator, &self.why(&shortcut, &e)),
+            Err(e) => Some(self.why(&shortcut, &e)),
         }
     }
 
-    /// Replace the panel shortcut recorded in Settings.
-    pub fn replace(&self, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+    pub fn replace(&self, kind: LauncherShortcut, next: Option<&Shortcut>) -> Result<(), ShortcutError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.panel_unavailable
-            && next.is_some_and(|shortcut| matches!(state.targets.get(shortcut), Some(Target::Panel)))
+        let matches_kind = |target: &Target| matches!(target, Target::Launcher(found) if *found == kind);
+        if state.unavailable_at_launch[kind as usize]
+            && let Some(shortcut) = next
+            && state.targets.get(shortcut).is_some_and(matches_kind)
+            && self.owner(shortcut).is_some()
         {
             return Err(ShortcutError::Conflict);
         }
         let mut targets = state.targets.clone();
-        targets.retain(|_, target| !matches!(target, Target::Panel));
+        targets.retain(|_, target| !matches_kind(target));
         if let Some(next) = next
-            && targets.insert(next.clone(), Target::Panel).is_some()
+            && targets.insert(next.clone(), Target::Launcher(kind)).is_some()
         {
             return Err(ShortcutError::Conflict);
         }
         self.update_registrations(&mut state, &targets)
             .map_err(|(_, error)| error)?;
         state.targets = targets;
-        state.panel_unavailable = false;
+        state.unavailable_at_launch[kind as usize] = false;
         Ok(())
     }
 
@@ -109,21 +172,32 @@ impl Binding {
     }
 
     fn configure(&self, config: &Config, previous: &Config, reserve: bool) -> Result<(), String> {
-        let (panel, mut targets) = configured_targets(config)?;
+        let mut targets = configured_targets(config)?;
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let keep_unavailable = state.panel_unavailable && parse(&previous.hotkey).ok() == Some(panel.clone());
-        if keep_unavailable
-            && let Some(panel) = panel
-            && !state.ids.contains_key(&panel)
-        {
-            match self.claim(&panel) {
+        let mut keep_unavailable = [false; 2];
+        for kind in LauncherShortcut::ALL {
+            let index = kind as usize;
+            if !state.unavailable_at_launch[index] {
+                continue;
+            }
+            let next = parse(kind.accelerator(config)).ok().flatten();
+            if next != parse(kind.accelerator(previous)).ok().flatten() {
+                continue;
+            }
+            let Some(shortcut) = next else { continue };
+            keep_unavailable[index] = true;
+            if state.ids.contains_key(&shortcut) {
+                continue;
+            }
+            match self.claim(&shortcut) {
                 Ok(id) => {
-                    state.ids.insert(panel.clone(), id);
-                    state.targets.insert(panel, Target::Panel);
-                    state.panel_unavailable = false;
+                    state.ids.insert(shortcut.clone(), id);
+                    state.targets.insert(shortcut, Target::Launcher(kind));
+                    state.unavailable_at_launch[index] = false;
+                    keep_unavailable[index] = false;
                 }
                 Err(_) => {
-                    targets.remove(&panel);
+                    targets.remove(&shortcut);
                 }
             }
         }
@@ -141,7 +215,7 @@ impl Binding {
             })?;
         if !reserve {
             state.targets = targets;
-            state.panel_unavailable &= keep_unavailable;
+            state.unavailable_at_launch = keep_unavailable;
         }
         Ok(())
     }
@@ -184,20 +258,6 @@ impl Binding {
         self.panel.shortcut_owner(shortcut)
     }
 
-    fn report(&self, accelerator: &str, reason: &str) {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .panel_unavailable = true;
-        let message = format!(
-            "Couldn't register the {} hotkey: {reason}. Free it in the app that holds it, or pick another in Settings (⌘,).",
-            keycaps(accelerator)
-        );
-        crate::log::warn(&message);
-        notify(&message);
-        self.panel.update(move |s, tx| s.show_notice(message, tx));
-    }
-
     fn why(&self, shortcut: &Shortcut, error: &ShortcutError) -> String {
         match (error, self.panel.shortcut_owner(shortcut)) {
             (ShortcutError::Conflict, Some(owner)) => format!("{owner} already uses it"),
@@ -207,11 +267,15 @@ impl Binding {
     }
 }
 
-fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shortcut, Target>), String> {
-    let panel = parse(&config.hotkey).map_err(|_| "The panel shortcut is invalid.")?;
+fn configured_targets(config: &Config) -> Result<HashMap<Shortcut, Target>, String> {
     let mut targets = HashMap::new();
-    if let Some(shortcut) = &panel {
-        targets.insert(shortcut.clone(), Target::Panel);
+    for kind in LauncherShortcut::ALL {
+        let accelerator = kind.accelerator(config);
+        if let Some(shortcut) =
+            parse(accelerator).map_err(|_| format!("The {} shortcut is invalid.", kind.name()))?
+        {
+            insert_target(&mut targets, shortcut, Target::Launcher(kind))?;
+        }
     }
     for (accelerator, target) in &config.bindings {
         let shortcut = accelerator
@@ -224,17 +288,26 @@ fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shor
                 shortcut.keycaps().join("")
             ));
         }
-        if targets
-            .insert(shortcut.clone(), Target::Configured(target.clone()))
-            .is_some()
-        {
-            return Err(format!(
-                "{} is assigned more than once.",
-                shortcut.keycaps().join("")
-            ));
-        }
+        insert_target(&mut targets, shortcut, Target::Configured(target.clone()))?;
     }
-    Ok((panel, targets))
+    Ok(targets)
+}
+
+fn insert_target(
+    targets: &mut HashMap<Shortcut, Target>,
+    shortcut: Shortcut,
+    target: Target,
+) -> Result<(), String> {
+    match targets.entry(shortcut) {
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(target);
+            Ok(())
+        }
+        std::collections::hash_map::Entry::Occupied(entry) => Err(format!(
+            "{} is assigned more than once.",
+            entry.key().keycaps().join("")
+        )),
+    }
 }
 
 fn sync<Id: Copy>(
@@ -337,12 +410,30 @@ mod tests {
     }
 
     #[test]
+    fn selection_shares_the_panel_and_app_binding_namespace() {
+        let mut config = Config {
+            selection_hotkey: "Command+Space".into(),
+            ..Config::default()
+        };
+        assert!(configured_targets(&config).is_err());
+
+        config.selection_hotkey = "ctrl+alt+c".into();
+        let selection = config.selection_hotkey.parse::<Shortcut>().unwrap();
+        assert!(matches!(
+            configured_targets(&config).unwrap().get(&selection),
+            Some(Target::Launcher(LauncherShortcut::Selection))
+        ));
+        config.bindings.insert("Control+Option+C".into(), app());
+        assert!(configured_targets(&config).is_err());
+    }
+
+    #[test]
     fn can_reassign_an_installed_chord_and_release_a_removed_chord() {
         let panel: Shortcut = "cmd+space".parse().unwrap();
         let app_key: Shortcut = "ctrl+alt+c".parse().unwrap();
         let mut ids = HashMap::from([(panel.clone(), 1), (app_key.clone(), 2)]);
         let previous = HashMap::from([
-            (panel.clone(), Target::Panel),
+            (panel.clone(), Target::Launcher(LauncherShortcut::Panel)),
             (app_key, Target::Configured(app())),
         ]);
         let next = HashMap::from([(panel.clone(), Target::Configured(app()))]);
@@ -363,8 +454,9 @@ mod tests {
 
     #[test]
     fn a_conflict_releases_partially_registered_shortcuts() {
-        let (panel, previous) = configured_targets(&Config::default()).unwrap();
-        let panel = panel.unwrap();
+        let config = Config::default();
+        let previous = configured_targets(&config).unwrap();
+        let panel = config.hotkey.parse::<Shortcut>().unwrap();
         let mut ids = HashMap::from([(panel.clone(), 1)]);
         let next = HashMap::from([
             ("ctrl+alt+c".parse().unwrap(), Target::Configured(app())),

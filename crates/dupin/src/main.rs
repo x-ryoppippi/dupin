@@ -136,7 +136,6 @@ fn main() {
         move || prefs::Prefs::new(config, binding, panel, updater, settings)
     });
 
-    let hotkey = config.hotkey.clone();
     let radius = config.theme.corner_radius as f32;
     let mut registered = false;
     let quick_look = Rc::new(RefCell::new(None));
@@ -170,7 +169,7 @@ fn main() {
             install_quick_look(window, &handle, &quick_look);
             // Once per process: a launcher window is made once and kept, but be explicit.
             if !std::mem::replace(&mut registered, true) {
-                binding.register_at_launch(&hotkey);
+                binding.register_at_launch(&config);
                 settings.activate();
             }
         })

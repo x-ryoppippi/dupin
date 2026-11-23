@@ -119,6 +119,33 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
             ),
         );
     }
+    if s.selection_permission_required {
+        panel = panel.child(divider(&t)).child(
+            col()
+                .key("selection-permission")
+                .w_full()
+                .px(18.0)
+                .py(12.0)
+                .gap(8.0)
+                .fill(WARNING)
+                .child(
+                    text("Dupin needs Accessibility access to read selected text from other apps.")
+                        .font(t.font(type_::BODY.lh(18.0)))
+                        .color(t.text)
+                        .wrap()
+                        .w_full(),
+                )
+                .child(
+                    text("Open System Settings")
+                        .key("selection-settings")
+                        .role("button")
+                        .focusable(true)
+                        .font(t.font(type_::TITLE))
+                        .color(accent)
+                        .on_press_tx(Ui::open_accessibility_settings),
+                ),
+        );
+    }
     for (origin, failure) in s.session.failures() {
         panel = panel.child(
             row()

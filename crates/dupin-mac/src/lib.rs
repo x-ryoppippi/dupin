@@ -9,6 +9,7 @@ mod file_actions;
 pub mod font;
 pub mod input_source;
 pub mod quick_look;
+pub mod selection;
 mod settings_search;
 pub mod spotlight;
 pub mod watcher;

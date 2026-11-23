@@ -31,6 +31,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSRunLoop",
 	"NSString",
 	"NSURL",
+	"NSUserDefaults",
 	"NSValue",
 ] }
 objc2-app-kit = { workspace = true, features = [
@@ -47,7 +48,13 @@ objc2-app-kit = { workspace = true, features = [
 ] }
 objc2-quick-look-ui = { workspace = true }
 
-objc2-core-foundation = { workspace = true, features = ["std", "CFString", "CFURL"] }
+objc2-core-foundation = { workspace = true, features = [
+	"std",
+	"CFDictionary",
+	"CFNumber",
+	"CFString",
+	"CFURL",
+] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
 memmap2 = { workspace = true }
 
