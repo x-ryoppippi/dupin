@@ -13,6 +13,7 @@ use dupin_core::{
     Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use objc2_foundation::NSRect;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -20,21 +21,21 @@ use rune::{
 
 /// Icons kept decoded: enough for a full file result list and the apps around it.
 const ICON_CAP: usize = 512;
-/// The panel's top edge below the display's for `position = "top"`: about where Spotlight
-/// puts its field.
+// Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
+pub const ICON_SIZE: f32 = 32.0;
 
-fn panel_offsets(frame: [f64; 4], visible: [f64; 4], width: u16, position: Position) -> (f32, f32) {
-    let left = visible[0] - frame[0] + ((visible[2] - f64::from(width)) / 2.0).max(0.0);
-    let top = frame[1] + frame[3] - visible[1] - visible[3];
-    let room = (visible[3] - f64::from(crate::view::HEADER_H)).max(0.0);
+fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
+    let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
+    let top = frame.max().y - visible.max().y;
+    // Use the query field's height so results can grow below it.
+    let room = (visible.size.height - f64::from(crate::HEADER_HEIGHT)).max(0.0);
     let offset = match position {
         Position::Center => room / 2.0,
         Position::Top => f64::from(TOP_MARGIN).min(room),
     };
-    (left as f32, (top + offset) as f32)
+    (inset as f32, (top + offset) as f32)
 }
-pub const ICON_SIZE: f32 = 32.0;
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -673,33 +674,44 @@ impl Ui {
             crate::log::warn(problem);
         }
         self.query.focused = true;
-        let (display, align, inset, margin) =
-            if let Some(screen) = dupin_mac::window::display_geometry(self.display) {
-                if screen.active_unavailable {
-                    self.notice.get_or_insert_with(|| {
-                        "Couldn't read the focused window; using the main display.".into()
-                    });
-                }
-                let (inset, margin) = panel_offsets(
-                    screen.frame,
-                    screen.visible_frame,
-                    self.theme.panel_width,
-                    self.position,
+        if !self.shown {
+            self.place_panel(tx);
+        }
+        self.shown = true;
+        self.shown_at = tx.clock();
+        self.force_input_source();
+        self.me.show();
+    }
+
+    fn place_panel(&mut self, tx: &mut Tx) {
+        let (display, align, inset, margin) = if !rune::tooling::is_headless()
+            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
+        {
+            if screen.active_unavailable {
+                self.timed_notice(
+                    "Couldn’t find the focused window. Using the main display.".into(),
+                    tx,
                 );
-                (
-                    DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
-                    Align::Start,
-                    inset,
-                    margin,
-                )
-            } else {
-                let display = if self.display == DisplaySelection::Mouse {
-                    DisplayTarget::UnderPointer
-                } else {
-                    DisplayTarget::Primary
-                };
-                (display, Align::Center, 0.0, TOP_MARGIN)
+            }
+            let (inset, margin) = panel_offsets(
+                screen.frame,
+                screen.visible_frame,
+                self.theme.panel_width,
+                self.position,
+            );
+            (
+                DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+                Align::Start,
+                inset,
+                margin,
+            )
+        } else {
+            let display = match self.display {
+                DisplaySelection::Mouse => DisplayTarget::UnderPointer,
+                DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
+            (display, Align::Center, 0.0, TOP_MARGIN)
+        };
         self.me.place(
             display,
             OverlayPlacement::Edge {
@@ -709,10 +721,6 @@ impl Ui {
                 inset,
             },
         );
-        self.shown = true;
-        self.shown_at = tx.clock();
-        self.force_input_source();
-        self.me.show();
     }
 
     fn force_input_source(&mut self) {
@@ -1516,11 +1524,16 @@ mod ui_helper_tests {
 #[cfg(test)]
 mod config_tests {
     use super::*;
+    use objc2_foundation::{NSPoint, NSSize};
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
 
     #[test]
     fn places_the_query_inside_the_selected_screens_visible_frame() {
-        let frame = [100.0, -900.0, 1440.0, 900.0];
-        let visible = [160.0, -850.0, 1380.0, 820.0];
+        let frame = rect(100.0, -900.0, 1440.0, 900.0);
+        let visible = rect(160.0, -850.0, 1380.0, 820.0);
         assert_eq!(
             panel_offsets(frame, visible, 680, Position::Center),
             (410.0, 408.0)
@@ -1534,8 +1547,8 @@ mod config_tests {
 
     #[test]
     fn top_spacing_cannot_push_the_query_below_the_visible_area() {
-        let frame = [-800.0, 200.0, 800.0, 150.0];
-        let visible = [-800.0, 200.0, 800.0, 120.0];
+        let frame = rect(-800.0, 200.0, 800.0, 150.0);
+        let visible = rect(-800.0, 200.0, 800.0, 120.0);
         assert_eq!(panel_offsets(frame, visible, 680, Position::Top), (60.0, 86.0));
     }
 

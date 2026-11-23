@@ -1,10 +1,12 @@
-//! AppKit settings for the panel's own window.
+//! Native display selection and panel window settings.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
+use dupin_core::DisplaySelection;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSScreen, NSView, NSWindow, NSWindowAnimationBehavior};
+use objc2_foundation::{NSIntersectionRect, NSMouseInRect, NSNumber, NSRect, NSString};
 
 /// Make the window holding `ns_view` appear and disappear at once. AppKit animates a panel's
 /// ordering in by default, which held Dupin's panel off screen for about 265 ms after its
@@ -27,300 +29,198 @@ pub unsafe fn appear_instantly(ns_view: NonNull<c_void>) -> bool {
     true
 }
 
-/// Geometry for one display, in AppKit's global point coordinates.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A single screen's identity and bounds in AppKit points.
 pub struct DisplayGeometry {
-    /// The Core Graphics display identifier associated with the screen.
     pub native_id: u32,
-    /// The full display frame as `[x, y, width, height]` in AppKit points.
-    pub frame: [f64; 4],
-    /// The usable display frame as `[x, y, width, height]` in AppKit points.
-    pub visible_frame: [f64; 4],
-    /// Whether Active selection fell back to the primary display because its focused window
-    /// could not be read.
+    pub frame: NSRect,
+    pub visible_frame: NSRect,
     pub active_unavailable: bool,
 }
 
-/// Snapshot the selected display and its usable area. Active selection reads the focused window
-/// through Accessibility only when permission is already granted; it never prompts.
-pub fn display_geometry(selection: dupin_core::DisplaySelection) -> Option<DisplayGeometry> {
-    let main = MainThreadMarker::new()?;
-    let screens = NSScreen::screens(main);
-    let snapshots: Vec<_> = screens
-        .iter()
-        .map(|screen| ScreenSnapshot {
-            native_id: native_id(&screen),
-            frame: rect(screen.frame()),
-            visible_frame: rect(screen.visibleFrame()),
-        })
-        .collect();
-    let primary_height = snapshots.first()?.frame[3];
-    let pointer = NSEvent::mouseLocation();
-    let pointer = (pointer.x, pointer.y);
-    let active = if selection == dupin_core::DisplaySelection::Active {
-        active_window_frame(primary_height)
-    } else {
-        None
+/// Resolve the display when the panel opens, falling back to the primary screen.
+pub fn display_geometry(selection: DisplaySelection) -> Option<DisplayGeometry> {
+    let screens = NSScreen::screens(MainThreadMarker::new()?);
+    let primary = screens.firstObject()?;
+    let selected = match selection {
+        DisplaySelection::Mouse => {
+            let pointer = NSEvent::mouseLocation();
+            screens
+                .iter()
+                .find(|screen| NSMouseInRect(pointer, screen.frame(), false))
+        }
+        DisplaySelection::Main => None,
+        DisplaySelection::Active => accessibility::focused_window_frame().and_then(|frame| {
+            let frame = appkit_frame(frame, primary.frame().size.height)?;
+            let index = screen_with_largest_overlap(screens.iter().map(|screen| screen.frame()), frame)?;
+            Some(screens.objectAtIndex(index))
+        }),
     };
-    let screen_frames: Vec<_> = snapshots.iter().map(|screen| screen.frame).collect();
-    let (index, active_unavailable) = select_screen(&screen_frames, pointer, active, selection)?;
-    let screen = snapshots.get(index)?;
+    let active_unavailable = selection == DisplaySelection::Active && selected.is_none();
+    let screen = selected.unwrap_or(primary);
+    let key = NSString::from_str("NSScreenNumber");
+    let number = screen.deviceDescription().objectForKey(&key)?;
     Some(DisplayGeometry {
-        native_id: screen.native_id?,
-        frame: screen.frame,
-        visible_frame: screen.visible_frame,
+        native_id: number.downcast::<NSNumber>().ok()?.as_u32(),
+        frame: screen.frame(),
+        visible_frame: screen.visibleFrame(),
         active_unavailable,
     })
 }
 
-struct ScreenSnapshot {
-    native_id: Option<u32>,
-    frame: [f64; 4],
-    visible_frame: [f64; 4],
-}
-
-fn native_id(screen: &NSScreen) -> Option<u32> {
-    use objc2_foundation::{NSNumber, NSString};
-
-    let key = NSString::from_str("NSScreenNumber");
-    screen
-        .deviceDescription()
-        .objectForKey(&key)?
-        .downcast::<NSNumber>()
-        .ok()
-        .map(|number| number.as_u32())
-}
-
-fn rect(rect: objc2_foundation::NSRect) -> [f64; 4] {
-    [rect.origin.x, rect.origin.y, rect.size.width, rect.size.height]
-}
-
-fn select_screen(
-    screens: &[[f64; 4]],
-    pointer: (f64, f64),
-    active_frame: Option<[f64; 4]>,
-    selection: dupin_core::DisplaySelection,
-) -> Option<(usize, bool)> {
-    if screens.is_empty() {
-        return None;
-    }
-    let selected = match selection {
-        dupin_core::DisplaySelection::Mouse => screens
-            .iter()
-            .position(|screen| contains(*screen, pointer))
-            .map(|index| (index, false))
-            .unwrap_or((0, false)),
-        dupin_core::DisplaySelection::Main => (0, false),
-        dupin_core::DisplaySelection::Active => active_frame
-            .and_then(|frame| screen_with_largest_overlap(screens, frame))
-            .map(|index| (index, false))
-            .unwrap_or((0, true)),
-    };
-    Some(selected)
-}
-
-fn contains(frame: [f64; 4], point: (f64, f64)) -> bool {
-    point.0 >= frame[0]
-        && point.0 < frame[0] + frame[2]
-        && point.1 > frame[1]
-        && point.1 <= frame[1] + frame[3]
-}
-
-fn screen_with_largest_overlap(screens: &[[f64; 4]], frame: [f64; 4]) -> Option<usize> {
-    if !usable_frame(frame) {
-        return None;
-    }
+fn screen_with_largest_overlap(screens: impl Iterator<Item = NSRect>, window: NSRect) -> Option<usize> {
     screens
-        .iter()
         .enumerate()
-        .filter(|(_, screen)| usable_frame(**screen))
-        .map(|(index, screen)| (index, overlap(*screen, frame)))
-        .filter(|(_, area)| *area > 0.0)
-        .fold(None, |best, candidate| match best {
-            Some((_, area)) if area >= candidate.1 => best,
-            _ => Some(candidate),
+        .filter_map(|(index, frame)| {
+            let size = NSIntersectionRect(frame, window).size;
+            let area = size.width * size.height;
+            (area > 0.0).then_some((index, area))
         })
+        .reduce(|best, candidate| if candidate.1 > best.1 { candidate } else { best })
         .map(|(index, _)| index)
 }
 
-fn usable_frame(frame: [f64; 4]) -> bool {
-    frame.into_iter().all(f64::is_finite) && frame[2] > 0.0 && frame[3] > 0.0
-}
-
-fn overlap(a: [f64; 4], b: [f64; 4]) -> f64 {
-    let width = (a[0] + a[2]).min(b[0] + b[2]) - a[0].max(b[0]);
-    let height = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
-    width.max(0.0) * height.max(0.0)
-}
-
-fn ax_to_appkit_frame(position: AxPoint, size: AxSize, primary_height: f64) -> [f64; 4] {
-    [
-        position.x,
-        primary_height - position.y - size.height,
-        size.width,
-        size.height,
-    ]
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct AxPoint {
-    x: f64,
-    y: f64,
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct AxSize {
-    width: f64,
-    height: f64,
-}
-
-fn active_window_frame(primary_height: f64) -> Option<[f64; 4]> {
-    if !accessibility::is_trusted() {
+fn appkit_frame(mut frame: NSRect, primary_height: f64) -> Option<NSRect> {
+    if frame.is_empty()
+        || ![
+            frame.origin.x,
+            frame.origin.y,
+            frame.size.width,
+            frame.size.height,
+        ]
+        .into_iter()
+        .all(f64::is_finite)
+    {
         return None;
     }
-    let system = accessibility::system_wide()?;
-    let focused_app = accessibility::attribute(&system, "AXFocusedApplication")?;
-    let focused_window = accessibility::attribute(&focused_app, "AXFocusedWindow")?;
-    let position = accessibility::attribute(&focused_window, "AXPosition")?;
-    let size = accessibility::attribute(&focused_window, "AXSize")?;
-    let position = accessibility::point(&position)?;
-    let size = accessibility::size(&size)?;
-    Some(ax_to_appkit_frame(position, size, primary_height))
+    // Accessibility measures from the primary display's top edge.
+    frame.origin.y = primary_height - frame.max().y;
+    Some(frame)
 }
 
 mod accessibility {
     use std::ffi::c_void;
-    use std::ptr::NonNull;
+    use std::ptr::{self, NonNull};
 
+    use objc2_app_kit::NSWorkspace;
     use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType, CFTypeID};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-    type ElementRef = *const c_void;
-    type TypeRef = *const c_void;
-    type Error = i32;
     const MESSAGING_TIMEOUT_SECONDS: f32 = 0.1;
+    const AX_POINT: u32 = 1;
+    const AX_SIZE: u32 = 2;
 
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
         fn AXIsProcessTrusted() -> u8;
         fn AXUIElementGetTypeID() -> CFTypeID;
-        fn AXValueGetTypeID() -> CFTypeID;
-        fn AXValueGetType(value: TypeRef) -> u32;
-        fn AXUIElementCreateSystemWide() -> ElementRef;
-        fn AXUIElementSetMessagingTimeout(element: ElementRef, timeout: f32) -> Error;
+        fn AXUIElementCreateApplication(pid: i32) -> *mut CFType;
+        fn AXUIElementSetMessagingTimeout(element: &CFType, timeout: f32) -> i32;
         fn AXUIElementCopyAttributeValue(
-            element: ElementRef,
-            attribute: *const CFString,
-            value: *mut TypeRef,
-        ) -> Error;
-        fn AXValueGetValue(value: TypeRef, value_type: u32, value_ptr: *mut c_void) -> u8;
+            element: &CFType,
+            attribute: &CFString,
+            value: &mut *mut CFType,
+        ) -> i32;
+        fn AXValueGetTypeID() -> CFTypeID;
+        fn AXValueGetValue(value: &CFType, kind: u32, out: *mut c_void) -> u8;
     }
 
-    pub(super) fn is_trusted() -> bool {
-        // SAFETY: This query only reports the current process's existing Accessibility grant.
-        unsafe { AXIsProcessTrusted() != 0 }
-    }
-
-    pub(super) fn system_wide() -> Option<CFRetained<CFType>> {
-        // SAFETY: AXUIElementCreateSystemWide follows the Create rule and returns a CF object.
-        let element = unsafe { AXUIElementCreateSystemWide() };
-        let element = retained(element)?;
-        set_messaging_timeout(&element).then_some(element)
-    }
-
-    pub(super) fn attribute(element: &CFType, name: &str) -> Option<CFRetained<CFType>> {
-        if !set_messaging_timeout(element) {
+    pub(super) fn focused_window_frame() -> Option<NSRect> {
+        // SAFETY: AXIsProcessTrusted only queries the current grant.
+        if unsafe { AXIsProcessTrusted() } == 0 {
             return None;
         }
-        let name = CFString::from_str(name);
-        let mut value = std::ptr::null();
-        // SAFETY: Both pointers are live CF objects, the output pointer is valid, and Copy
-        // returns an owned reference on success.
-        let error = unsafe {
-            AXUIElementCopyAttributeValue(
-                std::ptr::from_ref(element).cast(),
-                CFRetained::as_ptr(&name).as_ptr(),
-                &mut value,
-            )
-        };
-        if error != 0 {
-            return None;
-        }
-        retained(value)
+        let pid = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()?
+            .processIdentifier();
+        // SAFETY: The Create call gives us an owned AXUIElement reference for this PID.
+        let app = unsafe { CFRetained::from_raw(NonNull::new(AXUIElementCreateApplication(pid))?) };
+        let app = timed(app)?;
+        let window = attribute(&app, "AXFocusedWindow")?;
+        let window = timed(window)?;
+        let position = attribute(&window, "AXPosition")?;
+        let size = attribute(&window, "AXSize")?;
+        read_frame(&position, &size)
     }
 
-    fn set_messaging_timeout(element: &CFType) -> bool {
-        // SAFETY: The type-id query accepts every live CF object.
-        if CFGetTypeID(Some(element)) != unsafe { AXUIElementGetTypeID() } {
-            return false;
+    fn timed(element: CFRetained<CFType>) -> Option<CFRetained<CFType>> {
+        // SAFETY: Check the CF type before passing the object to the element-specific API.
+        if CFGetTypeID(Some(&element)) != unsafe { AXUIElementGetTypeID() } {
+            return None;
         }
-        // SAFETY: `element` is a live AXUIElement CF object returned by a Create/Copy API.
-        // The finite timeout bounds calls to an unresponsive external application.
+        // SAFETY: The check above establishes that this is an AXUIElement.
+        // Bound calls to the foreground app without changing the process-wide timeout.
+        (unsafe { AXUIElementSetMessagingTimeout(&element, MESSAGING_TIMEOUT_SECONDS) } == 0)
+            .then_some(element)
+    }
+
+    fn attribute(element: &CFType, name: &str) -> Option<CFRetained<CFType>> {
+        let mut value = ptr::null_mut();
+        // SAFETY: Callers pass elements checked by `timed`. Copy returns an owned CF reference.
         unsafe {
-            AXUIElementSetMessagingTimeout(std::ptr::from_ref(element).cast(), MESSAGING_TIMEOUT_SECONDS) == 0
+            if AXUIElementCopyAttributeValue(element, &CFString::from_str(name), &mut value) != 0 {
+                return None;
+            }
+            Some(CFRetained::from_raw(NonNull::new(value)?))
         }
     }
 
-    pub(super) fn point(value: &CFType) -> Option<super::AxPoint> {
-        if !is_value_kind(value, 1) {
+    fn read_frame(position: &CFType, size: &CFType) -> Option<NSRect> {
+        // SAFETY: Check both CF types before passing them to AXValueGetValue.
+        let value_type = unsafe { AXValueGetTypeID() };
+        if CFGetTypeID(Some(position)) != value_type || CFGetTypeID(Some(size)) != value_type {
             return None;
         }
-        let mut point = super::AxPoint::default();
-        // SAFETY: AXPosition is specified to contain an AXValue wrapping a CGPoint.
-        let success = unsafe {
-            AXValueGetValue(
-                std::ptr::from_ref(value).cast(),
-                1,
-                (&mut point as *mut super::AxPoint).cast(),
-            )
-        };
-        (success != 0).then_some(point)
-    }
-
-    pub(super) fn size(value: &CFType) -> Option<super::AxSize> {
-        if !is_value_kind(value, 2) {
-            return None;
-        }
-        let mut size = super::AxSize::default();
-        // SAFETY: AXSize is specified to contain an AXValue wrapping a CGSize.
-        let success = unsafe {
-            AXValueGetValue(
-                std::ptr::from_ref(value).cast(),
-                2,
-                (&mut size as *mut super::AxSize).cast(),
-            )
-        };
-        (success != 0).then_some(size)
-    }
-
-    fn is_value_kind(value: &CFType, kind: u32) -> bool {
-        // SAFETY: Check the CF object type before passing it to the AXValue-only query.
+        let mut origin = NSPoint::ZERO;
+        let mut dimensions = NSSize::ZERO;
+        // SAFETY: AXValueGetValue checks the requested kind and writes only its corresponding type.
         unsafe {
-            CFGetTypeID(Some(value)) == AXValueGetTypeID()
-                && AXValueGetType(std::ptr::from_ref(value).cast()) == kind
+            (AXValueGetValue(position, AX_POINT, ptr::from_mut(&mut origin).cast()) != 0
+                && AXValueGetValue(size, AX_SIZE, ptr::from_mut(&mut dimensions).cast()) != 0)
+                .then_some(NSRect::new(origin, dimensions))
         }
     }
 
-    fn retained(value: TypeRef) -> Option<CFRetained<CFType>> {
-        let value = NonNull::new(value.cast_mut().cast::<CFType>())?;
-        // SAFETY: AX Create/Copy functions return an owned +1 CF reference.
-        Some(unsafe { CFRetained::from_raw(value) })
-    }
     #[cfg(test)]
     mod tests {
         use super::*;
 
         #[test]
-        fn rejects_other_cf_object_types_before_reading_ax_values_or_elements() {
-            let string = CFString::from_str("not an AX object");
-            assert!(point(&string).is_none());
-            assert!(size(&string).is_none());
-            assert!(attribute(&string, "AXFocusedWindow").is_none());
+        fn rejects_non_accessibility_objects() {
+            let string: CFRetained<CFType> = CFString::from_str("not an AX object").into();
+            assert!(read_frame(&string, &string).is_none());
+            assert!(timed(string).is_none());
         }
     }
 }
 
 #[cfg(test)]
-#[path = "window_tests.rs"]
-mod tests;
+mod tests {
+    use super::*;
+    use objc2_foundation::{NSPoint, NSSize};
+
+    fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
+    }
+
+    #[test]
+    fn focused_window_uses_the_screen_with_most_overlap() {
+        let screens = [rect(0.0, 0.0, 1440.0, 900.0), rect(-1280.0, 100.0, 1280.0, 800.0)];
+        let window = appkit_frame(rect(-600.0, 150.0, 800.0, 450.0), 900.0).unwrap();
+        assert_eq!(window, rect(-600.0, 300.0, 800.0, 450.0));
+        assert_eq!(screen_with_largest_overlap(screens.into_iter(), window), Some(1));
+        assert_eq!(
+            screen_with_largest_overlap(screens.into_iter(), rect(1500.0, 100.0, 200.0, 200.0)),
+            None
+        );
+        assert!(appkit_frame(rect(0.0, 0.0, 0.0, 450.0), 900.0).is_none());
+    }
+
+    #[test]
+    fn shared_pointer_edges_belong_to_one_screen() {
+        let upper = rect(0.0, 800.0, 1000.0, 900.0);
+        let lower = rect(0.0, 0.0, 1000.0, 800.0);
+        let pointer = NSPoint::new(500.0, 800.0);
+        assert!(!NSMouseInRect(pointer, upper, false));
+        assert!(NSMouseInRect(pointer, lower, false));
+    }
+}
