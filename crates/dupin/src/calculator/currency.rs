@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -247,10 +247,27 @@ fn refresh(
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(directory.join(ATTEMPT_FILE))?;
-    if marker.try_lock().is_err() {
-        publish_cache(directory, state, notify);
-        return Ok(Duration::from_secs(15));
+    match marker.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => {
+            publish_cache(directory, state, notify);
+            return Ok(Duration::from_secs(15));
+        }
+        Err(TryLockError::Error(error)) => return Err(error),
     }
+    let result = refresh_locked(directory, &mut marker, state, fetch, notify);
+    // A forked child can keep the lock alive after our descriptor closes.
+    marker.unlock()?;
+    result
+}
+
+fn refresh_locked(
+    directory: &Path,
+    marker: &mut File,
+    state: &State,
+    fetch: &impl Fn() -> Option<String>,
+    notify: &impl Fn(),
+) -> io::Result<Duration> {
     let metadata = marker.metadata()?;
     if !metadata.is_file() {
         return Err(io::Error::other("the exchange-rate marker is not a file"));
@@ -265,7 +282,7 @@ fn refresh(
     let mut retry = FIRST_RETRY;
     if metadata.len() != 0 {
         let mut stored = Vec::new();
-        (&mut marker).take(16).read_to_end(&mut stored)?;
+        Read::by_ref(marker).take(16).read_to_end(&mut stored)?;
         let previous = std::str::from_utf8(&stored)
             .ok()
             .and_then(|text| text.trim().parse::<u64>().ok())

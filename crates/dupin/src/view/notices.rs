@@ -17,7 +17,7 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
     let notices = [
         ("config-problem", s.config_problem.as_deref()),
         ("hotkey-problem", s.hotkey_problem.as_deref()),
-        ("notice", s.notice.as_deref()),
+        ("notice", s.notice()),
         ("registration-notice", s.registration_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),
     ];

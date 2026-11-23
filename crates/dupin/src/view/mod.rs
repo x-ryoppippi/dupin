@@ -27,7 +27,7 @@ pub fn view(s: &Ui, cx: &mut Cx<Ui>) -> El {
     let dark = cx.system_dark();
     let t = ResolvedTheme::new(&s.theme, dark);
     let content = if let Some(picker) = &s.picker {
-        picker::view(s, picker)
+        picker::view(s, &picker.values, picker.selected)
     } else {
         launcher(s, &t, dark)
     };

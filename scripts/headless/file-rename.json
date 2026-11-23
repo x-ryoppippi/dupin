@@ -8,7 +8,6 @@
 		{ "t": 3.2, "type": "key", "name": "Down" },
 		{ "t": 3.25, "type": "key", "name": "Down" },
 		{ "t": 3.3, "type": "key", "name": "Down" },
-		{ "t": 3.35, "type": "key", "name": "Down" },
 		{ "t": 3.5, "type": "key", "name": "Enter" },
 		{ "t": 3.8, "type": "mark", "name": "end" }
 	]

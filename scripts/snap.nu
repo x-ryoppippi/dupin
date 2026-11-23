@@ -4,8 +4,8 @@ use headless-config.nu scenario-env
 
 # Render each headless scenario in scripts/headless to <out>/<name>.png.
 #
-# A scenario with a `<name>.toml` beside it runs with that file as its config.toml, from a
-# temporary config directory; the others use yours.
+# Each scenario runs with temporary HOME, XDG_DATA_HOME and XDG_CONFIG_HOME directories.
+# The config comes from scripts/headless/config unless a matching `<name>.toml` supplies it.
 #
 # The renders show real results from this Mac (file paths included), so they stay out of the
 # repository. `--realtime` paces each run on the wall clock: results come from real providers

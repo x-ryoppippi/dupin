@@ -79,7 +79,7 @@ pub(super) fn footer(s: &Prefs, k: &Kit) -> El {
                 .focusable(true)
                 .focus_selected(s.page == Page::Updates)
                 .focus_ring(2.0, 0.0, k.c.border_focus)
-                .on_press(|s: &mut Prefs| s.page = Page::Updates)
+                .on_press(|s: &mut Prefs| s.show(Page::Updates))
                 .w_full()
                 .px(6.0)
                 .font(k.ty.small.lh(20.0))
@@ -101,7 +101,7 @@ pub(super) fn footer(s: &Prefs, k: &Kit) -> El {
                 .hover(k.c.hover)
                 .press(k.c.pressed)
                 .on_press(|s: &mut Prefs| {
-                    s.page = Page::Updates;
+                    s.show(Page::Updates);
                     let status = s.updater.status();
                     if status.can_check() && !matches!(status, Status::Download { .. }) {
                         s.updater.check_now();

@@ -1,10 +1,13 @@
-use std::fs::{self, DirBuilder, File};
+use std::ffi::OsStr;
+use std::fs::{self, DirBuilder, File, Metadata};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt, symlink};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 const PREFIX: &str = ".dupin-copy-in-progress-";
 const MARKER: &str = ".dupin-copy-receipt";
+const REMOVE_PHASE: &str = ".remove-";
 
 pub(super) struct Staging {
     receipt: Receipt,
@@ -86,46 +89,76 @@ pub(super) fn recover(journal: &Path) -> io::Result<()> {
 }
 
 fn reap(receipt: &Path) -> io::Result<()> {
-    let stage = fs::read_link(receipt)?;
-    let name = receipt.file_name().expect("named receipt");
-    if !stage.is_absolute() || stage.file_name() != Some(name) {
-        return Err(io::Error::other("invalid copy staging receipt"));
+    let stage = match fs::read_link(receipt) {
+        Ok(stage) => stage,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let invalid = || io::Error::other("invalid copy staging receipt");
+    let name = receipt.file_name().and_then(OsStr::to_str).ok_or_else(invalid)?;
+    let (name, identity) = name
+        .split_once(REMOVE_PHASE)
+        .map_or((name, None), |(name, identity)| (name, Some(identity)));
+    if !stage.is_absolute() || stage.file_name() != Some(OsStr::new(name)) {
+        return Err(invalid());
     }
-    match stage.symlink_metadata() {
-        Ok(metadata) => {
-            if !metadata.is_dir() {
-                return fs::remove_file(receipt);
-            }
-            let marker = stage.join(MARKER);
-            let matches = match marker.symlink_metadata() {
-                Ok(metadata) if metadata.is_file() => fs::read(&marker)? == name.as_encoded_bytes(),
-                Ok(_) => false,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
-                Err(error) => return Err(error),
-            };
-            if !matches {
-                return fs::remove_file(receipt);
-            }
-            // Leave the marker in place if removing the staged copy fails and needs to be retried.
-            let entry = stage.join("entry");
-            match entry.symlink_metadata() {
-                Ok(metadata) if metadata.is_dir() => remove_staged_directory(&entry)?,
-                Ok(_) => fs::remove_file(&entry)?,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
-            }
-            fs::remove_file(&marker)?;
-            fs::remove_dir(&stage)?;
-        }
+    let metadata = match stage.symlink_metadata() {
+        Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             if !stage.parent().is_some_and(Path::is_dir) {
                 // Removable volumes can be absent when Dupin starts.
                 return Ok(());
             }
+            return fs::remove_file(receipt);
         }
         Err(error) => return Err(error),
+    };
+    if !metadata.is_dir() || identity.is_some_and(|id| id != directory_identity(&metadata)) {
+        return fs::remove_file(receipt);
     }
+    let marker = stage.join(MARKER);
+    let marked = match marker.symlink_metadata() {
+        Ok(metadata) if metadata.is_file() => fs::read(&marker)? == name.as_bytes(),
+        Ok(_) => false,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    let pending;
+    let receipt = if identity.is_some() {
+        receipt
+    } else {
+        if !marked {
+            return fs::remove_file(receipt);
+        }
+        let entry = stage.join("entry");
+        match entry.symlink_metadata() {
+            Ok(metadata) if metadata.is_dir() => remove_staged_directory(&entry)?,
+            Ok(_) => fs::remove_file(&entry)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        // Record ownership before deleting the marker so an interrupted removal can resume.
+        pending = receipt.with_file_name(format!("{name}{REMOVE_PHASE}{}", directory_identity(&metadata)));
+        fs::rename(receipt, &pending)?;
+        &pending
+    };
+    if marked {
+        fs::remove_file(marker)?;
+    }
+    fs::remove_dir(stage)?;
     fs::remove_file(receipt)
+}
+
+fn directory_identity(metadata: &Metadata) -> String {
+    let (device, inode) = (metadata.dev(), metadata.ino());
+    let created = metadata
+        .created()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok());
+    match created {
+        Some(time) => format!("{device}-{inode}-{}-{}", time.as_secs(), time.subsec_nanos()),
+        None => format!("{device}-{inode}"),
+    }
 }
 
 pub(super) fn remove_staged_directory(root: &Path) -> io::Result<()> {
@@ -153,6 +186,42 @@ pub(super) fn remove_staged_directory(root: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_retries_removing_a_stage_after_its_marker_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("journal");
+        fs::create_dir(&journal).unwrap();
+        let stage = Receipt::register(&journal, dir.path()).unwrap().stage;
+        let blocker = stage.join("blocker");
+        fs::write(&blocker, "keep until the next recovery").unwrap();
+
+        assert!(recover(&journal).is_err());
+        assert!(!stage.join(MARKER).exists());
+        assert_eq!(fs::read_dir(&journal).unwrap().count(), 1);
+        fs::remove_file(blocker).unwrap();
+
+        recover(&journal).unwrap();
+        assert!(!stage.exists());
+        assert_eq!(fs::read_dir(journal).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn startup_leaves_an_empty_replacement_when_retrying_stage_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal = dir.path().join("journal");
+        fs::create_dir(&journal).unwrap();
+        let stage = Receipt::register(&journal, dir.path()).unwrap().stage;
+        fs::write(stage.join("blocker"), "").unwrap();
+        assert!(recover(&journal).is_err());
+
+        fs::rename(&stage, dir.path().join("original")).unwrap();
+        fs::create_dir(&stage).unwrap();
+
+        recover(&journal).unwrap();
+        assert!(stage.is_dir());
+        assert_eq!(fs::read_dir(journal).unwrap().count(), 0);
+    }
 
     #[test]
     fn startup_removes_abandoned_copy_but_leaves_a_replaced_staging_folder() {

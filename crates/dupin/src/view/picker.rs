@@ -1,11 +1,11 @@
 use rune::{Color, El, TextStyle, col, row, text, text_input};
 
-use crate::ui::{Picker, Ui};
+use crate::ui::Ui;
 
 use super::header::HEADER_H;
 use super::results::visible_rows;
 
-pub(super) fn view(s: &Ui, picker: &Picker) -> El {
+pub(super) fn view(s: &Ui, values: &[serde_json::Value], selected: usize) -> El {
     let field = text_input(&s.query, TextStyle::new(22.0, 400.0))
         .key("pick-query")
         .single_line()
@@ -13,14 +13,7 @@ pub(super) fn view(s: &Ui, picker: &Picker) -> El {
         .on_edit(|s: &mut Ui| &mut s.query)
         .on_input_key(Ui::key)
         .on_input_change(Ui::edited);
-    picker_view(
-        field,
-        &picker.values,
-        &s.query.text,
-        picker.selected,
-        s.theme.row_height as f32,
-    )
-    .on_key(Ui::key)
+    picker_view(field, values, &s.query.text, selected, s.theme.row_height as f32).on_key(Ui::key)
 }
 
 fn picker_view(field: El, values: &[serde_json::Value], query: &str, selected: usize, row_height: f32) -> El {

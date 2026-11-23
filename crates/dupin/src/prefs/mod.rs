@@ -461,8 +461,7 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    #[test]
-    fn editing_stale_preferences_preserves_the_latest_external_values() {
+    fn state(current: Rc<RefCell<Config>>, settings: Arc<crate::settings::Service>, welcome: bool) -> Prefs {
         let panel = rune::App::new(rune::AppSpec::new(
             "test panel",
             (1.0, 1.0),
@@ -477,6 +476,69 @@ mod tests {
             view,
         ))
         .handle();
+        let binding = Arc::new(Binding::new(panel.clone()));
+        let updater = Updater::start(false, panel.clone(), prefs);
+        Prefs::new(current, binding, panel, updater, settings, welcome)
+    }
+
+    #[test]
+    fn skipped_extension_problems_follow_the_extensions_switch() {
+        let config = Config {
+            snippet_paste: false,
+            ..Config::default()
+        };
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(None, |_| {}));
+        let mut state = state(current, settings, false);
+        state.reflect_extensions(Vec::new(), vec!["fixture: invalid manifest".into()]);
+        state.show(Page::Search);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+
+        for (extensions, window_management) in [(true, false), (false, true)] {
+            runtime.update(|s, _| {
+                s.config.extensions = extensions;
+                s.config.window_management = window_management;
+            });
+            runtime.frame(0.0);
+            let shows_problems = runtime
+                .elements()
+                .iter()
+                .any(|element| element.key.as_deref() == Some("extension-problems"));
+            assert_eq!(shows_problems, extensions);
+        }
+    }
+
+    #[test]
+    fn both_updates_footer_buttons_leave_the_welcome() {
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(None, |_| {}));
+        let state = state(current, settings, true);
+        let mut runtime = rune::Runtime::new(
+            state,
+            |s, cx| updates::footer(s, rune_theme_opencode::kit(cx.system_dark())),
+            (SIDEBAR_WIDTH, 100.0),
+            rune::Env::default(),
+        );
+
+        for key in ["current-version", Page::Updates.key()] {
+            runtime.update(|s, _| {
+                s.page = Page::General;
+                s.welcome = Some(welcome::Step::Hotkey);
+            });
+            runtime.frame(0.0);
+            let (x, y) = runtime.find(key).unwrap();
+            runtime.pointer_down(x, y);
+            runtime.pointer_up(x, y);
+            runtime.frame(0.0);
+            runtime.update(|s, _| {
+                assert!(s.page == Page::Updates, "{key} should open Updates");
+                assert_eq!(s.welcome, None, "{key} should dismiss Welcome");
+            });
+        }
+    }
+
+    #[test]
+    fn editing_stale_preferences_preserves_the_latest_external_values() {
         let path = std::env::temp_dir().join(format!(
             "dupin-prefs-{}-{}.toml",
             std::process::id(),
@@ -490,9 +552,7 @@ mod tests {
             sent.send(update).unwrap();
         }));
         let current = Rc::new(RefCell::new(Config::default()));
-        let binding = Arc::new(Binding::new(panel.clone()));
-        let updater = Updater::start(false, panel.clone(), prefs);
-        let mut state = Prefs::new(current.clone(), binding, panel, updater, settings.clone(), false);
+        let mut state = state(current.clone(), settings.clone(), false);
         let external = Config {
             hotkey: "ctrl+alt+k".into(),
             dictionary_keywords: vec!["lookup".into()],

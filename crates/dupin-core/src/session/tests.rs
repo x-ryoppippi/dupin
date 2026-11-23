@@ -1,7 +1,11 @@
 use std::path::PathBuf;
 
+use super::search::ProviderPhase;
 use super::*;
-use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation, View};
+use crate::searcher::Delivery;
+use crate::{
+    Action, CommandId, CommandRegistry, CommandSpec, ItemAction, QueryEligibility, QueryPresentation, View,
+};
 
 fn trash_row() -> Item {
     let mut row = item("file");
