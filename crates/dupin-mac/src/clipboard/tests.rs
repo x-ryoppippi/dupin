@@ -291,6 +291,20 @@ fn files_are_kept_by_reference_with_their_size_and_type() {
 }
 
 #[test]
+fn only_files_still_there_are_put_back() {
+    let files = [
+        FileRef::new("/fixture/gone/a.txt"),
+        FileRef::new("/fixture/b.txt"),
+    ];
+    let exists = |path: &Path| !path.starts_with("/fixture/gone");
+    assert_eq!(
+        restorable(&files, exists),
+        Ok(vec![PathBuf::from("/fixture/b.txt")])
+    );
+    assert!(restorable(&files[..1], exists).is_err());
+}
+
+#[test]
 fn excluded_files_are_neither_recorded_nor_read_as_their_names() {
     let mut board = Fixture::new(&[FILE_URL_TYPE, STRING_TYPE]).text(STRING_TYPE, "report.pdf");
     board.files = vec!["/fixture/report.pdf".into()];

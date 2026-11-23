@@ -351,14 +351,21 @@ pub fn write(content: &Content) -> Result<(), String> {
                     NSPasteboardTypePNG
                 })
             }
-            Content::Files(files) => {
-                return copy_files(&files.iter().map(|file| file.path.clone()).collect::<Vec<_>>());
-            }
+            Content::Files(files) => return copy_files(&restorable(files, |path| path.exists())?),
         };
         written
             .then_some(())
             .ok_or_else(|| "Couldn't copy to the clipboard.".to_owned())
     })
+}
+
+/// The files of an entry still there to put back, as its row offers them.
+fn restorable(files: &[FileRef], exists: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, String> {
+    let paths = FileRef::present(files, exists);
+    if paths.is_empty() {
+        return Err("Those files are no longer there.".to_owned());
+    }
+    Ok(paths)
 }
 
 /// Put files on the general pasteboard, as Finder's Copy does.

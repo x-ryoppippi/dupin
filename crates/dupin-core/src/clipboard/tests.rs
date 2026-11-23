@@ -200,22 +200,30 @@ fn turning_off_images_or_files_forgets_those_already_kept() {
 }
 
 #[test]
-fn images_beyond_the_memory_budget_go_oldest_first() {
+fn images_beyond_the_memory_budget_go_oldest_first_and_leave_other_kinds() {
+    let store = Recorder::default();
     let mut roomy = policy(1000, 1024);
     roomy.max_image_bytes = IMAGE_MEMORY / 3;
-    let mut history = History::new(roomy);
-    for now in 0..4 {
-        push(
-            &mut history,
-            image(now as u32 + 1, 1, IMAGE_MEMORY / 3 - now),
-            now as u64,
-        );
+    let mut history = History::with_store(roomy, Box::new(store.clone()), |_| {}, 0);
+    push(&mut history, text("note"), 1);
+    push(&mut history, files(&["/fixture/a.txt"]), 2);
+    push(&mut history, image(1, 1, 1000), 3);
+    let large = IMAGE_MEMORY / 3 - 1000;
+    for id in 4..8 {
+        push(&mut history, image(id, 1, large), u64::from(id));
     }
-    push(&mut history, text("small"), 9);
     assert_eq!(
         titles(&history),
-        ["small", "Image · 4×1 PNG", "Image · 3×1 PNG", "Image · 2×1 PNG"]
+        [
+            "Image · 7×1 PNG",
+            "Image · 6×1 PNG",
+            "Image · 5×1 PNG",
+            "Image · 1×1 PNG",
+            "a.txt",
+            "note"
+        ]
     );
+    assert_eq!(store.ids(), [1, 2, 3, 5, 6, 7]);
 }
 
 #[test]

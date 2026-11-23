@@ -34,7 +34,7 @@ ignored_apps = [
 
 While it is on, Dupin checks the clipboard's change count twice a second on a background thread and records each new copy as one kind: the files copied in Finder, else plain text, else an image. Rich text is recorded as its plain text. Copies already on the clipboard when the history is turned on are not recorded. Copying something already in the history moves it to the top.
 
-- **Images** are read from PNG, TIFF, HEIC, HEIF or JPEG on the clipboard and kept as PNG. An image larger than 4096 pixels on its longest side is scaled down to it; one whose PNG is still larger than `max_image_bytes` is skipped. A PNG that already fits is kept byte for byte. Images share 128 MB of memory; past that, the oldest images go first.
+- **Images** are read from PNG, TIFF, HEIC, HEIF or JPEG on the clipboard and kept as PNG. An image larger than 4096 pixels on its longest side is scaled down to it; one whose PNG is still larger than `max_image_bytes` is skipped. A PNG that already fits is kept byte for byte. Images share 128 MB of memory; an image that no longer fits beside newer ones is dropped, oldest first. Text and files are never dropped to make room for images.
 - **Files**, including videos, are never copied. Dupin keeps each file's path, name, size and type, so a file larger than the history is never duplicated. No thumbnail is made.
 - **Text** larger than `max_entry_bytes` is skipped rather than kept in part.
 

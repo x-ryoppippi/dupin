@@ -18,8 +18,8 @@ use crate::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request,
 pub use store::{MemoryStore, Store, StoreError};
 
 const TITLE_CHARS: usize = 200;
-/// Images are most of a history's bytes. Past this total the oldest images go first, so the
-/// entry limit alone can't hold hundreds of megabytes.
+/// Images are most of a history's bytes. Newest first, an image that would take their total past
+/// this is dropped, so the entry limit alone can't hold hundreds of megabytes.
 const IMAGE_MEMORY: usize = 128 * 1024 * 1024;
 
 /// What one copy held, in the one representation the history keeps of it.
@@ -55,6 +55,15 @@ impl FileRef {
             size: None,
             kind: None,
         }
+    }
+
+    /// The paths of `files` that are still there: the only ones a row offers or puts back.
+    pub fn present(files: &[FileRef], exists: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+        files
+            .iter()
+            .filter(|file| exists(&file.path))
+            .map(|file| file.path.clone())
+            .collect()
     }
 
     fn name(&self) -> String {
@@ -392,10 +401,15 @@ impl History {
             {
                 return false;
             }
-            if let Content::Image(image) = content {
-                images += image.png.len();
+            let Content::Image(image) = content else {
+                return true;
+            };
+            let total = images + image.png.len();
+            let fits = total <= IMAGE_MEMORY;
+            if fits {
+                images = total;
             }
-            images <= IMAGE_MEMORY
+            fits
         });
     }
 
@@ -553,7 +567,7 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64, exists: fn(
             (None, Payload::default())
         }
         Content::Files(files) => {
-            let present: Vec<&FileRef> = files.iter().filter(|file| exists(&file.path)).collect();
+            let present = FileRef::present(files, exists);
             available = !present.is_empty();
             if !available {
                 parts.push("Unavailable".into());
@@ -565,12 +579,12 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64, exists: fn(
                 }
                 files => parts.push(plural(files.len(), "file", "files")),
             }
-            reveal = present.first().map(|file| file.path.clone());
+            reveal = present.first().cloned();
             (
                 reveal.clone(),
                 Payload {
                     text: None,
-                    paths: present.iter().map(|file| file.path.clone()).collect(),
+                    paths: present,
                 },
             )
         }
