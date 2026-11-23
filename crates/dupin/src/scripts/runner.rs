@@ -19,7 +19,7 @@ type Notify = Arc<dyn Fn(RunId, bool) + Send + Sync>;
 type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
 const EXIT_DRAIN: Duration = Duration::from_millis(100);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
-const POLL_INTERVAL: i32 = 20;
+const POLL_INTERVAL_MS: i32 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -146,18 +146,19 @@ impl Lifecycle {
 
     fn reap<T>(&self, id: RunId, poll: impl FnOnce() -> io::Result<Option<T>>) -> io::Result<Option<T>> {
         let mut state = lock(&self.state);
+        // Reserve the leader's PID through cancellation so KILL still reaches its group.
+        if state
+            .groups
+            .get(&id)
+            .is_some_and(|group| group.terminated && !group.killed)
+        {
+            return Ok(None);
+        }
         let result = poll()?;
         if result.is_some() {
             state.groups.remove(&id);
         }
         Ok(result)
-    }
-
-    fn killed(&self, id: RunId) -> bool {
-        lock(&self.state)
-            .groups
-            .get(&id)
-            .is_some_and(|group| group.killed)
     }
 }
 
@@ -417,41 +418,39 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
                 let force = started.elapsed() >= CANCEL_GRACE;
                 inner.lifecycle.cancel(run.id, force);
             }
-            // Keep the leader's PID reserved through cancellation so KILL still reaches its group.
-            if cancel_at.is_none() || inner.lifecycle.killed(run.id) {
-                match inner.lifecycle.reap(run.id, || child.try_wait()) {
-                    Ok(Some(status)) => {
-                        exited = Some((status, Instant::now()));
-                    }
-                    Ok(None) => {}
-                    Err(error) => {
-                        inner.lifecycle.cancel(run.id, true);
-                        let _ = child.wait();
-                        inner.lifecycle.reaped(run.id);
-                        return Status::Failed(error.to_string());
-                    }
+            match inner.lifecycle.reap(run.id, || child.try_wait()) {
+                Ok(Some(status)) => exited = Some((status, Instant::now())),
+                Ok(None) => {}
+                Err(error) => {
+                    inner.lifecycle.cancel(run.id, true);
+                    let _ = child.wait();
+                    inner.lifecycle.reaped(run.id);
+                    return Status::Failed(error.to_string());
                 }
             }
         }
-        if let Some((status, at)) = exited
-            && ((stdout.fd() == -1 && stderr.fd() == -1) || at.elapsed() >= EXIT_DRAIN)
-        {
-            stdout.close(output);
-            stderr.close(output);
-            return if cancel_at.is_some() {
-                Status::Cancelled
-            } else if let Some(error) = problem {
-                Status::Failed(error)
-            } else {
-                Status::Exited(status.code())
-            };
+        let mut timeout_ms = POLL_INTERVAL_MS;
+        if let Some((status, at)) = exited {
+            let remaining = EXIT_DRAIN.saturating_sub(at.elapsed());
+            if (stdout.fd() == -1 && stderr.fd() == -1) || remaining.is_zero() {
+                stdout.close(output);
+                stderr.close(output);
+                return if cancel_at.is_some() {
+                    Status::Cancelled
+                } else if let Some(error) = problem {
+                    Status::Failed(error)
+                } else {
+                    Status::Exited(status.code())
+                };
+            }
+            timeout_ms = timeout_ms.min(remaining.as_millis() as i32);
         }
         let mut fds = [stdout.fd(), stderr.fd()].map(|fd| libc::pollfd {
             fd,
             events: libc::POLLIN,
             revents: 0,
         });
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL) } == -1 {
+        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) } == -1 {
             let error = io::Error::last_os_error();
             if error.kind() != io::ErrorKind::Interrupted {
                 inner.lifecycle.cancel(run.id, true);
@@ -605,6 +604,22 @@ mod tests {
         assert!(lock(&signals).is_empty());
     }
 
+    #[test]
+    fn cancellation_reserves_the_group_until_escalation() {
+        let (lifecycle, signals) = lifecycle();
+        lifecycle
+            .spawn(1, &AtomicBool::new(false), || Ok(((), 789)))
+            .unwrap();
+        lifecycle.cancel(1, false);
+        assert_eq!(
+            lifecycle.reap::<()>(1, || panic!("reaping after TERM")).unwrap(),
+            None
+        );
+        lifecycle.cancel(1, true);
+        assert_eq!(lifecycle.reap(1, || Ok(Some(()))).unwrap(), Some(()));
+        assert_eq!(*lock(&signals), [(789, libc::SIGTERM), (789, libc::SIGKILL)]);
+    }
+
     struct Fixture(PathBuf);
 
     impl Fixture {
@@ -678,7 +693,7 @@ mod tests {
     #[test]
     fn leader_exit_finishes_even_with_inherited_pipes() {
         let fixture = Fixture::new(
-            "(for _ in 1 2 3 4 5 6 7 8; do [ ! -f stop ] || exit; sleep 0.25; done; touch timed-out) &\nprintf 'last stdout'\nprintf 'last stderr' >&2\nexit 7\n",
+            "(for _ in 1 2 3 4 5 6 7 8; do if [ -f stop ]; then touch stopped; exit; fi; sleep 0.25; done; touch timed-out) &\nprintf 'last stdout'\nprintf 'last stderr' >&2\nexit 7\n",
         );
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let running = runner.activity().clone();
@@ -690,6 +705,11 @@ mod tests {
         assert_eq!(result.output.last_stdout(), Some("last stdout"));
         assert_eq!(result.output.stderr_tail(), "last stderr\n");
         assert_eq!(running.load(Ordering::Acquire), 0);
+        let start = Instant::now();
+        while !fixture.0.join("stopped").exists() {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
