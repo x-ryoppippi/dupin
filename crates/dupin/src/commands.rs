@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{CommandId, CommandRegistry, CommandSpec, Config, Provider, QueryPresentation};
-use dupin_mac::{AppsProvider, DictionaryProvider, SpotlightProvider, Target};
+use dupin_mac::{AppsProvider, DictionaryProvider, FolderProvider, SpotlightProvider, Target};
 
 pub const APPS: &str = "apps.search";
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
 pub const DICTIONARY: &str = "dictionary.lookup";
+const BROWSE: &str = "files.browse";
 const SETTINGS: &str = "settings.search";
 const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -112,6 +113,12 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
             ),
         ),
         CommandSpec::new(
+            id(BROWSE),
+            file_limit,
+            presentation("Filter folder", None, None, Some("No matches"), false, 1.0),
+        )
+        .with_candidate_limit(MAX_FILE_CANDIDATES),
+        CommandSpec::new(
             dictionary_id.clone(),
             1,
             presentation(
@@ -150,6 +157,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         Some(id(WEB_KEYWORDS)),
     )?;
 
+    registry.set_browser(id(BROWSE))?;
     registry.add_keyword(&contents_id, "in")?;
     let mut rejected = Vec::new();
     for keyword in &config.dictionary_keywords {
@@ -208,6 +216,7 @@ pub fn register(config: &Config, apps: Arc<AppsProvider>) -> Result<Registration
             dictionary_id,
             Arc::new(DictionaryProvider::default()) as Arc<dyn Provider>,
         ),
+        (id(BROWSE), Arc::new(FolderProvider) as Arc<dyn Provider>),
         (
             id(WEB_KEYWORDS),
             Arc::new(crate::web::WebProvider::new(web.clone(), false)) as Arc<dyn Provider>,

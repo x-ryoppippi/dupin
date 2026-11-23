@@ -14,7 +14,7 @@ use dupin_core::{Item, Provider, ProviderError, Request};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{
-    NSArray, NSCompoundPredicate, NSDate, NSDefaultRunLoopMode, NSMetadataItem,
+    NSArray, NSCompoundPredicate, NSDate, NSDefaultRunLoopMode, NSMetadataItem, NSMetadataItemContentTypeKey,
     NSMetadataItemFSContentChangeDateKey, NSMetadataItemLastUsedDateKey, NSMetadataItemPathKey,
     NSMetadataQuery, NSMetadataQueryLocalComputerScope, NSPredicate, NSRunLoop, NSString, NSURL,
 };
@@ -210,15 +210,21 @@ fn item(
     now: u64,
     demotions: &[PathBuf],
 ) -> Option<Item> {
+    let result: &NSMetadataItem = result.downcast_ref()?;
     let dates = if target == Target::Names {
-        file_dates(result.downcast_ref()?)
+        file_dates(result)
     } else {
         FileDates {
             last_used: None,
             modified: None,
         }
     };
-    item_for_path(target, path, query, dates, now, demotions)
+    // SAFETY: The content type key is a valid immutable Foundation metadata key.
+    let folder = result
+        .valueForAttribute(unsafe { NSMetadataItemContentTypeKey })
+        .and_then(|kind| kind.downcast::<NSString>().ok())
+        .is_some_and(|kind| kind.to_string() == "public.folder");
+    item_for_path(target, path, query, dates, now, demotions, folder)
 }
 
 fn item_for_path(
@@ -228,6 +234,7 @@ fn item_for_path(
     dates: FileDates,
     now: u64,
     demotions: &[PathBuf],
+    folder: bool,
 ) -> Option<Item> {
     let title = path.file_name()?.to_string_lossy().into_owned();
     let (score, matched) = match target {
@@ -245,7 +252,7 @@ fn item_for_path(
     };
     let mut item = Item::path(path, title, matched);
     crate::quick_look::add_action(&mut item);
-    crate::file_actions::add(&mut item);
+    crate::file_actions::add(&mut item, folder);
     item.score = score;
     Some(item)
 }
@@ -656,7 +663,7 @@ mod tests {
             last_used: Some(1_700_000_000),
             modified: Some(1_699_000_000),
         };
-        let item = item_for_path(Target::Names, path, "saf", dates, 1_700_000_100, &[]).unwrap();
+        let item = item_for_path(Target::Names, path, "saf", dates, 1_700_000_100, &[], false).unwrap();
 
         assert!(item.score.is_some());
         assert_eq!(
@@ -674,7 +681,16 @@ mod tests {
             last_used: Some(1_700_000_000),
             modified: Some(1_699_000_000),
         };
-        let ranked = item_for_path(Target::Names, path.clone(), &terms, dates, 1_700_000_100, &[]).unwrap();
+        let ranked = item_for_path(
+            Target::Names,
+            path.clone(),
+            &terms,
+            dates,
+            1_700_000_100,
+            &[],
+            false,
+        )
+        .unwrap();
         let expected = file_rank::score("saf", "Safari.pdf", &path, dates, 1_700_000_100, &[]);
 
         assert_eq!(ranked.score, Some(expected.score));
@@ -693,6 +709,7 @@ mod tests {
             },
             1_700_000_100,
             &[],
+            false,
         )
         .unwrap();
 

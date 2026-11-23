@@ -452,7 +452,12 @@ fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .px(18.0)
         .gap(12.0)
         .center_y();
-    bar = if let Some(chip) = presentation.chip.as_deref() {
+    let folder = s.session.folder().map(|folder| {
+        folder
+            .file_name()
+            .map_or_else(|| folder.to_string_lossy(), |name| name.to_string_lossy())
+    });
+    bar = if let Some(chip) = folder.as_deref().or(presentation.chip.as_deref()) {
         bar.child(
             row()
                 .key("mode")
@@ -486,7 +491,7 @@ fn hint(s: &Ui) -> Option<&str> {
         return Some(problem);
     }
     let presentation = &s.session.command().presentation;
-    if s.session.query().trim().is_empty() {
+    if s.session.results() == Results::Idle {
         presentation.empty_hint.as_deref()
     } else if s.session.results() == Results::Done && s.session.failures().next().is_none() {
         presentation.no_results_hint.as_deref()

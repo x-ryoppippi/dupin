@@ -6,6 +6,7 @@ pub mod bundle;
 mod bundle_names;
 pub mod dictionary;
 mod file_actions;
+pub mod folder;
 pub mod font;
 pub mod input_source;
 pub mod quick_look;
@@ -17,6 +18,7 @@ pub mod workspace;
 
 pub use apps::{AppsProvider, AppsWatcher};
 pub use dictionary::DictionaryProvider;
+pub use folder::FolderProvider;
 pub use settings_search::SettingsProvider;
 pub use spotlight::{SpotlightProvider, Target};
 pub use watcher::PathWatcher;
