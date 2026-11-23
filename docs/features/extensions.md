@@ -24,15 +24,16 @@ Two files make a complete extension:
 
 ```text
 ~/.config/dupin/extensions/word-count/
-├── extension.toml
+├── package.json
 └── main.js
 ```
 
-```toml
-id = "word-count" # 1–64 lowercase letters, digits or hyphens, unique
-name = "Word Count" # shown on the keyword chip and in Settings
-version = "0.1.0"
-keyword = "wc" # no spaces
+```json
+{
+	"name": "word-count",
+	"version": "0.1.0",
+	"dupin": { "title": "Word Count", "keyword": "wc" }
+}
 ```
 
 ```js
@@ -50,7 +51,18 @@ export function search(query) {
 
 Type `wc two words` to see **2 words**. Enter copies `2`. [`examples/extensions/word-count-js`](../../examples/extensions/word-count-js) holds these two files.
 
-The manifest may also name the module with `entry = "src/index.js"`, a `.js` or `.mjs` file inside the folder; without it, Dupin runs `main.js`. Unknown keys are errors. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
+The manifest is the `dupin` key of `package.json`, so a package keeps one file for Dupin and its own JavaScript tooling. Dupin reads it as plain JSON before running any code:
+
+| Key                  | Value                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`               | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                      |
+| `version`            | Required. 1–32 characters without spaces.                                                                                             |
+| `dupin.title`        | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                             |
+| `dupin.keyword`      | Required. Up to 32 bytes, no spaces.                                                                                                  |
+| `dupin.main`         | Optional. The module that exports `search`, a `.js` or `.mjs` file inside the folder, such as `dist/index.js`. Defaults to `main.js`. |
+| `dupin.capabilities` | Reserved. Dupin grants no capabilities yet, so any entry in it is an error.                                                           |
+
+Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
 
 ### `search(query, ctx)`
 
@@ -72,7 +84,7 @@ The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io
 
 There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, on the extension's own thread, so module-level variables never carry from one query to the next.
 
-TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=main.js`) and install the output. Dupin runs JavaScript only and never type-checks.
+TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=dist/main.js`), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                        | Value          |
 | ---------------------------- | -------------- |
@@ -111,7 +123,7 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 }
 ```
 
-`code` is stable; `file` is relative to the folder, and `line` and `column` are present when the problem has a source position. [`crates/dupin-js-runtime/tests/fixtures`](../../crates/dupin-js-runtime/tests/fixtures) holds extensions that break each limit, for comparison.
+`code` is stable; `file` is relative to the folder (`package.json` for a manifest problem, with `field` naming the key, such as `dupin.keyword`), and `line` and `column` are present when the problem has a source position. [`crates/dupin-js-runtime/tests/fixtures`](../../crates/dupin-js-runtime/tests/fixtures) holds extensions that break each limit, for comparison.
 
 ## Authoring
 
@@ -151,7 +163,7 @@ Publishes a development copy to the extensions folder and keeps it current. It p
 
 ## A Wasm extension
 
-A folder whose `entry` names a `.wasm` file runs a WebAssembly module instead. A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). Bodies are plain text; list sections and Markdown details are host features that built-ins such as Calendar and Dictionary use, and extensions cannot return them yet. A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).
+A folder with `extension.toml` instead of `package.json` runs a WebAssembly module. A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). Bodies are plain text; list sections and Markdown details are host features that built-ins such as Calendar and Dictionary use, and extensions cannot return them yet. A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).
 
 Nothing else is reachable. A module that imports anything, including WASI, is rejected, so it cannot read files, use the network, start processes, read the clipboard or see the time. Each query runs in a fresh instance, on its own thread, with no memory of earlier queries.
 
@@ -221,6 +233,8 @@ version = "0.1.0"
 keyword = "wc"
 entry = "word_count.wasm" # a .wasm file inside this folder
 ```
+
+`extension.toml` describes Wasm modules only: its `entry` is required and must name a `.wasm` file, and unknown keys are errors. A folder with both `extension.toml` and a `package.json` with a `dupin` key is skipped as ambiguous; any other `package.json`, including one Dupin can't parse, is left to your tooling and does not get in the way.
 
 The module exports a memory named `memory` and three functions:
 

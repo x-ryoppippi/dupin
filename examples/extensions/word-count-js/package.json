@@ -1,0 +1,8 @@
+{
+	"name": "word-count",
+	"version": "0.1.0",
+	"dupin": {
+		"title": "Word Count",
+		"keyword": "wc"
+	}
+}
