@@ -46,6 +46,7 @@ objc2-metal = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+dupin-broker = { path = "../dupin-broker" }
 tempfile = "3"
 wat = "1"
 

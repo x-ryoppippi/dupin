@@ -96,3 +96,32 @@ pub(super) fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredComm
 fn default_query(ui: &Ui) -> bool {
     ui.session.command_id().as_str() == apps::APPS && !ui.session.query().trim().is_empty()
 }
+
+#[cfg(test)]
+mod tests {
+    use dupin_broker::OsPermission;
+
+    use super::*;
+
+    // The broker bridge lists extension consumers on the Settings row this picks.
+    fn settings_capability(permission: OsPermission) -> Option<Capability> {
+        match permission {
+            OsPermission::Calendars => Some(Capability::Permission(Permission::Calendars)),
+            // Clipboard history reports the pasteboard policy in its own row; Permissions has
+            // no row for it.
+            OsPermission::Pasteboard => None,
+        }
+    }
+
+    #[test]
+    fn extension_os_permissions_land_on_rows_that_built_in_features_already_show() {
+        for permission in OsPermission::ALL {
+            if let Some(capability) = settings_capability(permission) {
+                assert!(
+                    permission_uses().any(|usage| usage.capability == capability),
+                    "{permission:?} has no Settings row"
+                );
+            }
+        }
+    }
+}
