@@ -308,12 +308,22 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
         );
     }
     let toggle = SegmentedControl::new(
-        &["Light", "Dark"],
-        Some(usize::from(s.preview_dark.unwrap_or(dark))),
+        &["Light", "Dark", "System"],
+        Some(match s.preview_dark {
+            Some(false) => 0,
+            Some(true) => 1,
+            None => 2,
+        }),
     )
     .label("Preview appearance")
     .fit()
-    .on_pick(|s: &mut Prefs, i, _| s.preview_dark = Some(i == 1))
+    .on_pick(|s: &mut Prefs, i, _| {
+        s.preview_dark = match i {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
+    })
     .build(k)
     .key("preview-appearance");
     let well = col()
