@@ -525,33 +525,40 @@ impl Ui {
             update.save_problem.is_some(),
         );
         let accepted = snapshot.and_then(|config| {
-            self.configuration
+            let hotkey_problem = self
+                .configuration
                 .hotkey
                 .apply_config(&config, &previous)
                 .map_err(|error| format!("{error} Check config.toml. Keeping the previous configuration."))?;
-            Ok(config)
+            Ok((config, hotkey_problem))
         });
-        let problem = match accepted {
-            Ok(config) => {
+        let (problem, hotkey_problem) = match accepted {
+            Ok((config, hotkey_problem)) => {
                 self.acknowledged_config = config.clone();
                 if *self.configuration.values.borrow() != config {
                     *self.configuration.values.borrow_mut() = config.clone();
                     self.apply_config(&config, tx);
                 }
-                None
+                (None, hotkey_problem)
             }
             Err(error) => {
                 if self.control_save.is_some() {
                     self.configuration.hotkey.discard_reservations();
                 }
-                Some(error)
+                (Some(error), None)
             }
         };
         let save_error = problem.clone().or_else(|| update.save_problem.clone());
-        let problems: Vec<_> = [problem, read_problem, update.save_problem, update.watch_problem]
-            .into_iter()
-            .flatten()
-            .collect();
+        let problems: Vec<_> = [
+            problem,
+            hotkey_problem,
+            read_problem,
+            update.save_problem,
+            update.watch_problem,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let problem = (!problems.is_empty()).then(|| problems.join("; "));
         if self.config_problem != problem
             && let Some(problem) = &problem
