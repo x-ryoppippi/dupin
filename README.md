@@ -82,6 +82,9 @@ service, including managed/read-only files and native shortcut validation; a suc
 reply follows reconciliation. `--json` emits JSON values on success and an `error` object
 on failure. `dupin --help` and `dupin --version` perform no app or configuration work.
 
+`dupin mcp` serves the same controls, with configuration reading and validation, to agents
+over the Model Context Protocol; see [MCP server](./docs/mcp.md).
+
 Pure headless examples (no resident instance required):
 
 ```sh
