@@ -41,7 +41,9 @@ A host service describes the operation as a `Request` and calls `Broker::check(p
 
 - **Allow**, with a `Permit` carrying the declared scope, its bounds and, for files and exec, the path the user picked.
 - **Deny**, with a reason that renders as a user-facing sentence: not installed, a stale revision, unreadable grants, turned off, an invalid request (such as a path with `..`), an undeclared scope, beyond the declared scope (method, files access, script output, storage quota, calendar window), a missing activation, revoked by the user, denied by the declarative base, or denied or restricted by the OS.
-- **NeedsConsent**, naming the scope and whether it was never granted, was widened by a new revision, or needs OS access. `may_prompt` is true only for an activation, so the host never asks while the user types or in the background.
+- **NeedsConsent**, carrying the revision and declared scope to show and whether it was never granted, was widened by a new revision, or needs OS access. `may_prompt` is true only for an activation, so the host never asks while the user types or in the background.
+
+When the user grants it, the host passes that revision and scope back to `Broker::consent`. The broker refuses the approval if the package has since moved to another revision or declares the scope differently, so a consent never approves more than the user saw. Settings takes both from `Broker::revision` and `Broker::consents` when it renders the list.
 
 HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads and clipboard writes need an activation. Reads, storage of the package's own data and clipboard watching don't.
 
@@ -63,9 +65,9 @@ The broker owns grants, keyed by package ID, scope and the approved revision (th
 | Local   | `grants.toml` in the writable data directory  | The user's consents, with the scope as approved, and revocations and enablement.                  |
 | Bundled | Registered by the app                         | First-party packages that ship in Dupin.                                                          |
 
-A scope's standing is decided in this order: a local revocation, a base denial, a local grant for this revision that covers the declaration, a base grant for this revision, a bundled pre-grant, then undecided (or changed, if an older approval no longer covers it). The base can grant and deny; local choices can always take authority away and can add it only where the base is silent. A base denial is locked: consent to it is refused. Enablement follows the same rule.
+A scope's standing is decided in this order: a local revocation, a base denial, a local grant for this revision that covers the declaration, a base grant for this revision, a bundled pre-grant, then undecided (or changed, if an older approval no longer covers it). The base can grant and deny; local choices can always take authority away and can add it only where the base is silent. A base denial is locked: consent to it is refused. Enablement follows the same rule: a base `enabled = false` locks the package off for every revision, like a denial, while `enabled = true` applies only to the `revision` it names, if it names one.
 
-- **Revisions.** `Broker::install` loads or updates a package's declaration and never grants. Approvals the new declaration doesn't widen carry over, narrowed to what it declares. Widened approvals need consent again. Decisions about scopes it no longer declares are forgotten, revocations included.
+- **Revisions.** `Broker::install` loads or updates a package's declaration and never grants. Approvals the new declaration doesn't widen carry over, narrowed to what it declares. Widened approvals need consent again. Grants of scopes it no longer declares are forgotten, but revocations are kept, so a later revision that declares the scope again stays revoked rather than getting a base or bundled pre-grant back.
 - **Bundled packages.** While the installed revision is exactly the bundled one, the package is on by default and its scopes are granted, except files and exec scopes, which need a path the user picks. OS access is still requested on enable or first use. A modified copy has another revision, so it is third-party: off, with nothing granted.
 - **Reloading the base.** A base read while running takes away at once what it no longer grants, but grants nothing new until the next launch: a configuration reload must never grant.
 - **Unreadable grants.** If the local file exists but can't be read, the bridge passes `Local::unreadable()`: nothing is granted, bundled pre-grants are suspended, and saving is refused rather than overwriting the file.
@@ -102,7 +104,7 @@ bindings = { "files:notes" = "/Users/me/Notes" }
 
 ## OS permissions
 
-Calendar reads need macOS Calendars access, and clipboard reads and watching need the pasteboard policy (Paste from Other Apps). The host reads each without prompting and reports it with `Broker::set_os_access`; macOS's write-only calendar access counts as denied. `Broker::os_consumers` lists every installed package scope that needs one, for Settings → Permissions to show beside the built-in features in `features::permission_uses`.
+Calendar reads need macOS Calendars access, and clipboard reads and watching need the pasteboard policy (Paste from Other Apps). The host reads each without prompting and reports it with `Broker::set_os_access`; macOS's write-only calendar access counts as denied. `Broker::os_consumers` lists every installed package scope that needs one, for Settings → Permissions to show beside the built-in features in `features::permission_uses`. Calendars consumers join the existing Calendars row. Settings has no row for the pasteboard policy yet, so the bridge adds a Paste from Other Apps row, shared with clipboard history, when it lists extension consumers; the mapping lands with that first caller.
 
 ## Remaining integration
 

@@ -9,14 +9,14 @@ fn local_choices_survive_a_relaunch() {
     let _ = broker.install(package.clone(), rev("sha256:1111"), everything());
     broker.set_enabled(&package, true).unwrap();
     broker
-        .consent(
+        .approve(
             &package,
             &key("files:notes"),
             Some(PathBuf::from("/Users/me/Notes")),
         )
         .unwrap();
     broker
-        .consent(&package, &key("http:https://api.github.com"), None)
+        .approve(&package, &key("http:https://api.github.com"), None)
         .unwrap();
     broker.revoke(&package, &ScopeKey::Dictionary).unwrap();
 
@@ -40,7 +40,7 @@ fn the_saved_file_records_the_approved_scope_and_revision() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let _ = broker.install(package.clone(), rev("sha256:1111"), everything());
     broker
-        .consent(&package, &key("http:https://api.github.com"), None)
+        .approve(&package, &key("http:https://api.github.com"), None)
         .unwrap();
     broker.revoke(&package, &ScopeKey::Dictionary).unwrap();
     let saved: toml::Table = broker.local_toml().unwrap().parse().unwrap();
@@ -69,7 +69,7 @@ fn packages_with_no_decisions_are_not_saved() {
     let package = id("bookmarks");
     let mut broker = Broker::new(Base::default(), Local::default());
     let _ = broker.install(package.clone(), rev("sha256:1111"), everything());
-    broker.consent(&package, &ScopeKey::Dictionary, None).unwrap();
+    broker.approve(&package, &ScopeKey::Dictionary, None).unwrap();
     assert!(broker.uninstall(&package));
     assert_eq!(broker.local_toml().unwrap(), "version = 1\n\n[packages]\n");
 }

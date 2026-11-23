@@ -40,6 +40,26 @@ fn key(value: &str) -> ScopeKey {
     value.parse().unwrap()
 }
 
+impl Broker {
+    /// Consents to `key` exactly as the installed revision declares it, as the host does with
+    /// the prompt it just showed.
+    #[track_caller]
+    fn approve(
+        &mut self,
+        package: &PackageId,
+        key: &ScopeKey,
+        binding: Option<std::path::PathBuf>,
+    ) -> Result<(), BrokerError> {
+        let revision = self.revision(package).expect("installed").clone();
+        let (scope, _) = self
+            .consents(package)
+            .into_iter()
+            .find(|(scope, _)| scope.key() == *key)
+            .unwrap_or_else(|| panic!("`{key}` isn't declared"));
+        self.consent(package, &revision, &scope, binding)
+    }
+}
+
 fn caps(value: serde_json::Value) -> Capabilities {
     Capabilities::parse(&value).unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}"))
 }

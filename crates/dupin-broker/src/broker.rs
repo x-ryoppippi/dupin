@@ -98,7 +98,10 @@ pub enum Denial {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConsentNeeded {
-    pub key: ScopeKey,
+    /// The revision and declared scope to show the user. [`Broker::consent`] takes them back
+    /// and refuses them once the installed declaration differs.
+    pub revision: Revision,
+    pub scope: Scope,
     pub reason: ConsentReason,
     /// Whether the host may ask now. It asks only for a deliberate action, never while the
     /// user types or in the background.
@@ -154,6 +157,10 @@ pub struct Reconciliation {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BrokerError {
     NotInstalled,
+    /// The approval was for a revision that has since been replaced.
+    StaleRevision,
+    /// The installed revision declares the scope differently from what the user approved.
+    DeclarationChanged(ScopeKey),
     Undeclared(ScopeKey),
     DeniedByBase(ScopeKey),
     DisabledByBase,
@@ -167,6 +174,10 @@ impl fmt::Display for BrokerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInstalled => f.write_str("the extension isn't installed"),
+            Self::StaleRevision => f.write_str("the extension changed; review its request again"),
+            Self::DeclarationChanged(key) => {
+                write!(f, "the extension changed what `{key}` asks for; review it again")
+            }
             Self::Undeclared(key) => write!(f, "the extension doesn't declare `{key}`"),
             Self::DeniedByBase(key) => write!(f, "`{key}` is denied by your declared configuration"),
             Self::DisabledByBase => f.write_str("the extension is turned off by your declared configuration"),
@@ -277,7 +288,8 @@ impl Broker {
     }
 
     /// Loads or updates a package's declaration. Scopes it no longer declares lose their
-    /// decisions; approvals it widens need consent again; nothing new is granted.
+    /// grants but keep revocations; approvals it widens need consent again; nothing new is
+    /// granted.
     pub fn install(
         &mut self,
         id: PackageId,
@@ -293,6 +305,11 @@ impl Broker {
         {
             package.scopes.retain(|key, record| {
                 let Some(declared) = capabilities.get(key) else {
+                    // A revocation must outlive the declaration, or a later revision that
+                    // declares the scope again would get a base or bundled pre-grant back.
+                    if matches!(record, Record::Revoked) {
+                        return true;
+                    }
                     report.dropped.push(key.clone());
                     return false;
                 };
@@ -379,19 +396,34 @@ impl Broker {
         }
     }
 
-    /// Records the user's approval of a declared scope for the installed revision. `binding`
+    /// The installed revision, for a host that lists [`Broker::consents`] and later passes
+    /// what it showed to [`Broker::consent`].
+    pub fn revision(&self, id: &PackageId) -> Option<&Revision> {
+        self.installed.get(id).map(|installed| &installed.revision)
+    }
+
+    /// Records the user's approval of `scope` as declared by `revision`, exactly as the host
+    /// showed it, and refuses it if the installed declaration has since changed. `binding`
     /// is the absolute path the user picked for a files or exec scope.
     pub fn consent(
         &mut self,
         id: &PackageId,
-        key: &ScopeKey,
+        revision: &Revision,
+        scope: &Scope,
         binding: Option<PathBuf>,
     ) -> Result<(), BrokerError> {
+        let key = &scope.key();
         let installed = self.installed.get(id).ok_or(BrokerError::NotInstalled)?;
+        if installed.revision != *revision {
+            return Err(BrokerError::StaleRevision);
+        }
         let declared = installed
             .capabilities
             .get(key)
             .ok_or_else(|| BrokerError::Undeclared(key.clone()))?;
+        if declared != scope {
+            return Err(BrokerError::DeclarationChanged(key.clone()));
+        }
         if self.base_denies(id, key) {
             return Err(BrokerError::DeniedByBase(key.clone()));
         }
@@ -403,6 +435,10 @@ impl Broker {
             }
             _ => {}
         }
+        let rebound = matches!(
+            self.effective(id, installed, key, declared),
+            Effective::Granted { binding: old, .. } if old != binding
+        );
         let record = Record::Granted {
             revision: installed.revision.clone(),
             approved: declared.clone(),
@@ -413,15 +449,11 @@ impl Broker {
             .packages
             .as_mut()
             .ok_or(BrokerError::GrantsUnreadable)?;
-        let previous = packages
+        packages
             .entry(id.clone())
             .or_default()
             .scopes
-            .insert(key.clone(), record.clone());
-        let rebound = matches!(
-            (&previous, &record),
-            (Some(Record::Granted { binding: old, .. }), Record::Granted { binding: new, .. }) if old != new
-        );
+            .insert(key.clone(), record);
         if rebound {
             self.bump(id);
         }
@@ -525,7 +557,8 @@ impl Broker {
         }
         let needs = |reason| {
             Decision::NeedsConsent(ConsentNeeded {
-                key: key.clone(),
+                revision: installed.revision.clone(),
+                scope: declared.clone(),
                 reason,
                 may_prompt: trigger == Trigger::Activation,
             })
@@ -658,23 +691,21 @@ impl Broker {
         self.base_packages(id).any(|package| package.deny.contains(key))
     }
 
+    /// A base disable applies to every revision, like a denial; an enable only to the
+    /// revision it names, if it names one.
     fn base_enabled(&self, id: &PackageId, revision: &Revision) -> Option<bool> {
-        let applies = |package: &BasePackage| package.revision.as_ref().is_none_or(|r| r == revision);
-        let current = self
-            .base
-            .package(id)
-            .filter(|p| applies(p))
-            .and_then(|p| p.enabled);
-        let ceiling = self
-            .ceiling
-            .package(id)
-            .filter(|p| applies(p))
-            .and_then(|p| p.enabled);
-        match (current, ceiling) {
-            (Some(false), _) | (_, Some(false)) => Some(false),
-            (Some(true), Some(true)) => Some(true),
-            _ => None,
+        if self
+            .base_packages(id)
+            .any(|package| package.enabled == Some(false))
+        {
+            return Some(false);
         }
+        let enables = |base: &Base| {
+            base.package(id).is_some_and(|package| {
+                package.enabled == Some(true) && package.revision.as_ref().is_none_or(|r| r == revision)
+            })
+        };
+        (enables(&self.base) && enables(&self.ceiling)).then_some(true)
     }
 
     /// The base's grant of `key` for this revision, which both the current base and the one
