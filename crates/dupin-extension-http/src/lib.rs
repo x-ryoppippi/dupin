@@ -336,7 +336,8 @@ pub struct HttpService {
     loopback: bool,
 }
 
-/// Request headers a guest can't set: the transport owns framing, the connection and the host.
+/// Request headers a guest can't set: the transport owns framing, the connection and the host,
+/// and servers attribute extension traffic to Dupin by its user agent.
 const FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
     "connection",
     "content-length",
@@ -347,6 +348,7 @@ const FORBIDDEN_REQUEST_HEADERS: &[&str] = &[
     "trailer",
     "transfer-encoding",
     "upgrade",
+    "user-agent",
 ];
 
 /// Response headers a guest never sees: cookies would be ambient state, the rest is transport.

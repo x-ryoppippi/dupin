@@ -571,6 +571,7 @@ fn request_headers_and_bodies_are_validated() {
         ("Content-Length", "1"),
         ("Proxy-Authorization", "x"),
         ("Transfer-Encoding", "chunked"),
+        ("User-Agent", "Mozilla/5.0"),
     ] {
         let request = Request {
             headers: vec![(name.into(), value.into())],
