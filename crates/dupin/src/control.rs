@@ -153,13 +153,43 @@ pub fn socket_path(create: bool) -> io::Result<PathBuf> {
     owned(&dir, true)?;
     Ok(dir.join("control.sock"))
 }
-pub fn connect() -> io::Result<UnixStream> {
+fn connect() -> io::Result<UnixStream> {
     let path = socket_path(false)?;
     owned(&path, false)?;
     let stream = UnixStream::connect(path)?;
     stream.set_read_timeout(Some(Duration::from_secs(300)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     Ok(stream)
+}
+/// A command sent to the running launcher whose reply has not been read yet.
+pub struct Pending {
+    stream: UnixStream,
+    id: u64,
+}
+pub fn send(command: Command) -> Result<Pending, String> {
+    let request = Request { id: 1, command };
+    validate(&request).map_err(|e| e.to_string())?;
+    let mut stream = connect().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => "Dupin is not running".to_owned(),
+        _ => e.to_string(),
+    })?;
+    write_frame(&mut stream, &request).map_err(|e| e.to_string())?;
+    Ok(Pending {
+        stream,
+        id: request.id,
+    })
+}
+impl Pending {
+    pub fn wait(mut self) -> Result<Value, String> {
+        let reply: Reply = read_frame(&mut self.stream).map_err(|e| e.to_string())?;
+        if reply.id != self.id {
+            return Err("control correlation mismatch".into());
+        }
+        reply.result
+    }
+}
+pub fn exchange(command: Command) -> Result<Value, String> {
+    send(command)?.wait()
 }
 pub struct Server {
     stop: Arc<AtomicBool>,

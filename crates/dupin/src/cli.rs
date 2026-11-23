@@ -1,4 +1,4 @@
-use crate::control::{self, Command, Reply, Request};
+use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
 const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
@@ -67,17 +67,6 @@ fn file(path: &str, cap: usize) -> Result<Vec<u8>, String> {
         std::fs::File::open(path).map_err(|_| "could not open input")?,
         cap,
     )
-}
-fn exchange(command: Command) -> Result<Value, String> {
-    let request = Request { id: 1, command };
-    control::validate(&request).map_err(|e| e.to_string())?;
-    let mut stream = control::connect().map_err(|e| e.to_string())?;
-    control::write_frame(&mut stream, &request).map_err(|e| e.to_string())?;
-    let reply: Reply = control::read_frame(&mut stream).map_err(|e| e.to_string())?;
-    if reply.id != request.id {
-        return Err("control correlation mismatch".into());
-    }
-    reply.result
 }
 fn selection(bytes: &[u8], json: bool) -> Result<Vec<Value>, String> {
     let values = if json {
