@@ -195,12 +195,23 @@ fn typescript_scaffold_builds_with_each_bundler_on_path() {
     let workflow = std::fs::read_to_string(dir.join(".github/workflows/build.yml")).unwrap();
     assert!(
         workflow.contains("bun build src/main.ts --outfile=dist/main.js")
+            && workflow.contains("bun install --frozen-lockfile --ignore-scripts")
+            && workflow.contains("persist-credentials: false")
+            && workflow.contains("path: 'dist'\n")
             && workflow.contains("git add dist/main.js")
             && !workflow.contains("{{"),
         "{workflow}"
     );
+    let (build_job, commit_job) = workflow.split_once("\n  commit:\n").unwrap();
+    assert!(build_job.contains("contents: read") && !build_job.contains("contents: write"));
+    assert!(!commit_job.contains("bun "), "{commit_job}");
     let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
-    assert!(readme.contains("## Build") && !readme.contains("{{"), "{readme}");
+    assert!(
+        readme.contains("## Build")
+            && readme.contains("dupin ext build .\ndupin ext check .")
+            && !readme.contains("{{"),
+        "{readme}"
+    );
 
     assert_eq!(
         build(&dir, None, BuildOptions::default(), &validate)

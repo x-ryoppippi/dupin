@@ -11,7 +11,7 @@ dupin ext dev .
 `dev` {{build_note}}checks the package and publishes a development copy to Dupin's extensions folder whenever a file changes. Turn on **Extensions** in Settings → Search to try it in the launcher. A change that fails to build or check is reported here, and Dupin keeps the last good copy.
 
 ```sh
-dupin ext check .
+{{build_command}}dupin ext check .
 dupin ext run . --query Dupin
 ```
 

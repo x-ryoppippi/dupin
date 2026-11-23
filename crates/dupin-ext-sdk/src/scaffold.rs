@@ -8,6 +8,7 @@ use crate::manifest::MANIFEST_FILE;
 
 const TS_SOURCE: &str = "src/main.ts";
 const TS_MAIN: &str = "dist/main.js";
+const TS_MAIN_DIR: &str = "dist";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Template {
@@ -78,12 +79,13 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
         title = string(title),
     );
 
-    let (build_note, build_section) = match template {
-        Template::JavaScript => ("", String::new()),
+    let (build_note, build_command, build_section) = match template {
+        Template::JavaScript => ("", "", String::new()),
         Template::TypeScript => (
             "bundles `src/main.ts` with Bun or esbuild, ",
+            "dupin ext build .\n",
             format!(
-                "\n## Build\n\n```sh\ndupin ext build .\n```\n\n`build` bundles `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds and commits it on every push to `main`.\n"
+                "\n## Build\n\n```sh\ndupin ext build .\n```\n\n`build` bundles `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds and commits it on every push to `main`, installing only what `bun.lock` pins, so commit `bun.lock` once you add a dependency.\n"
             ),
         ),
     };
@@ -91,7 +93,9 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
         text.replace("{{title}}", title)
             .replace("{{keyword}}", name)
             .replace("{{source}}", TS_SOURCE)
+            .replace("{{main_dir}}", TS_MAIN_DIR)
             .replace("{{main}}", TS_MAIN)
+            .replace("{{build_command}}", build_command)
             .replace("{{build_note}}", build_note)
             .replace("{{build_section}}", &build_section)
     };

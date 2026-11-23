@@ -145,6 +145,8 @@ Creates a package in a new or empty folder. The folder's name becomes the id, so
 
 `dupin ext new .` names the package after the current folder.
 
+The `--ts` workflow installs exactly what `bun.lock` pins, without install scripts, so commit `bun.lock` once the package has dependencies. It installs and bundles in a job that can only read the repository; a second job, which runs no dependency code, commits the bundle.
+
 With `--ts`, `package.json` adds `"source": "src/main.ts"` and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle.
 
 `dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
