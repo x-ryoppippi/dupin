@@ -258,6 +258,16 @@ pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
 }
 
 fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
+    load_with(folder, previous, build_guest)
+}
+
+/// `build` reads the guest's files only after they are stamped, so an edit that lands while they
+/// are read leaves a stamp that no longer matches, and the next scan loads the guest again.
+fn load_with(
+    folder: &Path,
+    previous: Option<LoadedExtension>,
+    build: impl FnOnce(&Path, &str, &[FileStamp]) -> Result<Guest, Diagnostic>,
+) -> Result<LoadedExtension, Diagnostic> {
     let manifest_file = folder
         .join(MANIFEST)
         .canonicalize()
@@ -285,18 +295,8 @@ fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtens
     validate(&manifest)?;
     let entry_name = manifest.entry.as_deref().unwrap_or(DEFAULT_ENTRY);
     let entry = PathBuf::from(entry_name);
-    let (guest, files) = if is_wasm(&entry) {
-        let module_file = module_stamp(folder, &entry)?;
-        let bytes = read_capped(&module_file.path, MAX_MODULE_BYTES)
-            .map_err(|error| Diagnostic::new("invalid-module", error).file(entry_name))?;
-        let module = GuestModule::load(&bytes)
-            .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))?;
-        (Guest::Wasm(module), vec![module_file])
-    } else {
-        let package = Package::load(folder, entry_name)?;
-        let files = stamps(package.files().iter().cloned())?;
-        (Guest::JavaScript(package), files)
-    };
+    let files = revision(folder, &entry)?;
+    let guest = build(folder, entry_name, &files)?;
     Ok(LoadedExtension {
         manifest: manifest_file,
         entry,
@@ -311,6 +311,17 @@ fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtens
             requests: AtomicU64::new(0),
         }),
     })
+}
+
+fn build_guest(folder: &Path, entry_name: &str, files: &[FileStamp]) -> Result<Guest, Diagnostic> {
+    if !is_wasm(Path::new(entry_name)) {
+        return Package::load(folder, entry_name).map(Guest::JavaScript);
+    }
+    let bytes = read_capped(&files[0].path, MAX_MODULE_BYTES)
+        .map_err(|error| Diagnostic::new("invalid-module", error).file(entry_name))?;
+    GuestModule::load(&bytes)
+        .map(Guest::Wasm)
+        .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))
 }
 
 fn is_wasm(entry: &Path) -> bool {
@@ -855,5 +866,44 @@ pub(crate) mod tests {
 
         fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
         assert!(scanner.update(root, None).is_some());
+    }
+
+    #[test]
+    fn an_edit_while_a_guest_is_read_is_picked_up_by_the_next_scan() {
+        let fixture = folder();
+        let root = fixture.path();
+        install_javascript(
+            root,
+            "js",
+            "js",
+            "js",
+            &[("main.js", "export const search = () => [{ title: 'old' }];")],
+        );
+        let wasm = guest("{}");
+        install(root, "wasm", &manifest("wasm", "wa"), Some(&wasm));
+
+        for (name, file, edit) in [
+            (
+                "js",
+                "main.js",
+                b"export const search = () => [{ title: 'new edit' }];".as_slice(),
+            ),
+            ("wasm", "guest.wasm", guest("{\"changed\":true}").as_slice()),
+        ] {
+            let folder = root.join(name);
+            let edited = folder.join(file);
+            let loaded = load_with(&folder, None, |folder, entry, files| {
+                let guest = build_guest(folder, entry, files);
+                fs::write(&edited, edit).unwrap();
+                guest
+            })
+            .unwrap();
+            let before = Arc::clone(&loaded.extension);
+            let reloaded = load(&folder, Some(loaded)).unwrap();
+            assert!(!Arc::ptr_eq(&before, &reloaded.extension), "{name}");
+            let current = Arc::clone(&reloaded.extension);
+            let unchanged = load(&folder, Some(reloaded)).unwrap();
+            assert!(Arc::ptr_eq(&current, &unchanged.extension), "{name}");
+        }
     }
 }
