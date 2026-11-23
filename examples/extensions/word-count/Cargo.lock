@@ -15,6 +15,7 @@ name = "dupin-word-count"
 version = "0.1.0"
 dependencies = [
  "dupin-plugin-protocol",
+ "serde_json",
 ]
 
 [[package]]

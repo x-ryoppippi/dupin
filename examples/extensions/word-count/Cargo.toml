@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dupin-plugin-protocol = { path = "../../../crates/dupin-plugin-protocol" }
+serde_json = "1"
 
 [profile.release]
 opt-level = "s"
