@@ -257,7 +257,6 @@ pub struct Ui {
     pub active_radius: f32,
     pub script_entry: Option<crate::scripts::entry::Entry>,
     pub script_card: Option<Arc<crate::scripts::runner::Snapshot>>,
-    pub scripts_notice: Option<String>,
     scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     runner: crate::scripts::runner::Runner,
     _scripts_watcher: Option<crate::scripts::CatalogWatch>,
@@ -472,7 +471,6 @@ impl Ui {
             script_output_after_close: None,
             script_entry: None,
             script_card: None,
-            scripts_notice: None,
             scripts: registration.scripts,
             runner,
             _scripts_watcher: scripts_watcher,
@@ -1265,7 +1263,8 @@ impl Ui {
     }
 
     pub(crate) fn scripts_catalog(&mut self, mut catalog: crate::scripts::catalog::Catalog, tx: &mut Tx) {
-        self.scripts_notice = catalog.notice.take();
+        let notice = catalog.notice.take();
+        self.prefs.update(move |prefs, _| prefs.scripts_notice = notice);
         *self.scripts.write().unwrap() = catalog;
         self.refresh_default(tx);
     }

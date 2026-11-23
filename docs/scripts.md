@@ -21,7 +21,7 @@ Argument declarations use `name` for a required value, `name?` for an optional v
 
 Quotes group input into arguments. Backslashes escape characters outside quotes; double quotes allow escaped quotes and backslashes. Dupin passes the resulting values directly as argv. It does not expand variables, globs or `~`, and it does not invoke a shell to interpret the argument field. The limit is 64 arguments and 64 KiB of argument text.
 
-Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and reads at most 8 KiB or 64 lines. An invalid header skips the script and reports a problem in the panel. Unknown metadata keys produce a warning. Dupin discovers up to 200 executable files at the top level, including symlinks, and ignores hidden files and editor backups.
+Headers use comment prefixes `#`, `//`, `--` or `;`. Scanning stops at code and reads at most 8 KiB or 64 lines. Dupin discovers up to 200 executable files at the top level, including symlinks, and ignores hidden files and editor backups. Settings → Search shows script discovery warnings for non-executable files, invalid headers and unknown metadata keys.
 
 ## Output and cancellation
 

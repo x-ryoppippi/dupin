@@ -130,7 +130,6 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
         ("config-problem", s.config_problem.as_deref()),
         ("notice", s.notice.as_deref()),
         ("registration-notice", s.registration_notice.as_deref()),
-        ("scripts-notice", s.scripts_notice.as_deref()),
         ("backdrop-notice", s.backdrop.problem()),
     ];
     for (key, notice) in notices.into_iter().filter_map(|(k, n)| Some((k, n?))) {
