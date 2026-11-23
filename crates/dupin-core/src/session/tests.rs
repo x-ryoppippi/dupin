@@ -145,6 +145,73 @@ fn actions_run_the_named_result_even_after_selection_moves() {
 }
 
 #[test]
+fn followup_actions_keep_the_parent_target_and_use_their_own_disposition() {
+    for keep_open in [true, false] {
+        let mut s = session();
+        let generation = searched(&s.set_query("notes")).1;
+        let mut row = item("notes.md");
+        row.actions
+            .push(ItemAction::new("inspect", "Inspect", Action::Preview("/x/notes.md".into())).keep_open());
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![row],
+        });
+        let key = s.result_key(0);
+        assert_eq!(
+            s.run_key_action(&key, "inspect"),
+            [Effect::Run(Action::Preview("/x/notes.md".into()))]
+        );
+        let mut followup = ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
+        if keep_open {
+            followup = followup.keep_open();
+        }
+        let effects = s.run_key_followup(&key, "inspect", followup);
+        assert_eq!(effects[0], Effect::Run(Action::Copy("value".into())));
+        assert_eq!(effects.contains(&Effect::SaveHistory), !keep_open);
+        assert_eq!(effects.contains(&Effect::Hide), !keep_open);
+        if keep_open {
+            assert_eq!(s.history(), &History::default());
+            assert_eq!(s.result_key(0), key);
+            assert_eq!(s.query(), "notes");
+        } else {
+            assert_ne!(s.history(), &History::default());
+        }
+    }
+}
+
+#[test]
+fn followup_actions_refuse_missing_parents_and_stale_or_pending_results() {
+    for change in 0..3 {
+        let mut s = session();
+        let generation = searched(&s.set_query("notes")).1;
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("notes.md")],
+        });
+        let key = s.result_key(0);
+        let followup = || ItemAction::new("chosen", "Chosen action", Action::Copy("value".into()));
+        assert!(s.run_key_followup(&key, "missing", followup()).is_empty());
+        match change {
+            0 => {
+                s.refresh();
+            }
+            1 => {
+                s.set_query("other");
+            }
+            _ => {
+                s.reset();
+            }
+        }
+        assert!(s.run_key_followup(&key, "open", followup()).is_empty());
+        if !s.items().is_empty() {
+            let pending = s.result_key(0);
+            assert!(s.run_key_followup(&pending, "open", followup()).is_empty());
+        }
+        assert_eq!(s.history(), &History::default());
+    }
+}
+
+#[test]
 fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
     for entry in 0..3 {
         let mut s = session();

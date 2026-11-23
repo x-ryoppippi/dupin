@@ -441,6 +441,16 @@ impl Session {
         };
         self.activate(&item, action)
     }
+    pub fn run_key_followup(&mut self, key: &str, parent: &str, action: ItemAction) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        if item.item_action(parent).is_none() {
+            return Vec::new();
+        }
+        self.activate(&item, action)
+    }
     #[cfg(test)]
     pub(crate) fn deliver(&mut self, delivery: Delivery) -> bool {
         self.deliver_from(self.command.clone(), delivery)
