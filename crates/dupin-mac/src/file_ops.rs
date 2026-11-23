@@ -209,7 +209,7 @@ fn rename_with_fallback(
 ) -> io::Result<()> {
     match rename_no_replace(source, destination) {
         Err(error) if error.raw_os_error() == Some(libc::ENOTSUP) => {
-            rename_into_reservation(source, destination)
+            rename_without_exclusive_support(source, destination)
         }
         result => result,
     }
@@ -227,9 +227,31 @@ fn rename_no_replace(source: &Path, destination: &Path) -> io::Result<()> {
     }
 }
 
-fn rename_into_reservation(source: &Path, destination: &Path) -> io::Result<()> {
+fn rename_without_exclusive_support(source: &Path, destination: &Path) -> io::Result<()> {
+    let metadata = source.symlink_metadata()?;
+    if let (Some(parent), Some(old), Some(new)) = (
+        source.parent(),
+        source.file_name().and_then(|name| name.to_str()),
+        destination.file_name().and_then(|name| name.to_str()),
+    ) && destination.parent() == Some(parent)
+        && old != new
+        && old.to_lowercase() == new.to_lowercase()
+        && destination
+            .symlink_metadata()
+            .is_ok_and(|entry| file_identity(&entry) == file_identity(&metadata))
+    {
+        // A case alias already holds the name. A rename between hard links is a no-op.
+        fs::rename(source, destination)?;
+        for entry in fs::read_dir(parent.join("."))? {
+            if entry?.file_name() == old {
+                return Err(io::ErrorKind::AlreadyExists.into());
+            }
+        }
+        return Ok(());
+    }
+
     // FAT volumes lack exclusive rename and hard links. Claim the destination before renaming.
-    let directory = source.symlink_metadata()?.is_dir();
+    let directory = metadata.is_dir();
     let reservation = if directory {
         DirBuilder::new().mode(0o700).create(destination)?;
         OpenOptions::new()
@@ -495,6 +517,26 @@ mod tests {
             assert!(!source.exists());
             assert_eq!(fs::read_to_string(contents).unwrap(), "original");
         }
+    }
+
+    #[test]
+    fn unsupported_exclusive_rename_can_change_only_the_case() {
+        let dir = Scratch::new("rename-unsupported-case");
+        let source = dir.file("notes.txt", "original");
+        let destination = dir.0.join("Notes.txt");
+        if !destination.exists() {
+            eprintln!("Case-only rename fallback requires a case-insensitive scratch volume");
+            return;
+        }
+
+        rename_with_fallback(&source, &destination, |_, _| {
+            Err(io::Error::from_raw_os_error(libc::ENOTSUP))
+        })
+        .unwrap();
+        let names = dir.names();
+        assert!(names.iter().any(|name| name == "Notes.txt"), "{names:?}");
+        assert!(!names.iter().any(|name| name == "notes.txt"), "{names:?}");
+        assert_eq!(fs::read_to_string(destination).unwrap(), "original");
     }
 
     #[test]
