@@ -10,8 +10,7 @@ enum Event {
     Stop,
 }
 
-/// Runs scans and delivers their results on a worker. Dropping the watch stops it after
-/// an in-progress scan delivers its result.
+/// Runs scans and delivers updates on a worker. Dropping the watch lets an in-progress scan finish.
 pub(crate) struct Watch {
     events: mpsc::Sender<Event>,
 }
@@ -19,8 +18,7 @@ pub(crate) struct Watch {
 impl Watch {
     pub(crate) fn start<T>(
         directory: PathBuf,
-        recursive: bool,
-        scan: impl Fn(&Path, Option<String>) -> T + Send + 'static,
+        mut scan: impl FnMut(&Path, Option<String>) -> Option<T> + Send + 'static,
         deliver: impl Fn(T) + Send + 'static,
     ) -> io::Result<Self> {
         let (events, received) = mpsc::channel();
@@ -32,7 +30,7 @@ impl Watch {
                 let mut watched = None;
                 let mut root_moved = false;
                 loop {
-                    let requested = Roots::discover(&directory, recursive);
+                    let requested = Roots::discover(&directory);
                     let mut watch_problem = None;
                     if root_moved || watched.as_ref() != Some(&requested) {
                         let events = worker_events.clone();
@@ -46,7 +44,7 @@ impl Watch {
                             Ok(next) => {
                                 watcher.replace(next);
                                 // A link may have moved between discovery and stream startup.
-                                if Roots::discover(&directory, recursive) != requested {
+                                if Roots::discover(&directory) != requested {
                                     let _ = worker_events.send(Event::Changed { root_moved: false });
                                 }
                                 watched = Some(requested);
@@ -60,7 +58,9 @@ impl Watch {
                             }
                         }
                     }
-                    deliver(scan(&directory, watch_problem));
+                    if let Some(result) = scan(&directory, watch_problem) {
+                        deliver(result);
+                    }
 
                     let Ok(Event::Changed { root_moved: moved }) = received.recv() else {
                         break;
@@ -91,23 +91,17 @@ struct Roots {
 }
 
 impl Roots {
-    fn discover(directory: &Path, recursive: bool) -> Self {
+    fn discover(directory: &Path) -> Self {
         let mut roots = Self::default();
         let directory = std::path::absolute(directory).unwrap_or_else(|_| directory.to_owned());
         if let Ok(target) = roots.resolve(&directory)
             && target.is_dir()
         {
-            let paths = if recursive {
-                &mut roots.recursive
-            } else {
-                &mut roots.shallow
-            };
-            paths.push(canonical_root(&target));
+            roots.recursive.push(canonical_root(&target));
             if let Ok(entries) = std::fs::read_dir(target) {
                 for entry in entries.flatten() {
                     if entry.file_type().is_ok_and(|kind| kind.is_symlink())
                         && let Ok(target) = roots.resolve(&entry.path())
-                        && recursive
                         && target.is_dir()
                     {
                         roots.recursive.push(canonical_root(&target));
