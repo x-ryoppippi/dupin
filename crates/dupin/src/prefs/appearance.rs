@@ -49,7 +49,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
                     "Backdrop",
                     Some("The shader that animates behind the panel"),
                     backdrop,
-                    locked,
+                    s.lock_note(locked),
                 ),
                 setting(
                     k,
@@ -227,7 +227,7 @@ fn segments(
     control.build(k).key(key)
 }
 
-fn theme_row(k: &Kit, name: &str, controls: El, locked: bool) -> El {
+fn theme_row(s: &Prefs, k: &Kit, name: &str, controls: El, locked: bool) -> El {
     row()
         .w_full()
         .h(40.0)
@@ -235,7 +235,7 @@ fn theme_row(k: &Kit, name: &str, controls: El, locked: bool) -> El {
         .center_y()
         .gap(12.0)
         .child(text(name).font(k.ty.small).color(k.c.text_base).grow(1.0))
-        .children(locked.then(|| lock_note(k)))
+        .children(s.lock_note(locked).map(|note| lock_note(k, note)))
         .child(controls)
 }
 
@@ -380,8 +380,9 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 .child(icon(&icons::SPARKLES, 16.0).color(k.c.text_muted))
                 .child(text("Theme").font(k.ty.small).color(k.c.text_base).grow(1.0)),
             el().w_full().px(ROW_PX).mb(4.0).child(well),
-            theme_row(k, "Palette", swatches, locked),
+            theme_row(s, k, "Palette", swatches, locked),
             theme_row(
+                s,
                 k,
                 "Font",
                 row()
@@ -407,6 +408,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 locked,
             ),
             theme_row(
+                s,
                 k,
                 "Width",
                 segments(
@@ -421,6 +423,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 locked,
             ),
             theme_row(
+                s,
                 k,
                 "Rows",
                 segments(
@@ -434,7 +437,7 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 ),
                 locked,
             ),
-            theme_row(k, "Corners", corners, locked),
+            theme_row(s, k, "Corners", corners, locked),
         ],
     )
     .child(reset.pin(None, Some(6.0), Some(ROW_PX), None))

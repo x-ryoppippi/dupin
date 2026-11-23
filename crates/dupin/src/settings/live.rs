@@ -21,7 +21,7 @@ pub struct Update {
 }
 
 pub struct Service {
-    has_base: bool,
+    base: Option<PathBuf>,
     sender: Sender<Job>,
     next_revision: Mutex<u64>,
     worker: Option<JoinHandle<()>>,
@@ -31,18 +31,22 @@ impl Service {
     pub fn new(paths: Paths, callback: impl Fn(Update) + Send + 'static) -> Self {
         let (sender, receiver) = mpsc::channel();
         let worker_sender = sender.clone();
-        let has_base = paths.base.is_some();
+        let base = paths.base.clone();
         let worker = thread::Builder::new()
             .name("dupin-config-watch".into())
             .spawn(move || Worker::new(paths, receiver, worker_sender, callback).run())
             .expect("could not start settings worker");
 
         Service {
-            has_base,
+            base,
             sender,
             next_revision: Mutex::new(0),
             worker: Some(worker),
         }
+    }
+
+    pub(crate) fn base_path(&self) -> Option<&Path> {
+        self.base.as_deref()
     }
 
     pub fn activate(&self) {
@@ -54,7 +58,7 @@ impl Service {
     }
 
     pub fn save(&self, base: &Config, desired: &Config) -> Result<u64, String> {
-        if !self.has_base {
+        if self.base.is_none() {
             return Err("config.toml has no path".into());
         }
 

@@ -91,6 +91,7 @@ pub struct Prefs {
     panel: AppHandle<Ui>,
     updater: Updater,
     locked_keys: crate::settings::LockedKeys,
+    lock_note: &'static str,
     settings: Arc<crate::settings::Service>,
     config_problem: Option<String>,
     login: Option<LoginPreference>,
@@ -139,6 +140,7 @@ impl Prefs {
             panel,
             updater,
             locked_keys,
+            lock_note: config_lock_note(&settings),
             settings,
             config_problem: None,
             extensions: Default::default(),
@@ -179,11 +181,16 @@ impl Prefs {
         }
         self.adopt(config);
         self.locked_keys = locked_keys;
+        self.lock_note = config_lock_note(&self.settings);
         self.config_problem = problem;
     }
 
     fn locked(&self, key: &str) -> bool {
         self.locked_keys.contains(key)
+    }
+
+    fn lock_note(&self, locked: bool) -> Option<&'static str> {
+        locked.then_some(self.lock_note)
     }
 
     fn adopt(&mut self, config: Config) {
@@ -291,6 +298,18 @@ impl Prefs {
     fn publish(&self) {
         let config = self.config.clone();
         self.panel.update(move |ui, tx| ui.apply_config(&config, tx));
+    }
+}
+
+fn config_lock_note(settings: &crate::settings::Service) -> &'static str {
+    if settings
+        .base_path()
+        .and_then(|path| path.canonicalize().ok())
+        .is_some_and(|path| path.starts_with("/nix/store"))
+    {
+        "Managed by Nix"
+    } else {
+        "Set in config.toml"
     }
 }
 
@@ -498,6 +517,42 @@ mod tests {
             welcome,
             CalendarAccess::new(|| {}),
         )
+    }
+
+    #[test]
+    fn locked_general_controls_are_disabled() {
+        use rune::accesskit::Role;
+
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let state = state(current, settings, false);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        let controls = [
+            ("hotkey", "Show Dupin", Role::Button),
+            ("selection_hotkey", "Search selected text", Role::Button),
+            ("display", "Display", Role::ComboBox),
+            ("system_automation", "System Command Automation", Role::Switch),
+        ];
+
+        for locked in [false, true] {
+            runtime.update(|s, _| {
+                s.locked_keys = controls
+                    .iter()
+                    .filter(|_| locked)
+                    .map(|(key, _, _)| (*key).to_owned())
+                    .collect();
+            });
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            for (_, label, role) in controls {
+                let control = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == role && node.label() == Some(label));
+                let (_, control) = control.unwrap_or_else(|| panic!("missing control {label}"));
+                assert_eq!(control.is_disabled(), locked, "{label}");
+            }
+        }
     }
 
     #[test]

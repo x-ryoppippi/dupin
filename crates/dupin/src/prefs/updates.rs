@@ -41,7 +41,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             "Install updates automatically",
             Some("New versions download in the background and install on restart"),
             auto,
-            locked,
+            s.lock_note(locked),
         ),
         setting(
             k,

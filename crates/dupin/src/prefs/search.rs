@@ -48,7 +48,7 @@ fn calculator_setting(s: &Prefs, k: &Kit) -> El {
         "Calculator",
         Some("Show calculations and unit conversions in app search"),
         calculator,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -67,7 +67,7 @@ fn currency_setting(s: &Prefs, k: &Kit) -> El {
         "Currency conversion",
         Some("Fetch European Central Bank rates in the background"),
         currency,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -86,7 +86,7 @@ fn recent_setting(s: &Prefs, k: &Kit) -> El {
         "Show recent items",
         Some("Show recently and frequently used apps and files when the search is empty"),
         recent,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -106,7 +106,7 @@ fn file_limit_setting(s: &Prefs, k: &Kit) -> El {
         "Files shown",
         Some("The most files a Spotlight search lists"),
         limit,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -138,7 +138,7 @@ fn calendar_setting(s: &Prefs, k: &Kit) -> El {
         "Calendar search",
         Some("Type cal then Space to search events. Requires Calendar access."),
         calendar,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -157,7 +157,7 @@ fn clipboard_setting(s: &Prefs, k: &Kit) -> El {
         "Clipboard history",
         Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
         clipboard,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -176,7 +176,7 @@ fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
         "Paste snippets",
         Some("Enter pastes a snippet into the front app. Requires Accessibility access."),
         paste,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -195,7 +195,7 @@ fn window_management_setting(s: &Prefs, k: &Kit) -> El {
         "Window Management",
         Some("Show commands to move and resize windows. Requires Accessibility access."),
         window_management,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -221,7 +221,14 @@ fn extensions_setting(s: &Prefs, k: &Kit) -> El {
     } else {
         format!("Loaded from {folder}: {}", loaded.join(", "))
     };
-    setting_with_lock(k, &icons::PUZZLE, "Extensions", Some(&status), switch, locked)
+    setting_with_lock(
+        k,
+        &icons::PUZZLE,
+        "Extensions",
+        Some(&status),
+        switch,
+        s.lock_note(locked),
+    )
 }
 
 fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {

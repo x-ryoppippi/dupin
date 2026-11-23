@@ -41,13 +41,19 @@ fn shortcut_recorder(s: &Prefs, k: &Kit, kind: LauncherShortcut, key: &str, labe
             .cloned()
             .unwrap_or_else(|| shortcut_error_message(error, chord))
     };
-    ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
+    let recorder = ShortcutRecorder::new(key, &s.recorders[i], move |s: &mut Prefs| &mut s.recorders[i])
         .label(label)
         .width(180.0)
         .on_change(move |s: &mut Prefs, next, _| s.change_hotkey(kind, next))
         .error_message(refusal)
         .disabled(locked)
-        .build(k)
+        .build(k);
+    if locked {
+        // Rune disables recorder input without applying the kit's usual disabled dimming.
+        recorder.layer_opacity(0.5)
+    } else {
+        recorder
+    }
 }
 
 /// The panel hotkey's row, on General and in the welcome.
@@ -72,7 +78,7 @@ pub(super) fn hotkey_setting(s: &Prefs, k: &Kit) -> El {
         "Hotkey",
         Some(&detail),
         shortcut_recorder(s, k, kind, "hotkey", "Show Dupin", locked),
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -91,7 +97,7 @@ fn selection_hotkey_setting(s: &Prefs, k: &Kit) -> El {
             "Search selected text",
             locked,
         ),
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -115,7 +121,7 @@ fn display_setting(s: &Prefs, k: &Kit) -> El {
             "Which display the panel opens on"
         }),
         display,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -167,7 +173,7 @@ fn position_setting(s: &Prefs, k: &Kit) -> El {
         "Position",
         Some("Where on the display the panel opens"),
         position,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -213,7 +219,7 @@ fn input_source_setting(s: &Prefs, k: &Kit) -> El {
         "Input source",
         Some("ASCII switches an input method to Roman while the panel shows"),
         input_source,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -360,7 +366,7 @@ fn automation_setting(s: &Prefs, k: &Kit) -> El {
         "System Command Automation",
         Some("Show system commands that may ask for macOS Automation when confirmed"),
         automation,
-        locked,
+        s.lock_note(locked),
     )
 }
 
@@ -397,7 +403,7 @@ fn configured_hotkeys(s: &Prefs, k: &Kit, hair: f32) -> El {
                 kind,
                 Some(name),
                 text(keys).font(k.ty.ui).color(k.c.text_base),
-                s.locked("bindings"),
+                s.lock_note(s.locked("bindings")),
             )
             .key(chord)
         })

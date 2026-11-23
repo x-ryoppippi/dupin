@@ -123,11 +123,11 @@ pub(super) fn tilde(path: &str) -> String {
 
 /// A row: an icon, the setting's name and what it does, and its control at the trailing edge.
 pub(super) fn setting(k: &Kit, glyph: &'static Icon, label: &str, detail: Option<&str>, control: El) -> El {
-    setting_with_lock(k, glyph, label, detail, control, false)
+    setting_with_lock(k, glyph, label, detail, control, None)
 }
 
-pub(super) fn lock_note(k: &Kit) -> El {
-    text("Set in config.toml").font(DESCRIPTION).color(k.c.text_muted)
+pub(super) fn lock_note(k: &Kit, note: &'static str) -> El {
+    text(note).font(DESCRIPTION).color(k.c.text_muted)
 }
 
 pub(super) fn setting_with_lock(
@@ -136,7 +136,7 @@ pub(super) fn setting_with_lock(
     label: &str,
     detail: Option<&str>,
     control: El,
-    locked: bool,
+    note: Option<&'static str>,
 ) -> El {
     let mut words = col()
         .grow(1.0)
@@ -160,6 +160,6 @@ pub(super) fn setting_with_lock(
         .center_y()
         .label(label)
         .child(icon(glyph, 16.0).color(k.c.icon_base))
-        .child(words.children(locked.then(|| lock_note(k))))
+        .child(words.children(note.map(|note| lock_note(k, note))))
         .child(control)
 }
