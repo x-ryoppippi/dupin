@@ -62,6 +62,10 @@ impl Provider for FolderProvider {
 
 fn item(entry: Entry) -> Item {
     let mut item = Item::path(entry.path, entry.name, entry.matched);
+    if let dupin_core::View::Text { subtitle, .. } = &mut item.view {
+        // Every entry shares the browsed folder, which the chip already names.
+        subtitle.clear();
+    }
     crate::quick_look::add_action(&mut item);
     crate::file_actions::add(&mut item, entry.folder);
     item.score = entry.score;
