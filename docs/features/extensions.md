@@ -198,7 +198,7 @@ keyword = "wc"
 entry = "word_count.wasm" # a .wasm file inside this folder
 ```
 
-`extension.toml` describes Wasm modules only: its `entry` is required and must name a `.wasm` file, and unknown keys are errors. A folder with both `extension.toml` and a `package.json` with a `dupin` key is skipped as ambiguous; a `package.json` without a `dupin` key does not get in the way.
+`extension.toml` describes Wasm modules only: its `entry` is required and must name a `.wasm` file, and unknown keys are errors. A folder with both `extension.toml` and a `package.json` with a `dupin` key is skipped as ambiguous; any other `package.json`, including one Dupin can't parse, is left to your tooling and does not get in the way.
 
 The module exports a memory named `memory` and three functions:
 

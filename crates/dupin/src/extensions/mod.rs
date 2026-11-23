@@ -702,7 +702,7 @@ pub(crate) mod tests {
         );
         fs::write(
             root.join("c-entry").join(PACKAGE_JSON),
-            package_json("entry", "en", Some("src/index.mjs")),
+            package_json("entry", "en", Some("./src/./index.mjs")),
         )
         .unwrap();
         install_javascript(

@@ -57,13 +57,19 @@ impl Stamps {
 }
 
 /// A package.json with a `dupin` key makes a JavaScript extension; otherwise extension.toml
-/// makes a Wasm one.
+/// makes a Wasm one. Beside extension.toml, package.json may belong only to the author's
+/// tooling, so there it counts only when it parses and holds a non-null `dupin` key.
 pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
-    let Stamps { package, wasm } = stamps;
-    if let Some(package) = package {
-        let package = parse_package(&package.path)?;
-        if let Some(dupin) = package.get("dupin") {
-            if wasm.is_some() {
+    match stamps {
+        Stamps {
+            package,
+            wasm: Some(wasm),
+        } => {
+            let declares_dupin = package.as_ref().is_some_and(|package| {
+                parse_package(&package.path)
+                    .is_ok_and(|package| package.get("dupin").is_some_and(|dupin| !dupin.is_null()))
+            });
+            if declares_dupin {
                 return Err(Diagnostic::new(
                     "ambiguous-manifest",
                     "sits beside a package.json with a `dupin` key",
@@ -71,20 +77,27 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
                 .file(WASM_MANIFEST)
                 .hint("Delete extension.toml: package.json's `dupin` key already describes this JavaScript extension."));
             }
-            return javascript(&package, dupin);
+            wasm_manifest(&wasm.path)
         }
-        if wasm.is_none() {
-            return Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
-                .file(PACKAGE_JSON)
-                .field("dupin")
-                .hint(format!(
-                    "Add a `dupin` key holding {DUPIN_KEYS} to make the folder a Dupin extension."
-                )));
+        Stamps {
+            package: Some(package),
+            wasm: None,
+        } => {
+            let package = parse_package(&package.path)?;
+            match package.get("dupin") {
+                Some(dupin) => javascript(&package, dupin),
+                None => Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
+                    .file(PACKAGE_JSON)
+                    .field("dupin")
+                    .hint(format!(
+                        "Add a `dupin` key holding {DUPIN_KEYS} to make the folder a Dupin extension."
+                    ))),
+            }
         }
-    }
-    match wasm {
-        Some(wasm) => wasm_manifest(&wasm.path),
-        None => Err(Diagnostic::new("missing-manifest", "is missing")
+        Stamps {
+            package: None,
+            wasm: None,
+        } => Err(Diagnostic::new("missing-manifest", "is missing")
             .file(PACKAGE_JSON)
             .hint(
                 "Create package.json with `name`, `version` and a `dupin` key holding `title` and `keyword`.",
@@ -159,26 +172,22 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         keyword: "dupin.keyword",
     };
     fields.validate(&manifest)?;
-    let entry = Path::new(&manifest.entry);
-    if !is_relative_inside(entry)
-        || !entry
-            .extension()
-            .is_some_and(|extension| extension == "js" || extension == "mjs")
-    {
-        return Err(field(
-            "dupin.main",
-            "must be a relative path to a .js or .mjs file inside the folder",
-            MAIN_HINT,
-        ));
-    }
+    let entry = relative_inside(&manifest.entry)
+        .filter(|entry| {
+            Path::new(entry)
+                .extension()
+                .is_some_and(|extension| extension == "js" || extension == "mjs")
+        })
+        .ok_or_else(|| {
+            field(
+                "dupin.main",
+                "must be a relative path to a .js or .mjs file inside the folder",
+                MAIN_HINT,
+            )
+        })?;
     if let Some(capabilities) = dupin.get("capabilities") {
         check_capabilities(capabilities)?;
     }
-    let entry = manifest
-        .entry
-        .strip_prefix("./")
-        .unwrap_or(&manifest.entry)
-        .to_owned();
     Ok(Manifest { entry, ..manifest })
 }
 
@@ -255,11 +264,10 @@ fn wasm_manifest(path: &Path) -> Result<Manifest, Diagnostic> {
         keyword: "keyword",
     };
     fields.validate(&manifest)?;
-    let entry = Path::new(&manifest.entry);
-    if !is_relative_inside(entry) || !super::is_wasm(entry) {
-        return Err(not_wasm());
-    }
-    Ok(manifest)
+    let entry = relative_inside(&manifest.entry)
+        .filter(|entry| super::is_wasm(Path::new(entry)))
+        .ok_or_else(not_wasm)?;
+    Ok(Manifest { entry, ..manifest })
 }
 
 fn toml_problem(source: &str, error: &toml::de::Error) -> Diagnostic {
@@ -275,11 +283,18 @@ fn toml_problem(source: &str, error: &toml::de::Error) -> Diagnostic {
     diagnostic
 }
 
-fn is_relative_inside(path: &Path) -> bool {
-    path.components().next().is_some()
-        && path
-            .components()
-            .all(|part| matches!(part, Component::Normal(_) | Component::CurDir))
+/// `path` spelt as the folder-relative file name the loaders compare entries with, or `None`
+/// when it could lead outside the folder.
+fn relative_inside(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for part in Path::new(path).components() {
+        match part {
+            Component::Normal(part) => parts.push(part.to_str()?),
+            Component::CurDir => {}
+            _ => return None,
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 const ID_HINT: &str = "Use a name such as `word-count`.";
@@ -403,6 +418,14 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(manifest.entry, "dist/index.mjs");
+        for main in ["dist/./index.js", ".//dist/index.js", "./dist//index.js"] {
+            let manifest = read_folder(&[(
+                PACKAGE_JSON,
+                &package(&format!(r#"{{"title": "W", "keyword": "wc", "main": "{main}"}}"#)),
+            )])
+            .unwrap();
+            assert_eq!(manifest.entry, "dist/index.js", "{main}");
+        }
     }
 
     #[test]
@@ -493,9 +516,23 @@ mod tests {
     fn the_folder_decides_its_runtime_unambiguously() {
         let wasm = read_folder(&[(WASM_MANIFEST, WASM)]).unwrap();
         assert_eq!(wasm.entry, "guest.wasm");
-        let tooling =
-            read_folder(&[(PACKAGE_JSON, r#"{"name": "tooling"}"#), (WASM_MANIFEST, WASM)]).unwrap();
-        assert_eq!(tooling.entry, "guest.wasm");
+        let oversized = format!(
+            r#"{{"name": "tooling", "x": "{}"}}"#,
+            " ".repeat(MAX_PACKAGE_JSON_BYTES)
+        );
+        for tooling in [
+            r#"{"name": "tooling"}"#,
+            r#"{ "name": "tooling", }"#,
+            "[]",
+            r#"{"name": "tooling", "dupin": null}"#,
+            &oversized,
+        ] {
+            let wasm = read_folder(&[(PACKAGE_JSON, tooling), (WASM_MANIFEST, WASM)])
+                .unwrap_or_else(|diagnostic| panic!("{tooling:.40}: {diagnostic}"));
+            assert_eq!(wasm.entry, "guest.wasm");
+        }
+        let dotted = read_folder(&[(WASM_MANIFEST, &WASM.replace("guest.wasm", "./guest.wasm"))]).unwrap();
+        assert_eq!(dotted.entry, "guest.wasm");
 
         let both = problem(&[
             (PACKAGE_JSON, &package(r#"{"title": "W", "keyword": "wc"}"#)),
