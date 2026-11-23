@@ -12,8 +12,6 @@ use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
 
-pub(crate) mod command;
-
 pub struct Binding {
     panel: AppHandle<Ui>,
     state: Mutex<State>,

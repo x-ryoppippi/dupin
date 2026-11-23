@@ -5,7 +5,7 @@ use std::{
     os::fd::{AsRawFd, RawFd},
     os::unix::process::CommandExt,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::{ChildStderr, Command, Stdio},
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -25,6 +25,9 @@ type Signal = Arc<dyn Fn(i32, i32) + Send + Sync>;
 const EXIT_DRAIN: Duration = Duration::from_millis(100);
 const CANCEL_GRACE: Duration = Duration::from_secs(2);
 const POLL_INTERVAL_MS: i32 = 20;
+const SHELL_LIMIT: usize = 4;
+const SHELL_TAIL_BYTES: usize = 512;
+const SHELL_TAIL_LINES: usize = 4;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -181,6 +184,7 @@ struct Inner {
     runs: Mutex<VecDeque<Arc<Run>>>,
     next: AtomicU64,
     running: Arc<AtomicUsize>,
+    running_shells: AtomicUsize,
     notify: Notify,
     home: PathBuf,
 }
@@ -200,6 +204,7 @@ impl Runner {
                 runs: Mutex::default(),
                 next: AtomicU64::new(1),
                 running: Arc::default(),
+                running_shells: AtomicUsize::default(),
                 notify,
                 home,
             }),
@@ -270,8 +275,17 @@ impl Runner {
         if let Err(error) = thread::Builder::new()
             .name(format!("dupin-script-{id}"))
             .spawn(move || {
+                let mut command = Command::new(&worker_run.command.path);
+                command.args(&worker_run.command.args).current_dir(&inner.home);
                 let mut output = OutputBuffer::default();
-                let status = execute(&inner, &worker_run, &mut output);
+                let status = execute(
+                    &inner.lifecycle,
+                    id,
+                    &worker_run.cancelled,
+                    command,
+                    &mut Capture::Script(&mut output),
+                    |output| publish(&inner, &worker_run, Status::Running, output.clone()),
+                );
                 publish(&inner, &worker_run, status, output);
             })
         {
@@ -283,6 +297,61 @@ impl Runner {
             );
         }
         Start { id, refused: false }
+    }
+
+    pub fn start_shell(
+        &self,
+        line: &str,
+        complete: impl FnOnce(Result<(), String>) + Send + 'static,
+    ) -> Result<(), String> {
+        let home = std::env::home_dir().ok_or("Couldn't determine the home directory.")?;
+        let shell = std::env::var_os("SHELL")
+            .filter(|shell| !shell.is_empty())
+            .unwrap_or_else(|| "/bin/zsh".into());
+        let mut command = Command::new(shell);
+        command.args(["-lc", line]).current_dir(home);
+        self.start_shell_command(command, complete)
+    }
+
+    fn start_shell_command(
+        &self,
+        command: Command,
+        complete: impl FnOnce(Result<(), String>) + Send + 'static,
+    ) -> Result<(), String> {
+        let inner = self.inner.clone();
+        inner
+            .running_shells
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                (count < SHELL_LIMIT).then_some(count + 1)
+            })
+            .map_err(|_| "Four hotkey commands are already running.")?;
+        inner.running.fetch_add(1, Ordering::AcqRel);
+        let slot = ShellSlot(inner);
+        let id = slot.0.next.fetch_add(1, Ordering::Relaxed);
+        thread::Builder::new()
+            .name(format!("dupin-shell-{id}"))
+            .spawn(move || {
+                let mut output = ShellOutput::default();
+                let status = execute(
+                    &slot.0.lifecycle,
+                    id,
+                    &AtomicBool::new(false),
+                    command,
+                    &mut Capture::Shell(&mut output),
+                    |_| {},
+                );
+                let closing = lock(&slot.0.lifecycle.state).shutting_down;
+                drop(slot);
+                complete(if closing { Ok(()) } else { output.result(status) });
+                // A descendant can still use stderr after the shell releases its slot.
+                if let Some(mut stderr) = output.inherited_stderr
+                    && set_nonblocking(stderr.as_raw_fd(), false).is_ok()
+                {
+                    let _ = io::copy(&mut stderr, &mut io::sink());
+                }
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     pub fn snapshots(&self) -> Vec<Arc<Snapshot>> {
@@ -309,6 +378,15 @@ impl Runner {
 
     pub fn kill_all_now(&self) {
         self.inner.lifecycle.kill_all_now();
+    }
+}
+
+struct ShellSlot(Arc<Inner>);
+
+impl Drop for ShellSlot {
+    fn drop(&mut self) {
+        self.0.running_shells.fetch_sub(1, Ordering::AcqRel);
+        self.0.running.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -366,6 +444,59 @@ fn publish(inner: &Inner, run: &Run, status: Status, output: OutputBuffer) {
     (inner.notify)(run.id, finished);
 }
 
+#[derive(Default)]
+struct ShellOutput {
+    tail: VecDeque<u8>,
+    inherited_stderr: Option<ChildStderr>,
+}
+
+impl ShellOutput {
+    fn feed(&mut self, bytes: &[u8]) {
+        let bytes = &bytes[bytes.len().saturating_sub(SHELL_TAIL_BYTES)..];
+        let overflow = (self.tail.len() + bytes.len()).saturating_sub(SHELL_TAIL_BYTES);
+        self.tail.drain(..overflow);
+        self.tail.extend(bytes);
+    }
+
+    fn result(&mut self, status: Status) -> Result<(), String> {
+        if !status.failed() {
+            return Ok(());
+        }
+        let text = String::from_utf8_lossy(self.tail.make_contiguous());
+        let text = text.trim_end();
+        let tail = text
+            .rmatch_indices('\n')
+            .nth(SHELL_TAIL_LINES - 1)
+            .map_or(text, |(index, _)| &text[index + 1..]);
+        if tail.is_empty() {
+            Err(status.to_string())
+        } else {
+            Err(format!("{status}\n{tail}"))
+        }
+    }
+}
+
+enum Capture<'a> {
+    Script(&'a mut OutputBuffer),
+    Shell(&'a mut ShellOutput),
+}
+
+fn set_nonblocking(fd: RawFd, enabled: bool) -> io::Result<()> {
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    let flags = if enabled {
+        flags | libc::O_NONBLOCK
+    } else {
+        flags & !libc::O_NONBLOCK
+    };
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 struct Pipe<R> {
     reader: Option<R>,
     stream: Stream,
@@ -373,14 +504,12 @@ struct Pipe<R> {
 }
 
 impl<R: Read + AsRawFd> Pipe<R> {
-    fn new(reader: R, stream: Stream) -> io::Result<Self> {
-        let fd = reader.as_raw_fd();
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
-            return Err(io::Error::last_os_error());
+    fn new(reader: Option<R>, stream: Stream) -> io::Result<Self> {
+        if let Some(reader) = &reader {
+            set_nonblocking(reader.as_raw_fd(), true)?;
         }
         Ok(Self {
-            reader: Some(reader),
+            reader,
             stream,
             decoder: LineDecoder::default(),
         })
@@ -390,14 +519,17 @@ impl<R: Read + AsRawFd> Pipe<R> {
         self.reader.as_ref().map_or(-1, AsRawFd::as_raw_fd)
     }
 
-    fn read(&mut self, bytes: &mut [u8], output: &mut OutputBuffer) -> io::Result<bool> {
+    fn read(&mut self, bytes: &mut [u8], capture: &mut Capture<'_>) -> io::Result<bool> {
         let Some(reader) = &mut self.reader else {
             return Ok(false);
         };
         match reader.read(bytes) {
-            Ok(0) => Ok(self.close(output)),
+            Ok(0) => Ok(self.close(capture)),
             Ok(count) => {
-                self.decoder.feed(&bytes[..count], self.stream, output);
+                match capture {
+                    Capture::Script(output) => self.decoder.feed(&bytes[..count], self.stream, output),
+                    Capture::Shell(output) => output.feed(&bytes[..count]),
+                }
                 Ok(true)
             }
             Err(error)
@@ -409,15 +541,17 @@ impl<R: Read + AsRawFd> Pipe<R> {
                 Ok(false)
             }
             Err(error) => {
-                self.close(output);
+                self.close(capture);
                 Err(error)
             }
         }
     }
 
-    fn close(&mut self, output: &mut OutputBuffer) -> bool {
+    fn close(&mut self, capture: &mut Capture<'_>) -> bool {
         self.reader = None;
-        if self.decoder.has_pending() {
+        if let Capture::Script(output) = capture
+            && self.decoder.has_pending()
+        {
             self.decoder.finish(self.stream, output);
             return true;
         }
@@ -425,16 +559,24 @@ impl<R: Read + AsRawFd> Pipe<R> {
     }
 }
 
-fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
-    let mut command = Command::new(&run.command.path);
+fn execute(
+    lifecycle: &Lifecycle,
+    id: RunId,
+    cancelled: &AtomicBool,
+    mut command: Command,
+    capture: &mut Capture<'_>,
+    mut notify: impl FnMut(&OutputBuffer),
+) -> Status {
+    let stdout = match capture {
+        Capture::Script(_) => Stdio::piped(),
+        Capture::Shell(_) => Stdio::null(),
+    };
     command
-        .args(&run.command.args)
-        .current_dir(&inner.home)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(stdout)
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = match inner.lifecycle.spawn(run.id, &run.cancelled, || {
+    let mut child = match lifecycle.spawn(id, cancelled, || {
         command.spawn().map(|child| {
             let pgid = child.id() as i32;
             (child, pgid)
@@ -444,15 +586,14 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
         Ok(None) => return Status::Cancelled,
         Err(error) => return Status::Failed(error.to_string()),
     };
-    let pipes = Pipe::new(child.stdout.take().unwrap(), Stream::Stdout).and_then(|stdout| {
-        Pipe::new(child.stderr.take().unwrap(), Stream::Stderr).map(|stderr| (stdout, stderr))
-    });
+    let pipes = Pipe::new(child.stdout.take(), Stream::Stdout)
+        .and_then(|stdout| Pipe::new(child.stderr.take(), Stream::Stderr).map(|stderr| (stdout, stderr)));
     let (mut stdout, mut stderr) = match pipes {
         Ok(pipes) => pipes,
         Err(error) => {
-            inner.lifecycle.cancel(run.id, true);
+            lifecycle.cancel(id, true);
             let _ = child.wait();
-            inner.lifecycle.reaped(run.id);
+            lifecycle.reaped(id);
             return Status::Failed(error.to_string());
         }
     };
@@ -464,18 +605,33 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
     let mut notified = Instant::now();
     loop {
         if exited.is_none() {
-            if run.cancelled.load(Ordering::Acquire) {
+            if cancelled.load(Ordering::Acquire) {
                 let started = cancel_at.get_or_insert_with(Instant::now);
                 let force = started.elapsed() >= CANCEL_GRACE;
-                inner.lifecycle.cancel(run.id, force);
+                lifecycle.cancel(id, force);
             }
-            match inner.lifecycle.reap(run.id, leader_exited, || child.try_wait()) {
-                Ok(Some((status, cancelled))) => exited = Some((status, cancelled, Instant::now())),
+            match lifecycle.reap(id, leader_exited, || child.try_wait()) {
+                Ok(Some((status, cancelled))) => {
+                    if let Capture::Shell(output) = capture {
+                        if !status.success()
+                            && let Some(stderr) = &mut stderr.reader
+                        {
+                            // A descendant writing continuously mustn't delay the failure notice.
+                            let mut pending = stderr.take(256 * 1024);
+                            while let Ok(count @ 1..) = pending.read(&mut bytes) {
+                                output.feed(&bytes[..count]);
+                            }
+                        }
+                        output.inherited_stderr = stderr.reader.take();
+                        return problem.map_or_else(|| Status::Exited(status.code()), Status::Failed);
+                    }
+                    exited = Some((status, cancelled, Instant::now()));
+                }
                 Ok(None) => {}
                 Err(error) => {
-                    inner.lifecycle.cancel(run.id, true);
+                    lifecycle.cancel(id, true);
                     let _ = child.wait();
-                    inner.lifecycle.reaped(run.id);
+                    lifecycle.reaped(id);
                     return Status::Failed(error.to_string());
                 }
             }
@@ -484,8 +640,8 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
         if let Some((status, cancelled, at)) = exited {
             let remaining = EXIT_DRAIN.saturating_sub(at.elapsed());
             if (stdout.fd() == -1 && stderr.fd() == -1) || remaining.is_zero() {
-                stdout.close(output);
-                stderr.close(output);
+                stdout.close(capture);
+                stderr.close(capture);
                 return if cancelled {
                     Status::Cancelled
                 } else if let Some(error) = problem {
@@ -504,14 +660,14 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
         if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) } == -1 {
             let error = io::Error::last_os_error();
             if error.kind() != io::ErrorKind::Interrupted {
-                inner.lifecycle.cancel(run.id, true);
+                lifecycle.cancel(id, true);
                 let _ = child.wait();
-                inner.lifecycle.reaped(run.id);
+                lifecycle.reaped(id);
                 return Status::Failed(error.to_string());
             }
         }
         if fds.iter().any(|fd| fd.revents != 0) {
-            let reads = [stdout.read(&mut bytes, output), stderr.read(&mut bytes, output)];
+            let reads = [stdout.read(&mut bytes, capture), stderr.read(&mut bytes, capture)];
             for result in reads {
                 match result {
                     Ok(changed) => dirty |= changed,
@@ -519,8 +675,11 @@ fn execute(inner: &Inner, run: &Run, output: &mut OutputBuffer) -> Status {
                 }
             }
         }
-        if dirty && notified.elapsed() >= Duration::from_millis(50) {
-            publish(inner, run, Status::Running, output.clone());
+        if dirty
+            && notified.elapsed() >= Duration::from_millis(50)
+            && let Capture::Script(output) = capture
+        {
+            notify(output);
             notified = Instant::now();
             dirty = false;
         }
@@ -710,6 +869,27 @@ mod tests {
                 mode: OutputMode::Inline,
             }
         }
+
+        fn start_shell(&self, runner: &Runner) -> mpsc::Receiver<Result<(), String>> {
+            let mut command = Command::new("/bin/sh");
+            command.args(["-c", "./run"]).current_dir(&self.0);
+            let (send, received) = mpsc::channel();
+            runner
+                .start_shell_command(command, move |result| send.send(result).unwrap())
+                .unwrap();
+            received
+        }
+
+        fn wait_for(&self, file: &str) {
+            let started = Instant::now();
+            while !self.0.join(file).exists() {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "{file} was not created"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
     }
 
     impl Drop for Fixture {
@@ -726,6 +906,81 @@ mod tests {
                 return snapshot;
             }
             assert!(start.elapsed() < Duration::from_secs(6), "script did not finish");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn shell_notices_collect_only_the_bounded_stderr_tail() {
+        let fixture = Fixture::new(
+            "read value && exit 99\nprintf 'stdout\\n'\nprintf '%s\\n' old first second third fourth >&2\nexit 7\n",
+        );
+        let runner = Runner::new(
+            fixture.0.clone(),
+            Arc::new(|_, _| panic!("shell in script history")),
+        );
+        assert_eq!(
+            fixture
+                .start_shell(&runner)
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+            Err("Exited with code 7\nfirst\nsecond\nthird\nfourth".into())
+        );
+        let long_line = Fixture::new("printf '%02000d' 0 >&2\nexit 7\n");
+        assert_eq!(
+            long_line
+                .start_shell(&runner)
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap(),
+            Err(format!("Exited with code 7\n{}", "0".repeat(SHELL_TAIL_BYTES)))
+        );
+        assert!(runner.snapshots().is_empty());
+        assert_eq!(runner.activity().load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn shell_releases_its_slot_before_inheriting_children_finish_writing() {
+        let fixture = Fixture::new(
+            "(i=0; until [ -f release ]; do i=$((i + 1)); [ \"$i\" -lt 100 ] || exit 1; sleep 0.05; done;\n\
+            printf 'late stderr\\n' >&2 && touch alive) &\nexit 0\n",
+        );
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        assert_eq!(
+            fixture
+                .start_shell(&runner)
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+            Ok(())
+        );
+        assert_eq!(runner.activity().load(Ordering::Acquire), 0);
+        fs::write(fixture.0.join("release"), "").unwrap();
+        fixture.wait_for("alive");
+    }
+
+    #[test]
+    fn shutdown_stops_an_active_shell_group_and_prevents_later_launches() {
+        let fixture = Fixture::new("sleep 30 &\ntouch ready\nwait\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let completion = fixture.start_shell(&runner);
+        fixture.wait_for("ready");
+        let pgid = lock(&runner.inner.lifecycle.state).groups[&1].pgid;
+        runner.kill_all_now();
+        assert_eq!(completion.recv_timeout(Duration::from_secs(2)).unwrap(), Ok(()));
+        let refused = Fixture::new("touch launched\n");
+        assert_eq!(
+            refused
+                .start_shell(&runner)
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap(),
+            Ok(())
+        );
+        assert!(!refused.0.join("launched").exists());
+        let deadline = Instant::now();
+        while unsafe { libc::killpg(pgid, 0) } == 0 {
+            assert!(
+                deadline.elapsed() < Duration::from_secs(2),
+                "shell group survived quit"
+            );
             thread::sleep(Duration::from_millis(10));
         }
     }
