@@ -25,9 +25,9 @@ Aliases must be non-empty, have no leading or trailing whitespace and leave othe
 
 Choose **Relaunch** in Settings → General to restart Dupin. File edits reload automatically. Relaunch remains available when the configuration is read-only, including Nix-managed files. If an update is already staged, relaunch installs it first.
 
-## App hotkeys
+## Hotkeys
 
-Add a table to `config.toml` for each shortcut, using the app's macOS bundle identifier.
+Add a table to `config.toml` for each shortcut. An app binding uses the app's macOS bundle identifier.
 
 ```toml
 [bindings."ctrl+alt+c"]
@@ -35,6 +35,16 @@ target = "app"
 bundle_id = "com.apple.calculator"
 hide_if_frontmost = true # optional, defaults to false
 ```
+
+A command binding runs a shell command line.
+
+```toml
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+```
+
+Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
 
 Each shortcut must be distinct from the panel shortcut and other bindings. Edits reload automatically. Dupin reports clashes in Settings and in the panel, keeping the active shortcuts.
 

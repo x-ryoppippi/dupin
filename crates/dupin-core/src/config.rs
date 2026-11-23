@@ -42,6 +42,9 @@ pub enum HotkeyTarget {
         #[serde(default)]
         hide_if_frontmost: bool,
     },
+    Command {
+        command: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -224,6 +227,25 @@ bundle_id = "com.apple.calculator"
             HotkeyTarget::App {
                 bundle_id: "com.apple.calculator".into(),
                 hide_if_frontmost: false,
+            }
+        );
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+    }
+
+    #[test]
+    fn command_bindings_round_trip_without_changing_the_command_line() {
+        let config = Config::parse(
+            r#"
+[bindings."alt+cmd+g"]
+target = "command"
+command = "dupin open --query 'gh '"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            config.bindings["alt+cmd+g"],
+            HotkeyTarget::Command {
+                command: "dupin open --query 'gh '".into(),
             }
         );
         assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);

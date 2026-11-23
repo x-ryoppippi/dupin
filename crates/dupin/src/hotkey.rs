@@ -12,6 +12,8 @@ use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::ui::Ui;
 
+pub(crate) mod command;
+
 pub struct Binding {
     panel: AppHandle<Ui>,
     state: Mutex<State>,
@@ -217,12 +219,17 @@ fn configured_targets(config: &Config) -> Result<(Option<Shortcut>, HashMap<Shor
         let shortcut = accelerator
             .parse::<Shortcut>()
             .map_err(|_| "A shortcut in [bindings] is invalid.")?;
-        let HotkeyTarget::App { bundle_id, .. } = target;
-        if bundle_id.is_empty() || bundle_id.contains(char::is_whitespace) {
-            return Err(format!(
-                "{} needs an app bundle identifier.",
-                shortcut.keycaps().join("")
-            ));
+        let problem = match target {
+            HotkeyTarget::App { bundle_id, .. }
+                if bundle_id.is_empty() || bundle_id.contains(char::is_whitespace) =>
+            {
+                Some("an app bundle identifier")
+            }
+            HotkeyTarget::Command { command } if command.trim().is_empty() => Some("a shell command"),
+            HotkeyTarget::App { .. } | HotkeyTarget::Command { .. } => None,
+        };
+        if let Some(required) = problem {
+            return Err(format!("{} needs {required}.", shortcut.keycaps().join(""),));
         }
         if targets
             .insert(shortcut.clone(), Target::Configured(target.clone()))
@@ -332,8 +339,34 @@ mod tests {
         config.bindings.insert("Command+Space".into(), app());
         assert!(configured_targets(&config).is_err());
         config.hotkey.clear();
-        config.bindings.insert("cmd+space".into(), app());
+        config.bindings.insert(
+            "cmd+space".into(),
+            HotkeyTarget::Command {
+                command: "true".into(),
+            },
+        );
         assert!(configured_targets(&config).is_err());
+    }
+
+    #[test]
+    fn a_command_binding_needs_a_non_blank_command() {
+        let mut config = Config::default();
+        for command in ["", " \t\n", "true"] {
+            let target = HotkeyTarget::Command {
+                command: command.into(),
+            };
+            config.bindings.insert("alt+cmd+g".into(), target.clone());
+            if command.trim().is_empty() {
+                assert_eq!(
+                    configured_targets(&config).err().unwrap(),
+                    "⌥⌘G needs a shell command."
+                );
+            } else {
+                let (_, targets) = configured_targets(&config).unwrap();
+                let shortcut = "alt+cmd+g".parse().unwrap();
+                assert!(matches!(&targets[&shortcut], Target::Configured(actual) if actual == &target));
+            }
+        }
     }
 
     #[test]
