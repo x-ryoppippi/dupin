@@ -157,7 +157,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, dupin_core::Com
         ),
         CommandSpec::new(
             snippets_id.clone(),
-            50,
+            config.snippets.len(),
             presentation(
                 "Search snippets",
                 Some("Snippets"),
@@ -445,6 +445,55 @@ mod tests {
             [Effect::ReplaceQuery(text), Effect::Search { command, query, .. }]
                 if text.is_empty() && *command == id(SNIPPETS) && query.is_empty()
         ));
+    }
+
+    #[test]
+    fn empty_snippet_search_lists_the_whole_catalogue() {
+        use dupin_core::config::Snippet;
+        use dupin_core::{Delivery, Effect, Request};
+
+        let config = Config {
+            snippets: (0..64)
+                .map(|i| {
+                    (
+                        format!("snippet-{i:02}"),
+                        Snippet {
+                            name: None,
+                            text: format!("Example {i}"),
+                        },
+                    )
+                })
+                .collect(),
+            ..Config::default()
+        };
+        let configured = configured(&config).unwrap();
+        let provider = SnippetProvider::new(Arc::new(RwLock::new(configured.snippets)));
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        let effects = session.set_query("snip ");
+        let [
+            Effect::ReplaceQuery(_),
+            Effect::Search {
+                command,
+                generation,
+                query,
+            },
+        ] = effects.as_slice()
+        else {
+            panic!("expected a search in snippets mode, got {effects:?}");
+        };
+        let limit = session.provider_spec(command).unwrap().candidate_limit();
+        provider
+            .search(&Request::detached(query, limit), &mut |items| {
+                session.deliver_from(
+                    command.clone(),
+                    Delivery::Batch {
+                        generation: *generation,
+                        items,
+                    },
+                );
+            })
+            .unwrap();
+        assert_eq!(session.items().len(), config.snippets.len());
     }
 
     #[test]
