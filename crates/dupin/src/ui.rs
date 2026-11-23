@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{
-    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, Position, Searcher, Session,
+    Backdrop, CommandId, Config, Delivery, Effect, History, InputSource, Intent, ItemAction, Position,
+    Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
 use rune::{
@@ -23,6 +24,7 @@ const ICON_CAP: usize = 512;
 /// puts its field.
 const TOP_MARGIN: f32 = 180.0;
 pub const ICON_SIZE: f32 = 32.0;
+pub const SEND_TO: &str = "Send to…";
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -96,6 +98,10 @@ pub enum ActionStage {
         state: ApplicationState,
         selected: usize,
     },
+    Receivers {
+        actions: Vec<ItemAction>,
+        selected: usize,
+    },
     Confirm {
         action_id: String,
         selected: usize,
@@ -109,6 +115,8 @@ enum ActionKey {
     Run(String, String),
     Confirm,
     Choice(usize),
+    SendTo,
+    Receive(usize),
 }
 
 impl ActionScreen {
@@ -141,9 +149,15 @@ impl ActionScreen {
 
     fn selected_index(&self) -> usize {
         match &self.stage {
-            ActionStage::Applications { selected, .. } | ActionStage::Confirm { selected, .. } => *selected,
+            ActionStage::Applications { selected, .. }
+            | ActionStage::Receivers { selected, .. }
+            | ActionStage::Confirm { selected, .. } => *selected,
             ActionStage::List => self.selected,
         }
+    }
+
+    fn action_count(&self) -> usize {
+        self.item.actions.len() + usize::from(!self.item.payload.is_empty())
     }
 
     fn key(&mut self, key: &Key, repeat: bool) -> ActionKey {
@@ -183,15 +197,27 @@ impl ActionScreen {
                 }
                 return ActionKey::Stay;
             }
+            ActionStage::Receivers { actions, selected } => {
+                match key {
+                    Key::Up => *selected = selected.saturating_sub(1),
+                    Key::Down => *selected = (*selected + 1).min(actions.len().saturating_sub(1)),
+                    Key::Enter if !actions.is_empty() => return ActionKey::Receive(*selected),
+                    _ => {}
+                }
+                return ActionKey::Stay;
+            }
             ActionStage::List => {}
         }
         match key {
             Key::Up => self.selected = self.selected.saturating_sub(1),
-            Key::Down => self.selected = (self.selected + 1).min(self.item.actions.len().saturating_sub(1)),
+            Key::Down => self.selected = (self.selected + 1).min(self.action_count().saturating_sub(1)),
             Key::Left | Key::Escape => return ActionKey::Back,
             Key::Enter => {
                 if let Some(action) = self.item.actions.get(self.selected) {
                     return ActionKey::Run(self.key.clone(), action.id.clone());
+                }
+                if self.selected < self.action_count() {
+                    return ActionKey::SendTo;
                 }
             }
             _ => {}
@@ -260,6 +286,7 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
+    sharing: dupin_mac::sharing::Picker,
     file_demotions: Arc<RwLock<Vec<String>>>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
@@ -454,6 +481,7 @@ impl Ui {
             icon_cache: None,
             searchers,
             web: registration.web,
+            sharing: dupin_mac::sharing::Picker::default(),
             file_demotions: registration.file_demotions,
             deadlines: HashMap::new(),
             _apps_watcher: apps_watcher,
@@ -495,6 +523,12 @@ impl Ui {
             *web = registration.web;
             changed
         };
+        if web_changed
+            && let Some(screen) = &mut self.action_screen
+            && matches!(screen.stage, ActionStage::Receivers { .. })
+        {
+            screen.stage = ActionStage::List;
+        }
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         self.session
@@ -727,6 +761,7 @@ impl Ui {
     fn hide(&mut self, tx: &mut Tx) {
         crate::trace::panel("hide", self.me.is_visible(), self.shown);
         self.action_screen = None;
+        self.sharing.close();
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.close();
         }
@@ -892,6 +927,8 @@ impl Ui {
                 ActionKey::Run(key, action) => self.pick_action(&key, &action, tx),
                 ActionKey::Confirm => self.confirm_action(tx),
                 ActionKey::Choice(index) => self.pick_application(index, tx),
+                ActionKey::SendTo => self.show_receivers(tx),
+                ActionKey::Receive(index) => self.pick_receiver(index, tx),
                 ActionKey::Stay => {
                     tx.scroll_into_view(format!("action-{}", screen.selected_index()));
                 }
@@ -1142,6 +1179,40 @@ impl Ui {
         self.apply(effects, tx);
     }
 
+    pub fn show_receivers(&mut self, tx: &mut Tx) {
+        let Some(screen) = self
+            .action_screen
+            .as_mut()
+            .filter(|screen| matches!(screen.stage, ActionStage::List) && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        let payload = &screen.item.payload;
+        let mut actions = payload.receivers();
+        if let Some(text) = payload.nonblank_text() {
+            actions.extend(self.web.read().unwrap().receivers(text));
+        }
+        if actions.is_empty() {
+            return;
+        }
+        screen.selected = screen.item.actions.len();
+        screen.stage = ActionStage::Receivers { actions, selected: 0 };
+        crate::trace::action_screen("receivers");
+        tx.scroll_into_view("action-0");
+    }
+
+    pub fn pick_receiver(&mut self, index: usize, tx: &mut Tx) {
+        let Some(screen) = &self.action_screen else { return };
+        let ActionStage::Receivers { actions, .. } = &screen.stage else {
+            return;
+        };
+        let Some(action) = actions.get(index) else { return };
+        let effects = self
+            .session
+            .run_key_receiver(&screen.key, &screen.item.payload, action.clone());
+        self.apply(effects, tx);
+    }
+
     fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
         if self.session.deliver_from(origin.clone(), delivery) {
             if self.session.results() == dupin_core::session::Results::Done {
@@ -1230,6 +1301,13 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(self.session.history()),
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
+                    dupin_core::Action::Share { service, paths } => {
+                        if !rune::tooling::is_headless()
+                            && let Err(error) = self.sharing.share(service, &paths)
+                        {
+                            self.me.update(move |ui, tx| ui.show_notice(error, tx));
+                        }
+                    }
                     dupin_core::Action::OpenPreferences => self.prepare_settings(),
                     dupin_core::Action::Preview(path) => {
                         let shown = self
@@ -1320,6 +1398,10 @@ impl Ui {
             .borrow()
             .as_ref()
             .is_some_and(|preview| preview.panel_is_key() || preview.owner_is_key())
+    }
+
+    pub fn share_picker_is_active(&self) -> bool {
+        self.sharing.is_active()
     }
 
     pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
@@ -1831,15 +1913,32 @@ mod action_screen_tests {
     #[test]
     fn enter_uses_the_selected_action_without_running_external_effects() {
         let (mut session, mut screen) = fixture();
-        screen.selected = 2;
+        screen.selected = 1;
         let ActionKey::Run(key, action) = screen.key(&Key::Enter, false) else {
             panic!("expected action")
         };
         let effects = session.run_key_action(&key, &action);
         assert!(
             effects.iter().any(
-                |effect| matches!(effect, Effect::Run(Action::Copy(value)) if value == "/fixture/example")
+                |effect| matches!(effect, Effect::Run(Action::Reveal(path)) if path == std::path::Path::new("/fixture/example"))
             )
         );
+    }
+
+    #[test]
+    fn send_to_navigation_preserves_the_parent_selection() {
+        let (_, mut screen) = fixture();
+        screen.selected = screen.item.actions.len();
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
+        screen.stage = ActionStage::Receivers {
+            actions: screen.item.payload.receivers(),
+            selected: 0,
+        };
+        assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);
+        screen.key(&Key::Down, false);
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::Receive(1));
+        assert_eq!(screen.key(&Key::Escape, false), ActionKey::Stay);
+        assert!(matches!(screen.stage, ActionStage::List));
+        assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
     }
 }

@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use crate::searcher::Delivery;
-use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction};
+use crate::{Action, ActionDisposition, CommandId, CommandRegistry, History, Item, ItemAction, Payload};
 
 const QUERY_HISTORY_LIMIT: usize = 100;
 
@@ -248,7 +248,7 @@ impl Session {
         let effects = self
             .actionable_items()
             .get(self.selected)
-            .filter(|item| !item.actions.is_empty())
+            .filter(|item| item.has_actions())
             .map(|_| {
                 vec![Effect::ShowActions {
                     id: self.result_key(self.selected),
@@ -525,6 +525,17 @@ impl Session {
             return Vec::new();
         }
         self.activate(&item, ItemAction::new(parent_id, "Open with", choice))
+    }
+
+    pub fn run_key_receiver(&mut self, key: &str, payload: &Payload, action: ItemAction) -> Vec<Effect> {
+        if !self.select_key(key) {
+            return Vec::new();
+        }
+        let item = self.items[self.selected].clone();
+        if &item.payload != payload {
+            return Vec::new();
+        }
+        self.activate(&item, action)
     }
 
     pub fn forget(&mut self, key: &str) -> bool {

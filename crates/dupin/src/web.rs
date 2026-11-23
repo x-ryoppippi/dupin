@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use dupin_core::config::Config;
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use objc2_foundation::{NSString, NSURL};
 
 const MAX_KEYWORD_BYTES: usize = 32;
@@ -24,6 +24,17 @@ struct ValidatedSearch {
 }
 
 impl WebCatalog {
+    pub fn receivers(&self, query: &str) -> impl Iterator<Item = ItemAction> {
+        self.searches.iter().filter_map(move |(keyword, search)| {
+            let url = fill_template(&search.url, query)?;
+            Some(ItemAction::new(
+                &format!("web:{keyword}"),
+                &format!("Search {} ({keyword})", search.name),
+                Action::OpenUrl(url),
+            ))
+        })
+    }
+
     pub fn compile(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Self, Option<String>) {
         let mut catalog = Self::default();
         let mut problems = Vec::new();
@@ -247,6 +258,7 @@ fn percent_encode(value: &str) -> String {
 fn search_item(keyword: &str, title: String, url: String, completion: Option<String>) -> Item {
     Item {
         id: format!("web:{keyword}"),
+        payload: Payload::text(title.clone()),
         view: View::Text {
             title,
             subtitle: keyword.to_owned(),
@@ -344,6 +356,23 @@ mod tests {
             url(&item),
             "https://www.google.com/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%26%2F%23%3F"
         );
+    }
+
+    #[test]
+    fn configured_search_receivers_use_the_same_templates_as_keyword_search() {
+        let (catalog, _) = compile(&Config::default());
+        let query = "日本語 +&/#?";
+        let receivers: Vec<_> = catalog.receivers(query).collect();
+        assert_eq!(receivers.len(), catalog.searches.len());
+        for receiver in receivers {
+            let keyword = receiver.id.strip_prefix("web:").unwrap();
+            let item = keyword_item(&catalog, &format!("{keyword} {query}")).unwrap();
+            assert_eq!(
+                receiver,
+                ItemAction::new(&receiver.id, &receiver.title, Action::OpenUrl(url(&item).into()),)
+            );
+        }
+        assert_eq!(catalog.receivers(&"x".repeat(MAX_TEMPLATE_BYTES)).count(), 0);
     }
 
     #[test]

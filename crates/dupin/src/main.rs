@@ -175,7 +175,7 @@ fn main() {
         .on_frame_encoded(trace::frame)
         .on_close(ui::Ui::closed)
         .on_focus(|s, focused, tx| {
-            if !focused && !s.preview_focus_is_active() {
+            if !focused && !s.preview_focus_is_active() && !s.share_picker_is_active() {
                 s.dismiss(tx);
             }
         });

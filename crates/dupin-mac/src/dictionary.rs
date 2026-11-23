@@ -2,7 +2,7 @@
 
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 #[repr(C)]
@@ -68,6 +68,7 @@ fn full_range(text: &CFString) -> CFRange {
 fn item(term: &str, definition: String) -> Item {
     Item {
         id: format!("dictionary:{term}"),
+        payload: Payload::text(definition.clone()),
         view: View::Detail {
             title: term.to_owned(),
             body: definition,

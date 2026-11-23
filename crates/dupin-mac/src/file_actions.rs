@@ -35,7 +35,7 @@ mod tests {
             add(&mut item);
             assert_eq!(
                 item.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
-                ["open", "open-with", "reveal", "quick-look", "copy-path", "trash"]
+                ["open", "open-with", "reveal", "quick-look", "trash"]
             );
             assert!(item.item_action("trash").unwrap().confirmation().is_some());
         }

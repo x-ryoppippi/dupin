@@ -10,7 +10,7 @@ use rune::{
     row, text, text_input,
 };
 
-use crate::ui::{ActionStage, ApplicationState, ICON_SIZE, Ui};
+use crate::ui::{ActionStage, ApplicationState, ICON_SIZE, SEND_TO, Ui};
 
 pub const HEADER_H: f32 = 64.0;
 /// Rows shown before the list scrolls.
@@ -183,8 +183,9 @@ fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
         None => el().size(ICON_SIZE, ICON_SIZE),
     };
-    let subtitle = match &screen.item.view {
-        View::Text { subtitle, .. } => subtitle.as_str(),
+    let subtitle = match (&screen.stage, &screen.item.view) {
+        (ActionStage::Receivers { .. }, _) => SEND_TO,
+        (_, View::Text { subtitle, .. }) => subtitle.as_str(),
         _ => "Actions",
     };
     row()
@@ -249,6 +250,7 @@ fn application_locations(apps: &[dupin_mac::workspace::Application]) -> Vec<Opti
 
 fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let screen = s.action_screen.as_ref().unwrap();
+    let row_height = s.theme.row_height as f32 - 8.0;
     match &screen.stage {
         ActionStage::Applications { state, selected, .. } => {
             let mut list = col().key("applications").w_full().py(LIST_PAD);
@@ -324,6 +326,14 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
             }
             return list;
         }
+        ActionStage::Receivers { actions, selected } => {
+            return action_options("receivers", row_height).children(actions.iter().enumerate().map(
+                |(index, action)| {
+                    action_row(&action.title, index, *selected, row_height, false, t, accent)
+                        .on_press_tx(move |s: &mut Ui, tx| s.pick_receiver(index, tx))
+                },
+            ));
+        }
         ActionStage::Confirm { action_id, selected } => {
             let action = screen.item.item_action(action_id).unwrap();
             let confirmation = action.confirmation().unwrap();
@@ -384,51 +394,89 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         }
         ActionStage::List => {}
     }
-    col().key("actions").w_full().py(LIST_PAD).child(
-        col()
-            .w_full()
-            .max_h((s.theme.row_height as f32 - 8.0) * visible_rows(s.theme.row_height as f32 - 8.0) as f32)
-            .scroll(ScrollSpec { stick_bottom: false })
-            .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
-                let on = index == screen.selected;
-                let key = screen.key.clone();
-                let id = action.id.clone();
-                row()
-                    .key(format!("action-{index}"))
-                    .w_full()
-                    .h(s.theme.row_height as f32 - 8.0)
-                    .px(LIST_PAD)
-                    .child(
-                        row()
-                            .w_full()
-                            .h_full()
-                            .px(12.0)
-                            .gap(12.0)
-                            .center_y()
-                            .radius(8.0)
-                            .fill(if on { accent } else { Color::TRANSPARENT })
-                            .hover(if on { accent } else { t.hover })
-                            .child(
-                                text(&action.title)
-                                    .font(t.font(type_::BODY))
-                                    .color(if on {
-                                        t.selected_text
-                                    } else if action.confirmation().is_some() {
-                                        t.destructive
-                                    } else {
-                                        t.text
-                                    })
-                                    .grow(1.0),
-                            )
-                            .child(
-                                text(if on { "↩" } else { "" })
-                                    .font(t.font(type_::LABEL))
-                                    .color(t.selected_text.alpha(0.78)),
-                            )
-                            .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx)),
-                    )
-            })),
-    )
+    action_options("actions", row_height)
+        .children(screen.item.actions.iter().enumerate().map(|(index, action)| {
+            let key = screen.key.clone();
+            let id = action.id.clone();
+            action_row(
+                &action.title,
+                index,
+                screen.selected,
+                row_height,
+                action.confirmation().is_some(),
+                t,
+                accent,
+            )
+            .on_press_tx(move |s: &mut Ui, tx| s.pick_action(&key, &id, tx))
+        }))
+        .children((!screen.item.payload.is_empty()).then(|| {
+            action_row(
+                SEND_TO,
+                screen.item.actions.len(),
+                screen.selected,
+                row_height,
+                false,
+                t,
+                accent,
+            )
+            .on_press_tx(Ui::show_receivers)
+        }))
+}
+
+fn action_options(key: &str, row_height: f32) -> El {
+    col()
+        .key(key)
+        .w_full()
+        .py(LIST_PAD)
+        .max_h(row_height * visible_rows(row_height) as f32 + 2.0 * LIST_PAD)
+        .scroll(ScrollSpec { stick_bottom: false })
+}
+
+fn action_row(
+    title: &str,
+    index: usize,
+    selected: usize,
+    height: f32,
+    destructive: bool,
+    t: &ResolvedTheme,
+    accent: Color,
+) -> El {
+    let on = index == selected;
+    row()
+        .key(format!("action-{index}"))
+        .w_full()
+        .h(height)
+        .px(LIST_PAD)
+        .child(
+            row()
+                .w_full()
+                .h_full()
+                .px(12.0)
+                .gap(12.0)
+                .center_y()
+                .radius(8.0)
+                .fill(if on { accent } else { Color::TRANSPARENT })
+                .hover(if on { accent } else { t.hover })
+                .child(
+                    text(title)
+                        .font(t.font(type_::BODY))
+                        .color(if on {
+                            t.selected_text
+                        } else if destructive {
+                            t.destructive
+                        } else {
+                            t.text
+                        })
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .truncate(),
+                )
+                .child(
+                    text(if on { "↩" } else { "" })
+                        .font(t.font(type_::LABEL))
+                        .color(t.selected_text.alpha(0.78)),
+                ),
+        )
 }
 
 fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
@@ -568,7 +616,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, 
         header = header.child(el().grow(1.0));
         false
     };
-    if !item.actions.is_empty() {
+    if item.has_actions() {
         header = header.child(
             text("→ Actions")
                 .font(t.font(type_::BODY))
@@ -578,7 +626,7 @@ fn content_card(s: &Ui, item: &Item, index: usize, on: bool, t: &ResolvedTheme, 
                 .on_press_tx(move |s: &mut Ui, tx| s.actions(&id, tx)),
         );
     }
-    if has_title || !item.actions.is_empty() {
+    if has_title || item.has_actions() {
         card = card.child(header);
     }
     let body = match &item.view {

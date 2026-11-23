@@ -23,13 +23,8 @@ pub(crate) fn add_action(item: &mut Item) {
     let Some(Action::Open(path)) = item.action("open") else {
         return;
     };
-    let action = ItemAction::new(ACTION_ID, "Quick Look", Action::Preview(path.clone())).keep_open();
-    let at = item
-        .actions
-        .iter()
-        .position(|candidate| candidate.id == "copy-path")
-        .unwrap_or(item.actions.len());
-    item.actions.insert(at, action);
+    item.actions
+        .push(ItemAction::new(ACTION_ID, "Quick Look", Action::Preview(path.clone())).keep_open());
 }
 
 struct ControllerState {
@@ -508,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn adds_quick_look_to_path_results_before_copy_path() {
+    fn adds_quick_look_to_path_results() {
         let path = Path::new("/tmp/brief.md").to_path_buf();
         let mut item = Item::path(path.clone(), "brief.md".into(), Vec::new());
 
@@ -519,7 +514,7 @@ mod tests {
                 .iter()
                 .map(|action| action.id.as_str())
                 .collect::<Vec<_>>(),
-            ["open", "reveal", ACTION_ID, "copy-path"]
+            ["open", "reveal", ACTION_ID]
         );
         assert_eq!(item.action(ACTION_ID), Some(&Action::Preview(path)));
     }

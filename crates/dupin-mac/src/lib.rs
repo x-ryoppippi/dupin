@@ -10,6 +10,7 @@ pub mod font;
 pub mod input_source;
 pub mod quick_look;
 mod settings_search;
+pub mod sharing;
 pub mod spotlight;
 pub mod watcher;
 pub mod window;

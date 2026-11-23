@@ -80,8 +80,8 @@ fn expiry_preserves_delivered_rows_and_rejects_late_updates() {
     assert_eq!(s.failures().count(), 1);
     assert!(!s.deliver_from(id("slow.search"), batch(g, &["late"])));
     assert_eq!(
-        s.run_key_action(&key, "copy-path")[0],
-        Effect::Run(Action::Copy("valid".into()))
+        s.run_key_action(&key, "open")[0],
+        Effect::Run(Action::Open("valid".into()))
     );
 }
 
@@ -140,8 +140,8 @@ fn independent_completion_limits_pinning_and_identity() {
     assert_eq!(s.results(), Results::Done);
     assert_eq!(s.failures().count(), 1);
     assert!(!s.deliver_from(id("slow.search"), batch(g, &["late"])));
-    let effects = s.run_key_action(&app_key, "copy-path");
-    assert_eq!(effects[0], Effect::Run(Action::Copy("same".into())));
+    let effects = s.run_key_action(&app_key, "open");
+    assert_eq!(effects[0], Effect::Run(Action::Open("same".into())));
     assert_eq!(s.failures().count(), 0);
 }
 
