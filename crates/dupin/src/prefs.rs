@@ -714,7 +714,11 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
             k,
             &icons::PANEL,
             "Display",
-            Some("Focused window requires Accessibility access"),
+            Some(if s.config.display == DisplaySelection::Active {
+                "Uses the focused window's display when Accessibility access allows"
+            } else {
+                "Which display the panel opens on"
+            }),
             display,
         ),
         setting(
