@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+dupin-storage = { workspace = true }
 libc = { workspace = true }
 rune = { workspace = true }
 objc2 = { workspace = true }
@@ -82,6 +83,7 @@ objc2-service-management = { workspace = true, features = [
 objc2-core-foundation = { workspace = true, features = [
 	"std",
 	"CFArray",
+	"CFData",
 	"CFDictionary",
 	"CFNumber",
 	"CFPreferences",
@@ -89,8 +91,14 @@ objc2-core-foundation = { workspace = true, features = [
 	"CFURL",
 ] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
+objc2-security = { version = "0.3", default-features = false, features = [
+	"std",
+	"SecBase",
+	"SecItem",
+] }
 memmap2 = { workspace = true }
 tempfile = "3"
+zeroize = "1.8"
 
 [lints]
 workspace = true

@@ -15,6 +15,7 @@ pub mod file_ops;
 mod folder;
 pub mod font;
 pub mod input_source;
+pub mod keychain;
 pub mod login_item;
 pub mod paste;
 pub mod privacy;

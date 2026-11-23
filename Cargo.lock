@@ -887,6 +887,7 @@ version = "0.0.0"
 dependencies = [
  "block2 0.6.2",
  "dupin-core",
+ "dupin-storage",
  "libc",
  "memmap2",
  "objc2 0.6.5",
@@ -896,9 +897,11 @@ dependencies = [
  "objc2-event-kit",
  "objc2-foundation 0.3.2",
  "objc2-quick-look-ui",
+ "objc2-security",
  "objc2-service-management",
  "rune",
  "tempfile",
+ "zeroize",
 ]
 
 [[package]]
