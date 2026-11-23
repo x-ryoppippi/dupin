@@ -5,14 +5,14 @@ use dupin_core::{Action, Item, ItemAction, Provider, ProviderError, Request, Vie
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::Bool;
 use objc2::{Message, msg_send};
-use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEvent, EKEventStatus, EKEventStore};
+use objc2_event_kit::{EKAuthorizationStatus, EKEvent, EKEventStatus, EKEventStore};
 use objc2_foundation::{
     NSArray, NSBundle, NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSDateFormatter,
     NSDateIntervalFormatter, NSDateIntervalFormatterStyle, NSError, NSLocale, NSString, NSTimeZone,
 };
 
-const PRIVACY_URL: &str =
-    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Calendars";
+use crate::privacy::{Permission, calendar_authorization};
+
 const FIXTURE_NOW: f64 = 1_795_420_800.0;
 
 thread_local! {
@@ -77,7 +77,7 @@ impl Provider for CalendarProvider {
             let events = match &self.0 {
                 Source::EventKit { .. } => {
                     let events = STORE.with(|store| read_events(store, &start, &end, request));
-                    if authorization() != EKAuthorizationStatus::FullAccess {
+                    if calendar_authorization() != EKAuthorizationStatus::FullAccess {
                         emit(vec![permission_row()]);
                         return Ok(());
                     }
@@ -101,16 +101,12 @@ impl Provider for CalendarProvider {
     }
 }
 
-fn authorization() -> EKAuthorizationStatus {
-    unsafe { EKEventStore::authorizationStatusForEntityType(EKEntityType::Event) }
-}
-
 fn access_problem(
     prompt: &Arc<Mutex<Prompt>>,
     changed: &Arc<dyn Fn() + Send + Sync>,
     request: &Request,
 ) -> Option<Item> {
-    match authorization() {
+    match calendar_authorization() {
         EKAuthorizationStatus::FullAccess => return None,
         EKAuthorizationStatus::NotDetermined => {}
         _ => return Some(permission_row()),
@@ -159,7 +155,10 @@ fn permission_row() -> Item {
         "permission",
         "Calendar access required",
         "Allow Full Access in System Settings → Privacy & Security → Calendars.".into(),
-        Some(("Open Calendar Privacy Settings", PRIVACY_URL.into())),
+        Some((
+            "Open Calendar Privacy Settings",
+            Permission::Calendars.settings_url().into(),
+        )),
     )
 }
 
@@ -479,7 +478,7 @@ mod tests {
         );
         assert_eq!(
             permission_row().action("open"),
-            Some(&Action::OpenUrl(PRIVACY_URL.into()))
+            Some(&Action::OpenUrl(Permission::Calendars.settings_url().into()))
         );
     }
 }
