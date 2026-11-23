@@ -741,7 +741,7 @@ mod tests {
             &mut Tx::default(),
         );
         assert!(
-            rx.try_recv().is_err(),
+            matches!(rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)),
             "opening replies only after the panel's final Busy check"
         );
         assert_eq!(s.selected.as_deref(), Some("saved"));

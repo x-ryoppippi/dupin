@@ -65,6 +65,9 @@ let failure = try {
         if $kind == scenario {
             assert ($problem == 'scenario fixture failed') 'Recording must preserve the scenario failure'
         }
+        if $kind == uncovered {
+            assert ($problem | str contains 'does not cover') 'Coverage must fail for the intended reason'
+        }
     }
     null
 } catch {|error| $error }

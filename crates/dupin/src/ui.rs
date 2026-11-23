@@ -189,6 +189,9 @@ impl Ui {
             return;
         }
         match &call.request.command {
+            Command::SnapshotsOpen { .. } if self.picker.is_some() => {
+                call.finish(Err("Busy: picker active".into()));
+            }
             Command::SnapshotsList {} | Command::SnapshotsOpen { .. } | Command::SnapshotsClose {} => {
                 self.snapshots.update(move |s, tx| s.control(call, tx));
             }
