@@ -692,7 +692,7 @@ fn general(s: &Prefs, k: &Kit) -> Vec<El> {
         ),
         setting(
             k,
-            &icons::REFRESH,
+            &rune_theme_opencode::icons::SHIELD,
             "System Command Automation",
             Some("Show system commands that may ask for macOS Automation when confirmed"),
             automation,
