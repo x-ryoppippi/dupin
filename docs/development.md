@@ -152,9 +152,11 @@ verified by CI.
 
 ## Peak memory
 
-Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
+Dupin's physical footprint peaks at about 375–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's. It charges a process once per kind of encoder, whatever the size of the work: about 185 MB for a render pass and about 135 MB for a blit or compute encoder. It frees the charge within a second of the GPU going idle and charges it again on the next frame. Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
 
-Dupin can't avoid this without drawing outside Metal. `scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over a budget (450 MB by default). The driver's charge scales with the GPU, so the budget only holds for one Mac and build configuration; pass `--budget` on others:
+Dupin encodes no blits itself. Rune's Metal backend does: it zeroes every new texture with a blit, uploads glyph and image rows with blits, and reads `--snap` frames back with one. Rune's `examples/hello` peaks at 371 MB on an M5 Max, and at 218 MB with those done on the CPU through shared textures, which leaves only the render pass's charge. That fix belongs in Rune: [anomalyco/rune#1753](https://github.com/anomalyco/rune/issues/1753), and [#1245](https://github.com/anomalyco/rune/issues/1245) for uploads while drawing. The render pass's charge stays as long as Dupin draws with Metal.
+
+`scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over `--budget` (410 MB by default), or if it rises more than `--share` (35 MB) above the `empty` scenario's. Every scenario pays the same driver charge, so the share measures Dupin's own memory rather than the GPU's; the whole-peak budget only holds for one Mac and build configuration, so pass `--budget` on others:
 
 ```sh
 cargo build -p dupin
