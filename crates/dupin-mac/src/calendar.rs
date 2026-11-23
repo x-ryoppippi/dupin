@@ -71,7 +71,8 @@ impl Provider for CalendarProvider {
             };
             let calendar = NSCalendar::currentCalendar();
             calendar.setTimeZone(&zone);
-            let terms = request.query.trim().to_lowercase();
+            let query = request.query.to_lowercase();
+            let terms: Vec<_> = query.split_whitespace().collect();
             let (start, end) = bounds(&calendar, &now, terms.is_empty()).ok_or(ProviderError)?;
             let events = match &self.0 {
                 Source::EventKit { .. } => {
@@ -221,7 +222,7 @@ fn read_events(store: &EKEventStore, start: &NSDate, end: &NSDate, request: &Req
 
 fn event_rows(
     mut events: Vec<Event>,
-    query: &str,
+    terms: &[&str],
     limit: usize,
     start: &NSDate,
     end: &NSDate,
@@ -231,11 +232,17 @@ fn event_rows(
     let end = end.timeIntervalSince1970();
     events.retain(|event| {
         let begins = event.start.timeIntervalSince1970();
-        begins < end
-            && (begins >= start || event.end.timeIntervalSince1970() > start)
-            && (query.is_empty()
-                || event.title.to_lowercase().contains(query)
-                || event.location.to_lowercase().contains(query))
+        if begins >= end || (begins < start && event.end.timeIntervalSince1970() <= start) {
+            return false;
+        }
+        if terms.is_empty() {
+            return true;
+        }
+        let title = event.title.to_lowercase();
+        let location = event.location.to_lowercase();
+        terms
+            .iter()
+            .all(|term| title.contains(term) || location.contains(term))
     });
     events.sort_by(|a, b| {
         a.start
@@ -357,9 +364,9 @@ mod tests {
             collect("", 2).iter().map(Item::display_title).collect::<Vec<_>>(),
             ["Project planning", "Design review"],
         );
-        for query in [" DESIGN ", "meeting ROOM"] {
+        for query in [" DESIGN ", "meeting ROOM", "review design", "room DESIGN"] {
             let rows = collect(query, 30);
-            assert_eq!(rows.len(), 1);
+            assert_eq!(rows.len(), 1, "{query}");
             assert_eq!(rows[0].display_title(), "Design review");
             assert!(!rows[0].record_usage);
         }
@@ -380,7 +387,7 @@ mod tests {
         events[1].end = end.dateByAddingTimeInterval(3600.0);
         events[2].start = now.dateByAddingTimeInterval(-86_400.0);
         events[2].end = now.clone();
-        let rows = event_rows(events, "", 30, &start, &end, &zone);
+        let rows = event_rows(events, &[], 30, &start, &end, &zone);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].display_title(), "Project planning");
         let (start, end) = bounds(&calendar, &now, false).unwrap();
