@@ -67,7 +67,7 @@ pub struct Config {
     pub system_automation: bool,
     /// The shader that animates behind the query field.
     pub backdrop: Backdrop,
-    /// Load Wasm extensions from the `extensions` folder beside config.toml. Off by default
+    /// Load extensions from the `extensions` folder beside config.toml. Off by default
     /// because they are third-party code.
     pub extensions: bool,
     pub theme: Theme,

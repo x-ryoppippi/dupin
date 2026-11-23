@@ -213,9 +213,7 @@ fn extensions_setting(s: &Prefs, k: &Kit) -> El {
         .unwrap_or_else(|| "the extensions folder".into());
     let (loaded, _) = &s.extensions;
     let status = if !enabled {
-        format!(
-            "Off. Extensions are third-party code; when on, Wasm extensions in {folder} answer their keywords"
-        )
+        format!("Off. Extensions are third-party code; when on, extensions in {folder} answer their keywords")
     } else if loaded.is_empty() {
         format!("No extensions loaded from {folder}")
     } else {

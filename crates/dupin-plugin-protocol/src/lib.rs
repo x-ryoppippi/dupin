@@ -297,22 +297,29 @@ fn printable(value: &str, cap: usize, field: &'static str) -> Result<(), Protoco
     Ok(())
 }
 fn web_url(url: &str) -> Result<(), ProtocolError> {
-    bounded(url, MAX_URL_BYTES, "effect.url")?;
+    if is_web_url(url) {
+        Ok(())
+    } else {
+        Err(ProtocolError::InvalidField("effect.url"))
+    }
+}
+/// Whether an `open_url` effect may carry `url`: an `http` or `https` URL with a host, at most
+/// [`MAX_URL_BYTES`] long, without whitespace or control characters.
+pub fn is_web_url(url: &str) -> bool {
+    if url.is_empty() || url.len() > MAX_URL_BYTES {
+        return false;
+    }
     let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
     let rest = if lower.starts_with("https://") {
         &url[8..]
     } else if lower.starts_with("http://") {
         &url[7..]
     } else {
-        return Err(ProtocolError::InvalidField("effect.url"));
+        return false;
     };
-    if rest.is_empty()
+    !(rest.is_empty()
         || rest.starts_with(['/', '?', '#'])
-        || url.chars().any(|ch| ch.is_control() || ch.is_whitespace())
-    {
-        return Err(ProtocolError::InvalidField("effect.url"));
-    }
-    Ok(())
+        || url.chars().any(|ch| ch.is_control() || ch.is_whitespace()))
 }
 fn state(value: &Option<State>) -> Result<(), ProtocolError> {
     if let Some(value) = value {

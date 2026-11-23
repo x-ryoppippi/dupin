@@ -1,0 +1,21 @@
+[package]
+name = "dupin-js-runtime"
+description = "Bounded JavaScript (QuickJS-ng) execution for Dupin extensions."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+dupin-plugin-protocol = { workspace = true }
+# `rust-alloc` and `allocator` stay off: QuickJS's own allocator is what enforces the heap limit.
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "loader"] }
+serde = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

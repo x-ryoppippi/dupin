@@ -1,5 +1,6 @@
-//! User extensions: Wasm guests in `extensions/<name>/` beside config.toml, each routed by one
-//! keyword. Guests get the query and return views; they have no imports, so no host access.
+//! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
+//! JavaScript package run by QuickJS-ng, or a Wasm guest. Guests get the query and return
+//! views; neither runtime gives them any host access.
 
 mod provider;
 
@@ -7,9 +8,13 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Instant, SystemTime};
 
-use dupin_plugin_runtime::{GuestModule, MAX_MODULE_BYTES};
+use dupin_core::Page;
+use dupin_js_runtime::{Control, DEFAULT_ENTRY, Diagnostic, Package, RunError};
+use dupin_plugin_protocol as protocol;
+use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 use serde::Deserialize;
 
 pub use provider::{ExtensionProvider, QUERY_DEADLINE};
@@ -27,7 +32,7 @@ struct Manifest {
     name: String,
     version: String,
     keyword: String,
-    entry: String,
+    entry: Option<String>,
 }
 
 pub struct Extension {
@@ -36,7 +41,15 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    module: GuestModule,
+    guest: Guest,
+    /// Numbers each Wasm request, which the guest must echo back.
+    requests: AtomicU64,
+}
+
+/// The manifest's `entry` decides the runtime: a `.wasm` module, or a JavaScript module.
+pub(crate) enum Guest {
+    Wasm(GuestModule),
+    JavaScript(Package),
 }
 
 impl std::fmt::Debug for Extension {
@@ -45,7 +58,80 @@ impl std::fmt::Debug for Extension {
             .field("id", &self.id)
             .field("version", &self.version)
             .field("keyword", &self.keyword)
+            .field("runtime", &self.runtime())
             .finish_non_exhaustive()
+    }
+}
+
+impl Extension {
+    pub fn runtime(&self) -> &'static str {
+        match self.guest {
+            Guest::Wasm(_) => "wasm",
+            Guest::JavaScript(_) => "javascript",
+        }
+    }
+
+    /// Links a JavaScript package and checks that its entry exports `search`. A Wasm module was
+    /// checked as far as it can be without a request when it loaded.
+    pub fn check(&self, deadline: Instant) -> Result<(), RunError> {
+        match &self.guest {
+            Guest::Wasm(_) => Ok(()),
+            Guest::JavaScript(package) => package.check(Control {
+                deadline,
+                is_cancelled: Box::new(|| false),
+            }),
+        }
+    }
+
+    /// Asks the guest for `query`, inside `page` if a push opened one.
+    pub fn query(
+        &self,
+        query: &str,
+        page: Option<&Page>,
+        limit: usize,
+        deadline: Instant,
+        is_cancelled: impl Fn() -> bool + 'static,
+    ) -> Result<protocol::Outcome, RunError> {
+        match &self.guest {
+            Guest::Wasm(module) => {
+                let control = QueryControl {
+                    deadline,
+                    is_cancelled: &is_cancelled,
+                };
+                match module.query_controlled(&self.wire(query, page, limit), &control) {
+                    Ok(response) => Ok(response.outcome),
+                    Err(HostError::Cancelled) => Err(RunError::Cancelled),
+                    Err(error) => Err(RunError::Failed(Diagnostic::new("wasm-error", error.to_string()))),
+                }
+            }
+            Guest::JavaScript(_) if page.is_some() => Err(RunError::Failed(Diagnostic::new(
+                "unsupported-view",
+                "JavaScript extensions can't open views yet",
+            ))),
+            Guest::JavaScript(package) => {
+                let control = Control {
+                    deadline,
+                    is_cancelled: Box::new(is_cancelled),
+                };
+                let items = package.search(query, limit, control)?;
+                Ok(protocol::Outcome::Results { items, state: None })
+            }
+        }
+    }
+
+    fn wire(&self, query: &str, page: Option<&Page>, limit: usize) -> protocol::Request {
+        let correlation = (self.requests.fetch_add(1, Ordering::Relaxed) + 1).to_string();
+        protocol::Request {
+            version: protocol::VERSION,
+            request_id: correlation.clone(),
+            generation: correlation,
+            command: self.id.clone(),
+            query: query.into(),
+            limit: limit.min(protocol::MAX_RESULTS as usize) as u32,
+            state: None,
+            view: page.map(|page| page.view.clone()),
+            context: page.and_then(|page| page.context.clone()),
+        }
     }
 }
 
@@ -143,7 +229,8 @@ fn folder_name(folder: &Path) -> std::borrow::Cow<'_, str> {
 struct LoadedExtension {
     manifest: FileStamp,
     entry: PathBuf,
-    module: FileStamp,
+    /// Every file the guest was built from: the Wasm module, or each JavaScript file.
+    files: Vec<FileStamp>,
     extension: Arc<Extension>,
 }
 
@@ -165,61 +252,129 @@ impl FileStamp {
     }
 }
 
-fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, String> {
+/// Reads the extension in `folder` as the scanner does, for `dupin ext` to check or run.
+pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    load(folder, None).map(|loaded| loaded.extension)
+}
+
+fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
     let manifest_file = folder
         .join(MANIFEST)
         .canonicalize()
         .and_then(FileStamp::read)
-        .map_err(|error| format!("{MANIFEST}: {error}"))?;
+        .map_err(|error| {
+            Diagnostic::new("missing-manifest", format!("Couldn't read it: {error}"))
+                .file(MANIFEST)
+                .hint("Create extension.toml with `id`, `name`, `version` and `keyword`.")
+        })?;
     if let Some(previous) = previous
         && previous.manifest == manifest_file
-        && let Ok(module) = module_stamp(folder, &previous.entry)
-        && previous.module == module
+        && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files)
     {
         return Ok(previous);
     }
 
     let source = read_capped(&manifest_file.path, MAX_MANIFEST_BYTES)
-        .map_err(|error| format!("{MANIFEST}: {error}"))?;
-    let source = std::str::from_utf8(&source).map_err(|_| format!("{MANIFEST} is not UTF-8"))?;
-    let manifest: Manifest =
-        toml::from_str(source).map_err(|error| format!("{MANIFEST}: {}", error.message()))?;
+        .map_err(|error| Diagnostic::new("invalid-manifest", error).file(MANIFEST))?;
+    let source = std::str::from_utf8(&source).map_err(|_| {
+        Diagnostic::new("invalid-manifest", "is not UTF-8")
+            .file(MANIFEST)
+            .hint("Save extension.toml as UTF-8.")
+    })?;
+    let manifest: Manifest = toml::from_str(source).map_err(|error| toml_problem(source, &error))?;
     validate(&manifest)?;
-    let entry = PathBuf::from(&manifest.entry);
-    let module_file = module_stamp(folder, &entry)?;
-    let bytes = read_capped(&module_file.path, MAX_MODULE_BYTES)
-        .map_err(|error| format!("{}: {error}", manifest.entry))?;
-    let module = GuestModule::load(&bytes).map_err(|error| format!("{}: {error}", manifest.entry))?;
+    let entry_name = manifest.entry.as_deref().unwrap_or(DEFAULT_ENTRY);
+    let entry = PathBuf::from(entry_name);
+    let (guest, files) = if is_wasm(&entry) {
+        let module_file = module_stamp(folder, &entry)?;
+        let bytes = read_capped(&module_file.path, MAX_MODULE_BYTES)
+            .map_err(|error| Diagnostic::new("invalid-module", error).file(entry_name))?;
+        let module = GuestModule::load(&bytes)
+            .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))?;
+        (Guest::Wasm(module), vec![module_file])
+    } else {
+        let package = Package::load(folder, entry_name)?;
+        let files = stamps(package.files().iter().cloned())?;
+        (Guest::JavaScript(package), files)
+    };
     Ok(LoadedExtension {
         manifest: manifest_file,
         entry,
-        module: module_file,
+        files,
         extension: Arc::new(Extension {
             id: manifest.id,
             folder_name: folder_name(folder).into_owned(),
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
-            module,
+            guest,
+            requests: AtomicU64::new(0),
         }),
     })
 }
 
-fn module_stamp(folder: &Path, entry: &Path) -> Result<FileStamp, String> {
+fn is_wasm(entry: &Path) -> bool {
+    entry.extension().is_some_and(|extension| extension == "wasm")
+}
+
+/// The files the guest at `entry` would be built from now, to compare with a loaded revision.
+fn revision(folder: &Path, entry: &Path) -> Result<Vec<FileStamp>, Diagnostic> {
+    if is_wasm(entry) {
+        Ok(vec![module_stamp(folder, entry)?])
+    } else {
+        stamps(
+            dupin_js_runtime::source_files(folder)?
+                .into_iter()
+                .map(|(_, path)| path),
+        )
+    }
+}
+
+fn stamps(paths: impl Iterator<Item = PathBuf>) -> Result<Vec<FileStamp>, Diagnostic> {
+    paths
+        .map(|path| {
+            FileStamp::read(path.clone()).map_err(|error| {
+                Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}"))
+                    .file(path.display().to_string())
+            })
+        })
+        .collect()
+}
+
+fn toml_problem(source: &str, error: &toml::de::Error) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new("invalid-manifest", error.message().trim_end())
+        .file(MANIFEST)
+        .hint("extension.toml takes `id`, `name`, `version`, `keyword` and optionally `entry`, all strings.");
+    if let Some(span) = error.span() {
+        let before = &source[..span.start.min(source.len())];
+        let line = before.matches('\n').count() + 1;
+        let column = before.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
+        diagnostic = diagnostic.at(line as u32, column as u32);
+    }
+    diagnostic
+}
+
+fn module_stamp(folder: &Path, entry: &Path) -> Result<FileStamp, Diagnostic> {
+    let missing = || {
+        Diagnostic::new("missing-entry", "is not a file in this folder")
+            .file(entry.display().to_string())
+            .hint("Point `entry` in extension.toml at a module inside the extension's folder.")
+    };
     // A symlink must not lead the host into reading a module from outside the folder.
     let entry_path = match (folder.canonicalize(), folder.join(entry).canonicalize()) {
         (Ok(folder_path), Ok(entry_path)) if entry_path.starts_with(&folder_path) => entry_path,
-        _ => {
-            return Err(format!(
-                "entry `{}` is not a file in this folder",
-                entry.display()
-            ));
-        }
+        _ => return Err(missing()),
     };
-    FileStamp::read(entry_path).map_err(|error| format!("{}: {error}", entry.display()))
+    FileStamp::read(entry_path).map_err(|_| missing())
 }
 
-fn validate(manifest: &Manifest) -> Result<(), String> {
+fn validate(manifest: &Manifest) -> Result<(), Diagnostic> {
+    let invalid = |field: &str, message: &str, hint: &str| {
+        Diagnostic::new("invalid-manifest", message)
+            .file(MANIFEST)
+            .field(field)
+            .hint(hint)
+    };
     let id = &manifest.id;
     if id.is_empty()
         || id.len() > 64
@@ -227,11 +382,19 @@ fn validate(manifest: &Manifest) -> Result<(), String> {
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
     {
-        return Err("id must be 1–64 lowercase letters, digits or hyphens".into());
+        return Err(invalid(
+            "id",
+            "must be 1–64 lowercase letters, digits or hyphens",
+            "Use a name such as `word-count`.",
+        ));
     }
     let printable = |value: &str| !value.chars().any(char::is_control);
     if manifest.name.trim().is_empty() || manifest.name.chars().count() > 80 || !printable(&manifest.name) {
-        return Err("name must be 1–80 printable characters".into());
+        return Err(invalid(
+            "name",
+            "must be 1–80 printable characters",
+            "Use the name Settings and the keyword chip should show, such as `Word Count`.",
+        ));
     }
     if manifest.version.is_empty()
         || manifest.version.len() > 32
@@ -240,7 +403,11 @@ fn validate(manifest: &Manifest) -> Result<(), String> {
             .chars()
             .any(|ch| ch.is_whitespace() || ch.is_control())
     {
-        return Err("version must be 1–32 characters without spaces".into());
+        return Err(invalid(
+            "version",
+            "must be 1–32 characters without spaces",
+            "Use a version such as `0.1.0`.",
+        ));
     }
     if manifest.keyword.is_empty()
         || manifest.keyword.len() > 32
@@ -249,15 +416,28 @@ fn validate(manifest: &Manifest) -> Result<(), String> {
             .chars()
             .any(|ch| ch.is_whitespace() || ch.is_control())
     {
-        return Err("keyword must be 1–32 bytes without spaces".into());
+        return Err(invalid(
+            "keyword",
+            "must be 1–32 bytes without spaces",
+            "Use a short word such as `wc`.",
+        ));
     }
-    let entry = Path::new(&manifest.entry);
-    if entry.extension().is_none_or(|extension| extension != "wasm")
-        || !entry
-            .components()
-            .all(|part| matches!(part, Component::Normal(_)))
-    {
-        return Err("entry must be a relative path to a .wasm file inside the folder".into());
+    if let Some(entry) = &manifest.entry {
+        let entry = Path::new(entry);
+        let runnable = entry
+            .extension()
+            .is_some_and(|extension| extension == "wasm" || extension == "js" || extension == "mjs");
+        if !runnable
+            || !entry
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+        {
+            return Err(invalid(
+                "entry",
+                "must be a relative path to a .js, .mjs or .wasm file inside the folder",
+                "Leave `entry` out to use main.js.",
+            ));
+        }
     }
     Ok(())
 }
@@ -322,7 +502,8 @@ pub(crate) mod tests {
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
-            module,
+            guest: Guest::Wasm(module),
+            requests: AtomicU64::new(0),
         }
     }
 
@@ -545,11 +726,11 @@ pub(crate) mod tests {
         let problems = catalog.problems.join("\n");
         for (folder, reason) in [
             ("b-duplicate", "used by another extension"),
-            ("c-bad-id", "id must be"),
-            ("d-spaced-keyword", "keyword must be"),
+            ("c-bad-id", "`id` must be"),
+            ("d-spaced-keyword", "`keyword` must be"),
             ("e-missing-entry", "not a file in this folder"),
             ("f-unknown-key", "unknown field"),
-            ("g-escape", "entry must be a relative path"),
+            ("g-escape", "`entry` must be a relative path"),
             ("h-not-wasm", "invalid plugin module"),
             ("i-imports", "imports are unavailable"),
             ("j-no-manifest", "extension.toml"),
@@ -576,5 +757,103 @@ pub(crate) mod tests {
             "{:?}",
             catalog.problems
         );
+    }
+
+    fn install_javascript(root: &Path, folder: &str, id: &str, keyword: &str, files: &[(&str, &str)]) {
+        let manifest =
+            format!("id = \"{id}\"\nname = \"{id}\"\nversion = \"0.1.0\"\nkeyword = \"{keyword}\"\n");
+        install(root, folder, &manifest, None);
+        for (name, source) in files {
+            let path = root.join(folder).join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, source).unwrap();
+        }
+    }
+
+    #[test]
+    fn javascript_and_wasm_extensions_load_side_by_side() {
+        let fixture = folder();
+        let root = fixture.path();
+        install(root, "a-wasm", &manifest("wasm", "wa"), Some(&guest("{}")));
+        install_javascript(
+            root,
+            "b-js",
+            "js",
+            "js",
+            &[
+                (
+                    "main.js",
+                    "import { title } from './lib/title.js'; export const search = () => [{ title }];",
+                ),
+                ("lib/title.js", "export const title = 'first';"),
+            ],
+        );
+        install_javascript(
+            root,
+            "c-entry",
+            "entry",
+            "en",
+            &[("src/index.mjs", "export function search() { return []; }")],
+        );
+        fs::write(
+            root.join("c-entry").join(MANIFEST),
+            "id = \"entry\"\nname = \"Entry\"\nversion = \"1\"\nkeyword = \"en\"\nentry = \"src/index.mjs\"\n",
+        )
+        .unwrap();
+        install_javascript(
+            root,
+            "d-broken",
+            "broken",
+            "br",
+            &[("main.js", "export function search( {")],
+        );
+        install_javascript(root, "e-no-main", "nomain", "nm", &[("index.js", "")]);
+
+        let mut scanner = Scanner::default();
+        let catalog = scanner.update(root, None).unwrap();
+        let loaded: Vec<_> = catalog
+            .extensions
+            .iter()
+            .map(|extension| (extension.id.as_str(), extension.runtime()))
+            .collect();
+        assert_eq!(
+            loaded,
+            [("wasm", "wasm"), ("js", "javascript"), ("entry", "javascript")]
+        );
+        let problems = catalog.problems.join("\n");
+        assert!(problems.contains("d-broken: main.js:1:"), "{problems}");
+        assert!(
+            problems.contains("e-no-main: main.js: is not a JavaScript file in the package folder"),
+            "{problems}"
+        );
+        assert_eq!(catalog.problems.len(), 2, "{problems}");
+        assert!(scanner.update(root, None).is_none());
+
+        // An edit to an imported file, not only to the entry, is a new revision.
+        fs::write(
+            root.join("b-js/lib/title.js"),
+            "export const title = 'second edit';",
+        )
+        .unwrap();
+        let updated = scanner.update(root, None).unwrap();
+        assert!(Arc::ptr_eq(&catalog.extensions[0], &updated.extensions[0]));
+        assert!(!Arc::ptr_eq(&catalog.extensions[1], &updated.extensions[1]));
+        assert!(Arc::ptr_eq(&catalog.extensions[2], &updated.extensions[2]));
+        let outcome = updated.extensions[1]
+            .query("", None, 10, std::time::Instant::now() + QUERY_DEADLINE, || false)
+            .unwrap();
+        let protocol::Outcome::Results { items, .. } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(
+            items[0].view,
+            protocol::View::Text {
+                title: "second edit".into(),
+                subtitle: String::new()
+            }
+        );
+
+        fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
+        assert!(scanner.update(root, None).is_some());
     }
 }

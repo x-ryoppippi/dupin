@@ -4,7 +4,7 @@ The search and ranking model must remain independent of UI frameworks and operat
 
 ## Providers
 
-Every source of results is a `Provider` that streams batches of `Item`s and stops when its request is superseded. A `Request` carries the query, candidate budget and an optional `page` for a pushed view. Apps, file names and file contents each have a provider. Each loaded [extension](./features/extensions.md) has a provider that runs the Wasm guest through `dupin-plugin-runtime` and turns the returned views and actions into items.
+Every source of results is a `Provider` that streams batches of `Item`s and stops when its request is superseded. A `Request` carries the query, candidate budget and an optional `page` for a pushed view. Apps, file names and file contents each have a provider. Each loaded [extension](./features/extensions.md) has a provider that runs its guest and turns the returned views and actions into items. The manifest's entry picks the runtime: `dupin-js-runtime` runs a JavaScript package on QuickJS-ng, in a fresh runtime per query with its own heap, stack, deadline and promise-job limits, and `dupin-plugin-runtime` runs a Wasm module. Both answer in `dupin-plugin-protocol` rows, so copy, URL and push actions reach the session the same way.
 
 An `Item` owns the runtime-independent `dupin-plugin-protocol::View`: Text (title/subtitle), Detail (title/body), or Pair (source/result). It also carries its stable ID, icon path, matched title characters, optional score, action list and primary/alternate action IDs. `display_title()` returns the Text/Detail title or Pair source. Explicit `record_usage` metadata controls history recording; apps/files opt in and dictionary results opt out, independently of view.
 

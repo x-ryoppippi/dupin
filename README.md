@@ -90,11 +90,15 @@ Pure headless examples (no resident instance required):
 ```sh
 printf '%s' '{"kind":"text","title":"Hello","subtitle":"Headless fixture"}' > /tmp/dupin-view.json
 dupin snap /tmp/dupin-view.json /tmp/dupin-view.png --json
+dupin ext check examples/extensions/word-count-js --json
+dupin ext run examples/extensions/word-count-js --query 'two words' --json
 dupin ext check fixture.wasm request.json --json
 dupin ext snap fixture.wasm request.json /tmp/dupin-extension.png --json
 ```
 
-The extension commands accept the bounded
+`dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the
+launcher does and print its answer; a failure exits non-zero with a diagnostic naming the
+code, file, field and a fix. The Wasm forms accept the bounded
 versioned guest request contract, execute a
 module through the existing fuel/deadline-limited runtime, and validate its response.
 Imports (including OS/WASI imports) are forbidden. They test a module on its own; the

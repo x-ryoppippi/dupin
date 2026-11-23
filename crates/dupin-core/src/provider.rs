@@ -66,6 +66,27 @@ impl Request {
     pub fn is_cancelled(&self) -> bool {
         self.current.load(Ordering::Acquire) != self.generation
     }
+
+    /// The same check as [`Request::is_cancelled`], for code that must own it, such as an
+    /// engine's interrupt handler.
+    pub fn cancellation(&self) -> Cancellation {
+        Cancellation {
+            generation: self.generation,
+            current: self.current.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Cancellation {
+    generation: u64,
+    current: Arc<AtomicU64>,
+}
+
+impl Cancellation {
+    pub fn is_cancelled(&self) -> bool {
+        self.current.load(Ordering::Acquire) != self.generation
+    }
 }
 
 #[derive(Debug)]

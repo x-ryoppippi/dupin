@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -15,7 +15,45 @@ enum Action {
     Set(String, String),
     Snap(String, String),
     Ext(String, String, Option<String>),
+    /// Check an extension folder.
+    ExtCheck(String),
+    /// Ask an extension folder for a query.
+    ExtRun(String, String),
     Mcp,
+}
+
+/// Why a command failed: a plain message, or a diagnostic about an extension package.
+#[derive(Debug, PartialEq)]
+enum Failure {
+    Message(String),
+    Diagnostic(dupin_js_runtime::Diagnostic),
+}
+
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<&str> for Failure {
+    fn from(message: &str) -> Self {
+        Self::Message(message.into())
+    }
+}
+
+impl From<dupin_js_runtime::Diagnostic> for Failure {
+    fn from(diagnostic: dupin_js_runtime::Diagnostic) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+
+impl From<dupin_js_runtime::RunError> for Failure {
+    fn from(error: dupin_js_runtime::RunError) -> Self {
+        match error {
+            dupin_js_runtime::RunError::Cancelled => Self::Message("the extension was cancelled".into()),
+            dupin_js_runtime::RunError::Failed(diagnostic) => Self::Diagnostic(diagnostic),
+        }
+    }
 }
 fn parse(args: &[String]) -> Result<Action, String> {
     let mut parser = pico_args::Arguments::from_vec(args.iter().map(std::ffi::OsString::from).collect());
@@ -45,6 +83,10 @@ fn parse(args: &[String]) -> Result<Action, String> {
         }
         ["snap", view, out] if !view.starts_with('-') && !out.starts_with('-') => {
             Ok(Action::Snap(view.to_string(), out.to_string()))
+        }
+        ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
+        ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
+            Ok(Action::ExtRun(folder.to_string(), query.to_string()))
         }
         ["ext", "check", module, request] if !module.starts_with('-') && !request.starts_with('-') => {
             Ok(Action::Ext(module.to_string(), request.to_string(), None))
@@ -109,13 +151,13 @@ pub fn run() -> bool {
     let json = args.iter().any(|v| v == "--json");
     let action = parse(&args);
     let picked = matches!(action, Ok(Action::Pick(_)));
-    let result = action.and_then(|action| {
+    let result = action.map_err(Failure::from).and_then(|action| {
         let output = match &action {
             Action::Snap(_, output) | Action::Ext(_, _, Some(output)) if json => Some(output.clone()),
             _ => None,
         };
         if let Some(output) = output {
-            isolated_render(&args, &output)
+            isolated_render(&args, &output).map_err(Failure::from)
         } else {
             execute(action, json)
         }
@@ -135,11 +177,25 @@ pub fn run() -> bool {
             }
             true
         }
-        Err(error) => {
+        Err(Failure::Message(error)) => {
             if json {
                 println!("{}", serde_json::json!({"error": error}));
             } else {
                 eprintln!("dupin: {error}");
+            }
+            std::process::exit(1)
+        }
+        Err(Failure::Diagnostic(diagnostic)) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
+                );
+            } else {
+                eprintln!("dupin: {diagnostic}");
+                if let Some(hint) = &diagnostic.hint {
+                    eprintln!("hint: {hint}");
+                }
             }
             std::process::exit(1)
         }
@@ -183,7 +239,7 @@ fn isolated_render(args: &[String], output: &str) -> Result<Value, String> {
     }
 }
 
-fn execute(action: Action, json: bool) -> Result<Value, String> {
+fn execute(action: Action, json: bool) -> Result<Value, Failure> {
     use dupin_plugin_protocol as protocol;
     match action {
         Action::Help => {
@@ -202,19 +258,19 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
                 Ok(Value::Null)
             }
         }
-        Action::Open(query) => exchange(Command::Open { query }),
-        Action::Pick(json_input) => exchange(Command::Pick {
+        Action::Open(query) => Ok(exchange(Command::Open { query })?),
+        Action::Pick(json_input) => Ok(exchange(Command::Pick {
             values: selection(&bounded(io::stdin().lock(), control::MAX_FRAME / 2)?, json_input)?,
-        }),
-        Action::SnapshotsList => exchange(Command::SnapshotsList {}),
-        Action::SnapshotsOpen(id) => exchange(Command::SnapshotsOpen { id }),
-        Action::SnapshotsClose => exchange(Command::SnapshotsClose {}),
-        Action::Get => exchange(Command::ConfigGet {}),
-        Action::Set(base, desired) => exchange(Command::ConfigSet {
+        })?),
+        Action::SnapshotsList => Ok(exchange(Command::SnapshotsList {})?),
+        Action::SnapshotsOpen(id) => Ok(exchange(Command::SnapshotsOpen { id })?),
+        Action::SnapshotsClose => Ok(exchange(Command::SnapshotsClose {})?),
+        Action::Get => Ok(exchange(Command::ConfigGet {})?),
+        Action::Set(base, desired) => Ok(exchange(Command::ConfigSet {
             base: serde_json::from_slice(&file(&base, 65536)?).map_err(|_| "invalid base configuration")?,
             desired: serde_json::from_slice(&file(&desired, 65536)?)
                 .map_err(|_| "invalid desired configuration")?,
-        }),
+        })?),
         Action::Snap(input, output) => {
             let view: protocol::View = serde_json::from_slice(&file(&input, protocol::MAX_RESPONSE_BYTES)?)
                 .map_err(|_| "invalid view")?;
@@ -262,8 +318,93 @@ fn execute(action: Action, json: bool) -> Result<Value, String> {
                 serde_json::to_value(response).map_err(|_| "could not encode response".into())
             }
         }
-        Action::Mcp => crate::mcp::run().map(|()| Value::Null).map_err(|e| e.to_string()),
+        Action::ExtCheck(folder) => {
+            let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
+            extension.check(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE)?;
+            if json {
+                return Ok(serde_json::json!({
+                    "id": extension.id,
+                    "name": extension.name,
+                    "version": extension.version,
+                    "keyword": extension.keyword,
+                    "runtime": extension.runtime(),
+                }));
+            }
+            println!(
+                "{} {} ({}) answers `{}`",
+                extension.name,
+                extension.version,
+                extension.runtime(),
+                extension.keyword
+            );
+            Ok(Value::Null)
+        }
+        Action::ExtRun(folder, query) => {
+            let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
+            let outcome = extension.query(
+                &query,
+                None,
+                dupin_js_runtime::MAX_ROWS,
+                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                || false,
+            )?;
+            if let protocol::Outcome::Error { message, .. } = &outcome {
+                return Err(Failure::Message(format!(
+                    "the extension answered with an error: {message}"
+                )));
+            }
+            if json {
+                return serde_json::to_value(outcome).map_err(|_| "could not encode the answer".into());
+            }
+            print!("{}", describe_outcome(&outcome));
+            Ok(Value::Null)
+        }
+        Action::Mcp => crate::mcp::run()
+            .map(|()| Value::Null)
+            .map_err(|e| e.to_string().into()),
     }
+}
+
+/// An answer as plain text: each row's text, then its actions, indented.
+fn describe_outcome(outcome: &dupin_plugin_protocol::Outcome) -> String {
+    use dupin_plugin_protocol::{Effect, Outcome, PluginAction, View};
+    let mut out = String::new();
+    let actions = |out: &mut String, actions: &[PluginAction]| {
+        for action in actions {
+            let target = match &action.effect {
+                Effect::Copy { text } => text.clone(),
+                Effect::OpenUrl { url } => url.clone(),
+                Effect::Push { view, .. } => format!("view {view}"),
+            };
+            out.push_str(&format!("  {}: {target}\n", action.title));
+        }
+    };
+    match outcome {
+        Outcome::Results { items, .. } if items.is_empty() => out.push_str("No results\n"),
+        Outcome::Results { items, .. } => {
+            for item in items {
+                match &item.view {
+                    View::Text { title, subtitle } if subtitle.is_empty() => {
+                        out.push_str(&format!("{title}\n"))
+                    }
+                    View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
+                    View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
+                    View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
+                }
+                actions(&mut out, &item.actions);
+            }
+        }
+        Outcome::Detail {
+            title,
+            body,
+            actions: offered,
+        } => {
+            out.push_str(&format!("{title}\n  {body}\n"));
+            actions(&mut out, offered);
+        }
+        Outcome::Error { message, .. } => out.push_str(&format!("{message}\n")),
+    }
+    out
 }
 fn render(response: dupin_plugin_protocol::Response, output: &str) {
     use dupin_plugin_protocol::{Outcome, View};
@@ -328,6 +469,94 @@ mod tests {
         }
     }
     #[test]
+    fn extension_folders_check_and_run_with_diagnostics() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let folder = |path: &str| root.join(path).to_string_lossy().into_owned();
+        let word_count = folder("examples/extensions/word-count-js");
+        assert_eq!(
+            execute(Action::ExtCheck(word_count.clone()), true).unwrap()["runtime"],
+            "javascript"
+        );
+        let answer = execute(Action::ExtRun(word_count, "two words".into()), true).unwrap();
+        assert_eq!(answer["items"][0]["view"]["title"], "2 words");
+        assert_eq!(
+            answer["items"][0]["actions"][0]["effect"],
+            serde_json::json!({"kind": "copy", "text": "2"})
+        );
+
+        let fixtures = "crates/dupin-js-runtime/tests/fixtures";
+        for (action, code) in [
+            (
+                Action::ExtCheck(folder(&format!("{fixtures}/path-escape"))),
+                "import-escape",
+            ),
+            (
+                Action::ExtRun(folder(&format!("{fixtures}/throwing-search")), "x".into()),
+                "search-threw",
+            ),
+            (
+                Action::ExtRun(folder(&format!("{fixtures}/invalid-rows")), "x".into()),
+                "invalid-field",
+            ),
+            (
+                Action::ExtCheck(folder("examples/extensions")),
+                "missing-manifest",
+            ),
+        ] {
+            match execute(action, true) {
+                Err(Failure::Diagnostic(diagnostic)) => {
+                    assert_eq!(diagnostic.code, code);
+                    assert!(
+                        diagnostic.hint.is_some() && diagnostic.file.is_some(),
+                        "{diagnostic:?}"
+                    );
+                }
+                other => panic!("expected {code}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn plain_text_answers_list_rows_and_actions() {
+        use dupin_plugin_protocol::{Effect, Outcome, PluginAction, PluginItem, View};
+        let outcome = Outcome::Results {
+            items: vec![PluginItem {
+                id: "docs".into(),
+                view: View::Text {
+                    title: "Docs".into(),
+                    subtitle: "Read them".into(),
+                },
+                actions: vec![
+                    PluginAction {
+                        id: "open".into(),
+                        title: "Open URL".into(),
+                        effect: Effect::OpenUrl {
+                            url: "https://example.com/".into(),
+                        },
+                    },
+                    PluginAction {
+                        id: "copy".into(),
+                        title: "Copy".into(),
+                        effect: Effect::Copy { text: "docs".into() },
+                    },
+                ],
+            }],
+            state: None,
+        };
+        assert_eq!(
+            describe_outcome(&outcome),
+            "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n"
+        );
+        assert_eq!(
+            describe_outcome(&Outcome::Results {
+                items: vec![],
+                state: None
+            }),
+            "No results\n"
+        );
+    }
+
+    #[test]
     fn picker_filters_indices_without_transforming_values() {
         let values = vec![
             serde_json::json!({"action":"execute", "path":"日本語"}),
@@ -354,6 +583,21 @@ mod tests {
         assert!(owns_arguments(&["pick".into()]));
         assert!(owns_arguments(&["invalid-subcommand".into()]));
         assert!(parse(&["open".into(), "--bad".into()]).is_err());
+        let args = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            parse(&args(&["ext", "check", "word-count", "--json"])).unwrap(),
+            Action::ExtCheck("word-count".into())
+        );
+        assert_eq!(
+            parse(&args(&["ext", "run", "word-count", "--query", "two words"])).unwrap(),
+            Action::ExtRun("word-count".into(), "two words".into())
+        );
+        assert_eq!(
+            parse(&args(&["ext", "check", "guest.wasm", "request.json"])).unwrap(),
+            Action::Ext("guest.wasm".into(), "request.json".into(), None)
+        );
+        assert!(parse(&args(&["ext", "run", "word-count"])).is_err());
+        assert!(parse(&args(&["ext", "check", "--query"])).is_err());
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(

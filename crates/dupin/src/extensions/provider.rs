@@ -1,10 +1,9 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use dupin_core::{Action, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View};
+use dupin_js_runtime::RunError;
 use dupin_plugin_protocol as protocol;
-use dupin_plugin_runtime::{HostError, QueryControl};
 
 use super::Extension;
 
@@ -14,15 +13,11 @@ pub const QUERY_DEADLINE: Duration = Duration::from_secs(2);
 
 pub struct ExtensionProvider {
     extension: Arc<Extension>,
-    requests: AtomicU64,
 }
 
 impl ExtensionProvider {
     pub fn new(extension: Arc<Extension>) -> Self {
-        Self {
-            extension,
-            requests: AtomicU64::new(0),
-        }
+        Self { extension }
     }
 
     fn problem(&self, message: String) -> Item {
@@ -81,36 +76,21 @@ fn item(id: String, view: View, offered: Vec<protocol::PluginAction>) -> Item {
     }
 }
 
-impl ExtensionProvider {
-    fn wire(&self, request: &Request) -> protocol::Request {
-        let correlation = (self.requests.fetch_add(1, Ordering::Relaxed) + 1).to_string();
-        let page = request.page.as_ref();
-        protocol::Request {
-            version: protocol::VERSION,
-            request_id: correlation.clone(),
-            generation: correlation,
-            command: self.extension.id.clone(),
-            query: request.query.clone(),
-            limit: request.limit.min(protocol::MAX_RESULTS as usize) as u32,
-            state: None,
-            view: page.map(|page| page.view.clone()),
-            context: page.and_then(|page| page.context.clone()),
-        }
-    }
-}
-
 impl Provider for ExtensionProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         if request.limit == 0 {
             return Ok(());
         }
-        let wire = self.wire(request);
-        let control = QueryControl {
-            deadline: Instant::now() + QUERY_DEADLINE,
-            is_cancelled: &|| request.is_cancelled(),
-        };
-        let items = match self.extension.module.query_controlled(&wire, &control) {
-            Ok(response) => match response.outcome {
+        let cancellation = request.cancellation();
+        let answer = self.extension.query(
+            &request.query,
+            request.page.as_ref(),
+            request.limit,
+            Instant::now() + QUERY_DEADLINE,
+            move || cancellation.is_cancelled(),
+        );
+        let items = match answer {
+            Ok(outcome) => match outcome {
                 protocol::Outcome::Results { items, .. } => items
                     .into_iter()
                     .map(|row| item(row.id, row.view, row.actions))
@@ -122,10 +102,16 @@ impl Provider for ExtensionProvider {
                 } => vec![item("detail".into(), View::Detail { title, body }, offered)],
                 protocol::Outcome::Error { message, .. } => vec![self.problem(message)],
             },
-            Err(HostError::Cancelled) => return Ok(()),
-            Err(error) => {
-                crate::log::warn(&format!("extension {}: {error}", self.extension.id));
-                vec![self.problem(capitalized(&error.to_string()))]
+            Err(RunError::Cancelled) => return Ok(()),
+            Err(RunError::Failed(diagnostic)) => {
+                crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
+                // A located problem starts with its file name, which keeps its case.
+                let subtitle = if diagnostic.file.is_some() {
+                    diagnostic.to_string()
+                } else {
+                    capitalized(&diagnostic.message)
+                };
+                vec![self.problem(subtitle)]
             }
         };
         emit(items);
@@ -219,9 +205,9 @@ mod tests {
         assert_eq!(rows[0].action("stats"), Some(&Action::Push(page())));
         assert_eq!(rows[0].primary.as_deref(), Some("stats"));
 
-        let root = provider.wire(&Request::detached("q", 10));
+        let root = provider.extension.wire("q", None, 10);
         assert_eq!((root.view, root.context), (None, None));
-        let wire = provider.wire(&Request::detached_page("filter", page(), 10));
+        let wire = provider.extension.wire("filter", Some(&page()), 10);
         assert_eq!(wire.query, "filter");
         assert_eq!(wire.view.as_deref(), Some("stats"));
         assert_eq!(wire.context, page().context);
@@ -333,5 +319,83 @@ mod tests {
         let provider = ExtensionProvider::new(Arc::new(extension("Word Count", "wc", looping)));
         let rows = search(&provider, "query");
         assert_eq!(rows[0].display_title(), "Word Count failed");
+    }
+
+    fn javascript(source: &str) -> (tempfile::TempDir, ExtensionProvider) {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(super::super::MANIFEST),
+            "id = \"word-count\"\nname = \"Word Count\"\nversion = \"0.1.0\"\nkeyword = \"wc\"\n",
+        )
+        .unwrap();
+        std::fs::write(folder.path().join("main.js"), source).unwrap();
+        let extension = super::super::load_folder(folder.path()).unwrap();
+        (folder, ExtensionProvider::new(extension))
+    }
+
+    #[test]
+    fn the_javascript_word_counter_answers_like_the_wasm_one() {
+        let root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
+        let extension = super::super::load_folder(&root).unwrap();
+        assert_eq!(
+            (extension.runtime(), extension.keyword.as_str()),
+            ("javascript", "wc")
+        );
+        let rows = search(&ExtensionProvider::new(extension), "two words");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].view,
+            View::Text {
+                title: "2 words".into(),
+                subtitle: String::new()
+            }
+        );
+        assert_eq!(rows[0].primary.as_deref(), Some("copy"));
+        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
+        assert_eq!(rows[0].payload, Payload::text("2"));
+        assert!(!rows[0].record_usage);
+    }
+
+    #[test]
+    fn javascript_urls_open_first_and_text_copies() {
+        let (_folder, provider) = javascript(
+            "export function search(query) { return [{ id: 'docs', title: 'Docs', subtitle: query, url: 'https://example.com/?q=2', text: '2' }]; }",
+        );
+        let rows = search(&provider, "two words");
+        assert_eq!(rows[0].id, "docs");
+        assert_eq!(rows[0].primary.as_deref(), Some("open"));
+        assert_eq!(
+            rows[0].action("open"),
+            Some(&Action::OpenUrl("https://example.com/?q=2".into()))
+        );
+        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
+        assert_eq!(rows[0].payload, Payload::text("2"));
+    }
+
+    #[test]
+    fn javascript_failures_become_a_visible_error_row_with_the_location() {
+        for (source, subtitle) in [
+            (
+                "export function search() {\n  throw new Error('boom');\n}",
+                "main.js:2:13: search threw Error: boom",
+            ),
+            (
+                "export function search() { return [{ title: 'x', url: 'file:///' }]; }",
+                "main.js: `items[0].url` must be an http or https URL with a host",
+            ),
+        ] {
+            let (_folder, provider) = javascript(source);
+            let rows = search(&provider, "query");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(
+                rows[0].view,
+                View::Text {
+                    title: "Word Count failed".into(),
+                    subtitle: subtitle.into(),
+                }
+            );
+            assert!(rows[0].actions.is_empty());
+        }
     }
 }
