@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+libc = { workspace = true }
 objc2 = { workspace = true }
 block2 = "0.6"
 objc2-foundation = { workspace = true, features = [

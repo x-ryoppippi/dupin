@@ -266,7 +266,7 @@ pub struct Ui {
     searchers: HashMap<CommandId, Searcher>,
     web: Arc<RwLock<crate::web::WebCatalog>>,
     file_demotions: Arc<RwLock<Vec<String>>>,
-    system_provider: Arc<crate::system_commands::SystemProvider>,
+    system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     _apps_watcher: Option<AppsWatcher>,
     saver: crate::store::Saver,
@@ -278,7 +278,7 @@ pub struct Ui {
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
-    system_runner: crate::system_commands::Runner,
+    system_runner: dupin_mac::system_commands::Runner,
     /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
     updater: crate::update::Updater,
@@ -475,7 +475,7 @@ impl Ui {
             system_runner: if cfg!(test) || rune::tooling::is_headless() {
                 |_| Err("System commands are unavailable in headless runs.".into())
             } else {
-                crate::system_commands::run
+                dupin_mac::system_commands::run
             },
             running,
             updater,
@@ -1269,7 +1269,7 @@ impl Ui {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;
                         self.run_native_action(move || {
-                            crate::system_commands::execute(command, enabled, run)
+                            dupin_mac::system_commands::execute(command, enabled, run)
                         });
                     }
                     dupin_core::Action::Preview(path) => {

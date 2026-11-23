@@ -11,6 +11,7 @@ pub mod input_source;
 pub mod quick_look;
 mod settings_search;
 pub mod spotlight;
+pub mod system_commands;
 pub mod watcher;
 pub mod window;
 pub mod workspace;

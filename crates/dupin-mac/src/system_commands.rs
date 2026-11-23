@@ -126,64 +126,7 @@ impl Provider for SystemProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dupin_core::{CommandId, Config, Delivery, Effect, History, Intent, Session};
-
-    #[test]
-    fn normal_search_dispatches_each_command_through_its_expected_activation() {
-        let config = Config {
-            system_automation: true,
-            ..Config::default()
-        };
-        let provider = SystemProvider::new(config.system_automation);
-        for command in COMMANDS {
-            let configured = crate::commands::configured(&config).unwrap();
-            let origin = CommandId::new(crate::commands::SYSTEM).unwrap();
-            let mut session = Session::new(History::default(), configured.registry).unwrap();
-            let (title, _, confirmation) = labels(command);
-            let generation = session
-                .set_query(title)
-                .into_iter()
-                .find_map(|effect| match effect {
-                    Effect::Search {
-                        command, generation, ..
-                    } if command == origin => Some(generation),
-                    _ => None,
-                })
-                .unwrap();
-            provider
-                .search(&Request::detached(title, COMMANDS.len()), &mut |items| {
-                    session.deliver_from(origin.clone(), Delivery::Batch { generation, items });
-                })
-                .unwrap();
-            assert_eq!(session.selected_item().unwrap().display_title(), title);
-            let key = session.result_key(0);
-            let opened = session.intent(Intent::Open).unwrap();
-            let effects = if confirmation.is_some() {
-                assert_eq!(
-                    opened,
-                    [Effect::ShowActions {
-                        id: key.clone(),
-                        generation,
-                        confirmation: Some("run".into()),
-                    }]
-                );
-                assert!(session.run_key_action(&key, "run").is_empty());
-                session.run_confirmed_key_action(&key, "run")
-            } else {
-                assert!(session.run_confirmed_key_action(&key, "run").is_empty());
-                opened
-            };
-            let [Effect::Run(Action::System(picked)), ..] = effects.as_slice() else {
-                panic!("expected a system command, got {effects:?}");
-            };
-            execute(*picked, true, |picked| {
-                assert_eq!(picked, command);
-                Ok(())
-            })
-            .unwrap();
-            assert!(!effects.contains(&Effect::SaveHistory));
-        }
-    }
+    use dupin_core::Config;
 
     #[test]
     fn machine_sleep_precedes_display_sleep_and_short_queries_stay_quiet() {

@@ -122,7 +122,8 @@ fn toggle_dark_mode() -> Result<(), String> {
     Ok(())
 }
 
-#[repr(C)]
+// AEDataModel.h packs AEDesc to two-byte alignment.
+#[repr(C, packed(2))]
 struct Descriptor {
     kind: u32,
     data: *mut c_void,
@@ -248,5 +249,19 @@ fn event_status(target: &str, status: i32) -> Result<(), String> {
             "macOS denied Automation access to {target}. Review Dupin in System Settings → Privacy & Security → Automation."
         )),
         _ => Err(format!("Apple event for {target} failed (OSStatus {status}).")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Descriptor;
+    use std::mem::{align_of, offset_of, size_of};
+
+    #[test]
+    fn descriptor_matches_the_macos_sdk_layout() {
+        assert_eq!(align_of::<Descriptor>(), 2);
+        assert_eq!(offset_of!(Descriptor, kind), 0);
+        assert_eq!(offset_of!(Descriptor, data), 4);
+        assert_eq!(size_of::<Descriptor>(), 12);
     }
 }
