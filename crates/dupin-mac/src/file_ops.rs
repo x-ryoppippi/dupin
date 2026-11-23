@@ -79,6 +79,11 @@ impl FileTransfers {
         folder: &Path,
         destination: PathBuf,
     ) -> Result<PathBuf, String> {
+        match destination.symlink_metadata() {
+            Ok(_) => return Err(move_problem(io::ErrorKind::AlreadyExists.into(), &destination)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(move_problem(error, &destination)),
+        }
         let source = path.symlink_metadata().map_err(|error| error.to_string())?;
         let staging = self.stage_copy(path, folder)?;
         let destination = move_exclusively(&staging.entry(), destination)?;
@@ -135,7 +140,12 @@ pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
         return Err(problem.into());
     }
     file_name_of(path)?;
-    move_exclusively(path, parent_folder(path)?.join(name))
+    let destination = parent_folder(path)?.join(name);
+    rename_exclusive(path, &destination).map_err(|error| match error.kind() {
+        io::ErrorKind::AlreadyExists => format!("“{name}” already exists."),
+        _ => error.to_string(),
+    })?;
+    Ok(destination)
 }
 
 fn move_exclusively(path: &Path, destination: PathBuf) -> Result<PathBuf, String> {
@@ -346,7 +356,7 @@ mod tests {
         let dir = Scratch::new("rename");
         let source = dir.file("a.txt", "a");
         dir.file("b.txt", "b");
-        assert!(rename(&source, "b.txt").is_err());
+        assert_eq!(rename(&source, "b.txt").unwrap_err(), "“b.txt” already exists.");
         assert_eq!(std::fs::read_to_string(dir.0.join("b.txt")).unwrap(), "b");
         assert!(rename(&source, "../escape.txt").is_err());
         let renamed = rename(&source, "c.txt").unwrap();
@@ -562,16 +572,19 @@ mod tests {
         let folder = dir.0.join("destination");
         let target = folder.join("source");
         std::fs::create_dir(&source).unwrap();
-        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir(&folder).unwrap();
+        std::os::unix::fs::symlink("missing", &target).unwrap();
         dir.file("source/child.txt", "original");
-        assert!(
+        assert_eq!(
             files
                 .move_across_volumes(&source, &folder, target.clone())
-                .is_err()
+                .unwrap_err(),
+            "“source” already exists in the destination folder."
         );
         assert!(source.join("child.txt").exists());
-        assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
-        std::fs::remove_dir(&target).unwrap();
+        assert_eq!(std::fs::read_link(&target).unwrap(), Path::new("missing"));
+        assert!(!files.journal.as_ref().unwrap().exists());
+        std::fs::remove_file(&target).unwrap();
         let output = files.move_across_volumes(&source, &folder, target).unwrap();
         assert_eq!(
             std::fs::read_to_string(output.join("child.txt")).unwrap(),
