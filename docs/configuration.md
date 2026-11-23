@@ -48,7 +48,7 @@ command = "dupin open --query 'gh '"
 
 Dupin runs commands in the background from your home directory using `$SHELL -lc` (with `/bin/zsh` as the fallback). Standard input is closed. Successful commands run silently. On failure, Dupin shows a notice with the error or exit status and up to four lines from the end of stderr. Up to four commands can run at a time.
 
-Commands share [the script runner's lifecycle](./scripts.md#output-and-cancellation). They can run until they exit, or until Dupin quits or relaunches. A background job can keep running after its shell exits, which frees the command slot. Redirect that job's standard error if it needs to keep writing after Dupin quits.
+Commands run until they exit or Dupin quits or relaunches. Automatic updates can restart Dupin while commands are running. If all four slots are in use, wait for a command to finish or quit and reopen Dupin to clear the slots. A background job can keep running after its shell exits, which frees the command slot. Redirect that job's standard error if it needs to keep writing after Dupin quits.
 
 A [script binding](./scripts.md#hotkeys) uses the executable's filename, including its extension, and can pass an array of arguments.
 

@@ -183,7 +183,7 @@ struct Inner {
     lifecycle: Lifecycle,
     runs: Mutex<VecDeque<Arc<Run>>>,
     next: AtomicU64,
-    running: Arc<AtomicUsize>,
+    running_scripts: Arc<AtomicUsize>,
     running_shells: AtomicUsize,
     notify: Notify,
     home: PathBuf,
@@ -203,7 +203,7 @@ impl Runner {
                 },
                 runs: Mutex::default(),
                 next: AtomicU64::new(1),
-                running: Arc::default(),
+                running_scripts: Arc::default(),
                 running_shells: AtomicUsize::default(),
                 notify,
                 home,
@@ -212,7 +212,7 @@ impl Runner {
     }
 
     pub fn activity(&self) -> &Arc<AtomicUsize> {
-        &self.inner.running
+        &self.inner.running_scripts
     }
 
     fn insert_run(&self, runs: &mut VecDeque<Arc<Run>>, command: ScriptRun, status: Status) -> Arc<Run> {
@@ -269,7 +269,7 @@ impl Runner {
         let run = self.insert_run(&mut runs, command, Status::Running);
         let id = run.id;
         drop(runs);
-        self.inner.running.fetch_add(1, Ordering::AcqRel);
+        self.inner.running_scripts.fetch_add(1, Ordering::AcqRel);
         let inner = self.inner.clone();
         let worker_run = run.clone();
         if let Err(error) = thread::Builder::new()
@@ -324,8 +324,9 @@ impl Runner {
             .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < SHELL_LIMIT).then_some(count + 1)
             })
-            .map_err(|_| "Four hotkey commands are already running.")?;
-        inner.running.fetch_add(1, Ordering::AcqRel);
+            .map_err(|_| {
+                "Four hotkey commands are already running. Wait for one to finish, or quit and reopen Dupin to stop them."
+            })?;
         let slot = ShellSlot(inner);
         let id = slot.0.next.fetch_add(1, Ordering::Relaxed);
         thread::Builder::new()
@@ -386,7 +387,6 @@ struct ShellSlot(Arc<Inner>);
 impl Drop for ShellSlot {
     fn drop(&mut self) {
         self.0.running_shells.fetch_sub(1, Ordering::AcqRel);
-        self.0.running.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -437,7 +437,7 @@ fn publish(inner: &Inner, run: &Run, status: Status, output: OutputBuffer) {
     {
         let mut current = lock(&run.snapshot);
         if finished {
-            inner.running.fetch_sub(1, Ordering::AcqRel);
+            inner.running_scripts.fetch_sub(1, Ordering::AcqRel);
         }
         *current = snapshot;
     }
@@ -952,7 +952,7 @@ mod tests {
                 .unwrap(),
             Ok(())
         );
-        assert_eq!(runner.activity().load(Ordering::Acquire), 0);
+        assert_eq!(runner.inner.running_shells.load(Ordering::Acquire), 0);
         fs::write(fixture.0.join("release"), "").unwrap();
         fixture.wait_for("alive");
     }
@@ -963,6 +963,8 @@ mod tests {
         let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
         let completion = fixture.start_shell(&runner);
         fixture.wait_for("ready");
+        assert_eq!(runner.inner.running_shells.load(Ordering::Acquire), 1);
+        assert_eq!(runner.activity().load(Ordering::Acquire), 0);
         let pgid = lock(&runner.inner.lifecycle.state).groups[&1].pgid;
         runner.kill_all_now();
         assert_eq!(completion.recv_timeout(Duration::from_secs(2)).unwrap(), Ok(()));
