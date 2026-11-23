@@ -10,7 +10,7 @@ use rune::{
     row, text, text_input,
 };
 
-use crate::ui::{ICON_SIZE, Ui};
+use crate::ui::{ActionStage, ApplicationState, ICON_SIZE, Ui};
 
 pub const HEADER_H: f32 = 64.0;
 /// Rows shown before the list scrolls.
@@ -214,18 +214,176 @@ fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
                 ),
         )
         .child(
-            text("← Search")
-                .font(t.font(type_::LABEL))
-                .color(t.text_secondary)
-                .on_press_tx(|s: &mut Ui, tx| {
-                    s.action_screen = None;
-                    tx.focus("query", false);
-                }),
+            text(if matches!(screen.stage, ActionStage::List) {
+                "← Search"
+            } else {
+                "← Actions"
+            })
+            .font(t.font(type_::LABEL))
+            .color(t.text_secondary)
+            .on_press_tx(|s: &mut Ui, tx| {
+                s.action_back(tx);
+            }),
         )
+}
+
+fn application_locations(apps: &[dupin_mac::workspace::Application]) -> Vec<Option<String>> {
+    let names: Vec<_> = apps.iter().map(|app| app.name.to_lowercase()).collect();
+    let mut counts = std::collections::HashMap::new();
+    for name in &names {
+        *counts.entry(name).or_insert(0) += 1;
+    }
+    apps.iter()
+        .zip(&names)
+        .map(|(app, name)| {
+            if counts[name] > 1 {
+                app.path
+                    .parent()
+                    .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy()))
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
     let screen = s.action_screen.as_ref().unwrap();
+    match &screen.stage {
+        ActionStage::Applications { state, selected, .. } => {
+            let mut list = col().key("applications").w_full().py(LIST_PAD);
+            match state {
+                ApplicationState::Loading => {
+                    list = list.child(text("Finding apps…").color(t.text_secondary).padding(16.0))
+                }
+                ApplicationState::Failed(error) => {
+                    list = list.child(text(error).color(t.text_secondary).padding(16.0).wrap())
+                }
+                ApplicationState::Ready(apps) if apps.is_empty() => {
+                    list = list.child(
+                        text("No apps can open this item")
+                            .color(t.text_secondary)
+                            .padding(16.0),
+                    )
+                }
+                ApplicationState::Ready(apps) => {
+                    let locations = application_locations(apps);
+                    list = list.child(
+                        col()
+                            .w_full()
+                            .max_h(LIST_HEIGHT_BUDGET)
+                            .scroll(ScrollSpec { stick_bottom: false })
+                            .children(apps.iter().enumerate().map(|(index, app)| {
+                                let on = index == *selected;
+                                let icon = s
+                                    .icons
+                                    .get(&format!("choice-{}", app.path.display()))
+                                    .map(|image| el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()))
+                                    .unwrap_or_else(|| el().size(ICON_SIZE, ICON_SIZE));
+                                row()
+                                    .key(format!("action-{index}"))
+                                    .w_full()
+                                    .h(44.0)
+                                    .px(12.0)
+                                    .gap(12.0)
+                                    .center_y()
+                                    .radius(8.0)
+                                    .fill(if on { accent } else { Color::TRANSPARENT })
+                                    .hover(if on { accent } else { t.hover })
+                                    .child(icon)
+                                    .child(
+                                        col()
+                                            .grow(1.0)
+                                            .min_w(0.0)
+                                            .child(
+                                                text(&app.name)
+                                                    .font(t.font(type_::BODY))
+                                                    .color(if on { t.selected_text } else { t.text })
+                                                    .truncate(),
+                                            )
+                                            .children(locations[index].as_deref().map(|location| {
+                                                text(location)
+                                                    .font(t.font(type_::LABEL))
+                                                    .color(if on {
+                                                        t.selected_text
+                                                    } else {
+                                                        t.text_secondary
+                                                    })
+                                                    .truncate()
+                                            })),
+                                    )
+                                    .child(
+                                        text(if app.default { "Default" } else { "" })
+                                            .font(t.font(type_::LABEL))
+                                            .color(t.text_secondary),
+                                    )
+                                    .on_press_tx(move |s: &mut Ui, tx| s.pick_application(index, tx))
+                            })),
+                    );
+                }
+            }
+            return list;
+        }
+        ActionStage::Confirm { action_id, selected } => {
+            let action = screen.item.item_action(action_id).unwrap();
+            let confirmation = action.confirmation().unwrap();
+            let path = match screen.item.action(action_id) {
+                Some(dupin_core::Action::Trash(path)) => path.to_string_lossy(),
+                _ => "".into(),
+            };
+            return col()
+                .key("confirmation")
+                .w_full()
+                .py(LIST_PAD)
+                .child(
+                    col()
+                        .padding(16.0)
+                        .gap(6.0)
+                        .child(
+                            text(&confirmation.prompt)
+                                .font(t.font(type_::BODY))
+                                .color(t.text)
+                                .wrap(),
+                        )
+                        .child(
+                            text(path.as_ref())
+                                .font(t.font(type_::LABEL))
+                                .color(t.text_secondary)
+                                .wrap(),
+                        ),
+                )
+                .children(
+                    ["Cancel", confirmation.button.as_str()]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, title)| {
+                            let on = index == *selected;
+                            let red = t.destructive;
+                            row()
+                                .key(format!("action-{index}"))
+                                .w_full()
+                                .h(44.0)
+                                .px(12.0)
+                                .center_y()
+                                .radius(8.0)
+                                .fill(if on {
+                                    if index == 1 { red } else { accent }
+                                } else {
+                                    Color::TRANSPARENT
+                                })
+                                .child(text(title).font(t.font(type_::BODY)).color(if on {
+                                    t.selected_text
+                                } else if index == 1 {
+                                    red
+                                } else {
+                                    t.text
+                                }))
+                                .on_press_tx(move |s: &mut Ui, tx| s.select_confirmation(index, tx))
+                        }),
+                );
+        }
+        ActionStage::List => {}
+    }
     col().key("actions").w_full().py(LIST_PAD).child(
         col()
             .w_full()
@@ -253,7 +411,13 @@ fn action_list(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
                             .child(
                                 text(&action.title)
                                     .font(t.font(type_::BODY))
-                                    .color(if on { t.selected_text } else { t.text })
+                                    .color(if on {
+                                        t.selected_text
+                                    } else if action.confirmation().is_some() {
+                                        t.destructive
+                                    } else {
+                                        t.text
+                                    })
                                     .grow(1.0),
                             )
                             .child(
@@ -608,6 +772,7 @@ pub struct ResolvedTheme {
     palette: tok::Theme,
     pub accent: Color,
     pub selected_text: Color,
+    pub destructive: Color,
     scale: f32,
     family: tok::Family,
 }
@@ -636,6 +801,7 @@ impl ResolvedTheme {
             palette,
             accent: color(&c.accent, tok::accent(0, dark)),
             selected_text: color(&c.selected_text, Color::WHITE),
+            destructive: rune::color::hex(if dark { "#FF453A" } else { "#FF3B30" }).unwrap(),
             scale: theme.font_size as f32 / 15.0,
             family: match theme.font_family {
                 dupin_core::config::FontFamily::System => tok::Family::Sans,
@@ -722,6 +888,41 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
 #[cfg(test)]
 mod theme_tests {
     use super::*;
+    #[test]
+    fn duplicate_application_names_include_their_locations() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let user_applications = std::path::Path::new(&home).join("Applications");
+        let apps = vec![
+            dupin_mac::workspace::Application {
+                path: "/Applications/Viewer.app".into(),
+                name: "Viewer".into(),
+                default: false,
+            },
+            dupin_mac::workspace::Application {
+                path: user_applications.join("Viewer.app"),
+                name: "viewer".into(),
+                default: false,
+            },
+            dupin_mac::workspace::Application {
+                path: "/Applications/Other.app".into(),
+                name: "Other".into(),
+                default: true,
+            },
+        ];
+        assert_eq!(
+            application_locations(&apps),
+            vec![
+                Some("/Applications".into()),
+                Some(if home.is_empty() {
+                    "Applications".into()
+                } else {
+                    "~/Applications".into()
+                }),
+                None,
+            ]
+        );
+    }
+
     #[test]
     fn miniature_fits_both_axes_for_custom_geometry() {
         for width in [400, 680, 900, 1200] {

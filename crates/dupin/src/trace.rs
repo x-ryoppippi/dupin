@@ -13,6 +13,12 @@ fn on() -> bool {
     *ON.get_or_init(|| std::env::var_os("DUPIN_TRACE").is_some_and(|v| v != "0"))
 }
 
+pub fn action_screen(stage: &str) {
+    if on() {
+        eprintln!("dupin-trace: action-screen {stage}");
+    }
+}
+
 pub fn settings(event: &str) {
     if on() {
         eprintln!("dupin-trace: settings {event} wall={:.3}", wall_ms());

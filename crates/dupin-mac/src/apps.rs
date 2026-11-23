@@ -330,6 +330,10 @@ mod tests {
             .collect();
         assert_eq!(titles, ["Safari", "Safari Technology Preview", "Hush Safe"]);
         assert_eq!(rank(&apps, "saf", 1).len(), 1);
+        for item in rank(&apps, "saf", 10) {
+            assert!(item.action("open-with").is_none());
+            assert!(item.action("trash").is_none());
+        }
     }
 
     #[test]

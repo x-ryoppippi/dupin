@@ -7,6 +7,7 @@
 
 use e2e-recording.nu record
 use e2e-state.nu is-focused-query
+use e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
 
 # Run the scenario against `app`, keeping each step's last agent-desktop reply, a snapshot and a
 # screenshot per stage, and Dupin's log in `out`.
@@ -27,6 +28,21 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
     | where permission in [accessibility automation screen_recording] and grant.state != granted
     if ($denied | is-not-empty) {
         error make {msg: $"not granted: ($denied.permission | str join ', ')"}
+    }
+
+    if (viewer-running) {
+        error make {msg: 'Cannot establish ownership of the file-action viewer'}
+    }
+    readable-trash
+    if ($out | path join fixtures | path exists) {
+        error make {msg: 'File-action fixtures already exist'}
+    }
+    if (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | is-not-empty) {
+        error make {msg: 'File-action Trash fixtures already exist'}
+    }
+    try { prepare $out } catch {|failure|
+        try { cleanup $out }
+        error make $failure
     }
 
     # Spotlight holds ⌘Space on a fresh macOS.
@@ -52,27 +68,44 @@ def "main run" [app: path, --out: path = 'target/e2e', --record] {
         }
     }
 
-    # Dupin is running well before its on_ready callback registers the hotkey.
-    wait-for-log $log 'dupin-trace: hotkey alt+space registered'
-    snap $out launched
+    let failure = try {
 
-    if $record {
-        record $out {
+        # Dupin is running well before its on_ready callback registers the hotkey.
+        wait-for-log $log 'dupin-trace: hotkey alt+space registered'
+        snap $out launched
+        if $record {
+            record $out {
+                scenario $out
+                with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
+            }
+        } else {
             scenario $out
             with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
         }
-    } else {
-        scenario $out
-        with-env {XDG_RUNTIME_DIR: $runtime, XDG_DATA_HOME: $data} { cli-stage $out $control }
-    }
+        null
+    } catch {|error| $error }
 
-    job kill $dupin
+    let stop_failure = try {
+        job kill $dupin
+        null
+    } catch {|error|
+        $error
+    }
+    let cleanup_failure = try {
+        cleanup $out
+        null
+    } catch {|error|
+        $error
+    }
+    if $failure != null { error make $failure }
+    if $stop_failure != null { error make $stop_failure }
+    if $cleanup_failure != null { error make $cleanup_failure }
     # A shader that fails falls back to the built-in one with a warning, which the
     # screenshots alone wouldn't show.
     if (open --raw $log | lines | any {|line| $line =~ '^dupin: backdrop (shader|pipeline)' }) {
         error make {msg: $"the backdrop shader failed; see ($log)"}
     }
-    print 'e2e: Quick Look returned to the query, the panel opened Calculator, Dupin Settings and the Bluetooth pane; CLI picker and Snapshot controls passed'
+    print 'e2e: Quick Look returned to the query, the panel opened Calculator, Dupin Settings and the Bluetooth pane, Open with… and confirmed Trash; CLI picker and Snapshot controls passed'
 }
 
 def cli-stage [out: path, binary: path] {
@@ -438,6 +471,250 @@ def scenario [out: path] {
     snap $out settings-from-result
 
     system-pane $out $focused $found
+    file-actions-stage $out $found
+}
+
+def file-actions-stage [out: path, found: closure] {
+    let log = $out | path join dupin.log
+    let root = $out | path join fixtures
+    let open_path = $root | path join open-me.dupine2e
+    let trash_path = $root | path join trash-me.dupine2e
+    try {
+        file-search $out open-me $found
+        let loading = count-log $log 'dupin-trace: action-screen applications loading'
+        let ready = count-log $log 'dupin-trace: action-screen applications ready'
+        ad $out file-actions-choose-down press down | ignore
+        ad $out file-actions-choose press return | ignore
+        wait-for-log --after $loading $log 'dupin-trace: action-screen applications loading'
+        wait-for-log --after $ready $log 'dupin-trace: action-screen applications ready'
+        let viewer = (poll
+            $out
+            file-actions-viewer
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'DupinE2EViewer Default'
+            --exact
+            --first
+        )
+        snap $out file-actions-chooser
+        ad $out file-actions-open click $viewer.data.match.ref_id | ignore
+        let marker = $root | path join opened.json
+        wait-condition 'fixture application opening the exact path' {
+            ($marker | path exists) and (open $marker) == [$open_path]
+        }
+        snap $out file-actions-opened
+        ^osascript -e 'tell application id "org.dupin.e2e.viewer" to quit'
+        wait-condition 'fixture viewer quitting' { not (viewer-running) }
+
+        file-search $out trash-me $found
+        ^osascript -e 'tell application "System Events"
+            repeat 8 times
+                key code 125
+            end repeat
+        end tell'
+        let confirm = count-log $log 'dupin-trace: action-screen confirm'
+        ad $out file-actions-trash-review press return | ignore
+        wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
+        (poll
+            $out
+            file-actions-trash-question
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'Move “trash-me.dupine2e” to the Trash?'
+            --exact
+            --first
+        ) | ignore
+        (poll
+            $out
+            file-actions-trash-path
+            $found
+            find
+            --app
+            Dupin
+            --name
+            $trash_path
+            --exact
+            --first
+        ) | ignore
+        snap $out file-actions-trash-confirm
+        let list = count-log $log 'dupin-trace: action-screen list'
+        ad $out file-actions-trash-cancel press return | ignore
+        wait-for-log --after $list $log 'dupin-trace: action-screen list'
+        let confirm = count-log $log 'dupin-trace: action-screen confirm'
+        ad $out file-actions-trash-review-again press return | ignore
+        wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
+        if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
+        snap $out file-actions-trash-cancelled
+        ad $out file-actions-trash-select press down | ignore
+        ad $out file-actions-trash-confirm press return | ignore
+        wait-condition 'fixture moving to the Trash' {
+            not ($trash_path | path exists) and (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | length) == 1
+        }
+        let moved = glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | first
+        if (open --raw $moved | hash sha256) != (open --raw ($root | path join trash.sha256)) {
+            error make {msg: 'The Trash item is not the owned fixture'}
+        }
+        cp $moved ($root | path join moved-trash-me.dupine2e)
+        let row_name = file-row-name $out trash-me
+        (poll
+            $out
+            file-actions-row-removed
+            {|r| $r.ok and not (mentions $r $row_name) }
+            snapshot
+            --app
+            Dupin
+        ) | ignore
+        (poll
+            $out
+            file-actions-trash-notice
+            $found
+            find
+            --app
+            Dupin
+            --name
+            'Moved “trash-me.dupine2e” to the Trash'
+            --exact
+            --first
+        ) | ignore
+        snap $out file-actions-trash-finished
+        ad $out file-actions-close press escape | ignore
+    } catch {|failure|
+        try { snap $out file-actions-failure }
+        try { cp $log ($out | path join file-actions-failure.log) }
+        error make $failure
+    }
+}
+
+def file-row-name [out: path, name: string]: nothing -> string {
+    $'($name).dupine2e (file-parent $out)'
+}
+
+def file-parent [out: path]: nothing -> string {
+    let parent = $out | path join fixtures
+    let parent = if ($parent | str starts-with $env.HOME) {
+        $parent | str replace $env.HOME '~'
+    } else {
+        $parent
+    }
+    $parent
+}
+
+def file-search [out: path, query: string, found: closure] {
+    let file = $'($query).dupine2e'
+    let log = $out | path join dupin.log
+    (poll
+        $out
+        $'file-actions-($query)-apps'
+        {|r| $r.ok and not (mentions $r 'System Settings') }
+        list-apps
+    ) | ignore
+    ad $out $'file-actions-($query)-summon' press alt+space | ignore
+    (poll
+        $out
+        $'file-actions-($query)-panel'
+        {|r| is-focused-query $r '' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --first
+    ) | ignore
+    ^osascript -e 'tell application "System Events" to keystroke " "'
+    (poll
+        $out
+        $'file-actions-($query)-mode'
+        {|r| is-focused-query $r '' }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --name
+        'Search files'
+        --exact
+        --first
+    ) | ignore
+    ^osascript -e 'on run argv
+        tell application "System Events"
+            repeat with typedKey in characters of (item 1 of argv)
+                keystroke (typedKey as text)
+                delay 0.12
+            end repeat
+        end tell
+    end run' $file
+    (poll
+        $out
+        $'file-actions-($query)-query'
+        {|r| is-focused-query $r $file }
+        find
+        --app
+        Dupin
+        --role
+        textfield
+        --name
+        'Search files'
+        --exact
+        --first
+    ) | ignore
+    (poll
+        $out
+        $'file-actions-($query)-row'
+        $found
+        find
+        --app
+        Dupin
+        --name
+        (file-row-name $out $query)
+        --exact
+        --first
+    ) | ignore
+    let right = count-log $log 'dupin-trace: key Right '
+    ad $out $'file-actions-($query)-actions' press right | ignore
+    wait-for-log --after $right $log 'dupin-trace: key Right '
+    (poll
+        $out
+        $'file-actions-($query)-context-title'
+        $found
+        find
+        --app
+        Dupin
+        --name
+        $file
+        --exact
+        --first
+    ) | ignore
+    let parent = file-parent $out
+    (poll
+        $out
+        $'file-actions-($query)-context-path'
+        $found
+        find
+        --app
+        Dupin
+        --name
+        $parent
+        --exact
+        --first
+    ) | ignore
+}
+
+def count-log [log: path, text: string]: nothing -> int {
+    open --raw $log | lines | where {|line| $line | str contains $text } | length
+}
+
+def wait-condition [name: string, ready: closure] {
+    for _ in 1..20 {
+        if (do $ready) { return }
+        sleep 1sec
+    }
+    error make {msg: $'Timed out waiting for ($name)'}
 }
 
 def system-pane [out: path, focused: closure, found: closure] {
