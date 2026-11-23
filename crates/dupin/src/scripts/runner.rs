@@ -151,6 +151,7 @@ impl Lifecycle {
         let mut state = lock(&self.state);
         state.shutting_down = true;
         for group in state.groups.values_mut() {
+            group.terminated = true;
             if !group.killed {
                 (self.signal)(group.pgid, libc::SIGKILL);
                 group.killed = true;
@@ -1398,6 +1399,22 @@ mod tests {
 
         runner.kill_all_now();
         assert_eq!(spawn(&runner, &run).unwrap_err(), "Dupin is shutting down.");
+    }
+
+    #[test]
+    fn extension_commands_killed_by_shutdown_report_the_shutdown() {
+        let fixture = Fixture::new("printf '%s\\n' $$ > leader\nexec sleep 60\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let run = launch(fixture.0.join("run"), &[]);
+        let result = thread::scope(|scope| {
+            scope.spawn(|| {
+                fixture.wait_for("leader");
+                runner.kill_all_now();
+            });
+            spawn(&runner, &run)
+        });
+        assert_eq!(result.unwrap_err(), "Dupin is shutting down.");
+        assert_gone(&fixture, "leader");
     }
 
     #[test]
