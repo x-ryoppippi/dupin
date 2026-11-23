@@ -108,6 +108,8 @@ Rename… puts the item's name in the input, with the part before its extension 
 
 Move to… and Copy to… open a Spotlight folder search in the panel. Type a folder name, select a result and press Enter to confirm, or press Escape to return to the original search. The operation runs in the background and reports its outcome in the panel. Move keeps the item's name and refuses an existing name or the item's current folder. Copy uses the original name if available, then Finder-style names such as `report copy.pdf` and `report copy 2.pdf`. A folder cannot be moved or copied into itself or one of its descendants.
 
+When moving between volumes, Dupin saves the copy first. If the source still matches, Dupin puts the original in the Trash so it can be recovered. If the source changed or could not be verified, Dupin keeps it in place and reports the problem.
+
 Duplicate copies the item beside itself as Finder does: `report copy.pdf`, then `report copy 2.pdf`, and so on; duplicating a copy continues its numbering. Compress zips it beside itself with `ditto`, as Finder's Compress does: `report.pdf.zip`, then `report.pdf 2.zip`. Both keep the launcher open, work in the background and report the new name, or the failure, in the launcher. Neither replaces an existing item.
 
 Quick Look opens the native preview; Escape returns to the picker with its search and selection intact.

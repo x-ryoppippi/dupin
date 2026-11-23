@@ -1,7 +1,8 @@
 //! File operations that never replace an existing entry.
 
+use std::collections::HashMap;
 use std::ffi::CString;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -84,26 +85,12 @@ impl FileTransfers {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(move_problem(error, &destination)),
         }
-        let source = path.symlink_metadata().map_err(|error| error.to_string())?;
+        let source = SourceSnapshot::read(path).map_err(|error| error.to_string())?;
         let staging = self.stage_copy(path, folder)?;
-        let destination = move_exclusively(&staging.entry(), destination)?;
-        if !path
-            .symlink_metadata()
-            .is_ok_and(|current| file_identity(&current) == file_identity(&source))
-        {
-            return Err("The copy was saved in the destination. The source changed during the move.".into());
-        }
-        autoreleasepool(|_| {
-            NSFileManager::defaultManager()
-                .removeItemAtURL_error(&file_url(path))
-                .map_err(|error| {
-                    format!(
-                        "The copy was saved in the destination. Couldn't remove the source: {}",
-                        error.localizedDescription()
-                    )
-                })
-        })?;
-        Ok(destination)
+        publish_move(path, &source, &staging.entry(), destination, |path| {
+            // A writer can still modify the source between the last check and removal.
+            crate::workspace::run(&crate::workspace::Action::Trash(path.to_owned()))
+        })
     }
 
     fn copy_with_names(
@@ -126,8 +113,10 @@ impl FileTransfers {
             .ok_or("Dupin's support folder is unavailable.")?;
         let staging = staging::Staging::new(journal, folder).map_err(|error| error.to_string())?;
         autoreleasepool(|_| {
+            let source = file_url(path)?;
+            let destination = file_url(&staging.entry())?;
             NSFileManager::defaultManager()
-                .copyItemAtURL_toURL_error(&file_url(path), &file_url(&staging.entry()))
+                .copyItemAtURL_toURL_error(&source, &destination)
                 .map_err(|error| error.localizedDescription().to_string())
         })?;
         Ok(staging)
@@ -148,9 +137,65 @@ pub fn rename(path: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(destination)
 }
 
-fn move_exclusively(path: &Path, destination: PathBuf) -> Result<PathBuf, String> {
-    rename_exclusive(path, &destination).map_err(|error| move_problem(error, &destination))?;
+fn publish_move(
+    path: &Path,
+    original: &SourceSnapshot,
+    staged: &Path,
+    destination: PathBuf,
+    trash: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
+    rename_exclusive(staged, &destination).map_err(|error| move_problem(error, &destination))?;
+    match SourceSnapshot::read(path) {
+        Ok(current) if current == *original => {}
+        Ok(_) => {
+            return Err("The copy was saved in the destination. The source changed during the move.".into());
+        }
+        Err(error) => {
+            return Err(format!(
+                "The copy was saved in the destination. Couldn't verify the source: {error}"
+            ));
+        }
+    }
+    trash(path).map_err(|error| {
+        format!("The copy was saved in the destination. Couldn't move the source to the Trash: {error}")
+    })?;
     Ok(destination)
+}
+
+#[derive(PartialEq, Eq)]
+struct SourceSnapshot(HashMap<PathBuf, EntryStamp>);
+
+#[derive(PartialEq, Eq)]
+struct EntryStamp {
+    identity: (u64, u64),
+    size: u64,
+    modified: (i64, i64),
+    changed: (i64, i64),
+}
+
+impl SourceSnapshot {
+    fn read(path: &Path) -> io::Result<Self> {
+        let mut entries = HashMap::new();
+        let mut pending = vec![path.to_owned()];
+        while let Some(path) = pending.pop() {
+            let metadata = path.symlink_metadata()?;
+            if metadata.is_dir() {
+                for child in fs::read_dir(&path)? {
+                    pending.push(child?.path());
+                }
+            }
+            entries.insert(
+                path,
+                EntryStamp {
+                    identity: file_identity(&metadata),
+                    size: metadata.len(),
+                    modified: (metadata.mtime(), metadata.mtime_nsec()),
+                    changed: (metadata.ctime(), metadata.ctime_nsec()),
+                },
+            );
+        }
+        Ok(Self(entries))
+    }
 }
 
 fn rename_exclusive(source: &Path, destination: &Path) -> io::Result<()> {
@@ -305,8 +350,9 @@ fn file_identity(entry: &std::fs::Metadata) -> (u64, u64) {
     (entry.dev(), entry.ino())
 }
 
-fn file_url(path: &Path) -> objc2::rc::Retained<NSURL> {
-    NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()))
+fn file_url(path: &Path) -> Result<objc2::rc::Retained<NSURL>, String> {
+    let path = path.to_str().ok_or("The path cannot be represented as text.")?;
+    Ok(NSURL::fileURLWithPath(&NSString::from_str(path)))
 }
 
 #[cfg(test)]
@@ -585,12 +631,44 @@ mod tests {
         assert_eq!(std::fs::read_link(&target).unwrap(), Path::new("missing"));
         assert!(!files.journal.as_ref().unwrap().exists());
         std::fs::remove_file(&target).unwrap();
-        let output = files.move_across_volumes(&source, &folder, target).unwrap();
+        let snapshot = SourceSnapshot::read(&source).unwrap();
+        let staging = files.stage_copy(&source, &folder).unwrap();
+        let trash = dir.0.join("trash");
+        let output = publish_move(&source, &snapshot, &staging.entry(), target.clone(), |path| {
+            assert!(target.join("child.txt").exists());
+            fs::rename(path, &trash).map_err(|error| error.to_string())
+        })
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(output.join("child.txt")).unwrap(),
             "original"
         );
         assert!(!source.exists());
+        assert_eq!(fs::read_to_string(trash.join("child.txt")).unwrap(), "original");
+    }
+
+    #[test]
+    fn staged_move_keeps_the_original_when_a_child_changes_in_place() {
+        let dir = Scratch::new("staged-move-changed");
+        let files = dir.transfers();
+        let source = dir.0.join("source");
+        let folder = dir.0.join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&folder).unwrap();
+        let child = dir.file("source/child.txt", "original");
+
+        let snapshot = SourceSnapshot::read(&source).unwrap();
+        let staging = files.stage_copy(&source, &folder).unwrap();
+        fs::write(&child, "original updated").unwrap();
+        let target = folder.join("source");
+        let error = publish_move(&source, &snapshot, &staging.entry(), target.clone(), |_| {
+            panic!("a changed source must not be moved to the Trash")
+        })
+        .unwrap_err();
+
+        assert!(error.contains("The source changed during the move."));
+        assert_eq!(fs::read_to_string(child).unwrap(), "original updated");
+        assert_eq!(fs::read_to_string(target.join("child.txt")).unwrap(), "original");
     }
 
     #[test]
