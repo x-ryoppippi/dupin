@@ -11,8 +11,6 @@ type CGEventRef = *mut c_void;
 
 const HID_EVENT_TAP: u32 = 0;
 const COMMAND_FLAG: u64 = 0x0010_0000;
-/// `kVK_ANSI_V`: the key in the V position, as other apps' Paste shortcuts expect.
-const V_KEY: u16 = 9;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
@@ -40,12 +38,17 @@ pub fn request() {
     unsafe { CGRequestPostEventAccess() };
 }
 
-/// Press ⌘V in whichever app is frontmost.
-pub fn paste() -> Result<(), String> {
+/// Resolve the front app's paste shortcut on the main thread, after restoring its input source.
+pub fn key_code() -> u16 {
+    crate::input_source::command_v_key()
+}
+
+/// Press ⌘V in whichever app is frontmost, using its resolved key code.
+pub fn paste(key: u16) -> Result<(), String> {
     for down in [true, false] {
         // SAFETY: A null source is allowed; the event is released after it is posted.
         unsafe {
-            let event = CGEventCreateKeyboardEvent(std::ptr::null(), V_KEY, down);
+            let event = CGEventCreateKeyboardEvent(std::ptr::null(), key, down);
             if event.is_null() {
                 return Err("Couldn't paste the snippet into the front app.".into());
             }

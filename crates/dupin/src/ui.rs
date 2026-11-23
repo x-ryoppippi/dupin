@@ -1370,10 +1370,11 @@ impl Ui {
     fn deliver_snippet(&self, snippet: SnippetRun, paste: bool) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
+        let key = paste.then(dupin_mac::paste::key_code);
         std::thread::spawn(move || {
             let text = dupin_core::snippets::expand(&snippet.text, snippet.now, dupin_mac::pasteboard::text);
             let result = dupin_mac::pasteboard::set_text(&text)
-                .and_then(|()| if paste { dupin_mac::paste::paste() } else { Ok(()) });
+                .and_then(|()| key.map_or(Ok(()), dupin_mac::paste::paste));
             if let Err(error) = result {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
