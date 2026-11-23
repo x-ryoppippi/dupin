@@ -388,8 +388,7 @@ impl Ui {
         } = windows;
         let config = configuration.values.borrow().clone();
         let apps_provider = Arc::new(AppsProvider::standard());
-        let headless = rune::tooling::is_headless();
-        let calendar = if headless {
+        let calendar = if rune::tooling::is_headless() {
             dupin_mac::CalendarProvider::fixtures()
         } else {
             let panel = me.clone();
@@ -402,9 +401,8 @@ impl Ui {
                 });
             })
         };
-        let registration =
-            crate::commands::register(&config, apps_provider.clone(), history, headless, calendar)
-                .expect("built-in command registration is valid");
+        let registration = crate::commands::register(&config, apps_provider.clone(), history, calendar)
+            .expect("built-in command registration is valid");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_apps(tx))
@@ -502,8 +500,8 @@ impl Ui {
             }
             changed
         };
-        let registration = crate::commands::configured(config, rune::tooling::is_headless())
-            .expect("built-in command registration is valid");
+        let registration =
+            crate::commands::configured(config).expect("built-in command registration is valid");
         let web_changed = {
             let mut web = self.web.write().unwrap();
             let changed = *web != registration.web;
@@ -511,29 +509,22 @@ impl Ui {
             changed
         };
         let sources = registration.registry.ids();
-        if !sources.iter().any(|id| id == self.session.command_id().as_str()) {
-            let effects = self.session.reset();
-            self.apply(effects, tx);
-            self.action_screen = None;
-            if let Some(picker) = &mut self.picker {
-                picker.original.clear();
-            } else {
-                self.query.clear();
-            }
-        }
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let recent_changed = config.show_recent
             != self
                 .session
                 .provider_spec(&crate::commands::recent_id())
                 .is_some();
-        self.session
+        let effects = self
+            .session
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
         let is_apps = self.session.command_id().as_str() == crate::commands::APPS;
         let empty = self.session.query().trim().is_empty();
-        if self.session.command().result_limit != previous_limit
+        if !effects.is_empty() {
+            self.apply(effects, tx);
+        } else if self.session.command().result_limit != previous_limit
             || (web_changed && is_apps && !empty)
             || (ranking_changed && self.session.command_id().as_str() == crate::commands::FILES)
             || (recent_changed && is_apps && empty)
@@ -1268,7 +1259,14 @@ impl Ui {
                     self.searchers.values().for_each(Searcher::cancel);
                     self.deadlines.clear();
                 }
-                Effect::ClearQuery => self.query.clear(),
+                Effect::ClearQuery => {
+                    self.action_screen = None;
+                    if let Some(picker) = &mut self.picker {
+                        picker.original.clear();
+                    } else {
+                        self.query.clear();
+                    }
+                }
                 Effect::ReplaceQuery(text) => self.query.replace_text(text),
                 Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
@@ -1537,7 +1535,7 @@ mod config_tests {
         let base = Config::default();
         let mut session = Session::new(
             History::default(),
-            crate::commands::configured(&base, false).unwrap().registry,
+            crate::commands::configured(&base).unwrap().registry,
         )
         .unwrap();
         let effects = session.set_query("example");
@@ -1559,7 +1557,7 @@ mod config_tests {
         themed.theme.row_height = 100;
         themed.theme.light.accent = Some("#123456".into());
         session
-            .set_commands(crate::commands::configured(&themed, false).unwrap().registry)
+            .set_commands(crate::commands::configured(&themed).unwrap().registry)
             .unwrap();
         assert_eq!(
             (

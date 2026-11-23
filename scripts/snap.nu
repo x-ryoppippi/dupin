@@ -1,6 +1,11 @@
 #!/usr/bin/env nu
 
+use headless-config.nu scenario-env
+
 # Render each headless scenario in scripts/headless to <out>/<name>.png.
+#
+# A scenario with a `<name>.toml` beside it runs with that file as its config.toml, from a
+# temporary config directory; the others use yours.
 #
 # The renders show real results from this Mac (file paths included), so they stay out of the
 # repository. `--realtime` paces each run on the wall clock: results come from real providers
@@ -18,10 +23,15 @@ def main [
     let shots = glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
         let tree = $tmp | path join $"($name).json"
-        headless $bin --script $script --realtime --tree $tree --at mark:end
+        let config = scenario-env $script $tmp
+        with-env $config {
+            headless $bin --script $script --realtime --tree $tree --at mark:end
+        }
         let height = open $tree | panel-height
         let png = $out | path join $"($name).png"
-        headless $bin --script $script --realtime --snap $png --at mark:end --scale 2 --size $"680x($height)"
+        with-env $config {
+            headless $bin --script $script --realtime --snap $png --at mark:end --scale 2 --size $"680x($height)"
+        }
         {name: $name, png: ($png | path expand), height: $height}
     }
     rm --recursive $tmp

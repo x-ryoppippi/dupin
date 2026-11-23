@@ -166,13 +166,18 @@ impl Session {
         })
     }
 
-    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<(), crate::CommandError> {
+    /// Replace the command registry, returning effects if the active command disappears.
+    pub fn set_commands(&mut self, commands: CommandRegistry) -> Result<Vec<Effect>, crate::CommandError> {
         commands.validate()?;
-        if !commands.contains(&self.command) {
-            return Err(crate::CommandError::ActiveCommandRemoved(self.command.clone()));
+        if commands.contains(&self.command) {
+            self.commands = commands;
+            return Ok(Vec::new());
         }
+        self.remember_query(false);
         self.commands = commands;
-        Ok(())
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.reset_to_default());
+        Ok(effects)
     }
 
     /// The same, with a clock in Unix seconds other than the system's.
@@ -747,6 +752,10 @@ impl Session {
     /// Back to an empty default-command search, as the panel should look the next time it shows.
     pub fn reset(&mut self) -> Vec<Effect> {
         self.remember_query(false);
+        self.reset_to_default()
+    }
+
+    fn reset_to_default(&mut self) -> Vec<Effect> {
         self.recalled = None;
         self.deleting = false;
         self.before_deletion = None;

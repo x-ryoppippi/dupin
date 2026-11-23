@@ -709,12 +709,12 @@ fn search(s: &Prefs, k: &Kit) -> Vec<El> {
         &s.config.file_limit.to_string(),
         Prefs::pick_file_limit,
     );
-    let calendar_enabled = !s.config.calendar_enabled;
-    let calendar = Switch::new(s.config.calendar_enabled)
+    let calendar_enabled = !s.config.calendar.enabled;
+    let calendar = Switch::new(s.config.calendar.enabled)
         .label("Calendar search")
         .hide_label()
         .disabled(s.read_only)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar_enabled = calendar_enabled))
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.calendar.enabled = calendar_enabled))
         .build(k);
     vec![
         setting(
