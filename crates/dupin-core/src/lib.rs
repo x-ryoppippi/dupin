@@ -5,6 +5,7 @@
 pub mod clipboard;
 pub mod command;
 pub mod config;
+pub mod file_name;
 pub mod file_query;
 pub mod file_rank;
 pub mod fuzzy;
@@ -17,7 +18,7 @@ pub mod session;
 pub use command::{
     CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,
 };
-pub use config::{Backdrop, Config, InputSource, Position};
+pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
 pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{Action, Item, ItemAction, View};
