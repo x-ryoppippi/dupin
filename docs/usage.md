@@ -17,6 +17,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
 | ↩                                       | Open the app or file                                  |
 | ⌘↩                                      | Reveal the file in Finder                             |
+| ⌘Y                                      | Preview the selected app or file with Quick Look      |
 | → at the end of the input, ⌘K or Ctrl+K | Show actions for the selected result                  |
 | Esc, or clicking elsewhere              | Hide the panel                                        |
 | ⌘Q                                      | Quit Dupin                                            |
@@ -97,8 +98,10 @@ Valid qualifiers appear as inline chips without changing the query text. Backspa
 
 Both modes search the Spotlight index, so they find only what Spotlight has indexed.
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
-result's action screen: Open, Reveal in Finder and Copy path. Escape cancels the
+result's action screen: Open, Reveal in Finder, Quick Look and Copy path. Escape cancels the
 screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. The same screen is available for app results.
+
+Quick Look opens the native preview; Escape returns to the picker with its search and selection intact.
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Right Arrow, Cmd+K, Enter or the Actions link opens its action screen; choose Open in Dictionary to launch the external app. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](./configuration.md) to choose other aliases.
 

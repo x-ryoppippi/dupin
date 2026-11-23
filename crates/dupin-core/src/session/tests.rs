@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::{CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
+use crate::{Action, CommandId, CommandRegistry, CommandSpec, QueryPresentation, View};
 
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
@@ -142,6 +142,70 @@ fn actions_run_the_named_result_even_after_selection_moves() {
     assert_eq!(effects[0], Effect::Run(Action::Copy("/x/notes.md".into())));
     assert!(effects.contains(&Effect::Hide));
     assert!(s.items().is_empty());
+}
+
+#[test]
+fn keep_open_actions_preserve_the_search_and_do_not_record_a_pick() {
+    for entry in 0..3 {
+        let mut s = session();
+        let generation = searched(&s.set_query("note")).1;
+        let mut result = item("notes.md");
+        result
+            .actions
+            .push(ItemAction::new("inspect", "Inspect", Action::Preview("/x/notes.md".into())).keep_open());
+        result.primary = Some("inspect".into());
+        result.alternate = Some("inspect".into());
+        s.deliver(Delivery::Batch {
+            generation,
+            items: vec![item("other.md"), result],
+        });
+        s.intent(Intent::Down);
+        let key = s.result_key(1);
+        let before = s.items().to_vec();
+        let effects = match entry {
+            0 => s.run_key_action(&key, "inspect"),
+            1 => s.intent(Intent::Open).unwrap(),
+            _ => s.intent(Intent::OpenAlternate).unwrap(),
+        };
+        assert_eq!(effects, vec![Effect::Run(Action::Preview("/x/notes.md".into()))]);
+        assert_eq!(s.query(), "note");
+        assert_eq!(s.items(), before);
+        assert_eq!(s.result_key(1), key);
+        assert_eq!(s.selected_item(), before.get(1));
+        assert_eq!(s.history(), &History::default());
+        assert!(s.queries.is_empty());
+    }
+}
+
+#[test]
+fn keep_open_actions_cannot_preview_stale_or_retained_results() {
+    let mut s = session();
+    let generation = searched(&s.set_query("old")).1;
+    let mut result = item("notes.md");
+    result
+        .actions
+        .push(ItemAction::new("inspect", "Inspect", Action::Preview("/x/notes.md".into())).keep_open());
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![result.clone()],
+    });
+    let old_key = s.result_key(0);
+    let generation = searched(&s.set_query("new")).1;
+    assert!(s.run_key_action(&old_key, "inspect").is_empty());
+    let retained_key = s.result_key(0);
+    assert!(s.run_key_action(&retained_key, "inspect").is_empty());
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![result],
+    });
+    assert!(s.run_key_action(&old_key, "inspect").is_empty());
+    let fresh_key = s.result_key(0);
+    assert_eq!(
+        s.run_key_action(&fresh_key, "inspect"),
+        vec![Effect::Run(Action::Preview("/x/notes.md".into()))]
+    );
+    assert_eq!(s.query(), "new");
+    assert_eq!(s.history(), &History::default());
 }
 
 #[test]
