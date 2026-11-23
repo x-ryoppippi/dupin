@@ -195,7 +195,7 @@ pub fn add_extensions(
         if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
             added.problems.push(format!(
                 "{}: keyword `{keyword}` is already used by another command",
-                extension.id
+                extension.folder_name
             ));
             continue;
         }
@@ -366,14 +366,14 @@ mod tests {
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
         assert!(configured.web.has_keyword("gh"));
         assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
-        for (problem, id) in
-            added
-                .problems
-                .iter()
-                .zip(["dictionary-clash", "contents-clash", "web-clash", "second-count"])
-        {
+        for (problem, folder) in added.problems.iter().zip([
+            "dictionary-clash-folder",
+            "contents-clash-folder",
+            "web-clash-folder",
+            "second-count-folder",
+        ]) {
             assert!(
-                problem.starts_with(id) && problem.contains("already used"),
+                problem.starts_with(folder) && problem.contains("already used"),
                 "{problem}"
             );
         }

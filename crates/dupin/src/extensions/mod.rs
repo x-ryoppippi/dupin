@@ -3,9 +3,11 @@
 
 mod provider;
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use dupin_plugin_runtime::{GuestModule, MAX_MODULE_BYTES};
 use serde::Deserialize;
@@ -30,6 +32,7 @@ struct Manifest {
 
 pub struct Extension {
     pub id: String,
+    pub folder_name: String,
     pub name: String,
     pub version: String,
     pub keyword: String,
@@ -48,7 +51,7 @@ impl std::fmt::Debug for Extension {
 
 /// What a scan of the extensions folder found: the valid extensions, sorted by folder name,
 /// and one line for each folder that was skipped.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Catalog {
     pub extensions: Vec<Arc<Extension>>,
     pub problems: Vec<String>,
@@ -59,8 +62,33 @@ pub fn directory() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join("extensions"))
 }
 
-impl Catalog {
-    pub fn scan(directory: &Path) -> Catalog {
+#[derive(Default)]
+struct Scanner {
+    loaded: HashMap<PathBuf, LoadedExtension>,
+    previous: Option<Catalog>,
+}
+
+impl Scanner {
+    fn update(&mut self, directory: &Path, watch_problem: Option<String>) -> Option<Catalog> {
+        let mut catalog = self.scan(directory);
+        catalog.problems.extend(watch_problem);
+        if self.previous.as_ref().is_some_and(|previous| {
+            previous.problems == catalog.problems
+                && previous.extensions.len() == catalog.extensions.len()
+                && previous
+                    .extensions
+                    .iter()
+                    .zip(&catalog.extensions)
+                    .all(|(old, new)| Arc::ptr_eq(old, new))
+        }) {
+            return None;
+        }
+        self.previous = Some(catalog.clone());
+        Some(catalog)
+    }
+
+    fn scan(&mut self, directory: &Path) -> Catalog {
+        let mut previous = std::mem::take(&mut self.loaded);
         let mut catalog = Catalog::default();
         let entries = match std::fs::read_dir(directory) {
             Ok(entries) => entries,
@@ -86,52 +114,109 @@ impl Catalog {
             folders.truncate(MAX_EXTENSIONS);
         }
         for folder in folders {
-            let name = folder
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
-            match load(&folder) {
-                Ok(extension) if catalog.extensions.iter().any(|e| e.id == extension.id) => {
-                    catalog.problems.push(format!(
-                        "{name}: id `{}` is used by another extension",
-                        extension.id
-                    ));
+            match load(&folder, previous.remove(&folder)) {
+                Ok(loaded) => {
+                    let extension = &loaded.extension;
+                    if catalog.extensions.iter().any(|e| e.id == extension.id) {
+                        catalog.problems.push(format!(
+                            "{}: id `{}` is used by another extension",
+                            extension.folder_name, extension.id
+                        ));
+                    } else {
+                        catalog.extensions.push(extension.clone());
+                    }
+                    self.loaded.insert(folder, loaded);
                 }
-                Ok(extension) => catalog.extensions.push(Arc::new(extension)),
-                Err(problem) => catalog.problems.push(format!("{name}: {problem}")),
+                Err(problem) => catalog
+                    .problems
+                    .push(format!("{}: {problem}", folder_name(&folder))),
             }
         }
         catalog
     }
 }
 
-fn load(folder: &Path) -> Result<Extension, String> {
-    let source = read_capped(&folder.join(MANIFEST), MAX_MANIFEST_BYTES)
+fn folder_name(folder: &Path) -> std::borrow::Cow<'_, str> {
+    folder.file_name().unwrap_or_default().to_string_lossy()
+}
+
+struct LoadedExtension {
+    manifest: FileStamp,
+    entry: PathBuf,
+    module: FileStamp,
+    extension: Arc<Extension>,
+}
+
+#[derive(PartialEq, Eq)]
+struct FileStamp {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+}
+
+impl FileStamp {
+    fn read(path: PathBuf) -> std::io::Result<Self> {
+        let metadata = path.metadata()?;
+        Ok(Self {
+            path,
+            len: metadata.len(),
+            modified: metadata.modified()?,
+        })
+    }
+}
+
+fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, String> {
+    let manifest_file = folder
+        .join(MANIFEST)
+        .canonicalize()
+        .and_then(FileStamp::read)
+        .map_err(|error| format!("{MANIFEST}: {error}"))?;
+    if let Some(previous) = previous
+        && previous.manifest == manifest_file
+        && let Ok(module) = module_stamp(folder, &previous.entry)
+        && previous.module == module
+    {
+        return Ok(previous);
+    }
+
+    let source = read_capped(&manifest_file.path, MAX_MANIFEST_BYTES)
         .map_err(|error| format!("{MANIFEST}: {error}"))?;
     let source = std::str::from_utf8(&source).map_err(|_| format!("{MANIFEST} is not UTF-8"))?;
     let manifest: Manifest =
         toml::from_str(source).map_err(|error| format!("{MANIFEST}: {}", error.message()))?;
     validate(&manifest)?;
-    let entry = folder.join(&manifest.entry);
-    // A symlink must not lead the host into reading a module from outside the folder.
-    let inside = match (std::fs::canonicalize(folder), std::fs::canonicalize(&entry)) {
-        (Ok(folder), Ok(entry)) => entry.starts_with(folder),
-        _ => false,
-    };
-    if !inside {
-        return Err(format!("entry `{}` is not a file in this folder", manifest.entry));
-    }
-    let bytes =
-        read_capped(&entry, MAX_MODULE_BYTES).map_err(|error| format!("{}: {error}", manifest.entry))?;
+    let entry = PathBuf::from(&manifest.entry);
+    let module_file = module_stamp(folder, &entry)?;
+    let bytes = read_capped(&module_file.path, MAX_MODULE_BYTES)
+        .map_err(|error| format!("{}: {error}", manifest.entry))?;
     let module = GuestModule::load(&bytes).map_err(|error| format!("{}: {error}", manifest.entry))?;
-    Ok(Extension {
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        keyword: manifest.keyword,
-        module,
+    Ok(LoadedExtension {
+        manifest: manifest_file,
+        entry,
+        module: module_file,
+        extension: Arc::new(Extension {
+            id: manifest.id,
+            folder_name: folder_name(folder).into_owned(),
+            name: manifest.name,
+            version: manifest.version,
+            keyword: manifest.keyword,
+            module,
+        }),
     })
+}
+
+fn module_stamp(folder: &Path, entry: &Path) -> Result<FileStamp, String> {
+    // A symlink must not lead the host into reading a module from outside the folder.
+    let entry_path = match (folder.canonicalize(), folder.join(entry).canonicalize()) {
+        (Ok(folder_path), Ok(entry_path)) if entry_path.starts_with(&folder_path) => entry_path,
+        _ => {
+            return Err(format!(
+                "entry `{}` is not a file in this folder",
+                entry.display()
+            ));
+        }
+    };
+    FileStamp::read(entry_path).map_err(|error| format!("{}: {error}", entry.display()))
 }
 
 fn validate(manifest: &Manifest) -> Result<(), String> {
@@ -189,16 +274,14 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Scans now and after every change under `directory`, delivering each catalogue in order.
-/// Dropping it stops the watch; a scan already running still delivers once.
+/// Scans now and after changes under `directory`, delivering changed catalogues in order.
 pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
-    Watch::start(directory, true, scan_for_watch, deliver)
-}
-
-fn scan_for_watch(directory: &Path, watch_problem: Option<String>) -> Catalog {
-    let mut catalog = Catalog::scan(directory);
-    catalog.problems.extend(watch_problem);
-    catalog
+    let mut scanner = Scanner::default();
+    Watch::start(
+        directory,
+        move |directory, problem| scanner.update(directory, problem),
+        deliver,
+    )
 }
 
 #[cfg(test)]
@@ -231,8 +314,10 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn extension(name: &str, keyword: &str, module: GuestModule) -> Extension {
+        let id = name.to_lowercase().replace(' ', "-");
         Extension {
-            id: name.to_lowercase().replace(' ', "-"),
+            folder_name: format!("{id}-folder"),
+            id,
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
@@ -379,9 +464,43 @@ pub(crate) mod tests {
 
     #[test]
     fn a_missing_folder_is_an_empty_catalogue() {
-        let catalog = Catalog::scan(&folder().join("absent"));
+        let catalog = Scanner::default().scan(&folder().join("absent"));
         assert!(catalog.extensions.is_empty());
         assert!(catalog.problems.is_empty());
+    }
+
+    #[test]
+    fn catalogue_updates_reuse_unchanged_extensions_and_skip_unchanged_deliveries() {
+        let root = folder();
+        let directory = root.join("extensions");
+        let wasm = guest("{}");
+        install(&directory, "one", &manifest("one", "first"), Some(&wasm));
+        install(&directory, "two", &manifest("two", "second"), Some(&wasm));
+        let mut scanner = Scanner::default();
+        let initial = scanner.update(&directory, None).unwrap();
+
+        fs::write(root.join("config.toml"), "extensions = true").unwrap();
+        assert!(scanner.update(&directory, None).is_none());
+
+        fs::write(directory.join("one/guest.wasm"), guest("{\"changed\":true}")).unwrap();
+        let updated = scanner.update(&directory, None).unwrap();
+        assert!(!Arc::ptr_eq(&initial.extensions[0], &updated.extensions[0]));
+        assert!(Arc::ptr_eq(&initial.extensions[1], &updated.extensions[1]));
+
+        fs::write(directory.join("two").join(MANIFEST), manifest("two", "reloaded")).unwrap();
+        let reloaded = scanner.update(&directory, None).unwrap();
+        assert!(Arc::ptr_eq(&updated.extensions[0], &reloaded.extensions[0]));
+        assert!(!Arc::ptr_eq(&updated.extensions[1], &reloaded.extensions[1]));
+        assert_eq!(reloaded.extensions[1].keyword, "reloaded");
+        assert!(scanner.update(&directory, None).is_none());
+
+        fs::remove_file(directory.join("one/guest.wasm")).unwrap();
+        let removed = scanner.update(&directory, None).unwrap();
+        assert_eq!(removed.extensions.len(), 1);
+        assert!(Arc::ptr_eq(&reloaded.extensions[1], &removed.extensions[0]));
+        assert!(removed.problems[0].starts_with("one:"));
+        assert!(scanner.update(&directory, None).is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -419,7 +538,7 @@ pub(crate) mod tests {
         );
         std::os::unix::fs::symlink(root.join("k-link.wasm"), root.join("k-symlink/outside.wasm")).unwrap();
 
-        let catalog = Catalog::scan(&root);
+        let catalog = Scanner::default().scan(&root);
         let ids: Vec<_> = catalog.extensions.iter().map(|e| e.id.as_str()).collect();
         assert_eq!(ids, ["words"]);
         let words = &catalog.extensions[0];
@@ -455,7 +574,7 @@ pub(crate) mod tests {
     fn oversized_manifests_are_rejected_before_parsing() {
         let root = folder();
         install(&root, "big", &"#".repeat(MAX_MANIFEST_BYTES + 1), None);
-        let catalog = Catalog::scan(&root);
+        let catalog = Scanner::default().scan(&root);
         assert!(
             catalog.problems[0].contains("larger than 16 KiB"),
             "{:?}",
