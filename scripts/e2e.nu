@@ -350,10 +350,18 @@ def system-pane [out: path, focused: closure, found: closure] {
         try { snap --app 'System Settings' $out bluetooth-evidence-failure }
         $error
     }
-    cp $log ($out | path join bluetooth-evidence-after-trace.log)
+    let trace_failure = try {
+        cp $log ($out | path join bluetooth-evidence-after-trace.log)
+        null
+    } catch {|error| $error }
     # The absence check above establishes ownership of this CI-launched app.
-    ^osascript -e 'tell application "System Settings" to quit'
+    let cleanup_failure = try {
+        ^osascript -e 'tell application "System Settings" to quit'
+        null
+    } catch {|error| $error }
     if $failure != null { error make $failure }
+    if $trace_failure != null { error make $trace_failure }
+    if $cleanup_failure != null { error make $cleanup_failure }
 }
 
 # Run agent-desktop, keep its reply in <out>/<name>.json, and return it parsed.
