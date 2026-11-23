@@ -234,7 +234,7 @@ impl Runner {
         while runs.len() >= 20 {
             let index = runs
                 .iter()
-                .position(|run| lock(&run.snapshot).status != Status::Running)
+                .rposition(|run| lock(&run.snapshot).status != Status::Running)
                 .unwrap();
             runs.remove(index);
         }
@@ -936,6 +936,18 @@ mod tests {
         );
         assert!(runner.snapshots().is_empty());
         assert_eq!(runner.activity().load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn full_history_evicts_the_oldest_finished_run() {
+        let fixture = Fixture::new("exit 0\n");
+        let runner = Runner::new(fixture.0.clone(), Arc::new(|_, _| {}));
+        let mut runs = VecDeque::new();
+        for _ in 0..22 {
+            runner.insert_run(&mut runs, fixture.command(&[]), Status::Exited(Some(0)));
+        }
+        let ids: Vec<_> = runs.iter().map(|run| run.id).collect();
+        assert_eq!(ids, (3..=22).rev().collect::<Vec<_>>());
     }
 
     #[test]
