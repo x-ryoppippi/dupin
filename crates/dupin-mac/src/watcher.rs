@@ -30,16 +30,8 @@ impl PathWatcher {
     }
 
     /// Watches directory entries without forwarding descendant events.
+    /// Reconciles the file's metadata to detect in-place writes when FSEvents is silent.
     /// The callback receives `true` when a watched root changes identity.
-    pub fn start_shallow(
-        roots: Vec<PathBuf>,
-        changed: impl Fn(bool) + Send + Sync + 'static,
-    ) -> Result<Self, &'static str> {
-        Self::start_with_scope(roots, false, |_| Vec::new(), changed)
-    }
-
-    /// Also reconciles the file's metadata so an in-place write can be detected
-    /// if FSEvents is silent.
     pub fn start_shallow_with_file(
         roots: Vec<PathBuf>,
         file: PathBuf,
