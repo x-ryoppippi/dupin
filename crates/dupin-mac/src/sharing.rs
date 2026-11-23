@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::ffi::CString;
+use std::ffi::{CString, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
@@ -9,8 +9,8 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSApplication, NSSharingService, NSSharingServiceNameComposeEmail, NSSharingServiceNameSendViaAirDrop,
-    NSSharingServicePicker, NSSharingServicePickerDelegate,
+    NSSharingService, NSSharingServiceNameComposeEmail, NSSharingServiceNameSendViaAirDrop,
+    NSSharingServicePicker, NSSharingServicePickerDelegate, NSView,
 };
 use objc2_foundation::{NSArray, NSObject, NSObjectProtocol, NSRectEdge, NSString, NSURL};
 
@@ -95,10 +95,13 @@ impl Picker {
         }
     }
 
-    pub fn share(
+    /// # Safety
+    /// `ns_view` must point to the launcher's live AppKit view for the duration of the call.
+    pub unsafe fn share(
         &mut self,
         target: ShareTarget,
         paths: &[PathBuf],
+        ns_view: NonNull<c_void>,
         on_picker_finished: impl FnOnce() + 'static,
     ) -> Result<(), String> {
         let main = MainThreadMarker::new().ok_or("Sharing requires the main thread.")?;
@@ -111,10 +114,8 @@ impl Picker {
         let items: &NSArray = unsafe { urls.cast_unchecked() };
         match target {
             ShareTarget::Picker => {
-                let view = NSApplication::sharedApplication(main)
-                    .keyWindow()
-                    .and_then(|window| window.contentView())
-                    .ok_or("Couldn't find a window for the share sheet.")?;
+                // SAFETY: The caller lends the launcher view while Rune keeps it alive.
+                let view = unsafe { ns_view.cast::<NSView>().as_ref() };
                 self.close();
                 let completion = PickerCompletion(RefCell::new(Some(Box::new(on_picker_finished))));
                 // SAFETY: The delegate's superclass is NSObject and its ivars are set before init.
@@ -126,7 +127,7 @@ impl Picker {
                 picker.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
                 self.picker = Some((picker, delegate));
                 let (picker, _) = self.picker.as_ref().unwrap();
-                picker.showRelativeToRect_ofView_preferredEdge(view.bounds(), &view, NSRectEdge::MaxX);
+                picker.showRelativeToRect_ofView_preferredEdge(view.bounds(), view, NSRectEdge::MaxX);
             }
             ShareTarget::Service { name, label } => {
                 let service = NSSharingService::sharingServiceNamed(&NSString::from_str(&name))

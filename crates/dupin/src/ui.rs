@@ -13,6 +13,7 @@ use dupin_core::{
     Searcher, Session,
 };
 use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer};
+use rune::raw_window_handle::RawWindowHandle;
 use rune::{
     Align, AppHandle, DisplayTarget, Image, ImageCache, Key, KeyEvent, OverlayPlacement, ScreenEdge,
     TextEdit, Tx, Waker,
@@ -1300,11 +1301,8 @@ impl Ui {
                 Effect::Run(action) => match action {
                     dupin_core::Action::Copy(text) => tx.copy(text),
                     dupin_core::Action::Share { target, paths } => {
-                        let panel = self.me.clone();
                         if !rune::tooling::is_headless()
-                            && let Err(error) = self.sharing.share(target, &paths, move || {
-                                panel.update(|ui, tx| ui.dismiss_if_unfocused(tx));
-                            })
+                            && let Err(error) = self.share(target, &paths)
                         {
                             self.me.update(move |ui, tx| ui.show_notice(error, tx));
                         }
@@ -1398,6 +1396,23 @@ impl Ui {
         self.panel_window = Some(window);
     }
 
+    fn share(&mut self, target: dupin_core::ShareTarget, paths: &[std::path::PathBuf]) -> Result<(), String> {
+        let window = self
+            .panel_window
+            .as_ref()
+            .ok_or("Couldn't find the launcher window.")?;
+        let panel = self.me.clone();
+        window.with_raw_handle(|handle| match handle.as_raw() {
+            // SAFETY: Rune lends the live launcher view for this main-thread callback.
+            RawWindowHandle::AppKit(appkit) => unsafe {
+                self.sharing.share(target, paths, appkit.ns_view, move || {
+                    panel.update(|ui, tx| ui.dismiss_if_unfocused(tx));
+                })
+            },
+            _ => Err("Couldn't find the launcher view.".into()),
+        })?
+    }
+
     pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
         if !focused {
             self.dismiss_if_unfocused(tx);
@@ -1417,7 +1432,6 @@ impl Ui {
     }
 
     fn panel_is_key(&self) -> bool {
-        use rune::raw_window_handle::RawWindowHandle;
         self.panel_window.as_ref().is_some_and(|window| {
             window
                 .with_raw_handle(|handle| match handle.as_raw() {

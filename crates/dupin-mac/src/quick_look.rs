@@ -10,7 +10,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindow, NSWindowDelegate,
+    NSApplication, NSEvent, NSEventType, NSResponder, NSView, NSWindowDelegate,
     NSWindowDidResignKeyNotification,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString, NSURL};
@@ -235,7 +235,7 @@ impl Previewer {
         // SAFETY: The owner chain changed when its selected URL was set; this asks QL to find us.
         unsafe { panel.updateController() };
         let owner = self.view.window();
-        let owner_was_key = owner.as_ref().is_some_and(|window| window.isKeyWindow());
+        let owner_was_key = crate::window::view_is_key(&self.view);
         panel.makeKeyAndOrderFront(None);
         if !current_controller_is(&panel, &self.controller) {
             if std::env::var_os("DUPIN_TRACE").is_some() {
@@ -250,7 +250,7 @@ impl Previewer {
                 }
                 trace_preview(&format!(
                     "controller not adopted; owner_key={} app_active={} app_key={} responders={}",
-                    self.owner_is_key(),
+                    crate::window::view_is_key(&self.view),
                     app.isActive(),
                     app.keyWindow().is_some(),
                     chain.join(" -> ")
@@ -263,7 +263,7 @@ impl Previewer {
             }
             if owner_was_key
                 && let Some(owner) = owner
-                && !owner.isKeyWindow()
+                && !crate::window::view_is_key(&self.view)
             {
                 owner.makeKeyWindow();
             }
@@ -304,14 +304,6 @@ impl Previewer {
         ));
     }
 
-    pub fn owner_is_key(&self) -> bool {
-        MainThreadMarker::new().is_some()
-            && self
-                .view
-                .window()
-                .is_some_and(|window: Retained<NSWindow>| window.isKeyWindow())
-    }
-
     pub fn finish_focus_transfer(&self) -> bool {
         let Some(mtm) = MainThreadMarker::new() else {
             return false;
@@ -324,7 +316,7 @@ impl Previewer {
                 .is_some_and(|current| !same_object(&*current, &*self.controller))
         }) {
             self.controller.clear_item();
-            return self.owner_is_key();
+            return crate::window::view_is_key(&self.view);
         }
         let visible = panel.as_ref().is_some_and(|panel| panel.isVisible());
         trace_preview(&format!(
@@ -341,7 +333,7 @@ impl Previewer {
                 .as_ref()
                 .is_some_and(|panel| current_controller_is(panel, &self.controller) && panel.isKeyWindow()),
             visible,
-            owner.as_ref().is_some_and(|window| window.isKeyWindow()),
+            crate::window::view_is_key(&self.view),
             owner.as_ref().is_some_and(|window| window.isVisible()),
             app.isActive(),
             app.keyWindow().is_some(),

@@ -36,6 +36,10 @@ pub unsafe fn is_key_window(ns_view: NonNull<c_void>) -> bool {
     };
     // SAFETY: The caller guarantees a live NSView for this borrow.
     let view = unsafe { ns_view.cast::<NSView>().as_ref() };
+    view_is_key(view)
+}
+
+pub(crate) fn view_is_key(view: &NSView) -> bool {
     view.window().is_some_and(|window| window.isKeyWindow())
 }
 
