@@ -178,7 +178,7 @@ every gate, and containment fails at both levels.
   any real adapter code. The thrown value for an out-of-memory error can be `null`,
   so the host must classify failures itself rather than rely on the message.
 - `Module::load` trusts its input: QuickJS bytecode is not validated, so a bytecode
-  cache must be written only by the host from source it compiled, never accepted
+  cache must hold only bytecode compiled from source by Dupin, never accepted
   from a package.
 
 This experiment does not cover Linux compatibility, 64 installed packages, broker
