@@ -128,6 +128,12 @@ impl Catalog {
     }
 }
 
+impl dupin_host_services::exec::Scripts for Catalog {
+    fn resolve(&self, name: &str, args: &[String]) -> Result<PathBuf, String> {
+        self.bound_script(name, args).map(|script| script.path.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

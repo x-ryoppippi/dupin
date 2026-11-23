@@ -746,6 +746,7 @@ version = "0.0.0"
 dependencies = [
  "dupin-core",
  "dupin-ext-sdk",
+ "dupin-host-services",
  "dupin-js-runtime",
  "dupin-mac",
  "dupin-plugin-protocol",
@@ -789,6 +790,14 @@ dependencies = [
  "dupin-js-runtime",
  "dupin-plugin-protocol",
  "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "dupin-host-services"
+version = "0.0.0"
+dependencies = [
+ "libc",
  "tempfile",
 ]
 
