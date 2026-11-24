@@ -116,7 +116,7 @@ pub(crate) fn extract(
 }
 
 /// The id Git gives a blob with these contents.
-pub(crate) fn blob_id(bytes: &[u8]) -> String {
+fn blob_id(bytes: &[u8]) -> String {
     let mut hasher = sha1_smol::Sha1::new();
     hasher.update(format!("blob {}\0", bytes.len()).as_bytes());
     hasher.update(bytes);
