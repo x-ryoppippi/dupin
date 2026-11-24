@@ -207,10 +207,7 @@ impl fmt::Display for Denial {
             Self::Revoked(key) => write!(f, "You turned off `{key}` for this extension."),
             Self::DeniedByBase(key) => write!(f, "Your declared configuration denies `{key}`."),
             Self::OsDenied(permission) | Self::OsRestricted(permission) => {
-                let name = match permission {
-                    OsPermission::Calendars => "Calendars",
-                    OsPermission::Pasteboard => "Paste from Other Apps",
-                };
+                let name = permission.name();
                 let by = if matches!(self, Self::OsDenied(_)) {
                     "denied"
                 } else {

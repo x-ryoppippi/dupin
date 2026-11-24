@@ -262,6 +262,14 @@ pub enum OsPermission {
 
 impl OsPermission {
     pub const ALL: [Self; 2] = [Self::Calendars, Self::Pasteboard];
+
+    /// The name System Settings lists it under.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Calendars => "Calendars",
+            Self::Pasteboard => "Paste from Other Apps",
+        }
+    }
 }
 
 /// One grantable unit of a declaration. A [`ScopeKey`] names it; the rest bounds it.

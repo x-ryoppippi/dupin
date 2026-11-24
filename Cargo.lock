@@ -881,7 +881,11 @@ dependencies = [
 name = "dupin-host-services"
 version = "0.0.0"
 dependencies = [
+ "base64",
+ "dupin-broker",
  "libc",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -906,6 +910,7 @@ version = "0.0.0"
 dependencies = [
  "block2 0.6.2",
  "dupin-core",
+ "dupin-host-services",
  "libc",
  "memmap2",
  "objc2 0.6.5",

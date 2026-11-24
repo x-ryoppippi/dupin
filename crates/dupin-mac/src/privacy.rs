@@ -8,8 +8,11 @@ use objc2_app_kit::NSApplication;
 use objc2_event_kit::{EKAuthorizationStatus, EKEntityType, EKEventStore};
 use objc2_foundation::{NSBundle, NSError, NSOperationQueue, NSString};
 
+use dupin_host_services::{OsAccess, OsPermission};
+
 use crate::accessibility;
 
+const PRIVACY_SETTINGS_URL: &str = "x-apple.systempreferences:com.apple.preference.security";
 const CALENDARS_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars";
 
@@ -17,13 +20,16 @@ const CALENDARS_SETTINGS_URL: &str =
 pub enum Permission {
     Accessibility,
     Calendars,
+    /// Pasting from other apps without the system's prompt: the pasteboard access policy.
+    Pasteboard,
 }
 
 /// What macOS reports for a permission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Access {
     Allowed,
-    /// Accessibility is untrusted after Dupin previously requested access.
+    /// Accessibility is untrusted after Dupin previously requested access, or the pasteboard
+    /// asks on every read.
     NotAllowed,
     NotDetermined,
     Denied,
@@ -40,6 +46,15 @@ impl Permission {
         match self {
             Permission::Accessibility => "Accessibility",
             Permission::Calendars => "Calendars",
+            Permission::Pasteboard => "Paste from Other Apps",
+        }
+    }
+
+    /// The row in Settings → Permissions an extension capability's OS permission joins.
+    pub const fn of(permission: OsPermission) -> Self {
+        match permission {
+            OsPermission::Calendars => Self::Calendars,
+            OsPermission::Pasteboard => Self::Pasteboard,
         }
     }
 
@@ -50,6 +65,7 @@ impl Permission {
             Permission::Accessibility if accessibility::was_requested() => Access::NotAllowed,
             Permission::Accessibility => Access::NotDetermined,
             Permission::Calendars => calendar_access(calendar_authorization().0),
+            Permission::Pasteboard => crate::clipboard::policy_access(),
         }
     }
 
@@ -57,6 +73,8 @@ impl Permission {
         match self {
             Permission::Accessibility => accessibility::SETTINGS_URL,
             Permission::Calendars => CALENDARS_SETTINGS_URL,
+            // The per-app pasteboard list has no documented anchor.
+            Permission::Pasteboard => PRIVACY_SETTINGS_URL,
         }
     }
 
@@ -66,12 +84,37 @@ impl Permission {
     }
 }
 
+impl Access {
+    /// What the extension broker is told. Anything short of allowed that only System
+    /// Settings can change counts as denied, so the broker never offers a prompt for it.
+    pub(crate) fn os_access(self) -> OsAccess {
+        match self {
+            Access::Allowed => OsAccess::Allowed,
+            Access::NotDetermined => OsAccess::NotDetermined,
+            Access::Restricted => OsAccess::Restricted,
+            Access::NotAllowed | Access::Denied | Access::WriteOnly | Access::Unknown => OsAccess::Denied,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissionStatus {
     Access(Access),
     Requesting,
     RequestIncomplete,
     Unavailable,
+}
+
+impl PermissionStatus {
+    /// What the extension broker is told. A request in flight or unfinished is still
+    /// undetermined; an unavailable request can't be granted from this build.
+    pub(crate) fn os_access(self) -> OsAccess {
+        match self {
+            PermissionStatus::Access(access) => access.os_access(),
+            PermissionStatus::Requesting | PermissionStatus::RequestIncomplete => OsAccess::NotDetermined,
+            PermissionStatus::Unavailable => OsAccess::Restricted,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -311,11 +354,42 @@ mod tests {
     fn each_permission_links_to_its_privacy_pane() {
         for (permission, anchor) in [
             (Permission::Accessibility, "Privacy_Accessibility"),
-            (Permission::Calendars, "Privacy_Calendars"),
+            (Permission::Calendars, "?Privacy_Calendars"),
+            (Permission::Pasteboard, "com.apple.preference.security"),
         ] {
             let url = permission.settings_url();
-            assert!(url.starts_with("x-apple.systempreferences:com.apple.preference.security?"));
+            assert!(url.starts_with("x-apple.systempreferences:com.apple.preference.security"));
             assert!(url.ends_with(anchor), "{url}");
+        }
+    }
+
+    #[test]
+    fn extension_permissions_join_their_settings_rows() {
+        assert_eq!(Permission::of(OsPermission::Calendars), Permission::Calendars);
+        assert_eq!(Permission::of(OsPermission::Pasteboard), Permission::Pasteboard);
+        for permission in OsPermission::ALL {
+            assert_eq!(Permission::of(permission).name(), permission.name());
+        }
+    }
+
+    #[test]
+    fn only_allowed_access_reaches_the_broker_as_allowed() {
+        for (status, expected) in [
+            (PermissionStatus::Access(Access::Allowed), OsAccess::Allowed),
+            (
+                PermissionStatus::Access(Access::NotDetermined),
+                OsAccess::NotDetermined,
+            ),
+            (PermissionStatus::Requesting, OsAccess::NotDetermined),
+            (PermissionStatus::RequestIncomplete, OsAccess::NotDetermined),
+            (PermissionStatus::Access(Access::Restricted), OsAccess::Restricted),
+            (PermissionStatus::Unavailable, OsAccess::Restricted),
+            (PermissionStatus::Access(Access::Denied), OsAccess::Denied),
+            (PermissionStatus::Access(Access::WriteOnly), OsAccess::Denied),
+            (PermissionStatus::Access(Access::NotAllowed), OsAccess::Denied),
+            (PermissionStatus::Access(Access::Unknown), OsAccess::Denied),
+        ] {
+            assert_eq!(status.os_access(), expected, "{status:?}");
         }
     }
 }
