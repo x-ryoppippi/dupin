@@ -138,6 +138,16 @@ fn items_problems_name_the_field_at_fault() {
             Some("sections[0].items[0].id"),
         ),
         (
+            "export function items() { return { type: 'update', append: Object.assign([], { length: 2147483647 }) }; }",
+            "too-many-rows",
+            None,
+        ),
+        (
+            "export function items() { return { type: 'update', replace: Object.assign([], { length: 2147483647 }) }; }",
+            "too-many-rows",
+            None,
+        ),
+        (
             "export function items() { return { type: 'update', append: [{ id: 'a', title: 'a' }], replace: [{ id: 'a', title: 'b' }] }; }",
             "duplicate-id",
             Some("replace[0].id"),

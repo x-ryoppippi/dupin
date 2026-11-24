@@ -315,16 +315,14 @@ impl<'a> Reader<'a> {
         section: Option<&str>,
     ) -> Result<Vec<Row>, Failure> {
         let mut ids = HashSet::new();
-        let len = items.as_array().map_or(0, Array::len);
-        if len > self.max_rows() {
-            return Err(self.too_many_rows(len));
-        }
         let mut rows = self.list_items_with(items, path, section, 0, &mut ids)?;
         rows.truncate(self.limit);
         Ok(rows)
     }
 
-    /// Reads `items` at `path`, numbering items without an ID from `start`.
+    /// Reads `items` at `path`, numbering items without an ID from `start`. The array's length
+    /// is checked before anything is allocated for it, since a sparse array claims any length
+    /// without costing the package's heap.
     fn list_items_with(
         &mut self,
         items: Value<'_>,
@@ -339,6 +337,9 @@ impl<'a> Reader<'a> {
                 .hint("Return `{ items: [{ title: \"…\" }] }`.")
                 .into());
         };
+        if items.len() > self.max_rows() {
+            return Err(self.too_many_rows(items.len()));
+        }
         let mut rows = Vec::with_capacity(items.len());
         for (index, item) in items.iter::<Value>().enumerate() {
             let field = format!("{path}[{index}]");
