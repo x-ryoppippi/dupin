@@ -119,7 +119,8 @@ def "main compare" [
 }
 
 # Hold every implementation other than `native` against the native one of the same feature,
-# within one result set. Passes when no feature declares a second implementation.
+# within one result set, and one without a native implementation against its own `budget_ms`.
+# Passes when no feature declares a second implementation.
 def "main parity" [
     results: path
     --tolerance: float = 10.0 # Percent of native's p95
@@ -317,6 +318,7 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
         prefix: $job.prefix
         typed: $job.typed
         provider: $job.setup.provider
+        budget_ms: $job.setup.budget_ms?
         commands: (
             $runs
             | get commands
@@ -341,19 +343,25 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
 }
 
 # Each pair's verdict: `regressed` when the candidate's p95 exceeds the baseline's by more than
-# `tolerance` percent of it or `floor`, whichever is larger; `new` without a baseline.
+# `tolerance` percent of it or `floor`, whichever is larger. Without a baseline, `regressed` when
+# it exceeds the candidate's own `budget_ms`, and `new` when it has none.
 export def verdicts [pairs: list<record>, tolerance: float, floor: duration]: nothing -> table {
     $pairs | each {|pair|
         let cand = $pair.candidate
         match $pair.baseline {
             null => {
-                id: $cand.id
-                baseline: null
-                candidate: $cand.implementation
-                baseline_p95_ms: null
-                candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
-                allowed_ms: null
-                verdict: "new"
+                let budget = $cand.budget_ms?
+                {
+                    id: $cand.id
+                    baseline: (if $budget == null { null } else { "budget" })
+                    candidate: $cand.implementation
+                    baseline_p95_ms: null
+                    candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
+                    allowed_ms: $budget
+                    verdict: (
+                        if $budget == null { "new" } else if $cand.p95_ms > $budget { "regressed" } else { "ok" }
+                    )
+                }
             }
             $base => {
                 let allowed = [($base.p95_ms * $tolerance / 100) ($floor / 1ms)] | math max
