@@ -1,4 +1,4 @@
-{ lib, ... }:
+{ lib, self, ... }:
 let
   root = ./..;
 in
@@ -28,11 +28,16 @@ in
               nu scripts/tests/e2e-state.nu
               nu scripts/tests/e2e-file-fixtures.nu
               nu scripts/tests/e2e-script-fixtures.nu
+              nu scripts/tests/latency.nu
             '';
         inherit (dupin) hawk;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = dupin.lintAndTest;
+        home-manager-module = import ./tests/home-manager-module.nix {
+          inherit lib pkgs;
+          module = self.homeManagerModules.default;
+        };
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
           ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';

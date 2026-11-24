@@ -140,6 +140,8 @@ pub fn directory() -> Option<PathBuf> {
 struct Scanner {
     loaded: HashMap<PathBuf, LoadedExtension>,
     previous: Option<Catalog>,
+    /// Keeps a folder off when it no longer matches extensions.lock.
+    integrity: Option<dupin_extension_install::Integrity>,
 }
 
 impl Scanner {
@@ -188,6 +190,16 @@ impl Scanner {
             folders.truncate(MAX_EXTENSIONS);
         }
         for folder in folders {
+            if let Some(problem) = self
+                .integrity
+                .as_mut()
+                .and_then(|integrity| integrity.check(&folder))
+            {
+                catalog
+                    .problems
+                    .push(format!("{}: {problem}", folder_name(&folder)));
+                continue;
+            }
             match load(&folder, previous.remove(&folder)) {
                 Ok(loaded) => {
                     let extension = &loaded.extension;
@@ -243,6 +255,19 @@ impl FileStamp {
 /// Reads the extension in `folder` as the scanner does, for `dupin ext` to check or run.
 pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     load(folder, None).map(|loaded| loaded.extension)
+}
+
+/// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
+/// reports, and what `dupin ext build` and `dupin ext dev` require before a result is kept.
+pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    let extension = load_folder(folder)?;
+    extension
+        .check(Instant::now() + QUERY_DEADLINE)
+        .map_err(|error| match error {
+            RunError::Failed(diagnostic) => diagnostic,
+            RunError::Cancelled => Diagnostic::new("cancelled", "the check was cancelled"),
+        })?;
+    Ok(extension)
 }
 
 fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
@@ -351,7 +376,10 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
 
 /// Scans now and after changes under `directory`, delivering changed catalogues in order.
 pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
-    let mut scanner = Scanner::default();
+    let mut scanner = Scanner {
+        integrity: crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new),
+        ..Scanner::default()
+    };
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
@@ -640,6 +668,46 @@ pub(crate) mod tests {
             );
         }
         assert_eq!(catalog.problems.len(), 10, "{problems}");
+    }
+
+    #[test]
+    fn a_folder_that_no_longer_matches_the_lock_stays_off() {
+        let fixture = folder();
+        let root = fixture.path().join("extensions");
+        install(&root, "words", &manifest("words", "wc"), Some(&guest("{}")));
+        let lock_path = fixture.path().join(dupin_extension_install::LOCK_FILE);
+        let mut lock = dupin_extension_install::Lock::new();
+        lock.packages.insert(
+            "words".into(),
+            dupin_extension_install::Entry {
+                source: "github:someone/words".into(),
+                rev: None,
+                commit: None,
+                content_hash: dupin_extension_install::content_hash(&root.join("words")).unwrap(),
+                installed_at: "2026-01-01T00:00:00Z".into(),
+                version: "0.1.0".into(),
+                keyword: "wc".into(),
+                requested: vec![],
+                granted: vec![],
+                pending_consent: vec![],
+            },
+        );
+        lock.write(&lock_path).unwrap();
+        let mut scanner = Scanner {
+            integrity: Some(dupin_extension_install::Integrity::new(lock_path)),
+            ..Scanner::default()
+        };
+        assert_eq!(scanner.scan(&root).extensions.len(), 1);
+
+        std::fs::write(root.join("words/guest.wasm"), guest("{\"tampered\":true}")).unwrap();
+        let catalog = scanner.scan(&root);
+        assert!(catalog.extensions.is_empty());
+        assert!(
+            catalog.problems[0].starts_with("words: disabled")
+                && catalog.problems[0].contains("extensions.lock"),
+            "{:?}",
+            catalog.problems
+        );
     }
 
     #[test]
