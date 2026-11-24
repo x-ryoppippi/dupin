@@ -32,6 +32,12 @@ const HANDSHAKE: Duration = Duration::from_secs(5);
 /// provider's newer query replaces its older one.
 const MAX_WAITING: usize = 64;
 const IDLE: Duration = Duration::from_secs(120);
+/// How often the helpers waiting for a call are checked.
+const WATCH: Duration = Duration::from_secs(1);
+/// The processor time a helper may use between answering one call and being sent the next:
+/// enough to make the next call's engine and drop the last one's. A helper runs nothing else
+/// while it waits, so one that spends more is doing work nobody asked for.
+const RESTING_CPU: Duration = Duration::from_millis(250);
 /// Resident helpers kept at once; the one idle longest is stopped to make room.
 const MAX_RESIDENT: usize = 8;
 /// The helper's footprint beyond the package a call carries: the engine's 16 MiB heap,
@@ -573,7 +579,7 @@ impl Drop for Lease<'_> {
     fn drop(&mut self) {
         let mut state = self.shared.lock();
         let slot = state.slots.entry(self.domain).or_default();
-        slot.helper = self.helper.take();
+        slot.helper = self.helper.take().map(Helper::rest);
         slot.busy = false;
         slot.idle_since = Some(Instant::now());
         let resident = state.slots.values().filter(|slot| slot.helper.is_some()).count();
@@ -596,18 +602,19 @@ impl Drop for Lease<'_> {
     }
 }
 
-/// Stops a helper nobody has used for [`IDLE`], so an unused extension costs no process.
+/// Stops a helper nobody has used for [`IDLE`], so an unused extension costs no process, and
+/// one that is no longer idle while it waits for a call.
 fn spawn_reaper(shared: Weak<Shared>) -> bool {
     std::thread::Builder::new()
         .name("extension-host-reaper".into())
         .spawn(move || {
             loop {
-                std::thread::sleep(IDLE / 4);
+                std::thread::sleep(WATCH);
                 let Some(shared) = shared.upgrade() else { return };
                 let mut state = shared.lock();
                 for slot in state.slots.values_mut() {
                     let idle = slot.idle_since.is_some_and(|since| since.elapsed() >= IDLE);
-                    if idle {
+                    if idle || slot.helper.as_mut().is_some_and(|helper| !helper.is_idle()) {
                         slot.helper = None;
                     }
                 }
@@ -632,6 +639,10 @@ struct Helper {
     greeted: bool,
     /// What this helper holds of the compiles it was sent: it holds them by the same rules.
     held: wire::Held<()>,
+    /// The footprint its last call was allowed, which it keeps to while it waits for the next.
+    footprint_limit: u64,
+    /// Its processor time when it answered its last call.
+    resting_since: Option<Duration>,
 }
 
 impl Drop for Helper {
@@ -679,6 +690,8 @@ impl Helper {
             started: Instant::now(),
             greeted: false,
             held: wire::Held::default(),
+            footprint_limit: FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64,
+            resting_since: None,
         })
     }
 
@@ -745,12 +758,25 @@ impl Helper {
         Greeting::Ready
     }
 
-    /// Whether the helper is alive and, once greeted, has sent nothing since its last answer.
-    /// It speaks only to answer a call, so anything queued between calls, such as a reply
-    /// forged for a later call, means it can't be trusted with another.
+    /// Marks the helper as waiting for its next call from now.
+    fn rest(mut self) -> Self {
+        self.resting_since = processor_time(self.child.id());
+        self
+    }
+
+    /// Whether the helper is alive and, once greeted, has sent nothing since its last answer,
+    /// used no more than [`RESTING_CPU`] and kept to its last call's footprint. It speaks and
+    /// works only to answer a call, so anything sent or done between calls, such as a reply
+    /// forged for a later call or threads it started itself, means it can't be trusted with
+    /// another.
     fn is_idle(&mut self) -> bool {
         let quiet = !self.greeted || matches!(self.replies.try_recv(), Err(mpsc::TryRecvError::Empty));
-        quiet && matches!(self.child.try_wait(), Ok(None))
+        let pid = self.child.id();
+        let rested = self.resting_since.is_none_or(|since| {
+            processor_time(pid).is_none_or(|now| now.saturating_sub(since) <= RESTING_CPU)
+        });
+        let small = footprint(pid).is_none_or(|bytes| bytes <= self.footprint_limit);
+        quiet && rested && small && matches!(self.child.try_wait(), Ok(None))
     }
 
     fn send(&mut self, message: &ToHelper, tail: &[&[u8]]) -> Result<(), RunError> {
@@ -818,6 +844,7 @@ impl Helper {
         };
         self.send(&message, tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
+        self.footprint_limit = footprint_limit;
         let mut cancel_by = None;
         let mut requests = Requests::new(
             services.clone(),
@@ -1066,6 +1093,45 @@ fn footprint(pid: u32) -> Option<u64> {
         unsafe { libc::proc_pid_rusage(pid as i32, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) };
     // SAFETY: a zero status means the call filled `usage`.
     (status == 0).then(|| unsafe { usage.assume_init() }.ri_phys_footprint)
+}
+
+/// The processor time the helper has used, user and system, across all its threads.
+#[cfg(target_os = "macos")]
+fn processor_time(pid: u32) -> Option<Duration> {
+    #[repr(C)]
+    struct Timebase {
+        numerator: u32,
+        denominator: u32,
+    }
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut Timebase) -> libc::c_int;
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+    // SAFETY: `usage` is large enough for the RUSAGE_INFO_V2 flavor the call writes.
+    let status =
+        unsafe { libc::proc_pid_rusage(pid as i32, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) };
+    if status != 0 {
+        return None;
+    }
+    // SAFETY: a zero status means the call filled `usage`.
+    let usage = unsafe { usage.assume_init() };
+    let mut timebase = Timebase {
+        numerator: 0,
+        denominator: 0,
+    };
+    // SAFETY: `timebase` is the struct the call fills.
+    if unsafe { mach_timebase_info(&mut timebase) } != 0 || timebase.denominator == 0 {
+        return None;
+    }
+    // Mach absolute time units, which are nanoseconds only on Intel.
+    let ticks = u128::from(usage.ri_user_time) + u128::from(usage.ri_system_time);
+    let nanos = ticks * u128::from(timebase.numerator) / u128::from(timebase.denominator);
+    Some(Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn processor_time(_pid: u32) -> Option<Duration> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]

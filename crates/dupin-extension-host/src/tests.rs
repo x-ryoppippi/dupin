@@ -744,6 +744,66 @@ fn a_subverted_helper_never_runs_a_package_of_another_trust_domain() {
     assert_eq!(implanted.helper_pid(&second), Some(pids[1]));
 }
 
+const SPINNING_ENV: &str = "DUPIN_EXTENSION_HOST_SPINNING";
+
+/// Not a test: a subverted helper that answers every call as the real one does but keeps a
+/// thread of its own busy between calls.
+#[test]
+fn spinning_helper_entry() {
+    if std::env::var_os(SPINNING_ENV).is_some() {
+        std::thread::spawn(|| {
+            loop {
+                std::hint::black_box(0u64);
+            }
+        });
+        serve();
+    }
+}
+
+/// Polls until `done`, for at most `within`.
+fn eventually(within: Duration, done: impl Fn() -> bool) -> bool {
+    let until = Instant::now() + within;
+    while Instant::now() < until {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    done()
+}
+
+#[test]
+fn a_helper_that_works_between_calls_is_stopped_while_it_waits() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    let resting = host();
+    search(&resting, &echo, "", Duration::from_secs(5)).unwrap();
+    let pid = resting.helper_pid(&echo).unwrap();
+
+    let spinning = Host::new(Box::new(|| {
+        let mut command = helper_command("tests::spinning_helper_entry")?;
+        command.env(SPINNING_ENV, "1");
+        Ok(command)
+    }));
+    assert_eq!(
+        titles(&search(&spinning, &echo, "", Duration::from_secs(5)).unwrap()),
+        ["echo "]
+    );
+    let busy = spinning.helper_pid(&echo).unwrap();
+    assert!(
+        eventually(Duration::from_secs(5), || spinning.helper_pid(&echo).is_none()),
+        "the helper kept working while it waited"
+    );
+    // SAFETY: signal 0 only asks whether the process exists.
+    assert_ne!(unsafe { libc::kill(busy as i32, 0) }, 0, "the helper was stopped");
+
+    assert_eq!(
+        resting.helper_pid(&echo),
+        Some(pid),
+        "a helper that only waits stays resident"
+    );
+}
+
 const UNINTERRUPTIBLE: &str = "export function search() { return [{ title: String('a'.repeat(4e6).indexOf('a'.repeat(2e6) + 'b')) }]; }";
 
 #[test]
