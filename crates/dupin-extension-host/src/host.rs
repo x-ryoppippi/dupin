@@ -8,7 +8,7 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
@@ -20,6 +20,9 @@ use dupin_js_runtime::{
 use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
+use workers::Workers;
+
+mod workers;
 
 /// How long a call may run past its deadline, or past a cancellation, before the helper is
 /// stopped. The helper's own interrupt normally ends it well inside this.
@@ -851,46 +854,6 @@ impl<'a> Requests<'a> {
 impl Drop for Requests<'_> {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
-    }
-}
-
-type Job = Box<dyn FnOnce() + Send>;
-
-/// Threads that run host requests, each kept for [`IDLE`] after its last, so a request a guest
-/// makes while the user types doesn't wait for a thread to start.
-#[derive(Default)]
-struct Workers(Arc<Mutex<Vec<mpsc::Sender<Job>>>>);
-
-impl Workers {
-    fn run(&self, mut job: Job) -> io::Result<()> {
-        loop {
-            let idle = self.0.lock().unwrap_or_else(PoisonError::into_inner).pop();
-            let Some(worker) = idle else { break };
-            // A worker that has stopped hands the job back.
-            match worker.send(job) {
-                Ok(()) => return Ok(()),
-                Err(mpsc::SendError(back)) => job = back,
-            }
-        }
-        let (worker, jobs) = mpsc::channel::<Job>();
-        let pool = Arc::downgrade(&self.0);
-        std::thread::Builder::new()
-            .name("extension-host-request".into())
-            .spawn(move || {
-                loop {
-                    job();
-                    let Some(pool) = pool.upgrade() else { return };
-                    pool.lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(worker.clone());
-                    drop(pool);
-                    match jobs.recv_timeout(IDLE) {
-                        Ok(next) => job = next,
-                        Err(_) => return,
-                    }
-                }
-            })
-            .map(drop)
     }
 }
 
