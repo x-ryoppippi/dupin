@@ -91,7 +91,7 @@
 							}
 						],
 						"id": "next-display",
-						"keywords": ["window next display"],
+						"keywords": ["window next display", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Next Display"
 					}
@@ -174,7 +174,7 @@
 							}
 						],
 						"id": "left-half",
-						"keywords": ["window left half"],
+						"keywords": ["window left half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Left Half"
 					}
@@ -217,7 +217,7 @@
 							}
 						],
 						"id": "next-display",
-						"keywords": ["window next display"],
+						"keywords": ["window next display", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Next Display"
 					}

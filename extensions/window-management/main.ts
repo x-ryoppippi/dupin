@@ -35,6 +35,8 @@ export function items(): CatalogueItem[] {
 		keywords: [
 			...spellings,
 			...[title, ...spellings].map((name) => `window ${name.toLowerCase()}`),
+			// The feature's name lists every command, as the native search did.
+			'Window Management',
 		],
 		actions: [{ title: 'Arrange', run: 'arrange', data: id }],
 	}));

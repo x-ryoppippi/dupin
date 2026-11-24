@@ -1,6 +1,6 @@
 {
 	"fixture": 1,
-	"description": "The keyword alone lists every command; other spellings and `window` before a name find them too.",
+	"description": "The keyword alone or with the feature name lists every command; other spellings and `window` before a name find them too.",
 	"environment": {
 		"now": "2026-01-01T09:00:00Z",
 		"seed": 1,
@@ -28,7 +28,7 @@
 							}
 						],
 						"id": "left-half",
-						"keywords": ["window left half"],
+						"keywords": ["window left half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Left Half"
 					},
@@ -43,7 +43,7 @@
 							}
 						],
 						"id": "right-half",
-						"keywords": ["window right half"],
+						"keywords": ["window right half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Right Half"
 					},
@@ -58,7 +58,7 @@
 							}
 						],
 						"id": "top-half",
-						"keywords": ["window top half"],
+						"keywords": ["window top half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Top Half"
 					},
@@ -73,7 +73,7 @@
 							}
 						],
 						"id": "bottom-half",
-						"keywords": ["window bottom half"],
+						"keywords": ["window bottom half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Bottom Half"
 					},
@@ -88,7 +88,7 @@
 							}
 						],
 						"id": "left-third",
-						"keywords": ["window left third"],
+						"keywords": ["window left third", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Left Third"
 					},
@@ -103,7 +103,12 @@
 							}
 						],
 						"id": "centre-third",
-						"keywords": ["Center Third", "window centre third", "window center third"],
+						"keywords": [
+							"Center Third",
+							"window centre third",
+							"window center third",
+							"Window Management"
+						],
 						"subtitle": "Window Management",
 						"title": "Centre Third"
 					},
@@ -118,7 +123,7 @@
 							}
 						],
 						"id": "right-third",
-						"keywords": ["window right third"],
+						"keywords": ["window right third", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Right Third"
 					},
@@ -133,7 +138,7 @@
 							}
 						],
 						"id": "maximise",
-						"keywords": ["Maximize", "window maximise", "window maximize"],
+						"keywords": ["Maximize", "window maximise", "window maximize", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Maximise"
 					},
@@ -148,7 +153,7 @@
 							}
 						],
 						"id": "centre",
-						"keywords": ["Center", "window centre", "window center"],
+						"keywords": ["Center", "window centre", "window center", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Centre"
 					},
@@ -163,7 +168,170 @@
 							}
 						],
 						"id": "next-display",
-						"keywords": ["window next display"],
+						"keywords": ["window next display", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Next Display"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "management",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "left-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "left-half",
+						"keywords": ["window left half", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Left Half"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "right-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "right-half",
+						"keywords": ["window right half", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Right Half"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "top-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "top-half",
+						"keywords": ["window top half", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Top Half"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "bottom-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "bottom-half",
+						"keywords": ["window bottom half", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Bottom Half"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "left-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "left-third",
+						"keywords": ["window left third", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Left Third"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "centre-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "centre-third",
+						"keywords": [
+							"Center Third",
+							"window centre third",
+							"window center third",
+							"Window Management"
+						],
+						"subtitle": "Window Management",
+						"title": "Centre Third"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "right-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "right-third",
+						"keywords": ["window right third", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Right Third"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "maximise"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "maximise",
+						"keywords": ["Maximize", "window maximise", "window maximize", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Maximise"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "centre"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "centre",
+						"keywords": ["Center", "window centre", "window center", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Centre"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "next-display"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "next-display",
+						"keywords": ["window next display", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Next Display"
 					}
@@ -186,7 +354,12 @@
 							}
 						],
 						"id": "centre-third",
-						"keywords": ["Center Third", "window centre third", "window center third"],
+						"keywords": [
+							"Center Third",
+							"window centre third",
+							"window center third",
+							"Window Management"
+						],
 						"subtitle": "Window Management",
 						"title": "Centre Third"
 					}
@@ -209,7 +382,7 @@
 							}
 						],
 						"id": "maximise",
-						"keywords": ["Maximize", "window maximise", "window maximize"],
+						"keywords": ["Maximize", "window maximise", "window maximize", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Maximise"
 					}
@@ -232,7 +405,7 @@
 							}
 						],
 						"id": "left-half",
-						"keywords": ["window left half"],
+						"keywords": ["window left half", "Window Management"],
 						"subtitle": "Window Management",
 						"title": "Left Half"
 					}
