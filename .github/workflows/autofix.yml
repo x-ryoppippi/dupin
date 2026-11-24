@@ -3,6 +3,10 @@ name: autofix.ci
 
 on:
   pull_request:
+  # Blacksmith commits the job's sticky /nix store only from main, so without this run every
+  # pull request would start from a cold store.
+  push:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,12 +32,18 @@ jobs:
         with:
           cache-scope: autofix
 
+      # Apart from nix fmt below, so a formatter that no longer builds for Linux fails the job
+      # instead of hiding behind its continue-on-error.
+      - run: nix build --no-link .#formatter.x86_64-linux
+
       # Changes nothing, offline, unless the pull request moved Rune's pin.
       - run: nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/update-rune.nu
 
       # After the Rune step, so whatever it rewrites is formatted too. A finding no formatter can
       # fix, such as a typo or a zizmor one, still lets the fixes through; CI's treefmt check fails on it.
-      - run: nix fmt
+      - if: github.event_name == 'pull_request'
+        run: nix fmt
         continue-on-error: true
 
-      - uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
+      - if: github.event_name == 'pull_request'
+        uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4

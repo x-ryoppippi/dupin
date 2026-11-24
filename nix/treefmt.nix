@@ -16,6 +16,9 @@ let
         typos = {
           enable = true;
           configFile = "./typos.toml";
+          # Report only: autofix.ci would commit whatever typos rewrote, UK spellings turned
+          # American by the en-us locale among them, and a typo's fix needs a person.
+          autoFix = false;
         };
       };
 

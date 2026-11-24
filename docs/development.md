@@ -154,9 +154,9 @@ RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
 
 ## Formatting
 
-`nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
+`nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`; it only reports, since a typo's fix needs a person), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
 
-On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune step](#rune-updates), and autofix.ci commits both fixes in one commit, so unformatted files come back formatted instead of failing CI. The flake targets only aarch64-darwin, but it exports the same treefmt configuration as `formatter.x86_64-linux`, so the workflow runs on a cheap Linux runner. The `treefmt` check in CI still fails where autofix.ci can't commit, such as a pull request from a fork that hasn't installed the app, and on what the formatters report but can't fix, such as a typo, an actionlint error or a zizmor finding.
+On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune step](#rune-updates), and autofix.ci commits both fixes in one commit, so unformatted files come back formatted instead of failing CI. The flake targets only aarch64-darwin, but it exports the same treefmt configuration as `formatter.x86_64-linux`, so the workflow runs on a cheap Linux runner. The `treefmt` check in CI still fails where autofix.ci can't commit, such as a pull request from a fork that hasn't installed the app, and on what the formatters report but can't fix, such as a typo, an actionlint error or a zizmor finding. The workflow also runs on every push to `main`, without formatting or committing anything, because Blacksmith saves the job's Nix store only from `main`; without it, every pull request would download the formatter, Nushell and cargo again.
 
 ## Headless renders
 
