@@ -17,7 +17,8 @@ assert
   unhashed == [ ]
   || throw ''
     nix/cargo-vendor.nix has no hash for ${builtins.head unhashed}.
-    Add it to outputHashes with the hash "" and build .#dupin; Nix prints the hash to use.
+    For Rune, run `nu scripts/update-rune.nu`; for another Git source, add it to outputHashes
+    with the hash "" and build .#dupin, and Nix prints the hash to use.
   '';
 craneLib.vendorCargoDeps {
   cargoLock = ../Cargo.lock;
