@@ -749,6 +749,25 @@ mod tests {
             .collect()
     }
 
+    /// Like [`exchange`], but keeps input open until `replies` have arrived, as a client waiting
+    /// on its calls does; closing input aborts the calls still running.
+    fn converse(host: &Fake, input: &str, replies: usize) -> Vec<Value> {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let reader = server.try_clone().unwrap();
+        std::thread::scope(|scope| {
+            let serving = scope.spawn(move || serve(BufReader::new(reader), &mut server, host).unwrap());
+            client.write_all(input.as_bytes()).unwrap();
+            let received = BufReader::new(client.try_clone().unwrap())
+                .lines()
+                .take(replies)
+                .map(|line| serde_json::from_str(&line.unwrap()).unwrap())
+                .collect();
+            drop(client);
+            serving.join().unwrap();
+            received
+        })
+    }
+
     fn call(id: u64, name: &str, arguments: Value) -> String {
         json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
             .to_string()
@@ -1004,7 +1023,7 @@ mod tests {
         };
         let fixture = root.join("greeter/fixtures/search.json");
         let before = std::fs::read(&fixture).unwrap();
-        let mut replies = exchange(
+        let mut replies = converse(
             &host,
             &[
                 r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.to_owned() + "\n",
@@ -1019,6 +1038,7 @@ mod tests {
                 call(10, "ext_check", json!({"package": "greeter/fixtures"})),
             ]
             .concat(),
+            10,
         );
         replies.sort_by_key(|reply| reply["id"].as_u64());
         let names: Vec<&str> = replies[0]["result"]["tools"]
