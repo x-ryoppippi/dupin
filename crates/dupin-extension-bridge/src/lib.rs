@@ -234,15 +234,6 @@ fn stamp(path: &Path) -> Option<Stamp> {
     })
 }
 
-/// A missing file declares nothing.
-fn read_base(path: &Path) -> Result<Base, String> {
-    match std::fs::read_to_string(path) {
-        Ok(source) => Base::parse(&source).map_err(|error| error.to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Base::default()),
-        Err(error) => Err(error.to_string()),
-    }
-}
-
 /// A missing file holds no decisions; one that can't be read stands for unknown decisions.
 fn read_local(path: &Path) -> Result<Local, String> {
     match std::fs::read_to_string(path) {
@@ -286,21 +277,21 @@ impl Bridge {
     }
 
     /// Reads the declarative base at `base` and the local grants at `local`. A missing file is
-    /// empty. An unreadable local file grants nothing and is never overwritten; an unreadable
-    /// base is reported and grants nothing; a base entry that can't be read is reported and
-    /// keeps its package off.
+    /// empty. An unreadable local file grants nothing and is never overwritten; an unusable
+    /// base is reported, and while it stands only local grants apply; a base entry that can't
+    /// be read is reported and keeps its package off.
     pub fn open(base: &Path, local: &Path, services: Services) -> Self {
         // Stamped before reading, so a change made during the read is read again later.
         let seen = Seen {
             base: stamp(base),
             local: stamp(local),
         };
-        let base_grants = read_base(base);
-        let mut problems: Vec<_> = base_problems(&base_grants)
+        let base_grants = Base::read(base);
+        let mut problems: Vec<_> = base_grants
+            .problems()
             .into_iter()
             .map(|problem| format!("{}: {problem}", base.display()))
             .collect();
-        let base_grants = base_grants.unwrap_or_default();
         let local_grants = read_local(local).unwrap_or_else(|error| {
             problems.push(format!("{}: {error}", local.display()));
             Local::unreadable()
@@ -725,9 +716,9 @@ impl Inner {
             let now = stamp(path);
             if now != state.seen.base {
                 state.seen.base = now;
-                let base = read_base(path);
-                note_problem(state, path, &base_problems(&base));
-                changed.extend(state.broker.replace_base(base.unwrap_or_default()));
+                let base = Base::read(path);
+                note_problem(state, path, &base.problems());
+                changed.extend(state.broker.replace_base(base));
             }
         }
         if let Some(path) = &self.local {
@@ -830,14 +821,6 @@ fn note_problem<'a>(state: &mut State, path: &Path, problems: impl IntoIterator<
     state.problems.retain(|known| !known.starts_with(&prefix));
     for problem in problems {
         state.problems.push(format!("{prefix}{problem}"));
-    }
-}
-
-/// What reading the base found wrong: the whole file, or each entry it set aside.
-fn base_problems(base: &Result<Base, String>) -> Vec<String> {
-    match base {
-        Ok(base) => base.problems(),
-        Err(error) => vec![error.clone()],
     }
 }
 

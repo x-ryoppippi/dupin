@@ -884,7 +884,9 @@ impl Broker {
                 binding,
             };
         }
-        if self.pristine(id, &installed.revision) && !declared.needs_binding() {
+        // Only the current base counts: a fixed file restores what the build ships granted,
+        // which grants nothing beyond it.
+        if self.pristine(id, &installed.revision) && !declared.needs_binding() && !self.base.is_unusable() {
             return Effective::Granted {
                 source: GrantSource::Bundled,
                 binding: None,

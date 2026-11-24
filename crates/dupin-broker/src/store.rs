@@ -42,6 +42,10 @@ pub struct Base {
     /// Entries that couldn't be read, by the key they were written under, with why. What such
     /// an entry meant to deny is unknown, so the broker keeps its package off.
     rejected: BTreeMap<String, String>,
+    /// Why a file that exists couldn't be used at all. It carries the user's denials, none of
+    /// which are known, so the broker gives no package anything from the base or a bundled
+    /// pre-grant while it stands.
+    unusable: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -119,12 +123,40 @@ impl Base {
         self.packages.get(id)
     }
 
+    /// Reads the base at `path`. A missing file declares nothing; one that can't be read or
+    /// parsed is [`Base::unusable`].
+    pub fn read(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(source) => Self::parse(&source).unwrap_or_else(|error| Self::unusable(error.to_string())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(error) => Self::unusable(error.to_string()),
+        }
+    }
+
+    /// Stands in for a base file that exists but couldn't be used, for `reason`.
+    pub fn unusable(reason: impl Into<String>) -> Self {
+        Self {
+            unusable: Some(reason.into()),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn is_unusable(&self) -> bool {
+        self.unusable.is_some()
+    }
+
     pub(crate) fn rejects(&self, id: &PackageId) -> bool {
         self.rejected.contains_key(id.as_str())
     }
 
-    /// Why each entry that couldn't be read was set aside, for Settings to show.
+    /// Why the file, or each entry set aside, couldn't be used, for Settings to show.
     pub fn problems(&self) -> Vec<String> {
+        if let Some(reason) = &self.unusable {
+            return vec![format!(
+                "the declared grants can't be used, so no extension gets anything from them or \
+                 anything bundled extensions ship with, only what you allow in Dupin: {reason}"
+            )];
+        }
         self.rejected
             .iter()
             .map(|(key, message)| {

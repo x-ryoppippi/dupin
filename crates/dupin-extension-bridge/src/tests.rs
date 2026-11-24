@@ -1034,6 +1034,55 @@ fn settings_hears_of_a_base_entry_set_aside_and_its_package_stays_off() {
 }
 
 #[test]
+fn an_unusable_base_withholds_bundled_grants_and_says_why() {
+    let folder = tempfile::tempdir().unwrap();
+    let base = folder.path().join("base.toml");
+    let calendar = PackageId::new("bundled:calendar").unwrap();
+    let capabilities = || {
+        Capabilities::parse(&serde_json::json!({
+            "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 }
+        }))
+        .unwrap()
+    };
+    let open = || {
+        let bridge = Bridge::open(&base, &folder.path().join("grants.toml"), Services::none());
+        bridge.set_bundled(&calendar, revision(), true);
+        bridge.install_bundled(&calendar, revision(), capabilities());
+        bridge
+    };
+    let states = |bridge: &Bridge| -> Vec<_> {
+        bridge
+            .scopes(&calendar)
+            .into_iter()
+            .map(|entry| entry.state)
+            .collect()
+    };
+
+    let missing = open();
+    assert!(missing.problems().is_empty(), "a missing base is an empty one");
+    assert_eq!(states(&missing), [ConsentState::Granted(GrantSource::Bundled)]);
+
+    std::fs::write(&base, "version = 1\n[packages\n").unwrap();
+    let bridge = open();
+    let [problem] = bridge.problems().try_into().unwrap();
+    assert!(
+        problem.starts_with(&base.display().to_string()) && problem.contains("can't be used"),
+        "{problem}"
+    );
+    assert!(bridge.is_enabled(&calendar));
+    assert_eq!(states(&bridge), [ConsentState::Undecided]);
+
+    std::fs::write(&base, "version = 1\n").unwrap();
+    bridge.reload();
+    assert!(bridge.problems().is_empty());
+    assert_eq!(
+        states(&bridge),
+        [ConsentState::Granted(GrantSource::Bundled)],
+        "fixing the file restores what the build ships granted"
+    );
+}
+
+#[test]
 fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
     let folder = tempfile::tempdir().unwrap();
     let local = folder.path().join("grants.toml");

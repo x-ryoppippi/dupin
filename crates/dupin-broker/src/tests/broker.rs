@@ -1391,6 +1391,45 @@ deny = ["clipboard:paste"]
 }
 
 #[test]
+fn an_unusable_base_withholds_bundled_pre_grants_until_it_is_fixed() {
+    let mut broker = Broker::new(Base::unusable("expected `=`"), Local::default());
+    let calendar = id("bundled:calendar");
+    let dictionary = id("bundled:dictionary");
+    broker.set_bundled(calendar.clone(), rev(R1), true);
+    broker.set_bundled(dictionary.clone(), rev(R1), true);
+    let _ = broker.install(
+        calendar.clone(),
+        rev(R1),
+        caps(json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } })),
+    );
+    let _ = broker.install(
+        dictionary.clone(),
+        rev(R1),
+        caps(json!({ "dictionary": ["lookup"] })),
+    );
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 7,
+    };
+
+    assert!(
+        broker.is_enabled(&calendar),
+        "it still loads and answers what needs no capability"
+    );
+    assert_eq!(
+        consent_needed(broker.check(&calendar, &rev(R1), &read, Trigger::Query)).reason,
+        ConsentReason::NotGranted,
+        "what the unusable file denied is unknown"
+    );
+    broker.approve(&dictionary, &ScopeKey::Dictionary, None).unwrap();
+    permit(broker.check(&dictionary, &rev(R1), &Request::DictionaryLookup, Trigger::Query));
+
+    broker.replace_base(Base::default());
+    permit(broker.check(&calendar, &rev(R1), &read, Trigger::Query));
+}
+
+#[test]
 fn a_changed_copy_of_a_package_that_ships_off_waits_like_any_new_extension() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("window-management");

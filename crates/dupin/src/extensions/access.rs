@@ -71,10 +71,7 @@ pub fn open(platform: Platform) -> Bridge {
         );
     }
     if rune::tooling::is_headless() {
-        let base = base_path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|source| Base::parse(&source).ok())
-            .unwrap_or_default();
+        let base = base_path().map(|path| Base::read(&path)).unwrap_or_default();
         if let Some(fixture) = super::fixtures::headless() {
             return Bridge::new(Broker::new(base, Local::default()), None, fixture.services());
         }

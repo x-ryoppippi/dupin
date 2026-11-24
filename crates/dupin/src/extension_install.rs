@@ -113,8 +113,8 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
 fn grants() -> (Broker, Option<std::path::PathBuf>) {
     let read =
         |path: &Option<std::path::PathBuf>| path.as_ref().and_then(|path| std::fs::read_to_string(path).ok());
-    let base = read(&crate::extensions::access::base_path())
-        .and_then(|source| Base::parse(&source).ok())
+    let base = crate::extensions::access::base_path()
+        .map(|path| Base::read(&path))
         .unwrap_or_default();
     let path = crate::extensions::access::local_path();
     let local = match (read(&path), path.as_ref().is_some_and(|path| path.exists())) {
