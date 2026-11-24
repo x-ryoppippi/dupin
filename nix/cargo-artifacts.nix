@@ -63,8 +63,13 @@ let
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
   };
-  releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
-  debugArtifacts = craneLib.buildDepsOnly debugArgs;
+  # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
+  # stay 0.0.0 (see Cargo.toml).
+  depsArgs = {
+    version = "0.0.0";
+  };
+  releaseArtifacts = craneLib.buildDepsOnly (releaseArgs // depsArgs);
+  debugArtifacts = craneLib.buildDepsOnly (debugArgs // depsArgs);
   lintAndTest = craneLib.mkCargoDerivation (
     debugArgs
     // {
