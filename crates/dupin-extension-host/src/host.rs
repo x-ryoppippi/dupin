@@ -8,7 +8,7 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
@@ -107,6 +107,7 @@ struct Shared {
     state: Mutex<State>,
     released: Condvar,
     next_call: AtomicU64,
+    workers: Workers,
 }
 
 #[derive(Default)]
@@ -165,6 +166,7 @@ impl Host {
                 state: Mutex::default(),
                 released: Condvar::new(),
                 next_call: AtomicU64::new(1),
+                workers: Workers::default(),
             }),
         }
     }
@@ -383,6 +385,7 @@ impl Host {
             deadline,
             is_cancelled,
             services,
+            &self.shared.workers,
         );
         if answer.is_err() {
             lease.helper = None;
@@ -415,6 +418,7 @@ impl Host {
             deadline,
             is_cancelled,
             services,
+            &self.shared.workers,
         ))
     }
 
@@ -539,9 +543,24 @@ struct Helper {
     socket: UnixStream,
     /// Bounded, so a helper that writes without being asked stalls on its own socket instead
     /// of growing Dupin's memory.
-    replies: mpsc::Receiver<(FromHelper, Vec<u8>)>,
+    events: mpsc::Receiver<Event>,
+    /// Where a call's host requests report back, so the call wakes the moment one finishes.
+    finished: mpsc::SyncSender<Event>,
     started: Instant,
     greeted: bool,
+}
+
+/// What a running call waits for: the helper's next message, or one of its host requests
+/// finishing.
+enum Event {
+    Helper(FromHelper, Vec<u8>),
+    Finished {
+        run: u64,
+        call: u32,
+        reply: Vec<u8>,
+    },
+    /// The helper's socket closed: it stopped or broke the wire format.
+    Closed,
 }
 
 impl Drop for Helper {
@@ -569,23 +588,26 @@ impl Helper {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         let child = command.spawn().map_err(unavailable)?;
-        let (replies, received) = mpsc::sync_channel(1);
+        let (events, received) = mpsc::sync_channel(1);
+        let finished = events.clone();
         let mut reader = ours.try_clone().map_err(unavailable)?;
         ours.set_write_timeout(Some(HANDSHAKE)).map_err(unavailable)?;
         std::thread::Builder::new()
             .name("extension-host-replies".into())
             .spawn(move || {
-                while let Ok(Some(message)) = wire::read::<FromHelper>(&mut reader) {
-                    if replies.send(message).is_err() {
+                while let Ok(Some((message, tail))) = wire::read::<FromHelper>(&mut reader) {
+                    if events.send(Event::Helper(message, tail)).is_err() {
                         return;
                     }
                 }
+                let _ = events.send(Event::Closed);
             })
             .map_err(unavailable)?;
         Ok(Self {
             child,
             socket: ours,
-            replies: received,
+            events: received,
+            finished,
             started: Instant::now(),
             greeted: false,
         })
@@ -610,23 +632,27 @@ impl Helper {
         let didnt_start =
             || Greeting::Failed(RunError::Failed(host_error("the extension host didn't start")));
         while !self.greeted {
-            match self.replies.recv_timeout(TICK) {
-                Ok((FromHelper::Hello { version, engine }, _))
+            match self.events.recv_timeout(TICK) {
+                Ok(Event::Helper(FromHelper::Hello { version, engine }, _))
                     if version == wire::VERSION && engine == dupin_js_runtime::engine_version() =>
                 {
                     self.greeted = true;
                 }
-                Ok((FromHelper::Hello { .. }, _)) => {
+                Ok(Event::Helper(FromHelper::Hello { .. }, _)) => {
                     return Greeting::Failed(RunError::Failed(
                         host_error("the extension host is from another Dupin build")
                             .hint("Quit and reopen Dupin after an update."),
                     ));
                 }
-                Ok((FromHelper::Refused { reason }, _)) => return Greeting::Failed(refused(reason)),
-                Ok((FromHelper::Done { .. } | FromHelper::Host { .. }, _))
+                Ok(Event::Helper(FromHelper::Refused { reason }, _)) => {
+                    return Greeting::Failed(refused(reason));
+                }
+                Ok(Event::Helper(FromHelper::Done { .. } | FromHelper::Host { .. }, _) | Event::Closed)
                 | Err(RecvTimeoutError::Disconnected) => {
                     return didnt_start();
                 }
+                // No call has run on this helper yet, so no request of one can have finished.
+                Ok(Event::Finished { .. }) => {}
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
                     if now >= self.started + HANDSHAKE {
@@ -658,7 +684,17 @@ impl Helper {
     /// It speaks only to answer a call, so anything queued between calls, such as a reply
     /// forged for a later call, means it can't be trusted with another.
     fn is_idle(&mut self) -> bool {
-        let quiet = !self.greeted || matches!(self.replies.try_recv(), Err(mpsc::TryRecvError::Empty));
+        let quiet = !self.greeted
+            || loop {
+                match self.events.try_recv() {
+                    // A request of an ended call, whose reply nothing waits for.
+                    Ok(Event::Finished { .. }) => {}
+                    Ok(Event::Helper(..) | Event::Closed) | Err(mpsc::TryRecvError::Disconnected) => {
+                        break false;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => break true,
+                }
+            };
         quiet && matches!(self.child.try_wait(), Ok(None))
     }
 
@@ -684,6 +720,7 @@ impl Helper {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
+        workers: &Workers,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let message = ToHelper::Run {
@@ -697,32 +734,40 @@ impl Helper {
         self.send(&message, &request.tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
         let mut cancel_by = None;
-        let mut requests = Requests::new(services.clone(), deadline);
+        let mut requests = Requests::new(services.clone(), deadline, id, self.finished.clone(), workers);
         loop {
-            match self.replies.recv_timeout(TICK) {
-                Ok((FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
+            match self.events.recv_timeout(TICK) {
+                Ok(Event::Helper(FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
                     return Ok((answer, tail));
                 }
-                Ok((FromHelper::Host { id: asking, call, op }, args)) if asking == id => {
-                    requests.start(call, op, args).map_err(|problem| {
+                Ok(Event::Helper(FromHelper::Host { id: asking, call, op }, args)) if asking == id => {
+                    let unstarted = requests.start(call, op, args).map_err(|problem| {
                         RunError::Failed(host_error(format!(
                             "the extension host broke the rules for host requests: {problem}"
                         )))
                     })?;
+                    if let Some(reply) = unstarted {
+                        requests.waiting -= 1;
+                        self.send(&ToHelper::Reply { id, call }, &[&reply])?;
+                    }
+                }
+                // A request of an earlier call that ended before it finished is dropped.
+                Ok(Event::Finished { run, call, reply }) => {
+                    if run == id {
+                        requests.waiting -= 1;
+                        self.send(&ToHelper::Reply { id, call }, &[&reply])?;
+                    }
                 }
                 // Every call given up on stops the helper, so no other reply is ever due.
-                Ok(_) => {
+                Ok(Event::Helper(..)) => {
                     return Err(RunError::Failed(host_error(
                         "the extension host answered out of turn",
                     )));
                 }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
+                Ok(Event::Closed) | Err(RecvTimeoutError::Disconnected) => {
                     return Err(RunError::Failed(crashed().file(request.entry)));
                 }
-            }
-            for (call, json) in requests.finished() {
-                self.send(&ToHelper::Reply { id, call }, &[&json])?;
             }
             let now = Instant::now();
             if cancel_by.is_none() && is_cancelled() {
@@ -752,35 +797,42 @@ impl Helper {
     }
 }
 
-/// The host requests of one run: each runs on a thread of its own, and every reply that comes
-/// after the run ends is dropped with the channel.
-struct Requests {
+/// The host requests of one run: each runs on a thread of its own and reports to the run's
+/// events as it finishes. A reply that comes after the run ends is dropped.
+struct Requests<'a> {
     services: Arc<dyn Services>,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
-    done: mpsc::Sender<(u32, Vec<u8>)>,
-    finished: mpsc::Receiver<(u32, Vec<u8>)>,
+    run: u64,
+    finished: mpsc::SyncSender<Event>,
+    workers: &'a Workers,
     last: u32,
     waiting: usize,
 }
 
-impl Requests {
-    fn new(services: Arc<dyn Services>, deadline: Instant) -> Self {
-        let (done, finished) = mpsc::channel();
+impl<'a> Requests<'a> {
+    fn new(
+        services: Arc<dyn Services>,
+        deadline: Instant,
+        run: u64,
+        finished: mpsc::SyncSender<Event>,
+        workers: &'a Workers,
+    ) -> Self {
         Self {
             services,
             deadline,
             cancelled: Arc::default(),
-            done,
+            run,
             finished,
+            workers,
             last: 0,
             waiting: 0,
         }
     }
 
-    /// Starts request `call`. The guest runtime keeps to these bounds itself, so a helper that
-    /// breaks one has been subverted and is stopped.
-    fn start(&mut self, call: u32, op: String, args: Vec<u8>) -> Result<(), &'static str> {
+    /// Starts request `call`, or answers it at once when it can't start. The guest runtime keeps
+    /// to these bounds itself, so a helper that breaks one has been subverted and is stopped.
+    fn start(&mut self, call: u32, op: String, args: Vec<u8>) -> Result<Option<Vec<u8>>, &'static str> {
         if call != self.last + 1 || call > dupin_js_runtime::MAX_CALLS {
             return Err("a request out of sequence");
         }
@@ -794,31 +846,63 @@ impl Requests {
         self.waiting += 1;
         let services = self.services.clone();
         let cancelled = self.cancelled.clone();
-        let done = self.done.clone();
-        let deadline = self.deadline;
-        let started = std::thread::Builder::new()
-            .name("extension-host-request".into())
-            .spawn(move || {
-                let reply = services.call(&op, &args, deadline, &cancelled);
-                let _ = done.send((call, reply));
-            });
-        if started.is_err() {
-            let reply = br#"{"error":{"code":"unavailable","message":"Dupin couldn't start the request"}}"#;
-            let _ = self.done.send((call, reply.to_vec()));
-        }
-        Ok(())
-    }
-
-    fn finished(&mut self) -> Vec<(u32, Vec<u8>)> {
-        let finished: Vec<_> = self.finished.try_iter().collect();
-        self.waiting -= finished.len();
-        finished
+        let finished = self.finished.clone();
+        let (deadline, run) = (self.deadline, self.run);
+        let started = self.workers.run(Box::new(move || {
+            let reply = services.call(&op, &args, deadline, &cancelled);
+            if !cancelled.load(Ordering::Relaxed) {
+                let _ = finished.send(Event::Finished { run, call, reply });
+            }
+        }));
+        Ok(started.is_err().then(|| {
+            br#"{"error":{"code":"unavailable","message":"Dupin couldn't start the request"}}"#.to_vec()
+        }))
     }
 }
 
-impl Drop for Requests {
+impl Drop for Requests<'_> {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Threads that run host requests, each kept for [`IDLE`] after its last, so a request a guest
+/// makes while the user types doesn't wait for a thread to start.
+#[derive(Default)]
+struct Workers(Arc<Mutex<Vec<mpsc::Sender<Job>>>>);
+
+impl Workers {
+    fn run(&self, mut job: Job) -> io::Result<()> {
+        loop {
+            let idle = self.0.lock().unwrap_or_else(PoisonError::into_inner).pop();
+            let Some(worker) = idle else { break };
+            // A worker that has stopped hands the job back.
+            match worker.send(job) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::SendError(back)) => job = back,
+            }
+        }
+        let (worker, jobs) = mpsc::channel::<Job>();
+        let pool = Arc::downgrade(&self.0);
+        std::thread::Builder::new()
+            .name("extension-host-request".into())
+            .spawn(move || {
+                loop {
+                    job();
+                    let Some(pool) = pool.upgrade() else { return };
+                    pool.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(worker.clone());
+                    drop(pool);
+                    match jobs.recv_timeout(IDLE) {
+                        Ok(next) => job = next,
+                        Err(_) => return,
+                    }
+                }
+            })
+            .map(drop)
     }
 }
 
