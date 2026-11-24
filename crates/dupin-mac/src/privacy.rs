@@ -87,7 +87,7 @@ impl Permission {
 impl Access {
     /// What the extension broker is told. Anything short of allowed that only System
     /// Settings can change counts as denied, so the broker never offers a prompt for it.
-    pub(crate) fn os_access(self) -> OsAccess {
+    pub fn os_access(self) -> OsAccess {
         match self {
             Access::Allowed => OsAccess::Allowed,
             Access::NotDetermined => OsAccess::NotDetermined,
@@ -108,7 +108,7 @@ pub enum PermissionStatus {
 impl PermissionStatus {
     /// What the extension broker is told. A request in flight or unfinished is still
     /// undetermined; an unavailable request can't be granted from this build.
-    pub(crate) fn os_access(self) -> OsAccess {
+    pub fn os_access(self) -> OsAccess {
         match self {
             PermissionStatus::Access(access) => access.os_access(),
             PermissionStatus::Requesting | PermissionStatus::RequestIncomplete => OsAccess::NotDetermined,

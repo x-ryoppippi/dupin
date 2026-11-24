@@ -137,6 +137,13 @@ impl Default for Policy {
     }
 }
 
+impl Policy {
+    /// Apps whose copies are never recorded, which extensions don't see either.
+    pub fn ignored_apps(&self) -> &[String] {
+        &self.ignored_apps
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct History {
     /// Newest first.

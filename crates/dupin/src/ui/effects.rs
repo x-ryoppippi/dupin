@@ -85,6 +85,9 @@ impl Ui {
                     | Action::DeleteClipboardEntry(_)
                     | Action::ClearClipboardHistory => {}
                     Action::RequestClipboardAccess => self.request_clipboard_access(),
+                    Action::Extension { extension, request } => {
+                        self.run_extension_request(extension, request, tx)
+                    }
                     Action::Duplicate(path) => self.duplicate_file(path),
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self
@@ -109,6 +112,10 @@ impl Ui {
                     action: Action::ClearClipboardHistory,
                     ..
                 } => self.clear_clipboard_history(tx),
+                Effect::RunConsuming {
+                    id,
+                    action: Action::Extension { extension, request },
+                } => self.answer_extension_consent(id, extension, request, tx),
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {

@@ -12,5 +12,10 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
     if ($extensions | path exists) {
         cp --recursive $extensions ($config_dir | path join dupin extensions)
     }
+    # And the grants it declares, as `<name>.grants.toml`.
+    let grants = $script | path parse | update extension grants.toml | path join
+    if ($grants | path exists) {
+        cp $grants ($config_dir | path join dupin extension-grants.toml)
+    }
     {XDG_CONFIG_HOME: $config_dir}
 }

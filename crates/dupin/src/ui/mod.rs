@@ -116,6 +116,7 @@ pub struct Ui {
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     extensions: Extensions,
+    calendar_access: dupin_mac::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
     pub(crate) clipboard: crate::clipboard::Clipboard,
     saver: crate::store::Saver,
@@ -180,7 +181,7 @@ impl Ui {
         let calendar = if rune::tooling::is_headless() {
             dupin_mac::CalendarProvider::fixtures()
         } else {
-            dupin_mac::CalendarProvider::new(calendar_access)
+            dupin_mac::CalendarProvider::new(calendar_access.clone())
         };
         let registration = crate::commands::register(
             &config,
@@ -201,6 +202,17 @@ impl Ui {
             }),
         );
         let scripts_watcher = crate::scripts::watch(me.clone());
+        let bridge = crate::extensions::access::open(crate::extensions::access::Platform {
+            scripts: registration.scripts.clone(),
+            runner: runner.clone(),
+            calendar_access: calendar_access.clone(),
+            history: clipboard.history(),
+        });
+        bridge.set_listener({
+            let me = me.clone();
+            move |notice| me.update(move |ui, tx| ui.extension_access_changed(notice, tx))
+        });
+        crate::extensions::access::refresh_os_access(&bridge, &calendar_access);
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_default(tx))
@@ -272,7 +284,8 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
-            extensions: Extensions::default(),
+            extensions: Extensions::new(bridge),
+            calendar_access,
             _apps_watcher: apps_watcher,
             clipboard,
             position: config.position,

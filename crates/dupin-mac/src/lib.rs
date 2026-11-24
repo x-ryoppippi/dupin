@@ -17,6 +17,7 @@ pub mod font;
 pub mod input_source;
 pub mod login_item;
 pub mod paste;
+pub mod pick;
 pub mod privacy;
 pub mod quick_look;
 mod recent;
