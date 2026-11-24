@@ -18,7 +18,8 @@ use dupin_extension_bridge::{
     Trigger, WindowsAccess,
 };
 use dupin_host_services::calendar;
-use serde_json::Value;
+use dupin_storage::{Limits, MemoryKey, NewRecord, Storage};
+use serde_json::{Value, json};
 
 use super::packages::{Kind, Listed};
 use super::{Origin, Scanner, bundled};
@@ -177,6 +178,17 @@ impl Override {
             launcher.extensions.scanned(Origin::User, catalog);
         };
         rescan(&mut launcher);
+        let storage_root = grants.path().join("storage");
+        let storage = Storage::new(&storage_root, MemoryKey::random());
+        let eject = |grants: &Path| {
+            crate::extension_install::eject_into(
+                &shipped,
+                user.path(),
+                Some(grants),
+                Some(&storage),
+                self.name,
+            )
+        };
         let may_use = |launcher: &Launcher, package: &PackageId| match &self.uses {
             None => true,
             Some(Use::Search) => {
@@ -225,7 +237,7 @@ impl Override {
             launcher.install(&self.on);
         }
 
-        let copy = bundled::eject(&shipped, user.path(), self.name).unwrap();
+        let copy = eject(&local).unwrap();
         rescan(&mut launcher);
         launcher.install(&self.on);
         let unchanged = self.listed(&launcher);
@@ -296,6 +308,8 @@ impl Override {
         } else {
             bridge.set_enabled(&modified.package, true).unwrap();
         }
+        let held = scopes(&bridge, &modified);
+        store_data(&storage, self.name);
 
         std::fs::write(&main, EDITED).unwrap();
         rescan(&mut launcher);
@@ -341,9 +355,44 @@ impl Override {
         self.restored(&launcher, &bridge, &original, &shipped_scopes, &shipped_answer);
         assert!(may_use(&launcher, &original.package));
 
-        // `dupin ext eject` again: the copy starts afresh.
-        let copy = bundled::eject(&shipped, user.path(), self.name).unwrap();
-        crate::extension_install::forget_grants_in(&local, self.name).unwrap();
+        // Copied by hand rather than ejected, another revision is the earlier copy edited.
+        let pasted = bundled::eject(&shipped, user.path(), self.name).unwrap();
+        std::fs::write(pasted.join(entry(&pasted)), EDITED_AGAIN).unwrap();
+        rescan(&mut launcher);
+        launcher.install(&self.on);
+        let pasted_listed = self.listed(&launcher);
+        assert_eq!(pasted_listed.kind, Kind::Modified);
+        assert!(
+            bridge.is_enabled(&pasted_listed.package),
+            "a copy pasted by hand keeps the earlier copy's switch"
+        );
+        assert_eq!(
+            scopes(&bridge, &pasted_listed),
+            held,
+            "and the grants it doesn't widen"
+        );
+        std::fs::remove_dir_all(&pasted).unwrap();
+        rescan(&mut launcher);
+        launcher.install(&self.on);
+
+        let unreadable = grants.path().join("unreadable.toml");
+        std::fs::create_dir(&unreadable).unwrap();
+        let refused = eject(&unreadable).unwrap_err();
+        assert_eq!(refused.code, "grants-unsaved");
+        assert!(
+            user.path().join(self.name).symlink_metadata().is_err(),
+            "a copy that can't start afresh is removed"
+        );
+        assert!(
+            storage_root.join(namespace(self.name)).exists(),
+            "nothing it stored is deleted before its grants are forgotten"
+        );
+
+        let copy = eject(&local).unwrap();
+        assert!(
+            !storage_root.join(namespace(self.name)).exists(),
+            "what the earlier copy stored is deleted"
+        );
         std::fs::write(copy.join(entry(&copy)), EDITED_AGAIN).unwrap();
         rescan(&mut launcher);
         launcher.install(&self.on);
@@ -447,6 +496,24 @@ fn ask_for_keyword(package: &Path, keyword: &str) {
     let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     manifest["dupin"]["keyword"] = keyword.into();
     std::fs::write(&path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+}
+
+fn namespace(name: &str) -> String {
+    dupin_extension_bridge::storage::namespace(
+        &PackageId::new(name).unwrap(),
+        dupin_extension_bridge::Origin::User,
+    )
+}
+
+fn store_data(storage: &Storage, name: &str) {
+    storage
+        .open(&namespace(name), Limits::default())
+        .unwrap()
+        .put(NewRecord {
+            data: json!({ "stored by": "an earlier copy" }),
+            blobs: Vec::new(),
+        })
+        .unwrap();
 }
 
 fn scopes(bridge: &Bridge, listed: &Listed) -> Vec<(String, ConsentState)> {
