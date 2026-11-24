@@ -13,11 +13,11 @@ use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
 
-use dupin_js_runtime::row::Source;
+use dupin_js_runtime::row::{RowEffect, Source};
 use dupin_js_runtime::{
     Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row, RunError, Sources,
 };
-use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
+use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
@@ -46,6 +46,12 @@ pub trait Services: Send + Sync {
     /// `{"ok": value}` or `{"error": {"code", "message", …}}`. Runs on a thread of its own.
     /// `cancelled` is set once the call has ended, after which the reply is dropped.
     fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8>;
+    /// Whether one of this call's replies gave the guest `url`, a link not on the web such as
+    /// a calendar event's, which its rows may then open.
+    fn opens(&self, url: &str) -> bool {
+        let _ = url;
+        false
+    }
 }
 
 /// No host services: every request fails as unavailable.
@@ -283,6 +289,7 @@ impl Host {
         )? {
             (Answer::Rows { items }, _) => {
                 validate(&items, limit as usize).map_err(|problem| unshowable(problem, package))?;
+                issued(&items, services.as_ref(), package)?;
                 Ok(items)
             }
             _ => Err(mismatch()),
@@ -958,6 +965,29 @@ fn validate(items: &[Row], limit: usize) -> Result<(), String> {
         return Err("more text than an answer may carry".into());
     }
     Ok(())
+}
+
+/// Fails unless every link not on the web that `items` open came from one of the call's own
+/// replies, so only a package that read an event can show it in Calendar, and only that one.
+fn issued(items: &[Row], services: &dyn Services, package: &Compiled) -> Result<(), RunError> {
+    let stray = items
+        .iter()
+        .flat_map(|item| &item.actions)
+        .any(|action| match &action.effect {
+            RowEffect::OpenUrl { url } => !is_web_url(url) && !services.opens(url),
+            _ => false,
+        });
+    if !stray {
+        return Ok(());
+    }
+    Err(RunError::Failed(
+        Diagnostic::new(
+            "invalid-url",
+            "an `open` action names a calendar link that no `calendar.events` reply in this search gave",
+        )
+        .file(package.entry())
+        .hint("Open the `link` of an event `calendar.events` returned while answering this query."),
+    ))
 }
 
 fn unshowable(problem: String, package: &Compiled) -> RunError {

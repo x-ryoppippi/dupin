@@ -291,6 +291,7 @@ impl Session {
                     permit.scope(),
                 )?;
                 self.release(&permit, cancelled)?;
+                self.issue_links(&events);
                 Ok(json!({ "events": events }))
             }
             _ => Err(Failure::new(

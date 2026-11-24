@@ -206,6 +206,9 @@ impl Row {
                 RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
                     return Err("a copy action's text must be 1 byte to 16 KiB".into());
                 }
+                RowEffect::OpenUrl { url } if source == Source::Items && !is_web_url(url) => {
+                    return Err("a catalogue's open action needs an http or https URL".into());
+                }
                 RowEffect::OpenUrl { url } if !is_openable(url) => {
                     return Err(
                         "an open action needs an http or https URL, or a calendar event's link".into(),

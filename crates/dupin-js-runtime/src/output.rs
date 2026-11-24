@@ -845,7 +845,10 @@ impl<'a> Reader<'a> {
                     let url = self
                         .string(&action, &field, "open", MAX_URL_BYTES)?
                         .expect("present");
-                    if !row::is_openable(&url) {
+                    // A catalogue reaches no host service, so no calendar link reached it.
+                    if self.source == Source::Items {
+                        self.web_url(&field, &url)?;
+                    } else if !row::is_openable(&url) {
                         return Err(self
                             .invalid(
                                 "invalid-url",

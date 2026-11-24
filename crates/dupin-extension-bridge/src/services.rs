@@ -444,7 +444,7 @@ pub(crate) mod fixture {
                 .filter(|start| *start >= from)
                 .take(limit)
                 .map(|start| {
-                    serde_json::json!({ "id": format!("standup-{start}"), "title": "Standup", "start": start, "end": start + DAY / 24, "allDay": false, "calendar": { "name": "Work", "color": null }, "location": null, "url": null })
+                    serde_json::json!({ "id": format!("standup-{start}"), "title": "Standup", "start": start, "end": start + DAY / 24, "allDay": false, "calendar": { "name": "Work", "color": null }, "location": null, "url": null, "link": format!("ical://ekevent/standup-{start}?method=show&options=more") })
                 })
                 .collect();
             Ok(Value::Array(events))

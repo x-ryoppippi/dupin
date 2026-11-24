@@ -415,7 +415,7 @@ declare module 'dupin' {
 		readonly location: string | null;
 		/** The event's own link, as its calendar holds it. */
 		readonly url: string | null;
-		/** Shows this occurrence in Calendar, as an `open` action. */
+		/** Shows this occurrence in Calendar, as an `open` action of the `search` that read it. */
 		readonly link: string | null;
 		/** Its dates as this Mac's locale and time zone write them, since the guest has no `Intl`. */
 		readonly labels: {
