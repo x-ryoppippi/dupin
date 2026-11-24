@@ -179,7 +179,8 @@ impl<'a> Reader<'a> {
         };
         let update = self.kind(&answer, &["list", "update"])? == Some("update");
         let more = self.boolean(&answer, "more")?.unwrap_or(false);
-        let cursor = self.string(&answer, "cursor", "cursor", MAX_CURSOR_BYTES)?;
+        // The cursor isn't the items' text, which alone the answer's limit weighs.
+        let cursor = self.uncounted(&answer, "cursor", "cursor", MAX_CURSOR_BYTES)?;
         let ttl = self.ttl(&answer)?;
         let change = if update {
             self.only_keys(
@@ -986,6 +987,22 @@ impl<'a> Reader<'a> {
         key: &str,
         cap: usize,
     ) -> Result<Option<String>, Failure> {
+        let string = self.uncounted(item, field, key, cap)?;
+        if let Some(string) = &string {
+            self.bytes += string.len();
+            self.check_total(field)?;
+        }
+        Ok(string)
+    }
+
+    /// An optional string field, as [`Self::string`] reads it, without counting it.
+    fn uncounted(
+        &self,
+        item: &Object<'_>,
+        field: &str,
+        key: &str,
+        cap: usize,
+    ) -> Result<Option<String>, Failure> {
         let value: Value = item.get(key)?;
         if value.is_undefined() || value.is_null() {
             return Ok(None);
@@ -1007,11 +1024,17 @@ impl<'a> Reader<'a> {
                 .hint(format!("Leave `{key}` out instead of giving an empty string."))
                 .into());
         }
-        self.count(field, &string, cap)?;
+        self.capped(field, &string, cap)?;
         Ok(Some(string))
     }
 
     fn count(&mut self, field: &str, string: &str, cap: usize) -> Result<(), Failure> {
+        self.capped(field, string, cap)?;
+        self.bytes += string.len();
+        self.check_total(field)
+    }
+
+    fn capped(&self, field: &str, string: &str, cap: usize) -> Result<(), Failure> {
         if string.len() > cap {
             return Err(self
                 .invalid(
@@ -1022,8 +1045,7 @@ impl<'a> Reader<'a> {
                 .hint("Shorten the value.")
                 .into());
         }
-        self.bytes += string.len();
-        self.check_total(field)
+        Ok(())
     }
 
     fn check_total(&self, field: &str) -> Result<(), Failure> {

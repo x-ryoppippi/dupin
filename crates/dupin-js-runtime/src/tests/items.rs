@@ -243,6 +243,33 @@ fn items_problems_name_the_field_at_fault() {
 }
 
 #[test]
+fn a_part_may_carry_its_full_text_and_a_cursor() {
+    let source = format!(
+        "export function items() {{
+           const items = [];
+           for (let left = {MAX_PAGE_BYTES}, i = 0; left > 0; i++) {{
+             const copy = 'y'.repeat(Math.min(left - 4, {MAX_ACTION_TEXT_BYTES}));
+             items.push({{ id: String(i).padStart(2, '0'), title: 'a', actions: [{{ title: 'b', copy }}] }});
+             left -= 4 + copy.length;
+           }}
+           return {{ items, cursor: 'x'.repeat(256), more: true }};
+         }}",
+        MAX_PAGE_BYTES = row::MAX_PAGE_BYTES,
+        MAX_ACTION_TEXT_BYTES = row::MAX_ACTION_TEXT_BYTES,
+    );
+    let page = items(&source, None, Reason::Load).unwrap();
+    let PageChange::Reset { rows } = &page.change else {
+        panic!("expected a list, got {:?}", page.change);
+    };
+    assert_eq!(
+        rows.iter().map(row::Row::text_bytes).sum::<usize>(),
+        row::MAX_PAGE_BYTES
+    );
+    assert_eq!(page.cursor.as_deref().map(str::len), Some(256));
+    page.validate().unwrap();
+}
+
+#[test]
 fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
     let (_folder, loaded) = package(&[(
         "main.js",
