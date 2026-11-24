@@ -274,23 +274,30 @@ impl Catalogue {
                     let at = self.index[&row.entry.item.id];
                     self.rows[at] = row;
                 }
+                let moved = !remove.is_empty() || !prepend.is_empty();
                 if !remove.is_empty() {
                     self.rows.retain(|row| !remove.contains(&row.entry.item.id));
                 }
                 if !prepend.is_empty() {
                     self.rows.splice(0..0, prepend);
                 }
+                let appended_at = self.rows.len();
                 self.rows.extend(append);
                 self.bytes = bytes;
+                if !moved {
+                    self.index_from(appended_at);
+                    return Ok(());
+                }
             }
         }
-        self.index = self
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(at, row)| (row.entry.item.id.clone(), at))
-            .collect();
+        self.index.clear();
+        self.index_from(0);
         Ok(())
+    }
+
+    fn index_from(&mut self, start: usize) {
+        let ids = self.rows[start..].iter().map(|row| row.entry.item.id.clone());
+        self.index.extend(ids.zip(start..));
     }
 
     /// The rows for `query`, at most `limit`, as they show at `now` (Unix seconds). An empty
@@ -862,6 +869,33 @@ mod tests {
         };
         assert_eq!(
             catalogue.apply(duplicate, LIMITS),
+            Err(ChangeError::DuplicateId("e".into()))
+        );
+        // Rows appended alone, as a catalogue's later parts are, are held by ID like the rest.
+        let update = |append: Vec<Entry>, replace: Vec<Entry>, remove: &[&str]| Change::Update {
+            prepend: vec![],
+            append,
+            replace,
+            remove: remove.iter().map(|id| (*id).into()).collect(),
+        };
+        catalogue
+            .apply(
+                update(vec![entry("f", "Foxtrot")], vec![entry("d", "Delta again")], &[]),
+                LIMITS,
+            )
+            .unwrap();
+        catalogue
+            .apply(update(vec![], vec![entry("f", "Foxtrot again")], &[]), LIMITS)
+            .unwrap();
+        catalogue
+            .apply(update(vec![], vec![], &["c", "f"]), LIMITS)
+            .unwrap();
+        assert_eq!(
+            titles(&catalogue.search("", 10, 0)),
+            ["Echo", "Bravo", "Delta again"]
+        );
+        assert_eq!(
+            catalogue.apply(update(vec![entry("e", "Echo twice")], vec![], &[]), LIMITS),
             Err(ChangeError::DuplicateId("e".into()))
         );
     }
