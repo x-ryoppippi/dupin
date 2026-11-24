@@ -966,6 +966,7 @@ fn forgetful_helper_entry() {
                     section: None,
                     detail: None,
                     actions: Vec::new(),
+                    web_search: None,
                 }],
             },
         };
