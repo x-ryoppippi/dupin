@@ -3,6 +3,10 @@
 //! typing matches the rows held here natively. A package revision Dupin reloads starts a new,
 //! empty catalogue with the new [`super::Extension`].
 //!
+//! A catalogue may read the package's storage, files or the network, as a search may, so it
+//! belongs to the broker generation it was asked under: once the package's authority changes,
+//! such as a revoked scope, the rows it held are dropped and asked for again from the start.
+//!
 //! Catalogues live in memory only. Rebuilding one costs a call to the package, and one written
 //! to disk would keep what a package lists, such as clipboard history, past the package's own
 //! say; a package that wants its list to outlast a restart keeps it in its own storage.
@@ -13,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use dupin_core::Batch;
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits};
+use dupin_extension_bridge::Generation;
 use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
 
@@ -55,6 +60,8 @@ struct State {
     expires: Option<Instant>,
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
+    /// The broker generation the rows were asked under.
+    generation: Option<Generation>,
 }
 
 impl Default for Cached {
@@ -65,6 +72,7 @@ impl Default for Cached {
                 cursor: None,
                 expires: None,
                 due: Some(Reason::Load),
+                generation: None,
             }),
             bytes: AtomicUsize::new(0),
             used: AtomicU64::new(0),
@@ -78,6 +86,13 @@ impl Default for Cached {
 }
 
 impl Cached {
+    /// Drops what the catalogue holds; its next use asks for it from the start.
+    pub fn forget(&self) {
+        let mut state = self.shared.lock();
+        state.forget();
+        self.shared.bytes.store(0, Ordering::Relaxed);
+    }
+
     /// Asks the package again before the next use, with the cursor it last gave.
     pub fn invalidate(&self) {
         let mut state = self.shared.lock();
@@ -87,16 +102,22 @@ impl Cached {
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated or expired.
+    /// missing, invalidated, expired or held from another `generation` than the one `fetch`
+    /// asks under.
     pub fn search(
         &self,
         query: &str,
         limit: usize,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
+        generation: Option<Generation>,
     ) -> Result<Vec<Batch>, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
+        if state.generation != generation {
+            state.forget();
+            state.generation = generation;
+        }
         let refreshed = state.refresh(Instant::now(), fetch, convert);
         self.shared
             .bytes
@@ -329,10 +350,10 @@ mod tests {
             ))
         };
         for query in ["", "s", "sa", "saf"] {
-            cached.search(query, 10, &mut fetch, ENTRY).unwrap();
+            cached.search(query, 10, &mut fetch, ENTRY, None).unwrap();
         }
         assert_eq!(
-            titles(&cached.search("no", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("no", 10, &mut fetch, ENTRY, None).unwrap()),
             ["Notes"]
         );
         assert_eq!(calls, [(None, Reason::Load)]);
@@ -374,12 +395,12 @@ mod tests {
             })
         };
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
             ["Alpha", "Beta"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
             ["Bravo"]
         );
         assert_eq!(calls.len(), 3);
@@ -407,17 +428,17 @@ mod tests {
         let mut fetch =
             |_: Option<&str>, _| Ok(page(answers.next().expect("asked once per change"), "1", false));
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
             ["First", "Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
             ["Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
             ["Second", "Again"]
         );
     }
@@ -449,12 +470,63 @@ mod tests {
                 )),
             }
         };
-        cached.search("", 10, &mut fetch, ENTRY).unwrap();
+        cached.search("", 10, &mut fetch, ENTRY, None).unwrap();
         cached.shared.lock().expires = Some(Instant::now());
-        assert!(cached.search("", 10, &mut fetch, ENTRY).is_err());
+        assert!(cached.search("", 10, &mut fetch, ENTRY, None).is_err());
         assert_eq!(cached.len(), 0);
-        assert_eq!(titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()), ["B"]);
+        assert_eq!(
+            titles(&cached.search("", 10, &mut fetch, ENTRY, None).unwrap()),
+            ["B"]
+        );
         assert_eq!(reasons, [Reason::Load, Reason::Expired, Reason::Load]);
+    }
+
+    #[test]
+    fn a_catalogue_from_another_generation_is_asked_for_again_from_the_start() {
+        use dupin_extension_bridge::{
+            Base, Bridge, Broker, Capabilities, Local, PackageId, Revision, Services,
+        };
+
+        let bridge = Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+        let id = PackageId::new("clips").unwrap();
+        let capabilities =
+            Capabilities::parse(&serde_json::json!({ "storage": { "quotaBytes": 1024 } })).unwrap();
+        bridge.install(&id, Revision::new("blake3:1").unwrap(), capabilities);
+        bridge.set_enabled(&id, true).unwrap();
+        let before = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        bridge.set_enabled(&id, false).unwrap();
+        let after = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        assert_ne!(before, after);
+
+        let cached = Cached::default();
+        let mut calls = Vec::new();
+        let mut fetch = |cursor: Option<&str>, reason| {
+            calls.push((cursor.map(str::to_owned), reason));
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("a", "Copied")],
+                },
+                "1",
+                false,
+            ))
+        };
+        cached.search("", 10, &mut fetch, ENTRY, before).unwrap();
+        cached.search("c", 10, &mut fetch, ENTRY, before).unwrap();
+        cached.invalidate();
+        cached.search("", 10, &mut fetch, ENTRY, after).unwrap();
+        assert_eq!(
+            calls,
+            [(None, Reason::Load), (None, Reason::Load)],
+            "a new generation starts over instead of updating rows asked for under the old one"
+        );
     }
 
     #[test]
@@ -471,13 +543,13 @@ mod tests {
                 false,
             ))
         };
-        let error = cached.search("", 10, &mut fetch, ENTRY).unwrap_err();
+        let error = cached.search("", 10, &mut fetch, ENTRY, None).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
         let mut endless = |_: Option<&str>, _| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
-        let error = cached.search("", 10, &mut endless, ENTRY).unwrap_err();
+        let error = cached.search("", 10, &mut endless, ENTRY, None).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"

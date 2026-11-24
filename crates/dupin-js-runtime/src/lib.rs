@@ -179,17 +179,17 @@ impl Package {
         })
     }
 
-    /// Calls `items({ cursor, reason })` and reads the part of the catalogue it answers with.
-    /// The catalogue loads as the user types, before any row is chosen, and reaches no host
-    /// service.
+    /// Calls `items({ cursor, reason })`, carrying its host requests through `bridge`, and reads
+    /// the part of the catalogue it answers with. The catalogue loads as the user types, before
+    /// any row is chosen, so Dupin answers its requests as it does a search's.
     pub fn items(
         &self,
         cursor: Option<&str>,
         reason: Reason,
         control: Control,
+        bridge: &mut dyn Bridge,
     ) -> Result<CataloguePage, RunError> {
-        let mut bridge = Unavailable::default();
-        let sandbox = Sandbox::new(self, control, &mut bridge, Work::Items)?;
+        let sandbox = Sandbox::new(self, control, bridge, Work::Items)?;
         sandbox.run(|ctx| {
             let items = sandbox.function(ctx, "items")?;
             let context = Object::new(ctx.clone())?;
@@ -228,20 +228,23 @@ impl Package {
     }
 
     /// Calls `events[name](event)` for something Dupin watches on the package's behalf, such as
-    /// a clipboard change. What it returns is ignored.
+    /// a clipboard change, and reports whether it invalidated the catalogue. What it returns is
+    /// ignored.
     pub fn event(
         &self,
         name: &str,
         event: &str,
         control: Control,
         bridge: &mut dyn Bridge,
-    ) -> Result<(), RunError> {
+    ) -> Result<Handled, RunError> {
         let sandbox = Sandbox::new(self, control, bridge, Work::Event)?;
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "events", name)?;
             let event = ctx.json_parse(event)?;
             sandbox.call(ctx, handler, (frozen(ctx, event)?,))?;
-            Ok(())
+            Ok(Handled {
+                invalidated: sandbox.invalidated.get(),
+            })
         })
     }
 }
@@ -259,6 +262,13 @@ pub struct Acted {
     /// It called `items.invalidate()`.
     pub invalidated: bool,
     pub effect: Option<ActionEffect>,
+}
+
+/// What an event handler did that Dupin acts on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Handled {
+    /// It called `items.invalidate()`.
+    pub invalidated: bool,
 }
 
 fn missing_export(entry: &str) -> Diagnostic {
@@ -560,7 +570,7 @@ enum Stage {
 
 struct Sandbox<'a> {
     package: &'a Package,
-    /// Set when an action handler calls `items.invalidate()`.
+    /// Set when an action or event handler calls `items.invalidate()`.
     invalidated: Rc<Cell<bool>>,
     watchdog: Watchdog,
     problem: LinkProblem,
@@ -599,7 +609,7 @@ impl<'a> Sandbox<'a> {
         let context = Context::full(&runtime).map_err(|_| memory_limit())?;
         let calls = host::Shared::default();
         let invalidated = Rc::<Cell<bool>>::default();
-        let invalidating = (work == Work::Action).then(|| invalidated.clone());
+        let invalidating = matches!(work, Work::Action | Work::Event).then(|| invalidated.clone());
         context
             .with(|ctx| {
                 host::install(&ctx, &calls, invalidating)?;

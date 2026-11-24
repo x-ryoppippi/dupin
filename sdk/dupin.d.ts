@@ -103,7 +103,8 @@ declare module 'dupin' {
 		readonly cursor: string | null;
 		/**
 		 * `load` when Dupin holds nothing, `more` after an answer with `more: true`, `expired`
-		 * after its `ttl` and `invalidated` after an action called `items.invalidate()`.
+		 * after its `ttl` and `invalidated` after an action or event handler called
+		 * `items.invalidate()`.
 		 */
 		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
 	}
@@ -140,15 +141,15 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
-	 * user types, asking again only on first use, after `ttl` or when an action invalidates it.
-	 * At most 10,000 items and 8 MiB of text. It reaches no host service: a request fails with
-	 * `unavailable`.
+	 * user types, asking again only on first use, after `ttl` or when an action or event handler
+	 * invalidates it. At most 10,000 items and 8 MiB of text. It may use host services as
+	 * `search` does, so it may only read.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
 
 	/** The host's catalogue controls. */
 	export const items: {
-		/** From an action handler: ask `items` again, with its cursor, before the next use. */
+		/** From an action or event handler: ask `items` again, with its cursor, before the next use. */
 		invalidate(): void;
 	};
 

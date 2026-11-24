@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::{Catalogue, Change, Entry};
 use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_extension_bridge::Call;
 
 use super::parity::{Parity, seen};
 use super::{Extension, ExtensionProvider, QUERY_DEADLINE, Role, catalogue};
@@ -206,7 +207,7 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
     let rows = titles_of(&ExtensionProvider::new(extension.clone()), "");
     assert_eq!(rows, ["Marks failed"]);
     let error = extension
-        .catalogue("", 10, Instant::now() + QUERY_DEADLINE)
+        .catalogue("", 10, Instant::now() + QUERY_DEADLINE, &Call::none())
         .unwrap_err();
     assert!(
         matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic)
@@ -252,6 +253,121 @@ fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
 }
 
 #[test]
+fn an_event_that_invalidates_the_catalogue_updates_it_incrementally() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        "",
+        &[(
+            "main.js",
+            r#"import { items as catalogue } from 'dupin';
+               export function items(ctx) {
+                 if (ctx.reason === 'load') return { cursor: '1', items: [{ id: 'clip-1', title: 'First copy' }] };
+                 return { type: 'update', append: [{ id: `clip-${Number(ctx.cursor) + 1}`, title: `${ctx.reason} after ${ctx.cursor}` }], cursor: String(Number(ctx.cursor) + 1) };
+               }
+               export const events = { clipboard(change) { if (change.type === 'text') catalogue.invalidate(); } };"#,
+        )],
+    );
+    let keyword = ExtensionProvider::new(extension.clone());
+    assert_eq!(titles_of(&keyword, ""), ["First copy"]);
+    let copied = serde_json::json!({"type": "text", "text": "second"});
+    let handled = extension
+        .event(
+            "clipboard",
+            &copied,
+            Instant::now() + QUERY_DEADLINE,
+            &no_services(),
+        )
+        .unwrap();
+    assert!(handled.invalidated);
+    assert_eq!(titles_of(&keyword, ""), ["First copy", "invalidated after 1"]);
+    let ignored = extension
+        .event(
+            "clipboard",
+            &serde_json::json!({"type": "image"}),
+            Instant::now() + QUERY_DEADLINE,
+            &no_services(),
+        )
+        .unwrap();
+    assert!(!ignored.invalidated);
+    assert_eq!(titles_of(&keyword, ""), ["First copy", "invalidated after 1"]);
+}
+
+/// A provider for `extension` whose guest's requests go through an in-memory bridge that holds
+/// the package's declaration, with no grant yet.
+fn bridged(extension: &Arc<Extension>, role: Role) -> (ExtensionProvider, dupin_extension_bridge::Bridge) {
+    let bridge = dupin_extension_bridge::Bridge::new(
+        dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+        None,
+        dupin_extension_bridge::Services::none(),
+    );
+    bridge.install(
+        &extension.package,
+        extension.revision.clone(),
+        extension.capabilities.clone(),
+    );
+    (
+        ExtensionProvider::with_bridge(extension.clone(), role, bridge.clone()),
+        bridge,
+    )
+}
+
+#[test]
+fn a_catalogue_asks_the_broker_as_a_search_does_and_never_with_an_activation() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        r#", "defaultSearch": true, "capabilities": {"storage": {"quotaBytes": 1024}, "clipboard": ["read"]}"#,
+        &[(
+            "main.js",
+            r#"import { storage, clipboard } from 'dupin';
+               const code = (promise) => promise.then(() => 'ok', (error) => error.code);
+               export async function items() {
+                 const stored = await code(storage.usage());
+                 if (stored === 'needs-consent') throw new Error('storage needs consent');
+                 return [
+                   { id: 'storage', title: `storage ${stored}` },
+                   { id: 'clipboard', title: `clipboard ${await code(clipboard.readText())}` },
+                 ];
+               }"#,
+        )],
+    );
+    let (keyword, bridge) = bridged(&extension, Role::Keyword);
+    let main = ExtensionProvider::with_bridge(extension.clone(), Role::DefaultSearch, bridge.clone());
+    let id = &extension.package;
+    bridge.set_enabled(id, true).unwrap();
+
+    let rows = titles_of(&keyword, "");
+    assert_eq!(
+        rows[0], "Allow Marks to keep up to 1024 bytes of encrypted data?",
+        "{rows:?}"
+    );
+    assert_eq!(rows[1], "Marks failed");
+    assert!(
+        titles_of(&main, "storage").is_empty(),
+        "the main search neither lists the failure nor asks for consent"
+    );
+
+    let request = &bridge.pending(Some(id))[0];
+    bridge.allow(id, &request.revision, &request.scope, None).unwrap();
+    // The app forgets the catalogue when grants change; the bridge here has no app to tell.
+    extension.forget_catalogue();
+    assert_eq!(
+        titles_of(&keyword, ""),
+        // The in-memory bridge has no storage service, so the granted request reaches it and
+        // fails there; reading the clipboard needs an action you chose.
+        ["storage unavailable", "clipboard needs-activation"]
+    );
+    assert_eq!(titles_of(&main, "clip"), ["clipboard needs-activation"]);
+
+    let key = request.key();
+    bridge.revoke(id, &key).unwrap();
+    assert_eq!(
+        titles_of(&keyword, ""),
+        ["storage revoked", "clipboard needs-activation"],
+        "revoking drops the rows read under the grant and asks for the catalogue again"
+    );
+}
+
+#[test]
 fn every_part_of_a_catalogue_shares_one_deadline() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_folder, extension) = package(
@@ -271,7 +387,9 @@ fn every_part_of_a_catalogue_shares_one_deadline() {
     // Short, since the busy parts hold the extension host every other test shares.
     let deadline = Duration::from_millis(400);
     let started = Instant::now();
-    let error = extension.catalogue("", 10, started + deadline).unwrap_err();
+    let error = extension
+        .catalogue("", 10, started + deadline, &Call::none())
+        .unwrap_err();
     let elapsed = started.elapsed();
     assert!(
         matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic) if diagnostic.code == "deadline"),

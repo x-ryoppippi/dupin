@@ -507,7 +507,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         }
     );
     let page = host
-        .items(&package, None, Reason::Load, deadline(), &|| false)
+        .items(&package, None, Reason::Load, deadline(), &|| false, &none())
         .unwrap();
     assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
     let PageChange::Reset { rows } = page.change else {
@@ -515,7 +515,14 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     };
     assert_eq!(rows[0].id, "load");
     let next = host
-        .items(&package, Some("next"), Reason::More, deadline(), &|| false)
+        .items(
+            &package,
+            Some("next"),
+            Reason::More,
+            deadline(),
+            &|| false,
+            &none(),
+        )
         .unwrap();
     assert!(!next.more);
     assert!(

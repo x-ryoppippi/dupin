@@ -8,7 +8,7 @@
 use std::io::{self, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row};
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
@@ -118,7 +118,9 @@ pub enum Answer {
     Acted {
         acted: Acted,
     },
-    Handled,
+    Handled {
+        handled: Handled,
+    },
     Cancelled,
     Failed {
         diagnostic: Diagnostic,

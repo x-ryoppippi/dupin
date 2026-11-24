@@ -208,16 +208,24 @@ impl Ui {
             }
             let (watcher, bridge_for_watch) = (Arc::downgrade(&extension), bridge.clone());
             let id_for_watch = id.clone();
+            let me = self.me.clone();
             bridge.watch_clipboard(id, move |event| {
                 let Some(extension) = watcher.upgrade() else {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
                 let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
-                if let Err(RunError::Failed(diagnostic)) =
-                    extension.event("clipboard", &event, deadline, &call.services)
-                {
-                    crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                match extension.event("clipboard", &event, deadline, &call.services) {
+                    // Searching again shows the update at once while the panel lists the
+                    // catalogue, as after an action.
+                    Ok(handled) if handled.invalidated => me.update(|ui, tx| {
+                        let effects = ui.session.refresh();
+                        ui.apply(effects, tx);
+                    }),
+                    Ok(_) | Err(RunError::Cancelled) => {}
+                    Err(RunError::Failed(diagnostic)) => {
+                        crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                    }
                 }
             });
         }
@@ -229,6 +237,13 @@ impl Ui {
     /// extension asked for before.
     pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
         if let Notice::Changed(id) = &notice {
+            // A grant changes what the catalogue may read even when no authority was lost, so
+            // it is asked for again from the start on its next use.
+            for (extension, _) in self.extensions.registered.values() {
+                if extension.package == *id {
+                    extension.forget_catalogue();
+                }
+            }
             let bridge = &self.extensions.bridge;
             let commands: Vec<_> = self
                 .extensions
