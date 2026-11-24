@@ -215,6 +215,7 @@ impl Ui {
             calendar_access: calendar_access.clone(),
             clipboard: clipboard.settings(),
         });
+        clipboard.start(&bridge);
         bridge.set_listener({
             let me = me.clone();
             move |notice| me.update(move |ui, tx| ui.extension_access_changed(notice, tx))

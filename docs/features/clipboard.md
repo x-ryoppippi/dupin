@@ -52,4 +52,4 @@ On macOS versions that report the pasteboard access policy, background recording
 
 The history is kept across restarts in the extension's own [encrypted storage](./storage.md) namespace, sealed with the data key in your Keychain. It is never written to disk unencrypted, included in snapshots or logged. Dupin holds the list it shows in memory only, and lists it again from storage after a restart.
 
-Deleting an entry, clearing the history and turning it off delete what storage holds as well as what Dupin shows: turning the history off deletes the whole namespace, the bundled extension's and that of a copy of it in the extensions folder.
+Deleting an entry, clearing the history and turning it off delete what storage holds as well as what Dupin shows: turning the history off deletes the whole namespace, the bundled extension's and that of a copy of it in the extensions folder. Dupin deletes both again each time it starts with the history off, so turning it off in `config.toml` while Dupin is quit, or quitting before a deletion has finished, leaves nothing behind either.
