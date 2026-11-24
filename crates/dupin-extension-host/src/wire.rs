@@ -469,7 +469,7 @@ mod tests {
         r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A"}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A"}],"replace":[{"id":"a","title":"A"}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A"}],"replace":[{"id":"a","title":"A","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
