@@ -32,10 +32,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
-For isolated local Cargo cache measurements, see the
-[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
-sccache across fresh and reused target directories without changing the
-development shell or Nix package cache.
+For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
 ## Remote development with Testbox
 
@@ -82,11 +79,64 @@ authentication, warmup or native E2E succeeded.
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
-Flake builds share compiled dependencies separately for release and debug.
+Flake builds keep compiled dependencies in four outputs, one each for the
+release binary, Clippy and the tests, Hawk, whose toolchain differs, and the
+latency binary. A source edit reuses all four; only a manifest or `Cargo.lock`
+change rebuilds them. Hawk's dependency build runs with a fixed configuration,
+so editing `hawk.toml` or `scripts/hawk.nu` reuses it too. Every
+dependency-only output is named with version 0.0.0 rather than `VERSION`, so a
+release bump reuses them as well; `checks.<system>.dependency-cache-keys` fails
+if one would not. The two check builds leave out debug info, which a failing
+test does not need to report where it panicked.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
 builder and its vendor-hash definition; the hash update script evaluates it so
 updates still target `package.nix`. The non-flake `default.nix` build uses it too.
+
+## Build caching
+
+The [crate boundary experiment](../experiments/crate-boundaries/README.md)
+times representative edits. On a 6-CPU Testbox, an incremental `cargo build -p
+dupin` after editing a UI file, `dupin-core`'s session code or `dupin-mac` takes
+1.8–2.5 seconds, `cargo test --workspace --no-run` 1.8–3.0 and `cargo clippy`
+0.8–1.5. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
+`clippy` rebuilds nothing either, so no feature difference between them
+forces rebuilds. A release build takes 79–92 seconds whichever crate changed,
+because fat LTO recompiles the whole program. These numbers justify no
+crate split: editing the `dupin` crate already costs the least. New crates
+should stay leaves that depend on `serde` and `libc`, as the extension crates
+do, rather than on `dupin-core`, `dupin-mac` or Rune.
+
+CI's `build` job builds Clippy and the tests, Hawk and the release app in one
+`nix build`. Across 59 recent successful runs, that step took 143–191 seconds
+(median 155) for a Rust edit, about 340 seconds when `Cargo.lock` or a
+manifest changed, and 16–18 seconds when everything came from the cache. 17
+runs could not download a path that the Hestia manifest still listed, because
+its pack had been evicted from the cache; nine of them rebuilt the app for a
+change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
+compiled dependencies. On the Testbox, the same step after a UI edit takes 107
+seconds instead of 142 now that Hawk reuses its dependencies, and the three
+dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
+release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
+debug info.
+
+sccache is not configured for local builds or CI. Cargo builds workspace
+crates incrementally in the dev profile, which sccache cannot cache, and those
+crates are all that an edit rebuilds. It can only replay third-party crates in
+a fresh target directory. In the
+[Cargo cache experiment](../experiments/cargo-cache/README.md) on the Testbox,
+a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
+seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
+It only pays when a removed target is rebuilt at the same path: 18.1 seconds
+against 47.5. CI compiles through Nix, which caches whole dependency outputs
+instead. The development shell does not include sccache. A developer who often
+deletes and rebuilds the same target directory can run it from nixpkgs without
+installing it:
+
+```sh
+nix build --inputs-from . nixpkgs#sccache --out-link target/sccache
+RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
+```
 
 ## Formatting
 

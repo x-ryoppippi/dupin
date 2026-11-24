@@ -1,7 +1,7 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { config, pkgs, ... }:
     let
       native = pkgs.callPackage ../package.nix { };
       rolldown = pkgs.callPackage ./rolldown.nix { };
@@ -9,6 +9,7 @@
         inherit pkgs;
         inherit (inputs) crane;
         inherit native rolldown;
+        inherit (config.packages) cargo-hawk;
       };
       blacksmith = pkgs.callPackage ./blacksmith.nix { };
       # scripts/package-app.nu lays out Dupin.dmg over this.
