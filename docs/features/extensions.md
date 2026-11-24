@@ -186,11 +186,12 @@ The detail's title is the item's.
 
 An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a one-line `title` of up to 512 bytes and exactly one of:
 
-| Action | What it does                                                                                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `copy` | Copies the text, 1 byte to 16 KiB.                                                                                                                                                |
-| `open` | Opens the `http` or `https` URL.                                                                                                                                                  |
-| `run`  | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. |
+| Action  | What it does                                                                                                                                                                                 |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `copy`  | Copies the text, 1 byte to 16 KiB.                                                                                                                                                           |
+| `paste` | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Pasting needs Accessibility access; without it, Dupin copies the text and explains how to allow it. |
+| `open`  | Opens the `http` or `https` URL.                                                                                                                                                             |
+| `run`   | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep.            |
 
 ```js
 import { items as catalogue, storage } from 'dupin';

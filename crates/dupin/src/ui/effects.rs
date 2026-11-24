@@ -48,6 +48,7 @@ impl Ui {
                     Action::RunScript(command) => self.start_script(command, tx),
                     Action::ScriptArguments(path) => self.open_script_arguments(path, tx),
                     Action::Copy(text) => tx.copy(text),
+                    Action::Paste(text) => self.run_paste(text, tx),
                     Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
                     Action::Share { target, paths } => {
                         if !rune::tooling::is_headless()

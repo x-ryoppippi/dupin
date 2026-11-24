@@ -55,6 +55,7 @@ use snippets::SnippetRun;
 enum PendingPaste {
     Snippet(SnippetRun),
     ClipboardEntry(u64),
+    Text(String),
 }
 
 pub struct Windows {

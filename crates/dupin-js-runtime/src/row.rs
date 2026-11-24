@@ -83,6 +83,10 @@ pub enum RowEffect {
     Copy {
         text: String,
     },
+    /// Pastes the text into the app in front of Dupin, which copying alone leaves to the user.
+    Paste {
+        text: String,
+    },
     OpenUrl {
         url: String,
     },
@@ -206,6 +210,9 @@ impl Row {
                 RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
                     return Err("a copy action's text must be 1 byte to 16 KiB".into());
                 }
+                RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
+                    return Err("a paste action's text must be 1 byte to 16 KiB".into());
+                }
                 RowEffect::OpenUrl { url } if url.len() > MAX_URL_BYTES || !is_web_url(url) => {
                     return Err("an open action needs an http or https URL".into());
                 }
@@ -215,7 +222,7 @@ impl Row {
                         check_data(data)?;
                     }
                 }
-                RowEffect::Copy { .. } | RowEffect::OpenUrl { .. } => {}
+                RowEffect::Copy { .. } | RowEffect::Paste { .. } | RowEffect::OpenUrl { .. } => {}
             }
         }
         Ok(())
@@ -237,7 +244,7 @@ impl Row {
             .map(|action| {
                 action.title.len()
                     + match &action.effect {
-                        RowEffect::Copy { text } => text.len(),
+                        RowEffect::Copy { text } | RowEffect::Paste { text } => text.len(),
                         RowEffect::OpenUrl { url } => url.len(),
                         RowEffect::Run { handler, data } => {
                             handler.len() + data.as_ref().map_or(0, |data| data.to_string().len())

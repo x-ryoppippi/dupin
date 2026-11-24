@@ -43,6 +43,8 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
+    /// Paste the text into the frontmost app, or copy it while Dupin may not paste.
+    Paste(String),
     Share {
         target: ShareTarget,
         paths: Vec<PathBuf>,

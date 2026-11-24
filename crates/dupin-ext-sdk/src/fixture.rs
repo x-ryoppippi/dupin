@@ -620,10 +620,12 @@ pub fn rows(rows: &[Row]) -> Value {
         .collect()
 }
 
-/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }` or `{ "run": … }`.
+/// What choosing an action does, as `{ "copy": … }`, `{ "paste": … }`, `{ "url": … }` or
+/// `{ "run": … }`.
 pub fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
+        RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };

@@ -81,6 +81,7 @@ declare module 'dupin' {
 
 	export type Action =
 		| { title: string; copy: string }
+		| { title: string; paste: string }
 		| { title: string; open: string }
 		| ItemAction;
 

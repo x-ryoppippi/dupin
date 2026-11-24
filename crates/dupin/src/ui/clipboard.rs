@@ -22,6 +22,15 @@ impl Ui {
         });
     }
 
+    /// Paste an extension's text once the panel closes if access is granted, or copy it now.
+    pub(super) fn run_paste(&mut self, text: String, tx: &mut Tx) {
+        if !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
+            self.paste_after_close = Some(PendingPaste::Text(text));
+        } else {
+            tx.copy(text);
+        }
+    }
+
     /// Copy the entry back now, or paste it once the panel closes if access is granted.
     pub(super) fn restore_clipboard_entry(&mut self, entry: u64, paste: bool, tx: &mut Tx) {
         if paste && !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
