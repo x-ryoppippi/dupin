@@ -3,6 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 
 use dupin_core::catalogue::{Catalogue, Change, Entry};
 use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
@@ -202,6 +203,37 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
             if diagnostic.code == "unknown-id" && diagnostic.file.as_deref() == Some("main.js")),
         "{error:?}"
     );
+}
+
+#[test]
+fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        r#", "defaultSearch": true"#,
+        &[(
+            "main.js",
+            r#"import { items as catalogue } from 'dupin';
+               export function items(ctx) {
+                 if (ctx.reason === 'load') {
+                   return { cursor: '1', items: [{ id: 'clip-1', title: 'Secret token', text: 'hunter2' }, { id: 'clip-2', title: 'Shopping list', text: 'eggs' }] };
+                 }
+                 return { type: 'update', remove: ['clip-1'], cursor: '2' };
+               }
+               export const actions = { forget() { catalogue.invalidate(); } };"#,
+        )],
+    );
+    let keyword = ExtensionProvider::new(extension.clone());
+    let main = ExtensionProvider::with_role(extension.clone(), Role::DefaultSearch);
+    assert_eq!(titles_of(&keyword, ""), ["Secret token", "Shopping list"]);
+    assert_eq!(titles_of(&main, "secret"), ["Secret token"]);
+
+    let acted = extension
+        .run_action("forget", None, Instant::now() + QUERY_DEADLINE)
+        .unwrap();
+    assert!(acted.invalidated);
+    assert_eq!(titles_of(&keyword, ""), ["Shopping list"]);
+    assert!(titles_of(&main, "secret").is_empty());
+    assert_eq!(extension.catalogue.len(), 1);
 }
 
 /// A native provider over a catalogue, as a built-in port's baseline would be.

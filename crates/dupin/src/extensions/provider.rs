@@ -10,6 +10,7 @@ use dupin_js_runtime::RunError;
 use dupin_js_runtime::row::{Row, RowEffect};
 
 use super::Extension;
+use super::catalogue::Convert;
 
 /// Shorter than the command's session deadline, so a slow guest ends with its own error row
 /// rather than the generic expiry.
@@ -129,16 +130,22 @@ fn sectioned(rows: impl Iterator<Item = (Item, Option<Arc<Detail>>, Option<Strin
     batches
 }
 
-/// A catalogue row as the launcher holds it. Its ID carries the extension's, since usage
-/// history keys rows by ID across every command.
-pub(super) fn entry(extension: &Extension, mut row: Row) -> Entry {
-    let keywords = std::mem::take(&mut row.keywords);
-    let (item, detail, section) = row_item(extension, row, true);
-    Entry {
-        item,
-        keywords,
-        section: section.map(Into::into),
-        detail,
+impl Convert for Extension {
+    /// A catalogue row as the launcher holds it.
+    fn entry(&self, mut row: Row) -> Entry {
+        let keywords = std::mem::take(&mut row.keywords);
+        let (item, detail, section) = row_item(self, row, true);
+        Entry {
+            item,
+            keywords,
+            section: section.map(Into::into),
+            detail,
+        }
+    }
+
+    /// Carries the extension's ID, since usage history keys rows by ID across every command.
+    fn entry_id(&self, id: &str) -> String {
+        format!("extension:{}/{id}", self.id)
     }
 }
 
@@ -200,11 +207,7 @@ fn row_item(extension: &Extension, row: Row, catalogue: bool) -> (Item, Option<A
         })
         .collect();
     let item = Item {
-        id: if catalogue {
-            format!("extension:{}/{id}", extension.id)
-        } else {
-            id
-        },
+        id: if catalogue { extension.entry_id(&id) } else { id },
         view: View::Text { title, subtitle },
         payload,
         record_usage: catalogue,

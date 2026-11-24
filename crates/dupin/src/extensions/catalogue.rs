@@ -34,6 +34,14 @@ pub(crate) struct Cached {
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
 pub(crate) type Fetch<'a> = dyn FnMut(Option<&str>, Reason) -> Result<CataloguePage, RunError> + 'a;
 
+/// How the rows a package sends become the entries Dupin holds. An entry's ID need not be the
+/// row's, so the IDs an update removes are mapped the same way before they reach the catalogue.
+pub(crate) trait Convert {
+    fn entry(&self, row: Row) -> Entry;
+    /// The ID of the entry [`Convert::entry`] makes from a row whose ID is `id`.
+    fn entry_id(&self, id: &str) -> String;
+}
+
 struct Shared {
     state: Mutex<State>,
     /// Kept outside the lock, so the budget can weigh a catalogue another thread is filling.
@@ -79,13 +87,13 @@ impl Cached {
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated or expired. `convert` turns each row the package sent into an entry.
+    /// missing, invalidated or expired.
     pub fn search(
         &self,
         query: &str,
         limit: usize,
         fetch: &mut Fetch<'_>,
-        convert: &dyn Fn(Row) -> Entry,
+        convert: &dyn Convert,
     ) -> Result<Vec<Batch>, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
@@ -153,7 +161,7 @@ impl State {
         &mut self,
         now: Instant,
         fetch: &mut Fetch<'_>,
-        convert: &dyn Fn(Row) -> Entry,
+        convert: &dyn Convert,
     ) -> Result<(), RunError> {
         let expired = self.expires.is_some_and(|expires| now >= expires);
         let Some(mut reason) = self.due.or(expired.then_some(Reason::Expired)) else {
@@ -170,15 +178,17 @@ impl State {
             };
             let page = fetch(cursor.as_deref(), reason).inspect_err(|_| self.forget())?;
             let change = match page.change {
-                PageChange::Reset { rows } => Change::Reset(rows.into_iter().map(convert).collect()),
+                PageChange::Reset { rows } => {
+                    Change::Reset(rows.into_iter().map(|row| convert.entry(row)).collect())
+                }
                 PageChange::Update {
                     append,
                     replace,
                     remove,
                 } => Change::Update {
-                    append: append.into_iter().map(convert).collect(),
-                    replace: replace.into_iter().map(convert).collect(),
-                    remove,
+                    append: append.into_iter().map(|row| convert.entry(row)).collect(),
+                    replace: replace.into_iter().map(|row| convert.entry(row)).collect(),
+                    remove: remove.iter().map(|id| convert.entry_id(id)).collect(),
                 },
             };
             if let Err(problem) = self.catalogue.apply(change, LIMITS) {
@@ -251,29 +261,41 @@ mod tests {
         }
     }
 
-    fn entry(row: Row) -> Entry {
-        Entry {
-            item: Item {
-                id: row.id,
-                view: View::Text {
-                    title: row.title,
-                    subtitle: row.subtitle,
+    /// Prefixes IDs as the provider does, so an update that names rows by the package's IDs
+    /// only applies when those IDs are mapped too.
+    struct Prefixed;
+
+    impl Convert for Prefixed {
+        fn entry(&self, row: Row) -> Entry {
+            Entry {
+                item: Item {
+                    id: self.entry_id(&row.id),
+                    view: View::Text {
+                        title: row.title,
+                        subtitle: row.subtitle,
+                    },
+                    payload: Payload::default(),
+                    record_usage: true,
+                    icon: None,
+                    matched: Vec::new(),
+                    completion: None,
+                    score: None,
+                    primary: None,
+                    alternate: None,
+                    actions: Vec::new(),
                 },
-                payload: Payload::default(),
-                record_usage: true,
-                icon: None,
-                matched: Vec::new(),
-                completion: None,
-                score: None,
-                primary: None,
-                alternate: None,
-                actions: Vec::new(),
-            },
-            keywords: row.keywords,
-            section: None,
-            detail: None,
+                keywords: row.keywords,
+                section: None,
+                detail: None,
+            }
+        }
+
+        fn entry_id(&self, id: &str) -> String {
+            format!("held/{id}")
         }
     }
+
+    const ENTRY: &Prefixed = &Prefixed;
 
     fn page(change: PageChange, cursor: &str, more: bool) -> CataloguePage {
         CataloguePage {
@@ -307,10 +329,10 @@ mod tests {
             ))
         };
         for query in ["", "s", "sa", "saf"] {
-            cached.search(query, 10, &mut fetch, &entry).unwrap();
+            cached.search(query, 10, &mut fetch, ENTRY).unwrap();
         }
         assert_eq!(
-            titles(&cached.search("no", 10, &mut fetch, &entry).unwrap()),
+            titles(&cached.search("no", 10, &mut fetch, ENTRY).unwrap()),
             ["Notes"]
         );
         assert_eq!(calls, [(None, Reason::Load)]);
@@ -352,15 +374,52 @@ mod tests {
             })
         };
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, &entry).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
             ["Alpha", "Beta"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, &entry).unwrap()),
+            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
             ["Bravo"]
         );
         assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn a_removed_row_is_gone_and_its_id_can_come_back() {
+        let cached = Cached::default();
+        let mut answers = vec![
+            PageChange::Reset {
+                rows: vec![row("clip-1", "First"), row("clip-2", "Second")],
+            },
+            PageChange::Update {
+                append: Vec::new(),
+                replace: Vec::new(),
+                remove: vec!["clip-1".into()],
+            },
+            PageChange::Update {
+                append: vec![row("clip-1", "Again")],
+                replace: Vec::new(),
+                remove: Vec::new(),
+            },
+        ]
+        .into_iter();
+        let mut fetch =
+            |_: Option<&str>, _| Ok(page(answers.next().expect("asked once per change"), "1", false));
+        assert_eq!(
+            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            ["First", "Second"]
+        );
+        cached.invalidate();
+        assert_eq!(
+            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            ["Second"]
+        );
+        cached.invalidate();
+        assert_eq!(
+            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            ["Second", "Again"]
+        );
     }
 
     #[test]
@@ -390,11 +449,11 @@ mod tests {
                 )),
             }
         };
-        cached.search("", 10, &mut fetch, &entry).unwrap();
+        cached.search("", 10, &mut fetch, ENTRY).unwrap();
         cached.shared.lock().expires = Some(Instant::now());
-        assert!(cached.search("", 10, &mut fetch, &entry).is_err());
+        assert!(cached.search("", 10, &mut fetch, ENTRY).is_err());
         assert_eq!(cached.len(), 0);
-        assert_eq!(titles(&cached.search("", 10, &mut fetch, &entry).unwrap()), ["B"]);
+        assert_eq!(titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()), ["B"]);
         assert_eq!(reasons, [Reason::Load, Reason::Expired, Reason::Load]);
     }
 
@@ -412,13 +471,13 @@ mod tests {
                 false,
             ))
         };
-        let error = cached.search("", 10, &mut fetch, &entry).unwrap_err();
+        let error = cached.search("", 10, &mut fetch, ENTRY).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
         let mut endless = |_: Option<&str>, _| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
-        let error = cached.search("", 10, &mut endless, &entry).unwrap_err();
+        let error = cached.search("", 10, &mut endless, ENTRY).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"

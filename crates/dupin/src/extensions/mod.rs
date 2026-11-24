@@ -94,7 +94,7 @@ impl Extension {
             )
         };
         self.catalogue
-            .search(query, limit, &mut fetch, &|row| provider::entry(self, row))
+            .search(query, limit, &mut fetch, self)
             .map_err(|error| match error {
                 RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
                     RunError::Failed(diagnostic.file(self.compiled.entry()))
