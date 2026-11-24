@@ -6,10 +6,11 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
-use rquickjs::{Ctx, Function, Persistent, Promise};
+use rquickjs::{Context, Ctx, Function, Module, Persistent, Promise, Runtime, WriteOptions};
 
-use crate::Diagnostic;
+use crate::{Diagnostic, HOST_MODULE};
 
 /// Requests one call may have waiting for a reply at once.
 pub const MAX_PENDING: usize = 16;
@@ -23,7 +24,7 @@ const NATIVE: &str = "__dupinHost";
 const INVALIDATE: &str = "__dupinInvalidate";
 
 /// What the `dupin` module exports. `host` is captured and deleted before any package module
-/// that imports `dupin` runs.
+/// runs.
 pub(crate) const SOURCE: &str = r#"const host = globalThis.__dupinHost;
 delete globalThis.__dupinHost;
 const invalidate = globalThis.__dupinInvalidate;
@@ -279,20 +280,46 @@ pub(crate) struct Calls {
 
 pub(crate) type Shared = Rc<RefCell<Calls>>;
 
-/// Installs the native functions the `dupin` module captures. `invalidated` is set when an
-/// action or event handler calls `items.invalidate()`; any other call gets `None`, and the guest
-/// an error.
+/// The `dupin` module as bytecode, which this process compiles from [`SOURCE`] once and every
+/// engine then loads.
+pub(crate) fn bytecode() -> rquickjs::Result<&'static [u8]> {
+    static BYTECODE: OnceLock<Box<[u8]>> = OnceLock::new();
+    if let Some(bytecode) = BYTECODE.get() {
+        return Ok(bytecode);
+    }
+    let runtime = Runtime::new()?;
+    let context = Context::full(&runtime)?;
+    let bytecode = context.with(|ctx| {
+        Module::declare(ctx, HOST_MODULE, SOURCE)?.write(WriteOptions {
+            // Nothing reads the host module's own source back.
+            strip_source: true,
+            ..WriteOptions::default()
+        })
+    })?;
+    Ok(BYTECODE.get_or_init(|| bytecode.into_boxed_slice()))
+}
+
+/// Whether the running call may call `items.invalidate()`, which only an action or event
+/// handler may, and whether it did.
+#[derive(Default)]
+pub(crate) struct Invalidation {
+    pub(crate) allowed: Cell<bool>,
+    pub(crate) called: Cell<bool>,
+}
+
+/// Installs the native functions the `dupin` module captures. `items.invalidate()` throws in the
+/// guest unless `invalidation` allows it.
 pub(crate) fn install<'js>(
     ctx: &Ctx<'js>,
     calls: &Shared,
-    invalidated: Option<Rc<Cell<bool>>>,
+    invalidation: &Rc<Invalidation>,
 ) -> rquickjs::Result<()> {
-    let invalidate = Function::new(ctx.clone(), move || match &invalidated {
-        Some(invalidated) => {
-            invalidated.set(true);
-            true
+    let invalidation = invalidation.clone();
+    let invalidate = Function::new(ctx.clone(), move || {
+        if invalidation.allowed.get() {
+            invalidation.called.set(true);
         }
-        None => false,
+        invalidation.allowed.get()
     })?;
     ctx.globals().set(INVALIDATE, invalidate)?;
     let calls = calls.clone();

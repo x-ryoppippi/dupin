@@ -92,7 +92,10 @@ fn assert_fixture_matches(dir: &Path) {
 /// Links the entry with the launcher's JavaScript runtime. The launcher's full loader, which
 /// `dupin ext build` and `dupin ext dev` really validate with, is exercised by the `dupin` crate.
 fn validate(dir: &Path) -> Result<(), Diagnostic> {
-    compile(dir)?.check(control()).map(drop).map_err(failure)
+    compile(dir)?
+        .check(&dupin_js_runtime::Engine::new().map_err(failure)?, control())
+        .map(drop)
+        .map_err(failure)
 }
 
 /// Rolldown from `PATH`. The Nix checks and the dev shell put one there; elsewhere the tests that
