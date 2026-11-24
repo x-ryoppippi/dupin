@@ -159,6 +159,131 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 
 `code` is stable; `file` is relative to the folder (`package.json` for a manifest problem, with `field` naming the key, such as `dupin.keyword`), and `line` and `column` are present when the problem has a source position. [`crates/dupin-js-runtime/tests/fixtures`](../../crates/dupin-js-runtime/tests/fixtures) holds extensions that break each limit, for comparison.
 
+## Authoring
+
+`dupin ext` has three commands for writing an extension. They describe a package with `package.json`, whose `dupin` key is the manifest: `title`, `keyword` and optionally `main`, the module Dupin runs, which defaults to `main.js`. The package's `name` is its id and the name of its folder in `extensions/`.
+
+### `dupin ext new <dir> [--ts]`
+
+Creates a package in a new or empty folder. The folder's name becomes the id, so it takes 1–64 lowercase letters, digits or hyphens.
+
+| File                          | Purpose                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `package.json`                | The name, version 0.1.0, `"keywords": ["dupin-extension"]` and the `dupin` key, with the id as the keyword. |
+| `main.js` or `src/main.ts`    | A `search` that greets the query.                                                                           |
+| `dupin.d.ts`                  | The API's declarations, for editors and `tsc --noEmit`.                                                     |
+| `fixtures/search.json`        | A query and the items `search` answers it with.                                                             |
+| `README.md`                   | How to develop, build and share the package.                                                                |
+| `tsconfig.json`, `.gitignore` | `--ts` only. The compiler sees ES2023 and nothing else, as the guest does.                                  |
+| `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Bun and commits it on every push to `main`.                       |
+
+`dupin ext new .` names the package after the current folder.
+
+The `--ts` workflow installs exactly what `bun.lock` pins, without install scripts, so commit `bun.lock` once the package has dependencies. It installs and bundles in a job that can only read the repository; a second job, which runs no dependency code, commits the bundle.
+
+With `--ts`, `package.json` adds `"source": "src/main.ts"` and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle.
+
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
+
+### `dupin ext build <dir> [--sourcemap]`
+
+A package with `source` is bundled into a single ES module at `dupin.main`, with its npm dependencies, by `bun` or, without it, `esbuild` from `PATH`. Dupin never downloads either; with neither installed the build fails and says so. `--sourcemap` also writes `<main>.map` and links it from the bundle. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
+
+A dependency that imports a Node built-in (`fs`, `net`, `child_process` and the rest, with or without `node:`) fails the build, naming the file that imports it. Bundlers otherwise quietly stub or polyfill some built-ins for the browser, and the guest has none of them. A failed build or check puts back the `dupin.main` that was there before.
+
+A package without `source` is plain JavaScript and needs no build; `build` only checks it. [`dupin ext install`](#installing-and-updating) installs packages from Git without building them, so commit the bundle; the `--ts` scaffold's workflow does that for you.
+
+### `dupin ext dev <dir> [--sourcemap]`
+
+Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the JavaScript into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
+
+`dev` refuses to replace an `extensions/<name>` that is not its own symlink, so an installed extension of the same name is safe. Stop `dev` with ⌃C; the last revision stays installed until you delete `extensions/<name>` and `extensions/.dev/<name>`.
+
+## Installing and updating
+
+`dupin ext install` fetches a package and places it in the extensions folder, named after `name` in its `package.json`:
+
+```sh
+dupin ext install github:someone/dupin-word-count          # the newest version tag
+dupin ext install github:someone/dupin-word-count@v1.2.0   # a tag or a branch
+dupin ext install github:someone/dupin-word-count@0123456789abcdef0123456789abcdef01234567
+dupin ext install https://git.example.com/me/notes.git@main # an https://, ssh:// or file:// URL, or user@host:path
+dupin ext install ./word-count                              # a folder, copied as it is now
+```
+
+Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
+
+The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
+
+Installing never runs anything from the package. Dupin runs `git` to fetch the one commit into a scratch repository and reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run, and there is no package manager, install script or build. Git sources need Git (`xcode-select --install`); a folder source doesn't. Before placing anything, Dupin checks that:
+
+- `package.json` has a valid `dupin` key and `name`;
+- `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
+- there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
+- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch that writes more than 64 MiB is stopped before it finishes;
+- the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
+- a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
+
+A folder source skips `.git` and its top-level `node_modules`. The package is written into a hidden folder beside the others and then renamed into place, swapping with the previous copy on an update, so a running Dupin sees the old package or the new one and never half of either. It runs once [Extensions](#turning-them-on) is on, like any other folder there.
+
+| Command                   | What it does                                                                                                                                                     |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dupin ext list`          | Lists installed packages with their source, commit and state: installed, missing or modified.                                                                    |
+| `dupin ext update [NAME]` | Moves one package, or all, to the newest version tag (or the default branch), or copies a folder source again, and shows the capability scopes it adds or drops. |
+| `dupin ext remove NAME`   | Deletes the package's folder and its entry, with its grants.                                                                                                     |
+| `dupin ext sync`          | Reinstalls every package that is missing or modified from its locked commit, and checks it has the locked content hash.                                          |
+
+Each takes `--json`. Two commands that change extensions at the same time run one after the other.
+
+### The lock file
+
+`extensions.lock`, in Dupin's data directory (`$XDG_DATA_HOME/dupin`, else `~/Library/Application Support/Dupin`), pins what `dupin ext install` placed:
+
+```toml
+version = 1
+
+[packages.word-count]
+source = "github:someone/dupin-word-count"
+ref = "v1.2.0"
+commit = "0123456789abcdef0123456789abcdef01234567"
+content_hash = "blake3:…" # every file's path, executable bit and bytes
+installed_at = "2026-11-23T09:00:00Z"
+version = "1.2.0"
+keyword = "wc"
+requested = ["http:https://api.example.com"]
+granted = []
+```
+
+`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't connected yet.
+
+When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Search shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
+
+The lock is also how to reproduce a set of extensions: copy `extensions.lock` to another Mac and run `dupin ext sync`.
+
+### Declaring them with Nix
+
+The [Home Manager module](../configuration.md#nix) can declare packages and their grants instead:
+
+```nix
+programs.dupin = {
+  enable = true;
+  settings.extensions = true;
+  extensions = [
+    {
+      src = pkgs.fetchFromGitHub {
+        owner = "someone";
+        repo = "dupin-word-count";
+        rev = "0123456789abcdef0123456789abcdef01234567";
+        hash = "sha256-…";
+      };
+      grants = [ "http:https://api.example.com" ];
+    }
+  ];
+};
+```
+
+Each package links read-only into the extensions folder under `name`, which defaults to `name` in its `package.json`; set `name` to avoid reading the package while Nix evaluates. `grants` go to `extension-grants.toml` beside `config.toml`, the read-only base that grants chosen in Dupin overlay, as `settings.toml` overlays `config.toml`. macOS still asks for its own permissions when an extension first needs them. These packages are pinned by Nix, so they aren't in `extensions.lock`, and `dupin ext update` and `remove` leave them to Home Manager.
+
 ## A Wasm extension
 
 A folder with `extension.toml` instead of `package.json` runs a WebAssembly module. A module receives the query and returns up to 50 rows. A row is one of three views: text (title and subtitle), detail (title and body) or pair (source and result). Bodies are plain text; list sections and Markdown details are host features that built-ins such as Calendar and Dictionary use, and extensions cannot return them yet. A row may offer up to eight actions; Enter runs the first, → or ⌘K lists them all. An action can only copy text, open an `http` or `https` URL, or open one of the extension's own [views](#views).

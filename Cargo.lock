@@ -746,7 +746,9 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "dupin-core",
+ "dupin-ext-sdk",
  "dupin-extension-host",
+ "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
  "dupin-mac",
@@ -795,6 +797,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-ext-sdk"
+version = "0.0.0"
+dependencies = [
+ "dupin-js-runtime",
+ "dupin-plugin-protocol",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dupin-extension-host"
 version = "0.0.0"
 dependencies = [
@@ -813,6 +825,19 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dupin-extension-install"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "dupin-broker",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]

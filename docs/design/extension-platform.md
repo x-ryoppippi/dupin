@@ -225,6 +225,10 @@ Check in a pinned experiment modeled on `experiments/wasm-app-size`. Compare sig
 
 Use the same QuickJS-ng release, schema, fixtures and limits on macOS and Linux X11. The helper mode and socket protocol are portable, but each platform needs its own sandbox: Linux needs a separate mechanism, such as seccomp with Landlock or bubblewrap, and Windows would need job objects or an AppContainer. Build and run the fixture suite on the Linux port before expanding the API. Keep executable resolution, file handles, process cleanup, clipboard and permissions in platform adapters. Report unsupported capabilities clearly. macOS uses Dupin.app for TCC. Windows comes later and uses the same guest contract with its own host adapters. [Linux PR #166](https://github.com/x-ryoppippi/dupin/pull/166) · [QuickJS-ng supported platforms](https://quickjs-ng.github.io/quickjs/supported_platforms/)
 
+## Sync
+
+Sync between the owner's Macs is a host service on `dupin-storage` namespaces, through a user-chosen synced folder with end-to-end encryption and no Dupin server. Built-ins such as snippets and clipboard history get it by declaring a sync mode for their namespace. An extension's `storage` namespace syncs only with a `storage.sync` scope that the user grants on each Mac, and the extension list syncs from the lock file while grants are re-consented on each Mac. [Sync design](./sync.md)
+
 ## Rollout
 
 1. Measure native QuickJS-ng in `experiments/js-runtime`. Done: in-process execution failed containment, so guests move to a helper process.

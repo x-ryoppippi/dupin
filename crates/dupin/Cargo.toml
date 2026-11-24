@@ -21,6 +21,8 @@ dupin-plugin-protocol = { workspace = true }
 dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
 dupin-extension-host = { path = "../dupin-extension-host" }
+dupin-extension-install = { path = "../dupin-extension-install" }
+dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }

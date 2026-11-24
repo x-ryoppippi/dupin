@@ -17,6 +17,8 @@ let
     (root + /VERSION)
     (root + /rustfmt.toml)
     (root + /crates)
+    # The extension declarations `dupin ext new` copies into a package.
+    (root + /sdk)
     # The backdrop shader examples, which a test compiles.
     (root + /examples/shaders)
     # The JavaScript word counter, which tests load and run.
@@ -52,7 +54,7 @@ let
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
     name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-DNDJam1HhXFDnKFQ5dRU2J+IF3JuvVrtI2Okvib34ms=";
+    hash = "sha256-A4bwlPQLZg3CJ8cFAafNBlDcLWxp75ZwfGtQAcBusTI=";
   };
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the
