@@ -206,6 +206,7 @@ impl Fixture {
                 token: token.map(str::to_owned),
                 ..GitHub::default()
             },
+            bundled: Default::default(),
         }
     }
 

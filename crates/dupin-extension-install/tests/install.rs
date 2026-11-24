@@ -65,6 +65,7 @@ impl Fixture {
                 token: None,
                 ..GitHub::default()
             },
+            bundled: Default::default(),
         };
         Self {
             _root: root,
@@ -333,6 +334,19 @@ fn unsafe_or_unbuilt_packages_are_refused_before_anything_is_placed() {
     );
     assert!(!fixture.installed("word-count").exists());
     assert!(fixture.leftovers().is_empty(), "{:?}", fixture.leftovers());
+    assert!(fixture.lock().packages.is_empty());
+}
+
+#[test]
+fn a_package_cannot_take_a_bundled_name() {
+    let mut fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.installer.bundled.insert("word-count".into());
+
+    let error = fixture.install(&fixture.url()).unwrap_err();
+    assert_eq!(error.code, "name-bundled");
+    assert!(!fixture.installed("word-count").exists());
     assert!(fixture.lock().packages.is_empty());
 }
 
