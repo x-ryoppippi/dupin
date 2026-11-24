@@ -1,6 +1,6 @@
 [package]
 name = "dupin-extension-install"
-description = "Installs Dupin extension packages from Git or a folder and pins them in extensions.lock."
+description = "Installs Dupin extension packages from GitHub, Git or a folder and pins them in extensions.lock."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,9 +11,13 @@ license.workspace = true
 [dependencies]
 # Rune already links it, so hashing installed packages adds no crate to the app.
 blake3 = "1.8"
+# The app already links it for PNG decoding, so unpacking GitHub tarballs adds no crate.
+flate2 = "1.1"
 libc = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Checks each file of a GitHub tarball against the blob id in the commit's tree.
+sha1_smol = "1.0"
 toml = { workspace = true, features = ["display"] }
 
 [dev-dependencies]
