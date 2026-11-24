@@ -745,6 +745,7 @@ name = "dupin"
 version = "0.0.0"
 dependencies = [
  "dupin-core",
+ "dupin-ext-sdk",
  "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
@@ -791,6 +792,16 @@ dependencies = [
  "serde_json",
  "toml",
  "unicode-normalization",
+]
+
+[[package]]
+name = "dupin-ext-sdk"
+version = "0.0.0"
+dependencies = [
+ "dupin-js-runtime",
+ "dupin-plugin-protocol",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
