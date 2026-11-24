@@ -13,7 +13,7 @@ pub struct Registration {
     pub session: Session,
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
-    pub web: Arc<RwLock<crate::web::WebCatalog>>,
+    pub web: Arc<RwLock<crate::web::WebSearches>>,
     pub snippets: Arc<RwLock<SnippetCatalog>>,
     pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
@@ -129,7 +129,11 @@ pub fn register(
         snippets,
     } = configured(config)?;
     let session = Session::new(history, registry)?;
-    let web = Arc::new(RwLock::new(web));
+    let web = Arc::new(RwLock::new(crate::web::WebSearches::new(
+        web,
+        Vec::new(),
+        std::collections::HashSet::new(),
+    )));
     let snippets = Arc::new(RwLock::new(snippets));
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
@@ -536,7 +540,14 @@ mod tests {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
 
         let configured = configured(&Config::default()).unwrap();
-        let web = crate::web::WebProvider::new(Arc::new(RwLock::new(configured.web)), false);
+        let web = crate::web::WebProvider::new(
+            Arc::new(RwLock::new(crate::web::WebSearches::new(
+                configured.web,
+                Vec::new(),
+                std::collections::HashSet::new(),
+            ))),
+            false,
+        );
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         let effects = session.set_query("g");
         let generation = effects

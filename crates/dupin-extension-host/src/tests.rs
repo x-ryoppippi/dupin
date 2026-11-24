@@ -507,7 +507,14 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         }
     );
     let page = host
-        .items(&package, None, Reason::Load, deadline(), &|| false)
+        .items(
+            &package,
+            None,
+            Reason::Load,
+            &Default::default(),
+            deadline(),
+            &|| false,
+        )
         .unwrap();
     assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
     let PageChange::Reset { rows } = page.change else {
@@ -515,7 +522,14 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     };
     assert_eq!(rows[0].id, "load");
     let next = host
-        .items(&package, Some("next"), Reason::More, deadline(), &|| false)
+        .items(
+            &package,
+            Some("next"),
+            Reason::More,
+            &Default::default(),
+            deadline(),
+            &|| false,
+        )
         .unwrap();
     assert!(!next.more);
     assert!(
@@ -558,6 +572,7 @@ fn rogue_helper_entry() {
             section: None,
             detail: None,
             actions: Vec::new(),
+            web_search: None,
         }],
     };
     let hello = FromHelper::Hello {

@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use dupin_plugin_protocol::web_search::WebSearch;
+
 use crate::fuzzy::{self, Name, Query, Scratch};
 use crate::{Action, Batch, Detail, Item};
 
@@ -24,6 +26,8 @@ pub struct Entry {
     pub section: Option<Arc<str>>,
     /// Shown while the row is selected.
     pub detail: Option<Arc<Detail>>,
+    /// Makes the row a web search: it is reached by its alias, never matched by the query.
+    pub web_search: Option<WebSearch>,
 }
 
 /// How much one catalogue may hold.
@@ -223,6 +227,7 @@ impl Catalogue {
             .rows
             .iter()
             .enumerate()
+            .filter(|(_, row)| row.entry.web_search.is_none())
             .filter_map(|(at, row)| {
                 row.score(&query, &mut scratch)
                     .map(|(score, on_title)| (score, at, on_title))
@@ -258,9 +263,17 @@ impl Catalogue {
         vec![batch]
     }
 
+    /// The rows that are web searches, in the catalogue's order.
+    pub fn web_searches(&self) -> impl Iterator<Item = (&Entry, &WebSearch)> {
+        self.rows
+            .iter()
+            .filter_map(|row| Some((&row.entry, row.entry.web_search.as_ref()?)))
+    }
+
     fn listed(&self, limit: usize) -> Vec<Batch> {
         let mut batches: Vec<Batch> = Vec::new();
-        for row in self.rows.iter().take(limit) {
+        let listed = self.rows.iter().filter(|row| row.entry.web_search.is_none());
+        for row in listed.take(limit) {
             let entry = &row.entry;
             let section = entry.section.as_deref().map(str::to_owned);
             let batch = match batches.last_mut() {
@@ -338,6 +351,7 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.keywords.iter().map(String::len).sum::<usize>()
         + entry.section.as_ref().map_or(0, |section| section.len())
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
+        + entry.web_search.as_ref().map_or(0, WebSearch::text_bytes)
 }
 
 #[cfg(test)]
@@ -371,6 +385,7 @@ mod tests {
             keywords: Vec::new(),
             section: None,
             detail: None,
+            web_search: None,
         }
     }
 
@@ -407,6 +422,45 @@ mod tests {
         assert!(batches[0].items.iter().all(|item| item.score.is_some()));
         assert_eq!(titles(&catalogue.search("saf", 1)), ["Safari"]);
         assert!(catalogue.search("zzz", 10).is_empty());
+    }
+
+    #[test]
+    fn web_searches_are_held_and_updated_by_id_but_never_matched_or_listed() {
+        let search = |alias: &str| {
+            let mut entry = entry(alias, "Search Safari");
+            entry.web_search = Some(WebSearch {
+                alias: alias.into(),
+                url: "https://example.com/?q={query}".into(),
+                title: "Search Safari for {query}".into(),
+                fallback: None,
+            });
+            entry
+        };
+        let mut catalogue = catalogue(vec![search("s"), entry("b", "Safari"), search("t")]);
+        assert_eq!(titles(&catalogue.search("saf", 10)), ["Safari"]);
+        assert_eq!(titles(&catalogue.search("", 10)), ["Safari"]);
+        let aliases = |catalogue: &Catalogue| {
+            catalogue
+                .web_searches()
+                .map(|(entry, search)| (entry.item.id.clone(), search.alias.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            aliases(&catalogue),
+            [("s".into(), "s".into()), ("t".into(), "t".into())]
+        );
+        catalogue
+            .apply(
+                Change::Update {
+                    append: Vec::new(),
+                    replace: vec![entry("s", "Plain")],
+                    remove: vec!["t".into()],
+                },
+                LIMITS,
+            )
+            .unwrap();
+        assert!(aliases(&catalogue).is_empty());
+        assert_eq!(titles(&catalogue.search("", 10)), ["Plain", "Safari"]);
     }
 
     #[test]

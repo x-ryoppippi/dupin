@@ -43,6 +43,13 @@ provider = "clipboard.history"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "web.keywords"
 
+# The web-search package answers the same alias once config.toml lists no searches of its own.
+[features.web.extension]
+extends = "native"
+settings = { extensions = true, web_searches = {} }
+provider = "web.keywords"
+extensions = "scripts/latency/web-search.extensions"
+
 [features.snippets.native]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"

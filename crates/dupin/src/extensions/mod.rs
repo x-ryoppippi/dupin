@@ -14,6 +14,7 @@ mod manifest;
 pub mod packages;
 #[cfg(test)]
 pub(crate) mod parity;
+pub mod preferences;
 mod provider;
 
 use std::collections::HashMap;
@@ -22,10 +23,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
-use dupin_core::{Batch, Page};
+use dupin_core::{Batch, Item, Page};
 use dupin_extension_bridge::{Capabilities, PackageId, Revision};
 use dupin_extension_host::{Compiled, Host, Services};
-use dupin_js_runtime::{Acted, Diagnostic, Exports, Row, RunError, Sources};
+use dupin_js_runtime::web_search::WebSearch;
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Exports, Preferences, Reason, Row, RunError, Sources,
+};
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
@@ -136,16 +140,42 @@ impl Extension {
     /// the same catalogue. Every part of it must arrive before `deadline`, the search's own, so
     /// a slow catalogue fails with its own diagnostic before the search expires.
     pub fn catalogue(&self, query: &str, limit: usize, deadline: Instant) -> Result<Vec<Batch>, RunError> {
-        let mut fetch =
-            |cursor: Option<&str>, reason| host().items(&self.compiled, cursor, reason, deadline, &|| false);
+        let preferences = preferences::of(&self.package);
         self.catalogue
-            .search(query, limit, &mut fetch, self)
-            .map_err(|error| match error {
-                RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
-                    RunError::Failed(diagnostic.file(self.compiled.entry()))
-                }
-                error => error,
-            })
+            .search(query, limit, &preferences, &mut self.fetch(deadline), self)
+            .map_err(|error| self.located(error))
+    }
+
+    /// The catalogue's web searches, each with the row it shows before a query is typed, asking
+    /// the package first as [`Extension::catalogue`] does.
+    pub fn web_searches(&self, deadline: Instant) -> Result<Vec<(Item, WebSearch)>, RunError> {
+        let preferences = preferences::of(&self.package);
+        self.catalogue
+            .web_searches(&preferences, &mut self.fetch(deadline), self)
+            .map_err(|error| self.located(error))
+    }
+
+    /// The web searches Dupin holds for the package now, without asking it.
+    pub fn held_web_searches(&self) -> Vec<(Item, WebSearch)> {
+        self.catalogue.held_web_searches()
+    }
+
+    fn fetch(
+        &self,
+        deadline: Instant,
+    ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
+        move |cursor, reason, preferences| {
+            host().items(&self.compiled, cursor, reason, preferences, deadline, &|| false)
+        }
+    }
+
+    fn located(&self, error: RunError) -> RunError {
+        match error {
+            RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
+                RunError::Failed(diagnostic.file(self.compiled.entry()))
+            }
+            error => error,
+        }
     }
 }
 

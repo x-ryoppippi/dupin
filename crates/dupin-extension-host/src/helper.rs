@@ -225,8 +225,12 @@ fn execute(
         Call::Search { query, limit } => package
             .search_with(&query, limit as usize, control, bridge)
             .map(Outcome::Rows),
-        Call::Items { cursor, reason } => package
-            .items(cursor.as_deref(), reason, control)
+        Call::Items {
+            cursor,
+            reason,
+            preferences,
+        } => package
+            .items(cursor.as_deref(), reason, &preferences, control)
             .map(Outcome::Catalogue),
         Call::Action { name, data } => package
             .action(&name, &data.to_string(), control, bridge)

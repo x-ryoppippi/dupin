@@ -14,6 +14,7 @@ use crate::row::{
     MAX_TEXT_BYTES, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail,
     RowEffect,
 };
+use crate::web_search::{self, WebSearch};
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
 const MAX_TOAST_BYTES: usize = 512;
@@ -79,7 +80,8 @@ const ITEM_FIELDS: [&str; 9] = [
 ];
 const ITEM_FIELDS_HINT: &str =
     "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
-const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
+const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `text`, `url`, `icon`, `section`, `detail`, `actions` and `webSearch`.";
+const WEB_SEARCH_HINT: &str = "Give `webSearch` an `alias` such as `\"g\"`, a `url` such as `\"https://www.google.com/search?q={query}\"`, a `title` such as `\"Search Google for {query}\"` and optionally a `fallback` position.";
 
 /// Which export answered, which decides the fields and limits that apply.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -540,11 +542,15 @@ impl<'a> Reader<'a> {
         };
         for key in item.keys::<String>() {
             let key = key?;
-            let catalogue_only = key == "keywords" && self.source == Source::Items;
+            let catalogue_only =
+                matches!(key.as_str(), "keywords" | "webSearch") && self.source == Source::Items;
             if !ITEM_FIELDS.contains(&key.as_str()) && !catalogue_only {
                 let hint = match self.source {
                     Source::Search if key == "keywords" => {
                         "`keywords` help Dupin match items it holds; export `items` to use them."
+                    }
+                    Source::Search if key == "webSearch" => {
+                        "Dupin fills a `webSearch` as the user types; export `items` to list one."
                     }
                     Source::Search => ITEM_FIELDS_HINT,
                     Source::Items => CATALOGUE_ITEM_FIELDS_HINT,
@@ -617,6 +623,19 @@ impl<'a> Reader<'a> {
             });
         }
         self.actions(&item, &field("actions"), &mut actions)?;
+        let web_search = self.web_search(&item, &field("webSearch"))?;
+        if web_search.is_some() && !actions.is_empty() {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    field("webSearch"),
+                    "is on an item that also has `url`, `text` or `actions`",
+                )
+                .hint(
+                    "Dupin opens a web search's own URL; leave `url`, `text` and `actions` out of its item.",
+                )
+                .into());
+        }
         Ok(Row {
             id,
             title,
@@ -626,7 +645,83 @@ impl<'a> Reader<'a> {
             section,
             detail,
             actions,
+            web_search,
         })
+    }
+
+    fn web_search(&mut self, item: &Object<'_>, field: &str) -> Result<Option<WebSearch>, Failure> {
+        let value: Value = item.get("webSearch")?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let Some(object) = plain_object(&value) else {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    field,
+                    format!("must be an object, not {}", describe(&value)),
+                )
+                .hint(WEB_SEARCH_HINT)
+                .into());
+        };
+        self.only_keys(&object, &["alias", "url", "title", "fallback"], WEB_SEARCH_HINT)
+            .map_err(|failure| self.nested(failure, field))?;
+        let required = |reader: &mut Self, key: &str, cap: usize| {
+            let at = format!("{field}.{key}");
+            reader.string(&object, &at, key, cap)?.ok_or_else(|| {
+                Failure::from(
+                    reader
+                        .invalid("missing-field", at, "is required")
+                        .hint(WEB_SEARCH_HINT),
+                )
+            })
+        };
+        let alias = required(self, "alias", web_search::MAX_ALIAS_BYTES)?;
+        let url = required(self, "url", web_search::MAX_TEMPLATE_BYTES)?;
+        let title = required(self, "title", MAX_TITLE_BYTES)?;
+        let fallback: Value = object.get("fallback")?;
+        let fallback = if fallback.is_undefined() || fallback.is_null() {
+            None
+        } else {
+            match fallback.as_number() {
+                Some(position)
+                    if position.fract() == 0.0
+                        && (0.0..=f64::from(web_search::MAX_FALLBACK)).contains(&position) =>
+                {
+                    Some(position as u32)
+                }
+                _ => {
+                    return Err(self
+                        .invalid(
+                            "invalid-field",
+                            format!("{field}.fallback"),
+                            format!("must be a whole number from 0 to {}", web_search::MAX_FALLBACK),
+                        )
+                        .hint("Fallbacks are offered lowest first; leave `fallback` out to offer none.")
+                        .into());
+                }
+            }
+        };
+        let search = WebSearch {
+            alias,
+            url,
+            title,
+            fallback,
+        };
+        search.validate().map_err(|message| {
+            let (key, message) = message
+                .strip_prefix("`webSearch.")
+                .and_then(|rest| rest.split_once("` "))
+                .unwrap_or(("", message.as_str()));
+            let at = if key.is_empty() {
+                field.to_owned()
+            } else {
+                format!("{field}.{key}")
+            };
+            self.invalid("invalid-field", at, message.to_owned())
+                .hint(WEB_SEARCH_HINT)
+        })?;
+        Ok(Some(search))
     }
 
     fn web_url(&self, field: &str, url: &str) -> Result<(), Failure> {

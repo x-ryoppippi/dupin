@@ -1,8 +1,8 @@
 use dupin_core::{Action, ItemAction, Payload, ShareTarget};
 
-use crate::web::WebCatalog;
+use crate::web::WebSearches;
 
-pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
+pub fn for_payload(payload: &Payload, web: &WebSearches) -> Vec<ItemAction> {
     let mut receivers = Vec::new();
     let text = payload.nonblank_text();
     if let Some(text) = text {
@@ -35,10 +35,10 @@ pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
         receivers.push(ItemAction::new("copy-path", title, Action::Copy(text)));
     }
     if let Some(query) = text {
-        receivers.extend(web.search_urls(query).map(|(keyword, name, url)| {
+        receivers.extend(web.search_urls(query).into_iter().map(|(alias, title, url)| {
             ItemAction::new(
-                &format!("web:{keyword}"),
-                &format!("Search {name} ({keyword})"),
+                &format!("web:{alias}"),
+                &format!("{title} ({alias})"),
                 Action::OpenUrl(url),
             )
         }));
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn receivers_follow_the_payload_types() {
-        let web = WebCatalog::default();
+        let web = WebSearches::default();
         let ids = |actions: Vec<ItemAction>| actions.into_iter().map(|action| action.id).collect::<Vec<_>>();
         assert!(for_payload(&Payload::default(), &web).is_empty());
         assert!(for_payload(&Payload::text(" \n "), &web).is_empty());

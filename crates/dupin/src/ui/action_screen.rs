@@ -636,7 +636,7 @@ mod action_screen_tests {
         screen.selected = screen.item.actions.len();
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
         screen.stage = ActionStage::Receivers {
-            actions: crate::receivers::for_payload(&screen.item.payload, &crate::web::WebCatalog::default()),
+            actions: crate::receivers::for_payload(&screen.item.payload, &crate::web::WebSearches::default()),
             selected: 0,
         };
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);

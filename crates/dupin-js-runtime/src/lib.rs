@@ -13,6 +13,8 @@ mod package;
 pub mod row;
 mod typescript;
 
+pub use dupin_plugin_protocol::web_search;
+
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -30,6 +32,9 @@ pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Rep
 pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
 pub use row::{CataloguePage, Reason, Row};
+
+/// What the user set for a package, which `items` reads as `ctx.preferences`.
+pub type Preferences = serde_json::Map<String, serde_json::Value>;
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
@@ -179,13 +184,14 @@ impl Package {
         })
     }
 
-    /// Calls `items({ cursor, reason })` and reads the part of the catalogue it answers with.
-    /// The catalogue loads as the user types, before any row is chosen, and reaches no host
-    /// service.
+    /// Calls `items({ cursor, reason, preferences })` and reads the part of the catalogue it
+    /// answers with. The catalogue loads as the user types, before any row is chosen, and
+    /// reaches no host service.
     pub fn items(
         &self,
         cursor: Option<&str>,
         reason: Reason,
+        preferences: &Preferences,
         control: Control,
     ) -> Result<CataloguePage, RunError> {
         let mut bridge = Unavailable::default();
@@ -198,6 +204,8 @@ impl Package {
                 None => context.set("cursor", rquickjs::Null)?,
             }
             context.set("reason", reason.as_str())?;
+            let preferences = serde_json::Value::Object(preferences.clone());
+            context.set("preferences", frozen_json(ctx, &preferences)?)?;
             let context = frozen(ctx, context)?;
             let answer = sandbox.call(ctx, items, (context,))?;
             output::Reader::items(&self.entry).page(answer)
@@ -271,6 +279,31 @@ fn missing_export(entry: &str) -> Diagnostic {
 fn frozen<'js>(ctx: &Ctx<'js>, value: impl rquickjs::IntoJs<'js>) -> rquickjs::Result<Value<'js>> {
     let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
     freeze.call((value,))
+}
+
+/// `value` as JavaScript, with every object and array in it frozen.
+fn frozen_json<'js>(ctx: &Ctx<'js>, value: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
+    use rquickjs::IntoJs;
+    match value {
+        serde_json::Value::Null => Ok(Value::new_null(ctx.clone())),
+        serde_json::Value::Bool(value) => value.into_js(ctx),
+        serde_json::Value::Number(number) => number.as_f64().unwrap_or_default().into_js(ctx),
+        serde_json::Value::String(text) => text.as_str().into_js(ctx),
+        serde_json::Value::Array(values) => {
+            let array = rquickjs::Array::new(ctx.clone())?;
+            for (index, value) in values.iter().enumerate() {
+                array.set(index, frozen_json(ctx, value)?)?;
+            }
+            frozen(ctx, array)
+        }
+        serde_json::Value::Object(values) => {
+            let object = Object::new(ctx.clone())?;
+            for (key, value) in values {
+                object.set(key.as_str(), frozen_json(ctx, value)?)?;
+            }
+            frozen(ctx, object)
+        }
+    }
 }
 
 fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {

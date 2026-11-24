@@ -256,6 +256,21 @@ impl Ui {
         self.prefs.update(|prefs, _| prefs.refresh_permissions());
     }
 
+    /// The registered extensions whose catalogues answer the main search, in the order they
+    /// registered, which is where web searches come from.
+    pub(crate) fn web_search_sources(&self) -> Vec<Arc<Extension>> {
+        self.extensions
+            .active
+            .iter()
+            .filter(|extension| {
+                self.extensions.registered.values().any(|(registered, role)| {
+                    *role == Role::DefaultSearch && Arc::ptr_eq(registered, extension)
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
     fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
         self.extensions
             .registered

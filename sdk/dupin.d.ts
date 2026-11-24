@@ -63,6 +63,29 @@ declare module 'dupin' {
 		id: string;
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
+		/**
+		 * Makes the item a web search, which takes no `url`, `text` or `actions`. Typing the alias
+		 * in the main search shows the item first, with `title`; a space and a query show
+		 * `webSearch.title`, and Enter opens the URL filled with the query. The package's own
+		 * keyword lists every web search for the query. Query matching never reaches the item.
+		 */
+		webSearch?: WebSearch;
+	}
+
+	/** Dupin fills `{query}` as the user types, without calling the package. */
+	export interface WebSearch {
+		/** Up to 32 ASCII letters, digits, `_` or `-`, matched case-sensitively. A keyword wins over it. */
+		alias: string;
+		/**
+		 * An `http` or `https` URL of up to 4,096 bytes, with no credentials and one `{query}` after
+		 * its host, which Dupin percent-encodes; or exactly `maps://?q={query}`, which opens Apple
+		 * Maps and needs a query.
+		 */
+		url: string;
+		/** The title once a query is typed: one line with one `{query}`, which the query replaces. */
+		title: string;
+		/** Offered, lowest first, when nothing else matches the main search: 0 to 1,000. */
+		fallback?: number;
 	}
 
 	export interface Metadata {
@@ -106,6 +129,11 @@ declare module 'dupin' {
 		 * after its `ttl` and `invalidated` after an action called `items.invalidate()`.
 		 */
 		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
+		/**
+		 * What the user set for the package. A bundled package that replaces a built-in gets that
+		 * built-in's config.toml settings here; a change asks `items` again with reason `load`.
+		 */
+		readonly preferences: Readonly<Record<string, Json>>;
 	}
 
 	interface CatalogueAnswer {
@@ -140,7 +168,8 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
-	 * user types, asking again only on first use, after `ttl` or when an action invalidates it.
+	 * user types, asking again only on first use, after `ttl`, when an action invalidates it or
+	 * when its preferences change.
 	 * At most 10,000 items and 8 MiB of text. It reaches no host service: a request fails with
 	 * `unavailable`.
 	 */

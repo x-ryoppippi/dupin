@@ -345,6 +345,11 @@ impl CommandRegistry {
         self.keywords.get(keyword)
     }
 
+    /// Every keyword some command answers.
+    pub fn keywords(&self) -> impl Iterator<Item = &str> {
+        self.keywords.keys().map(String::as_str)
+    }
+
     pub(crate) fn contains(&self, id: &CommandId) -> bool {
         self.commands.contains_key(id)
     }

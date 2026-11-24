@@ -118,6 +118,16 @@ pub fn answer(
     if exports.items {
         let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
         batches.extend(extension.catalogue(query, left, deadline)?);
+        let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
+        let searches: Vec<Item> = extension
+            .web_searches(deadline)?
+            .iter()
+            .filter_map(|(item, search)| crate::web::item(item, search, query.trim(), false))
+            .take(left)
+            .collect();
+        if !searches.is_empty() {
+            batches.push(Batch::from(searches));
+        }
     }
     Ok(batches)
 }
@@ -162,12 +172,14 @@ impl Convert for Extension {
     /// A catalogue row as the launcher holds it.
     fn entry(&self, mut row: Row) -> Entry {
         let keywords = std::mem::take(&mut row.keywords);
+        let web_search = row.web_search.take();
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
             keywords,
             section: section.map(Into::into),
             detail,
+            web_search,
         }
     }
 
@@ -191,6 +203,7 @@ pub(super) fn row_item(
         section,
         detail,
         actions: offered,
+        web_search: _,
     } = row;
     let detail = detail.map(|detail| {
         let mut shown = Detail::new(title.clone(), &detail.markdown);

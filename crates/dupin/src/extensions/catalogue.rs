@@ -11,10 +11,11 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_core::Batch;
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits};
+use dupin_core::{Batch, Item};
 use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
-use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
+use dupin_js_runtime::web_search::WebSearch;
+use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
 
 /// What one package's catalogue may hold.
 pub const LIMITS: Limits = Limits {
@@ -32,7 +33,8 @@ pub(crate) struct Cached {
 }
 
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
-pub(crate) type Fetch<'a> = dyn FnMut(Option<&str>, Reason) -> Result<CataloguePage, RunError> + 'a;
+pub(crate) type Fetch<'a> =
+    dyn FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> + 'a;
 
 /// How the rows a package sends become the entries Dupin holds. An entry's ID need not be the
 /// row's, so the IDs an update removes are mapped the same way before they reach the catalogue.
@@ -55,6 +57,8 @@ struct State {
     expires: Option<Instant>,
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
+    /// The preferences the catalogue was asked for with.
+    preferences: Option<Arc<Preferences>>,
 }
 
 impl Default for Cached {
@@ -65,6 +69,7 @@ impl Default for Cached {
                 cursor: None,
                 expires: None,
                 due: Some(Reason::Load),
+                preferences: None,
             }),
             bytes: AtomicUsize::new(0),
             used: AtomicU64::new(0),
@@ -87,25 +92,59 @@ impl Cached {
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated or expired.
+    /// missing, invalidated, expired or was asked for with other `preferences`. Web searches are
+    /// reached by their alias instead, through [`Cached::web_searches`].
     pub fn search(
         &self,
         query: &str,
         limit: usize,
+        preferences: &Arc<Preferences>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<Vec<Batch>, RunError> {
+        self.fresh(preferences, fetch, convert, |catalogue| {
+            catalogue.search(query, limit)
+        })
+    }
+
+    /// The catalogue's web searches, each with the row it shows before a query is typed,
+    /// refreshed as [`Cached::search`] refreshes the catalogue.
+    pub fn web_searches(
+        &self,
+        preferences: &Arc<Preferences>,
+        fetch: &mut Fetch<'_>,
+        convert: &dyn Convert,
+    ) -> Result<Vec<(Item, WebSearch)>, RunError> {
+        self.fresh(preferences, fetch, convert, held_web_searches)
+    }
+
+    /// The web searches Dupin holds right now, without asking the package or waiting for a
+    /// search that is filling the catalogue.
+    pub fn held_web_searches(&self) -> Vec<(Item, WebSearch)> {
+        match self.shared.state.try_lock() {
+            Ok(state) if state.due.is_none() => held_web_searches(&state.catalogue),
+            _ => Vec::new(),
+        }
+    }
+
+    fn fresh<T>(
+        &self,
+        preferences: &Arc<Preferences>,
+        fetch: &mut Fetch<'_>,
+        convert: &dyn Convert,
+        read: impl FnOnce(&Catalogue) -> T,
+    ) -> Result<T, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
-        let refreshed = state.refresh(Instant::now(), fetch, convert);
+        let refreshed = state.refresh(Instant::now(), preferences, fetch, convert);
         self.shared
             .bytes
             .store(state.catalogue.bytes(), Ordering::Relaxed);
         refreshed?;
-        let batches = state.catalogue.search(query, limit);
+        let read = read(&state.catalogue);
         drop(state);
         self.keep_within_budget();
-        Ok(batches)
+        Ok(read)
     }
 
     /// How many rows the catalogue holds.
@@ -149,22 +188,39 @@ impl Shared {
     }
 }
 
+fn held_web_searches(catalogue: &Catalogue) -> Vec<(Item, WebSearch)> {
+    catalogue
+        .web_searches()
+        .map(|(entry, search)| (entry.item.clone(), search.clone()))
+        .collect()
+}
+
 impl State {
     fn forget(&mut self) {
         self.catalogue = Catalogue::default();
         self.cursor = None;
         self.expires = None;
         self.due = Some(Reason::Load);
+        self.preferences = None;
     }
 
     fn refresh(
         &mut self,
         now: Instant,
+        preferences: &Arc<Preferences>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<(), RunError> {
         let expired = self.expires.is_some_and(|expires| now >= expires);
-        let Some(mut reason) = self.due.or(expired.then_some(Reason::Expired)) else {
+        let changed = self
+            .preferences
+            .as_ref()
+            .is_some_and(|held| !Arc::ptr_eq(held, preferences));
+        let Some(mut reason) = changed
+            .then_some(Reason::Load)
+            .or(self.due)
+            .or(expired.then_some(Reason::Expired))
+        else {
             return Ok(());
         };
         if reason == Reason::Load {
@@ -176,7 +232,7 @@ impl State {
             } else {
                 self.cursor.clone()
             };
-            let page = fetch(cursor.as_deref(), reason).inspect_err(|_| self.forget())?;
+            let page = fetch(cursor.as_deref(), reason, preferences).inspect_err(|_| self.forget())?;
             let change = match page.change {
                 PageChange::Reset { rows } => {
                     Change::Reset(rows.into_iter().map(|row| convert.entry(row)).collect())
@@ -199,6 +255,7 @@ impl State {
             self.expires = page.ttl.map(|seconds| now + Duration::from_secs(seconds.into()));
             if !page.more {
                 self.due = None;
+                self.preferences = Some(preferences.clone());
                 return Ok(());
             }
             reason = Reason::More;
@@ -258,6 +315,7 @@ mod tests {
             section: None,
             detail: None,
             actions: Vec::new(),
+            web_search: None,
         }
     }
 
@@ -287,6 +345,7 @@ mod tests {
                 keywords: row.keywords,
                 section: None,
                 detail: None,
+                web_search: row.web_search,
             }
         }
 
@@ -296,6 +355,11 @@ mod tests {
     }
 
     const ENTRY: &Prefixed = &Prefixed;
+
+    fn none() -> Arc<Preferences> {
+        static NONE: OnceLock<Arc<Preferences>> = OnceLock::new();
+        NONE.get_or_init(Arc::default).clone()
+    }
 
     fn page(change: PageChange, cursor: &str, more: bool) -> CataloguePage {
         CataloguePage {
@@ -318,7 +382,7 @@ mod tests {
     fn the_package_is_asked_once_and_typing_only_matches_what_is_held() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -329,10 +393,10 @@ mod tests {
             ))
         };
         for query in ["", "s", "sa", "saf"] {
-            cached.search(query, 10, &mut fetch, ENTRY).unwrap();
+            cached.search(query, 10, &none(), &mut fetch, ENTRY).unwrap();
         }
         assert_eq!(
-            titles(&cached.search("no", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("no", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["Notes"]
         );
         assert_eq!(calls, [(None, Reason::Load)]);
@@ -342,7 +406,7 @@ mod tests {
     fn parts_and_updates_follow_the_cursor_and_invalidation_asks_with_it() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(match (cursor, reason) {
                 (None, Reason::Load) => page(
@@ -374,12 +438,12 @@ mod tests {
             })
         };
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["Alpha", "Beta"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["Bravo"]
         );
         assert_eq!(calls.len(), 3);
@@ -404,20 +468,21 @@ mod tests {
             },
         ]
         .into_iter();
-        let mut fetch =
-            |_: Option<&str>, _| Ok(page(answers.next().expect("asked once per change"), "1", false));
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            Ok(page(answers.next().expect("asked once per change"), "1", false))
+        };
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["First", "Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
             ["Second", "Again"]
         );
     }
@@ -426,7 +491,7 @@ mod tests {
     fn an_expired_catalogue_is_asked_again_and_a_failure_starts_over() {
         let cached = Cached::default();
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason| {
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
             reasons.push(reason);
             match reasons.len() {
                 1 => Ok(CataloguePage {
@@ -449,18 +514,21 @@ mod tests {
                 )),
             }
         };
-        cached.search("", 10, &mut fetch, ENTRY).unwrap();
+        cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap();
         cached.shared.lock().expires = Some(Instant::now());
-        assert!(cached.search("", 10, &mut fetch, ENTRY).is_err());
+        assert!(cached.search("", 10, &none(), &mut fetch, ENTRY).is_err());
         assert_eq!(cached.len(), 0);
-        assert_eq!(titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()), ["B"]);
+        assert_eq!(
+            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            ["B"]
+        );
         assert_eq!(reasons, [Reason::Load, Reason::Expired, Reason::Load]);
     }
 
     #[test]
     fn a_rejected_change_or_endless_parts_drop_the_catalogue() {
         let cached = Cached::default();
-        let mut fetch = |_: Option<&str>, _| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             Ok(page(
                 PageChange::Update {
                     append: Vec::new(),
@@ -471,16 +539,59 @@ mod tests {
                 false,
             ))
         };
-        let error = cached.search("", 10, &mut fetch, ENTRY).unwrap_err();
+        let error = cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
-        let mut endless = |_: Option<&str>, _| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
-        let error = cached.search("", 10, &mut endless, ENTRY).unwrap_err();
+        let mut endless =
+            |_: Option<&str>, _, _: &Preferences| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
+        let error = cached.search("", 10, &none(), &mut endless, ENTRY).unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn other_preferences_load_the_catalogue_again_and_web_searches_come_from_it() {
+        use dupin_js_runtime::web_search::WebSearch;
+
+        let cached = Cached::default();
+        let mut seen = Vec::new();
+        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+            seen.push((reason, preferences.len()));
+            let mut search = row("g", "Search Google");
+            search.web_search = Some(WebSearch {
+                alias: "g".into(),
+                url: "https://www.google.com/search?q={query}".into(),
+                title: "Search Google for {query}".into(),
+                fallback: None,
+            });
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![search, row("a", "Alpha")],
+                },
+                "1",
+                false,
+            ))
+        };
+        assert!(cached.held_web_searches().is_empty());
+        let first = none();
+        let searches = cached.web_searches(&first, &mut fetch, ENTRY).unwrap();
+        assert_eq!(searches.len(), 1);
+        assert_eq!(searches[0].0.id, "held/g");
+        assert_eq!(searches[0].1.alias, "g");
+        assert_eq!(cached.held_web_searches().len(), 1);
+        assert_eq!(
+            titles(&cached.search("", 10, &first, &mut fetch, ENTRY).unwrap()),
+            ["Alpha"]
+        );
+        let mut changed = Preferences::new();
+        changed.insert("webFallbacks".into(), serde_json::json!(["g"]));
+        cached
+            .web_searches(&Arc::new(changed), &mut fetch, ENTRY)
+            .unwrap();
+        assert_eq!(seen, [(Reason::Load, 0), (Reason::Load, 1)]);
     }
 }

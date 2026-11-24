@@ -4,8 +4,26 @@ use super::*;
 use crate::row::{self, PageChange, RowAction, RowEffect};
 
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
+    items_with(source, cursor, reason, &Preferences::new())
+}
+
+fn items_with(
+    source: &str,
+    cursor: Option<&str>,
+    reason: Reason,
+    preferences: &Preferences,
+) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
-    loaded.unwrap().items(cursor, reason, timeout(DEADLINE))
+    loaded
+        .unwrap()
+        .items(cursor, reason, preferences, timeout(DEADLINE))
+}
+
+fn reset_rows(page: CataloguePage) -> Vec<Row> {
+    match page.change {
+        PageChange::Reset { rows } => rows,
+        change => panic!("expected the whole catalogue, got {change:?}"),
+    }
 }
 
 fn failure_of<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
@@ -30,7 +48,12 @@ fn a_package_may_export_items_search_or_both() {
     }
     let (_folder, loaded) = package(&[("main.js", "export function search() { return []; }")]);
     assert_eq!(
-        failure_of(loaded.unwrap().items(None, Reason::Load, timeout(DEADLINE))).code,
+        failure_of(
+            loaded
+                .unwrap()
+                .items(None, Reason::Load, &Preferences::new(), timeout(DEADLINE))
+        )
+        .code,
         "missing-items"
     );
 }
@@ -300,6 +323,7 @@ fn rows_from_another_process_are_checked_again() {
             section: None,
             detail: None,
             actions: Vec::new(),
+            web_search: None,
         };
         edit(&mut row);
         row
@@ -334,4 +358,101 @@ fn rows_from_another_process_are_checked_again() {
             .validate(row::Source::Items)
             .is_ok()
     );
+}
+
+#[test]
+fn items_sees_the_preferences_frozen_through_and_through() {
+    let preferences: Preferences = serde_json::from_str(
+        r#"{ "webSearches": { "docs": { "name": "Docs", "url": "https://docs.example/?q={query}" } }, "webFallbacks": ["docs"] }"#,
+    )
+    .unwrap();
+    let source = r#"export function items(ctx) {
+         const searches = ctx.preferences.webSearches ?? {};
+         let frozen = Object.isFrozen(ctx.preferences) && Object.isFrozen(searches.docs ?? {})
+           && Object.isFrozen(ctx.preferences.webFallbacks ?? []);
+         try { ctx.preferences.webSearches.docs.name = 'Changed'; } catch { }
+         return Object.entries(searches).map(([alias, { name }]) => ({
+           id: alias, title: `${name} ${frozen} ${ctx.preferences.webFallbacks[0]}`,
+         }));
+       }"#;
+    let rows = reset_rows(items_with(source, None, Reason::Load, &preferences).unwrap());
+    assert_eq!(rows[0].title, "Docs true docs");
+    let empty = r#"export function items(ctx) { return [{ id: 'a', title: String(Object.keys(ctx.preferences).length) }]; }"#;
+    assert_eq!(
+        reset_rows(items(empty, None, Reason::Load).unwrap())[0].title,
+        "0"
+    );
+}
+
+#[test]
+fn a_catalogue_item_may_be_a_web_search_that_dupin_fills() {
+    let rows = reset_rows(
+        items(
+            r#"export function items() {
+                 return [
+                   { id: 'g', title: 'Search Google', subtitle: 'g',
+                     webSearch: { alias: 'g', url: 'https://www.google.com/search?q={query}', title: 'Search Google for {query}', fallback: 2 } },
+                   { id: 'maps', title: 'Search Apple Maps',
+                     webSearch: { alias: 'maps', url: 'maps://?q={query}', title: 'Search Apple Maps for {query}' } },
+                 ];
+               }"#,
+            None,
+            Reason::Load,
+        )
+        .unwrap(),
+    );
+    let google = rows[0].web_search.as_ref().unwrap();
+    assert_eq!((google.alias.as_str(), google.fallback), ("g", Some(2)));
+    assert!(rows[0].actions.is_empty());
+    assert!(rows[1].web_search.as_ref().unwrap().opens_maps());
+    rows[0].validate(row::Source::Items).unwrap();
+    assert!(rows[0].validate(row::Source::Search).is_err());
+
+    for (search, field) in [
+        (
+            "{ alias: 'g g', url: 'https://e.example/?q={query}', title: '{query}' }",
+            "items[0].webSearch.alias",
+        ),
+        (
+            "{ alias: 'g', url: 'file:///{query}', title: '{query}' }",
+            "items[0].webSearch.url",
+        ),
+        (
+            "{ alias: 'g', url: 'https://e.example/?q={query}', title: 'Search' }",
+            "items[0].webSearch.title",
+        ),
+        (
+            "{ alias: 'g', url: 'https://e.example/?q={query}', title: '{query}', fallback: 1.5 }",
+            "items[0].webSearch.fallback",
+        ),
+        (
+            "{ alias: 'g', url: 'https://e.example/?q={query}' }",
+            "items[0].webSearch.title",
+        ),
+        (
+            "{ alias: 'g', url: 'https://e.example/?q={query}', title: '{query}', open: true }",
+            "items[0].webSearch.open",
+        ),
+        ("'g'", "items[0].webSearch"),
+    ] {
+        let source =
+            format!("export function items() {{ return [{{ id: 'g', title: 'G', webSearch: {search} }}]; }}");
+        let diagnostic = failure_of(items(&source, None, Reason::Load));
+        assert_eq!(
+            diagnostic.field.as_deref(),
+            Some(field),
+            "{search}: {diagnostic:?}"
+        );
+    }
+    let with_url = "export function items() { return [{ id: 'g', title: 'G', url: 'https://e.example/', webSearch: { alias: 'g', url: 'https://e.example/?q={query}', title: '{query}' } }]; }";
+    assert_eq!(
+        failure_of(items(with_url, None, Reason::Load)).field.as_deref(),
+        Some("items[0].webSearch")
+    );
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        "export function search() { return [{ title: 'G', webSearch: { alias: 'g', url: 'https://e.example/?q={query}', title: '{query}' } }]; }",
+    )]);
+    let diagnostic = failure_of(loaded.unwrap().search("x", 5, timeout(DEADLINE)));
+    assert_eq!(diagnostic.code, "unknown-field");
 }

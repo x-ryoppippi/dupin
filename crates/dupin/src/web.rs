@@ -1,9 +1,174 @@
+//! Web searches: an alias typed first in the main search, then a query Dupin fills into a URL
+//! and opens in the browser or Maps. Extensions list them in their `items()` catalogues, as the
+//! bundled `web-search` package lists config.toml's, and Dupin matches the alias and fills the
+//! URL itself, so typing calls into no package.
+
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 use dupin_core::config::{Config, MAPS_SEARCH_TEMPLATE};
 use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_js_runtime::web_search::WebSearch;
 use objc2_foundation::{NSString, NSURL};
+
+use crate::extensions::{Extension, QUERY_DEADLINE};
+
+/// The extensions whose catalogues hold web searches, in the order they register, and the
+/// keywords that take precedence over an alias.
+#[derive(Clone, Debug, Default)]
+pub struct WebSearches {
+    native: WebCatalog,
+    sources: Vec<Arc<Extension>>,
+    reserved: HashSet<String>,
+}
+
+impl PartialEq for WebSearches {
+    fn eq(&self, other: &Self) -> bool {
+        self.native == other.native
+            && self.reserved == other.reserved
+            && self.sources.len() == other.sources.len()
+            && self
+                .sources
+                .iter()
+                .zip(&other.sources)
+                .all(|(a, b)| Arc::ptr_eq(a, b))
+    }
+}
+
+impl WebSearches {
+    pub fn new(native: WebCatalog, sources: Vec<Arc<Extension>>, reserved: HashSet<String>) -> Self {
+        Self {
+            native,
+            sources,
+            reserved,
+        }
+    }
+
+    /// Each source's searches, asking a package for its catalogue when it must, without the
+    /// ones whose alias is a keyword or an earlier package's alias.
+    fn searches(&self, deadline: Instant) -> Vec<(Item, WebSearch)> {
+        self.usable(self.sources.iter().flat_map(|extension| {
+            let listed = extension.check(deadline).and_then(|exports| {
+                if exports.items {
+                    extension.web_searches(deadline)
+                } else {
+                    Ok(Vec::new())
+                }
+            });
+            listed.unwrap_or_else(|error| {
+                if let dupin_js_runtime::RunError::Failed(diagnostic) = error {
+                    crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                }
+                Vec::new()
+            })
+        }))
+    }
+
+    /// The searches Dupin holds now, without asking any package.
+    fn held(&self) -> Vec<(Item, WebSearch)> {
+        self.usable(
+            self.sources
+                .iter()
+                .flat_map(|extension| extension.held_web_searches()),
+        )
+    }
+
+    fn usable(&self, searches: impl Iterator<Item = (Item, WebSearch)>) -> Vec<(Item, WebSearch)> {
+        let mut seen = HashSet::new();
+        searches
+            .filter(|(_, search)| {
+                !self.reserved.contains(&search.alias)
+                    && !self.native.has_keyword(&search.alias)
+                    && seen.insert(search.alias.clone())
+            })
+            .collect()
+    }
+
+    /// Every search Dupin holds, filled with `query`: its alias, title and URL.
+    pub fn search_urls(&self, query: &str) -> Vec<(String, String, String)> {
+        let mut urls: Vec<_> = self
+            .native
+            .search_urls(query)
+            .map(|(keyword, name, url)| (keyword.to_owned(), format!("Search {name}"), url))
+            .collect();
+        urls.extend(self.held().into_iter().filter_map(|(item, search)| {
+            let url = search.url_for(query)?;
+            Some((search.alias, item.display_title().to_owned(), url))
+        }));
+        urls
+    }
+}
+
+/// The row a web search shows for `query`: its own title until something is typed, and an
+/// action that opens its URL filled with the query. `complete` offers the alias and a space
+/// to Tab while nothing is typed after it.
+pub(crate) fn item(shown: &Item, search: &WebSearch, query: &str, complete: bool) -> Option<Item> {
+    if query.is_empty() && !search.accepts_empty_query() {
+        return None;
+    }
+    let url = search.url_for(query)?;
+    let title = if query.is_empty() {
+        shown.display_title().to_owned()
+    } else {
+        search.title_for(query)
+    };
+    let subtitle = match &shown.view {
+        View::Text { subtitle, .. } => subtitle.clone(),
+        _ => String::new(),
+    };
+    let action = if search.opens_maps() {
+        "Open in Maps"
+    } else {
+        "Open in Browser"
+    };
+    Some(Item {
+        id: shown.id.clone(),
+        payload: Payload::text(query),
+        view: View::Text { title, subtitle },
+        record_usage: false,
+        icon: shown.icon.clone(),
+        matched: Vec::new(),
+        completion: (complete && query.is_empty()).then(|| format!("{} ", search.alias)),
+        score: None,
+        primary: Some("open".into()),
+        alternate: None,
+        actions: vec![ItemAction::new("open", action, Action::OpenUrl(url))],
+    })
+}
+
+fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
+    let raw = raw.trim_start();
+    let boundary = raw.find(char::is_whitespace).unwrap_or(raw.len());
+    let alias = &raw[..boundary];
+    if alias.is_empty() {
+        return None;
+    }
+    let query = raw[boundary..].trim();
+    searches
+        .searches(deadline)
+        .into_iter()
+        .find(|(_, search)| search.alias == alias)
+        .and_then(|(shown, search)| item(&shown, &search, query, true))
+}
+
+fn fallback_rows(searches: &WebSearches, raw: &str, limit: usize, deadline: Instant) -> Vec<Item> {
+    let query = raw.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut fallbacks: Vec<_> = searches
+        .searches(deadline)
+        .into_iter()
+        .filter_map(|(shown, search)| Some((search.fallback?, shown, search)))
+        .collect();
+    fallbacks.sort_by_key(|(position, ..)| *position);
+    fallbacks
+        .iter()
+        .filter_map(|(_, shown, search)| item(shown, search, query, false))
+        .take(limit)
+        .collect()
+}
 
 const MAX_KEYWORD_BYTES: usize = 32;
 const MAX_NAME_CHARS: usize = 80;
@@ -111,13 +276,13 @@ impl WebCatalog {
 }
 
 pub struct WebProvider {
-    catalog: Arc<RwLock<WebCatalog>>,
+    searches: Arc<RwLock<WebSearches>>,
     fallback: bool,
 }
 
 impl WebProvider {
-    pub fn new(catalog: Arc<RwLock<WebCatalog>>, fallback: bool) -> Self {
-        Self { catalog, fallback }
+    pub fn new(searches: Arc<RwLock<WebSearches>>, fallback: bool) -> Self {
+        Self { searches, fallback }
     }
 }
 
@@ -126,17 +291,27 @@ impl Provider for WebProvider {
         if request.is_cancelled() || request.limit == 0 {
             return Ok(());
         }
-        let catalog = {
-            let Ok(catalog) = self.catalog.read() else {
+        let searches = {
+            let Ok(searches) = self.searches.read() else {
                 return Ok(());
             };
-            catalog.clone()
+            searches.clone()
         };
+        let deadline = Instant::now() + QUERY_DEADLINE;
+        let catalog = &searches.native;
 
         let items = if self.fallback {
-            fallback_items(&catalog, &request.query, request.limit, || request.is_cancelled())
+            let mut items = fallback_items(catalog, &request.query, request.limit, || request.is_cancelled());
+            let left = request.limit - items.len();
+            if left > 0 && !request.is_cancelled() {
+                items.extend(fallback_rows(&searches, &request.query, left, deadline));
+            }
+            items
         } else {
-            keyword_item(&catalog, &request.query).into_iter().collect()
+            keyword_item(catalog, &request.query)
+                .or_else(|| alias_item(&searches, &request.query, deadline))
+                .into_iter()
+                .collect()
         };
         if !items.is_empty() && !request.is_cancelled() {
             emit(items);
@@ -318,9 +493,13 @@ mod tests {
         })
     }
 
-    fn compiled(config: &Config) -> (Arc<RwLock<WebCatalog>>, Option<String>) {
+    fn compiled(config: &Config) -> (Arc<RwLock<WebSearches>>, Option<String>) {
         let (catalog, notice) = compile(config);
-        (Arc::new(RwLock::new(catalog)), notice)
+        (Arc::new(RwLock::new(native(catalog))), notice)
+    }
+
+    fn native(catalog: WebCatalog) -> WebSearches {
+        WebSearches::new(catalog, Vec::new(), HashSet::new())
     }
 
     #[test]
@@ -403,7 +582,8 @@ mod tests {
         let (catalog, _) = compile(&Config::default());
         let query = "日本語 +&/#?";
         let result = keyword_item(&catalog, &format!("g {query}")).unwrap();
-        let mut receivers = crate::receivers::for_payload(&result.payload, &catalog).into_iter();
+        let mut receivers =
+            crate::receivers::for_payload(&result.payload, &native(catalog.clone())).into_iter();
         assert_eq!(
             receivers.next().unwrap(),
             ItemAction::new("copy-text", "Copy", Action::Copy(query.into()))
@@ -417,7 +597,11 @@ mod tests {
                 ItemAction::new(&receiver.id, &receiver.title, Action::OpenUrl(url(&item).into()),)
             );
         }
-        assert_eq!(catalog.search_urls(&"x".repeat(MAX_TEMPLATE_BYTES)).count(), 0);
+        assert!(
+            native(catalog)
+                .search_urls(&"x".repeat(MAX_TEMPLATE_BYTES))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -543,7 +727,7 @@ mod tests {
             ..Config::default()
         };
         let (replacement, _) = compile(&config);
-        *catalog.write().unwrap() = replacement;
+        *catalog.write().unwrap() = native(replacement);
 
         assert_eq!(
             url(&collect(&provider, "g term", 5)[0]),

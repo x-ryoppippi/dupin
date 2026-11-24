@@ -5,7 +5,7 @@ use dupin_core::{CommandError, CommandSpec, Config};
 use super::{Feature, default_query};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::ui::{ActionStage, Ui};
-use crate::web::{WebCatalog, WebProvider};
+use crate::web::{WebCatalog, WebProvider, WebSearches};
 
 pub(crate) const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -51,10 +51,16 @@ fn start(providers: &mut Providers) {
     providers.add(WEB_FALLBACKS, Arc::new(WebProvider::new(web, true)));
 }
 
+/// Runs after the extensions feature has registered this configuration's extensions, so their
+/// keywords take precedence over an alias and their catalogues are the ones searched.
 fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
+    let next = WebSearches::new(
+        std::mem::take(&mut commands.web),
+        ui.web_search_sources(),
+        commands.registry.keywords().map(str::to_owned).collect(),
+    );
     let changed = {
         let mut web = ui.web.write().unwrap();
-        let next = std::mem::take(&mut commands.web);
         let changed = *web != next;
         *web = next;
         changed

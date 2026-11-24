@@ -8,7 +8,7 @@
 use std::io::{self, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row};
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Preferences, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
@@ -62,6 +62,8 @@ pub enum Call {
     Items {
         cursor: Option<String>,
         reason: Reason,
+        #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+        preferences: Preferences,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
@@ -278,6 +280,7 @@ mod tests {
                     };
                     8
                 ],
+                web_search: None,
             })
             .collect();
         let mut left = MAX_PAGE_BYTES - rows.iter().map(Row::text_bytes).sum::<usize>();
