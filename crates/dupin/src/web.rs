@@ -9,11 +9,12 @@ use std::time::Instant;
 
 use dupin_core::config::Config;
 use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_extension_bridge::{Bridge, Call, Trigger};
 use dupin_js_runtime::Preferences;
 use dupin_js_runtime::web_search::{self, PLACEHOLDER, WebSearch};
 use serde_json::{Value, json};
 
-use crate::extensions::{Extension, QUERY_DEADLINE};
+use crate::extensions::{Extension, QUERY_DEADLINE, Role};
 
 /// The bundled package that lists config.toml's web searches, as the broker knows it.
 pub const WEB_SEARCH_PACKAGE: &str = "bundled:web-search";
@@ -109,12 +110,23 @@ fn valid_name(name: &str) -> bool {
         && !name.contains(PLACEHOLDER)
 }
 
-/// The extensions whose catalogues hold web searches, in the order they register, and the
-/// keywords that take precedence over an alias.
-#[derive(Clone, Debug, Default)]
+/// The extensions whose catalogues hold web searches, in the order they register, the
+/// keywords that take precedence over an alias, and the bridge their catalogues reach host
+/// services through.
+#[derive(Clone, Default)]
 pub struct WebSearches {
     sources: Vec<Arc<Extension>>,
     reserved: HashSet<String>,
+    bridge: Option<Bridge>,
+}
+
+impl std::fmt::Debug for WebSearches {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebSearches")
+            .field("sources", &self.sources)
+            .field("reserved", &self.reserved)
+            .finish_non_exhaustive()
+    }
 }
 
 impl PartialEq for WebSearches {
@@ -131,20 +143,43 @@ impl PartialEq for WebSearches {
 
 impl WebSearches {
     pub fn new(sources: Vec<Arc<Extension>>, reserved: HashSet<String>) -> Self {
-        Self { sources, reserved }
+        Self {
+            sources,
+            reserved,
+            bridge: None,
+        }
+    }
+
+    /// Asks the sources' catalogues through `bridge`, as the main search asks a catalogue.
+    pub fn with_bridge(self, bridge: Bridge) -> Self {
+        Self {
+            bridge: Some(bridge),
+            ..self
+        }
     }
 
     /// Each source's searches, asking a package for its catalogue when it must, without the
-    /// ones whose alias is a keyword or an earlier package's alias.
+    /// ones whose alias is a keyword or an earlier package's alias. A catalogue loads under
+    /// the query trigger, as one in the main search does, and holds off asking again after a
+    /// failure in the same way; one whose access changed while it loaded is left out.
     pub fn searches(&self, deadline: Instant) -> Vec<(Item, WebSearch)> {
         self.usable(self.sources.iter().flat_map(|extension| {
+            let call = match &self.bridge {
+                Some(bridge) => bridge.call(&extension.package, Trigger::Query),
+                None => Call::none(),
+            };
             let listed = extension.check(deadline).and_then(|exports| {
                 if exports.items {
-                    extension.web_searches(deadline)
+                    extension.web_searches(deadline, &call, Role::DefaultSearch)
                 } else {
                     Ok(Vec::new())
                 }
             });
+            if let Some(bridge) = &self.bridge
+                && !bridge.is_current(&extension.package, call.generation)
+            {
+                return Vec::new();
+            }
             listed.unwrap_or_else(|error| {
                 if let dupin_js_runtime::RunError::Failed(diagnostic) = error {
                     crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));

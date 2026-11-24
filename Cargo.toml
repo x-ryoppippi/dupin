@@ -86,7 +86,7 @@ opt-level = 3
 [profile.dev.package.rquickjs-sys]
 opt-level = 3
 
-# The release build's code with Rune's headless tooling, for scripts/latency.nu. Thin LTO keeps a
+# The release build's code, which includes Rune's headless tooling, for scripts/latency.nu. Thin LTO keeps a
 # CI build to minutes; the comparisons it serves are all between builds of this same profile.
 [profile.latency]
 inherits = "release"

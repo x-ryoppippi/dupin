@@ -3,6 +3,10 @@
 //! typing matches the rows held here natively. A package revision Dupin reloads starts a new,
 //! empty catalogue with the new [`super::Extension`].
 //!
+//! A catalogue may read the package's storage, files or the network, as a search may, so it
+//! belongs to the broker generation it was asked under: once the package's authority changes,
+//! such as a revoked scope, the rows it held are dropped and asked for again from the start.
+//!
 //! Catalogues live in memory only. Rebuilding one costs a call to the package, and one written
 //! to disk would keep what a package lists, such as clipboard history, past the package's own
 //! say; a package that wants its list to outlast a restart keeps it in its own storage.
@@ -13,9 +17,12 @@ use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits};
 use dupin_core::{Batch, Item};
+use dupin_extension_bridge::Generation;
 use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::web_search::WebSearch;
 use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
+
+use super::Role;
 
 /// What one package's catalogue may hold.
 pub const LIMITS: Limits = Limits {
@@ -44,11 +51,23 @@ pub(crate) trait Convert {
     fn entry_id(&self, id: &str) -> String;
 }
 
+/// How a catalogue is asked for: with the preferences the package is handed, under the broker
+/// generation its host requests run in, and for which search.
+#[derive(Clone, Copy)]
+pub(crate) struct Asking<'a> {
+    pub preferences: &'a Arc<Preferences>,
+    pub generation: Option<Generation>,
+    pub role: Role,
+}
+
 struct Shared {
     state: Mutex<State>,
     /// Kept outside the lock, so the budget can weigh a catalogue another thread is filling.
     bytes: AtomicUsize,
     used: AtomicU64,
+    /// Counts [`Cached::forget`] calls outside the lock, which a catalogue being filled holds
+    /// for as long as the package takes, so forgetting never waits for it.
+    forgotten: AtomicU64,
 }
 
 struct State {
@@ -59,6 +78,13 @@ struct State {
     due: Option<Reason>,
     /// The preferences the catalogue was asked for with.
     preferences: Option<Arc<Preferences>>,
+    /// The broker generation the rows were asked under.
+    generation: Option<Generation>,
+    /// The [`Shared::forgotten`] count the rows were asked after.
+    forgotten: u64,
+    /// The preferences the last ask failed with, while nothing else has changed since that
+    /// could make the next one succeed.
+    failed: Option<Arc<Preferences>>,
 }
 
 impl Default for Cached {
@@ -70,9 +96,13 @@ impl Default for Cached {
                 expires: None,
                 due: Some(Reason::Load),
                 preferences: None,
+                generation: None,
+                forgotten: 0,
+                failed: None,
             }),
             bytes: AtomicUsize::new(0),
             used: AtomicU64::new(0),
+            forgotten: AtomicU64::new(0),
         });
         held()
             .lock()
@@ -83,39 +113,47 @@ impl Default for Cached {
 }
 
 impl Cached {
+    /// Drops what the catalogue holds when it is next used, which then asks for it from the
+    /// start. Rows being asked for right now are dropped at that use too.
+    pub fn forget(&self) {
+        self.shared.forgotten.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// Asks the package again before the next use, with the cursor it last gave.
     pub fn invalidate(&self) {
         let mut state = self.shared.lock();
+        state.failed = None;
         if state.due.is_none() {
             state.due = Some(Reason::Invalidated);
         }
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated, expired or was asked for with other `preferences`. Web searches are
-    /// reached by their alias instead, through [`Cached::web_searches`].
+    /// missing, invalidated, expired, forgotten, asked for with other preferences or held from
+    /// another generation than the one `fetch` asks under. The main search doesn't ask again
+    /// after a failure until one of those changes or the keyword's search succeeds, so a
+    /// package that can't answer it, such as for want of consent, costs no call per keystroke.
+    /// Web searches are reached by their alias instead, through [`Cached::web_searches`].
     pub fn search(
         &self,
         query: &str,
         limit: usize,
-        preferences: &Arc<Preferences>,
+        asking: Asking<'_>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<Vec<Batch>, RunError> {
-        self.fresh(preferences, fetch, convert, |catalogue| {
-            catalogue.search(query, limit)
-        })
+        self.fresh(asking, fetch, convert, |catalogue| catalogue.search(query, limit))
     }
 
     /// The catalogue's web searches, each with the row it shows before a query is typed,
     /// refreshed as [`Cached::search`] refreshes the catalogue.
     pub fn web_searches(
         &self,
-        preferences: &Arc<Preferences>,
+        asking: Asking<'_>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<Vec<(Item, WebSearch)>, RunError> {
-        self.fresh(preferences, fetch, convert, held_web_searches)
+        self.fresh(asking, fetch, convert, held_web_searches)
     }
 
     /// The web searches [`Cached::web_searches`] would return for `preferences` without asking
@@ -124,6 +162,7 @@ impl Cached {
     pub fn held_web_searches(&self, preferences: &Arc<Preferences>) -> Option<Vec<(Item, WebSearch)>> {
         let state = self.shared.state.try_lock().ok()?;
         let current = state.due.is_none()
+            && state.forgotten == self.shared.forgotten.load(Ordering::Acquire)
             && !state.expires.is_some_and(|expires| Instant::now() >= expires)
             && state
                 .preferences
@@ -132,16 +171,31 @@ impl Cached {
         current.then(|| held_web_searches(&state.catalogue))
     }
 
-    fn fresh<T>(
+    fn fresh<T: Default>(
         &self,
-        preferences: &Arc<Preferences>,
+        asking: Asking<'_>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
         read: impl FnOnce(&Catalogue) -> T,
     ) -> Result<T, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
-        let refreshed = state.refresh(Instant::now(), preferences, fetch, convert);
+        let forgotten = self.shared.forgotten.load(Ordering::Acquire);
+        if state.generation != asking.generation || state.forgotten != forgotten {
+            state.forget();
+            state.generation = asking.generation;
+            state.forgotten = forgotten;
+        }
+        let held_off = state
+            .failed
+            .as_ref()
+            .is_some_and(|failed| Arc::ptr_eq(failed, asking.preferences));
+        if held_off && asking.role == Role::DefaultSearch {
+            self.shared.bytes.store(0, Ordering::Relaxed);
+            return Ok(T::default());
+        }
+        let refreshed = state.refresh(Instant::now(), asking.preferences, fetch, convert);
+        state.failed = refreshed.is_err().then(|| asking.preferences.clone());
         self.shared
             .bytes
             .store(state.catalogue.bytes(), Ordering::Relaxed);
@@ -207,6 +261,7 @@ impl State {
         self.expires = None;
         self.due = Some(Reason::Load);
         self.preferences = None;
+        self.failed = None;
     }
 
     fn refresh(
@@ -366,6 +421,14 @@ mod tests {
         NONE.get_or_init(Arc::default).clone()
     }
 
+    fn keyword(preferences: &Arc<Preferences>) -> Asking<'_> {
+        Asking {
+            preferences,
+            generation: None,
+            role: Role::Keyword,
+        }
+    }
+
     fn page(change: PageChange, cursor: &str, more: bool) -> CataloguePage {
         CataloguePage {
             change,
@@ -398,10 +461,16 @@ mod tests {
             ))
         };
         for query in ["", "s", "sa", "saf"] {
-            cached.search(query, 10, &none(), &mut fetch, ENTRY).unwrap();
+            cached
+                .search(query, 10, keyword(&none()), &mut fetch, ENTRY)
+                .unwrap();
         }
         assert_eq!(
-            titles(&cached.search("no", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("no", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["Notes"]
         );
         assert_eq!(calls, [(None, Reason::Load)]);
@@ -443,12 +512,20 @@ mod tests {
             })
         };
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["Alpha", "Beta"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["Bravo"]
         );
         assert_eq!(calls.len(), 3);
@@ -477,17 +554,29 @@ mod tests {
             Ok(page(answers.next().expect("asked once per change"), "1", false))
         };
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["First", "Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["Second", "Again"]
         );
     }
@@ -519,15 +608,262 @@ mod tests {
                 )),
             }
         };
-        cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap();
+        cached
+            .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+            .unwrap();
         cached.shared.lock().expires = Some(Instant::now());
-        assert!(cached.search("", 10, &none(), &mut fetch, ENTRY).is_err());
+        assert!(
+            cached
+                .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                .is_err()
+        );
         assert_eq!(cached.len(), 0);
         assert_eq!(
-            titles(&cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
             ["B"]
         );
         assert_eq!(reasons, [Reason::Load, Reason::Expired, Reason::Load]);
+    }
+
+    #[test]
+    fn the_main_search_asks_a_failed_catalogue_again_only_once_something_changed() {
+        use std::cell::{Cell, RefCell};
+
+        let cached = Cached::default();
+        let calls = RefCell::new(Vec::new());
+        let failing = Cell::new(true);
+        let ask = |role| {
+            let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
+                calls.borrow_mut().push(reason);
+                if failing.get() {
+                    Err(RunError::Failed(Diagnostic::new("items-threw", "needs-consent")))
+                } else {
+                    Ok(page(
+                        PageChange::Reset {
+                            rows: vec![row("a", "Allowed")],
+                        },
+                        "1",
+                        false,
+                    ))
+                }
+            };
+            cached.search(
+                "a",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: None,
+                    role,
+                },
+                &mut fetch,
+                ENTRY,
+            )
+        };
+        assert!(ask(Role::DefaultSearch).is_err());
+        for _ in 0..3 {
+            assert!(
+                ask(Role::DefaultSearch).unwrap().is_empty(),
+                "held off, not failing again"
+            );
+        }
+        assert_eq!(calls.borrow().len(), 1, "one call, not one per keystroke");
+
+        assert!(
+            ask(Role::Keyword).is_err(),
+            "the keyword still asks, so it can show the failure and any question"
+        );
+        assert_eq!(calls.borrow().len(), 2);
+
+        cached.forget();
+        assert!(
+            ask(Role::DefaultSearch).is_err(),
+            "forgetting, as an access change does, asks again"
+        );
+        assert_eq!(calls.borrow().len(), 3);
+        cached.invalidate();
+        failing.set(false);
+        assert_eq!(titles(&ask(Role::DefaultSearch).unwrap()), ["Allowed"]);
+        assert_eq!(
+            *calls.borrow(),
+            [Reason::Load, Reason::Load, Reason::Load, Reason::Load]
+        );
+    }
+
+    #[test]
+    fn other_preferences_ask_a_failed_catalogue_again_from_the_main_search() {
+        let cached = Cached::default();
+        let mut calls = 0;
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            calls += 1;
+            Err(RunError::Failed(Diagnostic::new(
+                "items-threw",
+                "bad preferences",
+            )))
+        };
+        let main = |preferences| Asking {
+            preferences,
+            generation: None,
+            role: Role::DefaultSearch,
+        };
+        let first = none();
+        assert!(cached.web_searches(main(&first), &mut fetch, ENTRY).is_err());
+        assert!(
+            cached
+                .web_searches(main(&first), &mut fetch, ENTRY)
+                .unwrap()
+                .is_empty(),
+            "held off with the same preferences"
+        );
+        let changed = Arc::new(Preferences::from_iter([(
+            "webSearches".into(),
+            serde_json::json!({}),
+        )]));
+        assert!(cached.web_searches(main(&changed), &mut fetch, ENTRY).is_err());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn forgetting_never_waits_for_a_catalogue_being_asked_for() {
+        use std::sync::mpsc;
+
+        let cached = Arc::new(Cached::default());
+        let (asked, was_asked) = mpsc::channel();
+        let (answer, answered) = mpsc::channel::<()>();
+        let filling = std::thread::spawn({
+            let cached = cached.clone();
+            move || {
+                let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+                    asked.send(()).unwrap();
+                    answered.recv().unwrap();
+                    Ok(page(
+                        PageChange::Reset {
+                            rows: vec![row("a", "Before")],
+                        },
+                        "1",
+                        false,
+                    ))
+                };
+                titles(
+                    &cached
+                        .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                        .unwrap(),
+                )
+            }
+        });
+        was_asked.recv().unwrap();
+        cached.forget();
+        answer.send(()).unwrap();
+        assert_eq!(filling.join().unwrap(), ["Before"]);
+
+        let mut reasons = Vec::new();
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
+            reasons.push(reason);
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("b", "After")],
+                },
+                "2",
+                false,
+            ))
+        };
+        assert_eq!(
+            titles(
+                &cached
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+                    .unwrap()
+            ),
+            ["After"],
+            "rows asked for before the forget are dropped at the next use"
+        );
+        assert_eq!(reasons, [Reason::Load]);
+    }
+
+    #[test]
+    fn a_catalogue_from_another_generation_is_asked_for_again_from_the_start() {
+        use dupin_extension_bridge::{
+            Base, Bridge, Broker, Capabilities, Local, PackageId, Revision, Services,
+        };
+
+        let bridge = Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+        let id = PackageId::new("clips").unwrap();
+        let capabilities =
+            Capabilities::parse(&serde_json::json!({ "storage": { "quotaBytes": 1024 } })).unwrap();
+        bridge.install(&id, Revision::new("blake3:1").unwrap(), capabilities);
+        bridge.set_enabled(&id, true).unwrap();
+        let before = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        bridge.set_enabled(&id, false).unwrap();
+        let after = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        assert_ne!(before, after);
+
+        let cached = Cached::default();
+        let mut calls = Vec::new();
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
+            calls.push((cursor.map(str::to_owned), reason));
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("a", "Copied")],
+                },
+                "1",
+                false,
+            ))
+        };
+        cached
+            .search(
+                "",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: before,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
+            .unwrap();
+        cached
+            .search(
+                "c",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: before,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
+            .unwrap();
+        cached.invalidate();
+        cached
+            .search(
+                "",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: after,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
+            .unwrap();
+        assert_eq!(
+            calls,
+            [(None, Reason::Load), (None, Reason::Load)],
+            "a new generation starts over instead of updating rows asked for under the old one"
+        );
     }
 
     #[test]
@@ -544,14 +880,18 @@ mod tests {
                 false,
             ))
         };
-        let error = cached.search("", 10, &none(), &mut fetch, ENTRY).unwrap_err();
+        let error = cached
+            .search("", 10, keyword(&none()), &mut fetch, ENTRY)
+            .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
         let mut endless =
             |_: Option<&str>, _, _: &Preferences| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
-        let error = cached.search("", 10, &none(), &mut endless, ENTRY).unwrap_err();
+        let error = cached
+            .search("", 10, keyword(&none()), &mut endless, ENTRY)
+            .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"
@@ -583,13 +923,13 @@ mod tests {
         };
         let first = none();
         assert_eq!(cached.held_web_searches(&first), None);
-        let searches = cached.web_searches(&first, &mut fetch, ENTRY).unwrap();
+        let searches = cached.web_searches(keyword(&first), &mut fetch, ENTRY).unwrap();
         assert_eq!(searches.len(), 1);
         assert_eq!(searches[0].0.id, "held/g");
         assert_eq!(searches[0].1.alias, "g");
         assert_eq!(cached.held_web_searches(&first).unwrap().len(), 1);
         assert_eq!(
-            titles(&cached.search("", 10, &first, &mut fetch, ENTRY).unwrap()),
+            titles(&cached.search("", 10, keyword(&first), &mut fetch, ENTRY).unwrap()),
             ["Alpha"]
         );
         let mut changed = Preferences::new();
@@ -600,7 +940,7 @@ mod tests {
             None,
             "held for other preferences"
         );
-        cached.web_searches(&changed, &mut fetch, ENTRY).unwrap();
+        cached.web_searches(keyword(&changed), &mut fetch, ENTRY).unwrap();
         assert_eq!(seen, [(Reason::Load, 0), (Reason::Load, 1)]);
         assert_eq!(cached.held_web_searches(&changed).unwrap().len(), 1);
         assert_eq!(cached.held_web_searches(&first), None);

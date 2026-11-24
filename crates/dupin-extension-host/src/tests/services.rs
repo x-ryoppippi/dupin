@@ -71,6 +71,41 @@ fn host_requests_cross_to_dupin_and_back_during_a_search() {
 }
 
 #[test]
+fn a_catalogue_reaches_host_services_as_a_search_does() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let package = package(
+        r#"import { storage } from 'dupin';
+           export async function items(ctx) {
+             const { data } = await storage.get(ctx.reason);
+             return [{ id: 'stored', title: data }];
+           }"#,
+    );
+    let fixture = Arc::new(Fixture::default());
+    let page = host
+        .items(
+            &package,
+            ItemsContext {
+                cursor: None,
+                reason: Reason::Load,
+                preferences: &Default::default(),
+            },
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+            &services(&fixture),
+        )
+        .unwrap();
+    let dupin_js_runtime::row::PageChange::Reset { rows } = page.change else {
+        panic!("{:?}", page.change);
+    };
+    assert_eq!(titles(&rows), ["stored \"load\""]);
+    assert_eq!(
+        *fixture.seen.lock().unwrap(),
+        [("storage.get".to_owned(), serde_json::json!({"id": "load"}))]
+    );
+}
+
+#[test]
 fn actions_and_events_run_in_the_helper_with_their_data() {
     skip_inside_a_sandbox!();
     let host = host();
@@ -187,6 +222,7 @@ fn actions_and_events_waiting_on_a_service_never_hold_up_searches() {
                         .map(drop)
                 } else {
                     host.event(&package, "clipboard", &none, deadline, &|| false, &slow)
+                        .map(drop)
                 }
             })
         })

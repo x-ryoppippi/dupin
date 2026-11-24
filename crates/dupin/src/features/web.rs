@@ -60,7 +60,8 @@ fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
     let next = WebSearches::new(
         ui.web_search_sources(),
         commands.registry.keywords().map(str::to_owned).collect(),
-    );
+    )
+    .with_bridge(ui.extension_bridge());
     let changed = {
         let mut web = ui.web.write().unwrap();
         let changed = *web != next;

@@ -14,9 +14,13 @@ fn items_with(
     preferences: &Preferences,
 ) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
-    loaded
-        .unwrap()
-        .items(cursor, reason, preferences, timeout(DEADLINE))
+    loaded.unwrap().items(
+        cursor,
+        reason,
+        preferences,
+        timeout(DEADLINE),
+        &mut Unavailable::default(),
+    )
 }
 
 fn reset_rows(page: CataloguePage) -> Vec<Row> {
@@ -48,11 +52,13 @@ fn a_package_may_export_items_search_or_both() {
     }
     let (_folder, loaded) = package(&[("main.js", "export function search() { return []; }")]);
     assert_eq!(
-        failure_of(
-            loaded
-                .unwrap()
-                .items(None, Reason::Load, &Preferences::new(), timeout(DEADLINE))
-        )
+        failure_of(loaded.unwrap().items(
+            None,
+            Reason::Load,
+            &Preferences::new(),
+            timeout(DEADLINE),
+            &mut Unavailable::default(),
+        ))
         .code,
         "missing-items"
     );
@@ -276,7 +282,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
     let outside = failure_of(package.search("", 5, timeout(DEADLINE)));
     assert_eq!(outside.code, "search-threw");
     assert!(
-        outside.message.contains("only in an action handler"),
+        outside.message.contains("only in an action or event handler"),
         "{outside:?}"
     );
 }

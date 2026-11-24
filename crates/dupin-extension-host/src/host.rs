@@ -15,7 +15,8 @@ use std::collections::HashSet;
 
 use dupin_js_runtime::row::Source;
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Environment, Exports, Preferences, Reason, Row, RunError, Sources,
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Preferences, Reason, Row, RunError,
+    Sources,
 };
 use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
 
@@ -150,6 +151,15 @@ impl Work {
     }
 }
 
+/// The `ctx` [`Host::items`] hands `items()`: the cursor of the last answer, why Dupin asks
+/// and what the user set for the package.
+#[derive(Clone, Copy, Debug)]
+pub struct ItemsContext<'a> {
+    pub cursor: Option<&'a str>,
+    pub reason: Reason,
+    pub preferences: &'a Preferences,
+}
+
 impl Host {
     pub fn new(launch: Launcher) -> Self {
         Self::fixed(launch, None)
@@ -234,23 +244,22 @@ impl Host {
     }
 
     /// Calls `items({ cursor, reason, preferences })` in `package` for the next part of its
-    /// catalogue. It loads before any row is chosen, so it reaches no host service.
+    /// catalogue, answering its host requests with `services`.
     pub fn items(
         &self,
         package: &Compiled,
-        cursor: Option<&str>,
-        reason: Reason,
-        preferences: &Preferences,
+        asked: ItemsContext<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
     ) -> Result<CataloguePage, RunError> {
         let call = Call::Items {
-            cursor: cursor.map(str::to_owned),
-            reason,
-            preferences: preferences.clone(),
+            cursor: asked.cursor.map(str::to_owned),
+            reason: asked.reason,
+            preferences: asked.preferences.clone(),
         };
         let request = Request::run(package, call, Work::Items);
-        match self.call(request, deadline, is_cancelled, &no_services())? {
+        match self.call(request, deadline, is_cancelled, services)? {
             (Answer::Catalogue { page }, _) => {
                 page.validate().map_err(|problem| unshowable(problem, package))?;
                 Ok(page)
@@ -327,7 +336,7 @@ impl Host {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
-    ) -> Result<(), RunError> {
+    ) -> Result<Handled, RunError> {
         let call = Call::Event {
             name: name.into(),
             event: event.clone(),
@@ -339,7 +348,7 @@ impl Host {
             is_cancelled,
             services,
         )? {
-            (Answer::Handled, _) => Ok(()),
+            (Answer::Handled { handled }, _) => Ok(handled),
             _ => Err(mismatch()),
         }
     }

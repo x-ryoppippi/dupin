@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dupin_core::{CommandId, ExtensionRequest};
-use dupin_extension_bridge::{Bridge, Notice, ScopeKey, Trigger};
+use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
 use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
@@ -43,6 +43,18 @@ impl Extensions {
             registered: HashMap::new(),
             bridge,
         }
+    }
+
+    /// Whether `current` lists `package`'s catalogue: its keyword, or the main search it
+    /// answers too.
+    fn lists_catalogue_of(&self, current: &CommandId, package: &PackageId) -> bool {
+        lists_catalogue_of(
+            self.registered
+                .iter()
+                .map(|(command, (extension, role))| (command, &extension.package, *role)),
+            current,
+            package,
+        )
     }
 
     fn folder(&mut self, origin: Origin) -> &mut Folder {
@@ -208,16 +220,30 @@ impl Ui {
             }
             let (watcher, bridge_for_watch) = (Arc::downgrade(&extension), bridge.clone());
             let id_for_watch = id.clone();
+            let me = self.me.clone();
             bridge.watch_clipboard(id, move |event| {
                 let Some(extension) = watcher.upgrade() else {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
                 let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
-                if let Err(RunError::Failed(diagnostic)) =
-                    extension.event("clipboard", &event, deadline, &call.services)
-                {
-                    crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                match extension.event("clipboard", &event, deadline, &call.services) {
+                    // Only a search that lists this catalogue runs again: any other would run
+                    // its package's `search` on this package's events.
+                    Ok(handled) if handled.invalidated => {
+                        let id = id_for_watch.clone();
+                        me.update(move |ui, tx| {
+                            let current = ui.session.command_id().clone();
+                            if ui.shown && ui.extensions.lists_catalogue_of(&current, &id) {
+                                let effects = ui.session.refresh();
+                                ui.apply(effects, tx);
+                            }
+                        });
+                    }
+                    Ok(_) | Err(RunError::Cancelled) => {}
+                    Err(RunError::Failed(diagnostic)) => {
+                        crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                    }
                 }
             });
         }
@@ -229,6 +255,13 @@ impl Ui {
     /// extension asked for before.
     pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
         if let Notice::Changed(id) = &notice {
+            // A grant changes what the catalogue may read even when no authority was lost, so
+            // it is asked for again from the start on its next use.
+            for (extension, _) in self.extensions.registered.values() {
+                if extension.package == *id {
+                    extension.forget_catalogue();
+                }
+            }
             let bridge = &self.extensions.bridge;
             let commands: Vec<_> = self
                 .extensions
@@ -254,6 +287,11 @@ impl Ui {
             }
         }
         self.prefs.update(|prefs, _| prefs.refresh_permissions());
+    }
+
+    /// The bridge every extension's host services go through.
+    pub(crate) fn extension_bridge(&self) -> Bridge {
+        self.extensions.bridge.clone()
     }
 
     /// The registered extensions whose catalogues answer the main search, in the order they
@@ -411,4 +449,51 @@ impl Ui {
             self.answer_extension_row(Some(row), extension, request, tx);
         }
     }
+}
+
+/// Whether `current` lists `package`'s catalogue, given which extension and role each command
+/// routes to: its keyword does, and so does the main search while it answers there.
+fn lists_catalogue_of<'a>(
+    registered: impl IntoIterator<Item = (&'a CommandId, &'a PackageId, Role)>,
+    current: &CommandId,
+    package: &PackageId,
+) -> bool {
+    let main = current.as_str() == crate::features::apps::APPS;
+    registered.into_iter().any(|(command, routed, role)| {
+        routed == package
+            && match role {
+                Role::Keyword => command == current,
+                Role::DefaultSearch => main,
+            }
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn only_a_search_that_lists_the_catalogue_runs_again_for_it() {
+    let command = |id: &str| CommandId::new(id).unwrap();
+    let (clips, web) = (PackageId::new("clips").unwrap(), PackageId::new("web").unwrap());
+    let (clips_keyword, web_keyword, apps) = (
+        command("extension.clips"),
+        command("extension.web"),
+        command(crate::features::apps::APPS),
+    );
+    let clips_search = command("extension-search.clips");
+    let keywords_only = [
+        (&clips_keyword, &clips, Role::Keyword),
+        (&web_keyword, &web, Role::Keyword),
+    ];
+    assert!(lists_catalogue_of(keywords_only, &clips_keyword, &clips));
+    assert!(
+        !lists_catalogue_of(keywords_only, &web_keyword, &clips),
+        "another extension's keyword search never runs on this one's events"
+    );
+    assert!(!lists_catalogue_of(keywords_only, &apps, &clips));
+    let in_main_search = [
+        (&clips_keyword, &clips, Role::Keyword),
+        (&clips_search, &clips, Role::DefaultSearch),
+        (&web_keyword, &web, Role::Keyword),
+    ];
+    assert!(lists_catalogue_of(in_main_search, &apps, &clips));
+    assert!(!lists_catalogue_of(in_main_search, &apps, &web));
 }

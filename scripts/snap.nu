@@ -15,7 +15,7 @@ use headless-config.nu scenario-env
 # The clipboard history never reads this Mac's clipboard headless; it shows the synthetic
 # entries in scripts/fixtures/clipboard.json instead.
 def main [
-    --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
+    --bin: path = "target/debug/dupin" # Any build of Dupin, or the app's Contents/MacOS/dupin
     --out: path = "target/screenshots"
     --theme: string # `light` or `dark`; the Mac's appearance when omitted
     --only: string # Render only the scenarios whose name contains this

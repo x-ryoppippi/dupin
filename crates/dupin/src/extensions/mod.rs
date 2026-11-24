@@ -24,12 +24,14 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::{Batch, Item, Page};
-use dupin_extension_bridge::{Capabilities, PackageId, Revision};
-use dupin_extension_host::{Compiled, Host, Services};
+use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
+use dupin_extension_host::{Compiled, Host, ItemsContext, Services};
 use dupin_js_runtime::web_search::WebSearch;
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Exports, Preferences, Reason, Row, RunError, Sources,
+    Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
 };
+
+use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
@@ -124,34 +126,64 @@ impl Extension {
         Ok(acted)
     }
 
-    /// Runs `events[name](event)` for something Dupin watched on the package's behalf.
+    /// Runs `events[name](event)` for something Dupin watched on the package's behalf, and
+    /// asks for the catalogue again if the handler invalidated it.
     pub fn event(
         &self,
         name: &str,
         event: &serde_json::Value,
         deadline: Instant,
         services: &Arc<dyn Services>,
-    ) -> Result<(), RunError> {
-        host().event(&self.compiled, name, event, deadline, &|| false, services)
+    ) -> Result<Handled, RunError> {
+        let handled = host().event(&self.compiled, name, event, deadline, &|| false, services)?;
+        if handled.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(handled)
     }
 
     /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
-    /// holds none or it went stale. Typing never cancels that, since the next keystroke needs
-    /// the same catalogue. Every part of it must arrive before `deadline`, the search's own, so
-    /// a slow catalogue fails with its own diagnostic before the search expires.
-    pub fn catalogue(&self, query: &str, limit: usize, deadline: Instant) -> Result<Vec<Batch>, RunError> {
+    /// holds none, it went stale, its preferences changed or it was made under another
+    /// generation than `call`'s. Its host requests go through `call`, as a search's do. Typing
+    /// never cancels that, since the next keystroke needs the same catalogue. Every part of it
+    /// must arrive before `deadline`, the search's own, so a slow catalogue fails with its own
+    /// diagnostic before the search expires. For the main search, `role` holds off asking again
+    /// after a failure.
+    pub fn catalogue(
+        &self,
+        query: &str,
+        limit: usize,
+        deadline: Instant,
+        call: &Call,
+        role: Role,
+    ) -> Result<Vec<Batch>, RunError> {
         let preferences = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &preferences,
+            generation: call.generation,
+            role,
+        };
         self.catalogue
-            .search(query, limit, &preferences, &mut self.fetch(deadline), self)
+            .search(query, limit, asking, &mut self.fetch(deadline, call), self)
             .map_err(|error| self.located(error))
     }
 
     /// The catalogue's web searches, each with the row it shows before a query is typed, asking
     /// the package first as [`Extension::catalogue`] does.
-    pub fn web_searches(&self, deadline: Instant) -> Result<Vec<(Item, WebSearch)>, RunError> {
+    pub fn web_searches(
+        &self,
+        deadline: Instant,
+        call: &Call,
+        role: Role,
+    ) -> Result<Vec<(Item, WebSearch)>, RunError> {
         let preferences = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &preferences,
+            generation: call.generation,
+            role,
+        };
         self.catalogue
-            .web_searches(&preferences, &mut self.fetch(deadline), self)
+            .web_searches(asking, &mut self.fetch(deadline, call), self)
             .map_err(|error| self.located(error))
     }
 
@@ -164,15 +196,27 @@ impl Extension {
         self.catalogue.held_web_searches(&preferences::of(&self.package))
     }
 
+    /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
+    pub fn forget_catalogue(&self) {
+        self.catalogue.forget();
+    }
+
     fn fetch(
         &self,
         deadline: Instant,
+        call: &Call,
     ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
         move |cursor, reason, preferences| {
-            host().items(&self.compiled, cursor, reason, preferences, deadline, &|| false)
+            let asked = ItemsContext {
+                cursor,
+                reason,
+                preferences,
+            };
+            host().items(&self.compiled, asked, deadline, &|| false, &call.services)
         }
     }
 
+    /// A catalogue's failure, named after the package's entry when nothing else locates it.
     fn located(&self, error: RunError) -> RunError {
         match error {
             RunError::Failed(diagnostic) if diagnostic.file.is_none() => {

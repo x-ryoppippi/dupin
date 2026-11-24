@@ -56,7 +56,8 @@ pub struct Platform {
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service; a headless render may still declare a base beside its own config.
+/// and reaches no service of the Mac's; a headless render may still declare a base beside its
+/// own config, and one `dupin ext snap` starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) || rune::tooling::is_headless() {
         let base = base_path()
@@ -64,7 +65,11 @@ pub fn open(platform: Platform) -> Bridge {
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|source| Base::parse(&source).ok())
             .unwrap_or_default();
-        return Bridge::new(Broker::new(base, Local::default()), None, Services::none());
+        let services = match super::fixtures::headless() {
+            Some(fixture) => fixture.services(),
+            None => Services::none(),
+        };
+        return Bridge::new(Broker::new(base, Local::default()), None, services);
     }
     let services = Services {
         http: Box::new(HttpService::new(HttpConfig {

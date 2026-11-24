@@ -8,12 +8,14 @@
 use std::io::{self, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Preferences, Reason, Row};
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Preferences, Reason, Row,
+};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 7;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -120,7 +122,9 @@ pub enum Answer {
     Acted {
         acted: Acted,
     },
-    Handled,
+    Handled {
+        handled: Handled,
+    },
     Cancelled,
     Failed {
         diagnostic: Diagnostic,
@@ -318,6 +322,159 @@ mod tests {
             }
         ));
     }
+
+    /// One of each message as its JSON reads, so a change of shape can't land without
+    /// [`VERSION`] being raised with it.
+    #[test]
+    fn every_message_keeps_the_shape_its_version_names() {
+        use dupin_js_runtime::row::PageChange;
+
+        let row = Row {
+            id: "a".into(),
+            title: "A".into(),
+            subtitle: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            section: None,
+            detail: None,
+            actions: Vec::new(),
+            web_search: None,
+        };
+        let web_search = Row {
+            web_search: Some(dupin_js_runtime::web_search::WebSearch {
+                alias: "g".into(),
+                url: "https://example.com/?q={query}".into(),
+                title: "G {query}".into(),
+                fallback: Some(0),
+            }),
+            ..row.clone()
+        };
+        let span = || ModuleSpan {
+            name: "main.js".into(),
+            len: 1,
+        };
+        let calls = [
+            Call::Compile,
+            Call::Check,
+            Call::Search {
+                query: "q".into(),
+                limit: 1,
+            },
+            Call::Items {
+                cursor: Some("c".into()),
+                reason: Reason::Invalidated,
+                preferences: serde_json::json!({ "p": 1 }).as_object().unwrap().clone(),
+            },
+            Call::Action {
+                name: "run".into(),
+                data: serde_json::Value::Null,
+            },
+            Call::Event {
+                name: "clipboard".into(),
+                event: serde_json::json!({}),
+            },
+        ];
+        let mut shapes: Vec<String> = calls
+            .into_iter()
+            .map(|call| ToHelper::Run {
+                id: 1,
+                deadline_ms: 2,
+                entry: "main.js".into(),
+                modules: vec![span()],
+                call,
+                environment: Some(Environment { now: 3, seed: 4 }),
+            })
+            .chain([ToHelper::Cancel { id: 1 }, ToHelper::Reply { id: 1, call: 2 }])
+            .map(|message| serde_json::to_string(&message).unwrap())
+            .collect();
+        let answers = [
+            Answer::Compiled {
+                modules: vec![span()],
+            },
+            Answer::Checked {
+                exports: Exports {
+                    search: true,
+                    items: true,
+                },
+            },
+            Answer::Rows {
+                items: vec![row.clone()],
+            },
+            Answer::Catalogue {
+                page: CataloguePage {
+                    change: PageChange::Update {
+                        append: vec![row.clone()],
+                        replace: vec![web_search],
+                        remove: vec!["b".into()],
+                    },
+                    ttl: Some(1),
+                    cursor: Some("c".into()),
+                    more: true,
+                },
+            },
+            Answer::Acted {
+                acted: Acted {
+                    invalidated: true,
+                    effect: Some(dupin_js_runtime::ActionEffect::Toast { text: "t".into() }),
+                },
+            },
+            Answer::Handled {
+                handled: Handled { invalidated: true },
+            },
+            Answer::Cancelled,
+            Answer::Failed {
+                diagnostic: Diagnostic::new("code", "message"),
+            },
+        ];
+        shapes.extend(
+            [
+                FromHelper::Hello {
+                    version: 0,
+                    engine: "e".into(),
+                },
+                FromHelper::Refused { reason: "r".into() },
+                FromHelper::Host {
+                    id: 1,
+                    call: 2,
+                    op: "storage".into(),
+                },
+            ]
+            .into_iter()
+            .chain(
+                answers
+                    .into_iter()
+                    .map(|answer| FromHelper::Done { id: 1, answer }),
+            )
+            .map(|message| serde_json::to_string(&message).unwrap()),
+        );
+        assert_eq!(
+            (VERSION, shapes),
+            (7, SHAPES.map(str::to_owned).to_vec()),
+            "a message changed shape: raise VERSION and record the new shapes here"
+        );
+    }
+
+    const SHAPES: [&str; 19] = [
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"p":1}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"cancel","id":1}"#,
+        r#"{"kind":"reply","id":1,"call":2}"#,
+        r#"{"kind":"hello","version":0,"engine":"e"}"#,
+        r#"{"kind":"refused","reason":"r"}"#,
+        r#"{"kind":"host","id":1,"call":2,"op":"storage"}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A"}]}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A"}],"replace":[{"id":"a","title":"A"}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,
+    ];
 
     #[test]
     fn spans_must_cover_the_tail_exactly() {
