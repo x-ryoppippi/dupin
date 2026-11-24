@@ -302,39 +302,69 @@ impl Git {
         };
         match rev.as_deref() {
             Some(commit) if is_full_commit(commit) => {
-                if self.fetch(repo, url, &[commit], true).is_err() {
-                    // Not every server lets a client ask for a commit by SHA; a full fetch
-                    // brings it if any branch or tag reaches it.
-                    self.fetch(
-                        repo,
-                        url,
-                        &["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
-                        false,
-                    )?;
+                // Only what the repository's branches and tags reach, never the commit by SHA:
+                // a server may hold commits no ref of its own reaches, as GitHub holds every
+                // fork's in the repository it was forked from.
+                self.fetch(
+                    repo,
+                    url,
+                    &["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
+                    false,
+                )?;
+                let unpublished = || {
+                    Error::new(
+                        "unknown-ref",
+                        format!("commit {commit} isn't on a branch or tag of {url}"),
+                    )
+                    .hint("Install the branch or tag the commit is on by name.")
+                };
+                let resolved = self.commit_of(repo, commit).map_err(|_| unpublished())?;
+                let mut command = self.command(repo);
+                command.args([
+                    "for-each-ref",
+                    "--count=1",
+                    "--format=%(refname)",
+                    "--contains",
+                    &resolved,
+                    "refs/heads",
+                    "refs/tags",
+                ]);
+                if self.text(command)?.trim().is_empty() {
+                    return Err(unpublished());
                 }
-                let resolved = self
-                    .commit_of(repo, commit)
-                    .map_err(|_| Error::new("unknown-ref", format!("commit {commit} isn't in {url}")))?;
                 Ok(Fetched {
                     commit: resolved,
                     rev: None,
                 })
             }
             Some(name) => {
-                self.fetch(repo, url, &[name], true).map_err(|error| {
-                    let mut error = Error::new(
-                        "unknown-ref",
-                        format!("couldn't fetch `{name}` from {url}: {}", error.message),
-                    );
-                    if name.len() < 40 && name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                        error = error.hint("Name a commit by its full 40-character SHA.");
+                // A branch or tag only, as GitHub sources take them: Git would also fetch a name
+                // such as `pull/1/head`, a commit someone else proposed.
+                let candidates = match name.strip_prefix("refs/") {
+                    Some(_) => vec![name.to_owned()],
+                    None => vec![format!("refs/tags/{name}"), format!("refs/heads/{name}")],
+                };
+                let mut failure = None;
+                for candidate in &candidates {
+                    match self.fetch(repo, url, &[candidate], true) {
+                        Ok(()) => {
+                            return Ok(Fetched {
+                                commit: self.commit_of(repo, "FETCH_HEAD")?,
+                                rev: Some(name.to_owned()),
+                            });
+                        }
+                        Err(error) => failure = Some(error),
                     }
-                    error
-                })?;
-                Ok(Fetched {
-                    commit: self.commit_of(repo, "FETCH_HEAD")?,
-                    rev: Some(name.to_owned()),
-                })
+                }
+                let message = failure.map(|error| error.message).unwrap_or_default();
+                let mut error = Error::new(
+                    "unknown-ref",
+                    format!("couldn't fetch `{name}` from {url}: {message}"),
+                );
+                if name.len() < 40 && name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                    error = error.hint("Name a commit by its full 40-character SHA.");
+                }
+                Err(error)
             }
             None => {
                 self.fetch(repo, url, &["HEAD"], true)?;

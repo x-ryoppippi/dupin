@@ -89,6 +89,11 @@ struct Reference {
 }
 
 #[derive(Deserialize)]
+struct Comparison {
+    status: String,
+}
+
+#[derive(Deserialize)]
 struct Tree {
     tree: Vec<TreeEntry>,
     #[serde(default)]
@@ -140,16 +145,26 @@ impl GitHub {
             Some(commit) if is_full_commit(commit) => {
                 let found: Option<Object> =
                     self.api(repo, &format!("{}/git/commits/{commit}", repo.path()))?;
-                match found {
-                    Some(found) if found.sha.eq_ignore_ascii_case(commit) => Ok(Fetched {
-                        commit: found.sha.to_ascii_lowercase(),
-                        rev: None,
-                    }),
-                    _ => Err(Error::new(
+                let commit = match found {
+                    Some(found) if found.sha.eq_ignore_ascii_case(commit) => found.sha.to_ascii_lowercase(),
+                    _ => {
+                        return Err(Error::new(
+                            "unknown-ref",
+                            format!("commit {commit} isn't in {}", repo.locator()),
+                        ));
+                    }
+                };
+                if !self.publishes(repo, &repository.default_branch, &commit)? {
+                    return Err(Error::new(
                         "unknown-ref",
-                        format!("commit {commit} isn't in {}", repo.locator()),
-                    )),
+                        format!(
+                            "commit {commit} isn't on {}'s default branch or a tag of it",
+                            repo.locator()
+                        ),
+                    )
+                    .hint("Install the branch or tag the commit is on by name."));
                 }
+                Ok(Fetched { commit, rev: None })
             }
             Some(name) => {
                 let candidates = match name.strip_prefix("refs/") {
@@ -262,6 +277,28 @@ impl GitHub {
         let file = std::fs::File::open(&archive)
             .map_err(|error| Error::io("io-error", "read the downloaded archive", error))?;
         tarball::extract(std::io::BufReader::new(file), &expected, stage)
+    }
+
+    /// Whether the repository's own history holds `commit`: its default branch reaches it, or a
+    /// tag names it. GitHub serves every commit of a fork network through each repository in
+    /// it, so a commit pushed only to a fork would otherwise install as this repository's.
+    fn publishes(&self, repo: &Repo<'_>, branch: &str, commit: &str) -> Result<bool, Error> {
+        let compared: Option<Comparison> = self.api(
+            repo,
+            &format!("{}/compare/{}...{commit}", repo.path(), escape(branch)),
+        )?;
+        if compared.is_some_and(|compared| matches!(compared.status.as_str(), "identical" | "behind")) {
+            return Ok(true);
+        }
+        for (name, object) in self.tags(repo)? {
+            if self
+                .peel(repo, object, &format!("tags/{name}"))
+                .is_ok_and(|tagged| tagged.eq_ignore_ascii_case(commit))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Every tag of the repository, as `ls-remote --tags` lists them: GitHub answers this listing

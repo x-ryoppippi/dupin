@@ -796,7 +796,7 @@ dupin ext install https://git.example.com/me/notes.git@main # an https://, ssh:/
 dupin ext install ./word-count                              # a folder, copied as it is now
 ```
 
-Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
+Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA, and must be the repository's own: on a branch or tag of a Git source, or on the default branch or a tag of a `github:` source, since GitHub serves a commit pushed to any fork through the repository it was forked from. A ref such as `refs/pull/1/head`, someone else's proposed commit, is refused. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
 
 The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is committed to the repository: JavaScript or erasable TypeScript as written, or the bundle a build made.
 

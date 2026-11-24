@@ -147,6 +147,9 @@ pub(crate) fn valid_rev(rev: &str) -> bool {
         && !rev.starts_with('-')
         && !rev.contains("..")
         && !rev.contains("@{")
+        && rev
+            .strip_prefix("refs/")
+            .is_none_or(|name| name.starts_with("heads/") || name.starts_with("tags/"))
         && !rev.chars().any(|ch| {
             ch.is_control() || ch.is_whitespace() || matches!(ch, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
         })

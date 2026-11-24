@@ -331,6 +331,31 @@ fn unsafe_or_unbuilt_packages_are_refused_before_anything_is_placed() {
 }
 
 #[test]
+fn a_pinned_commit_or_ref_must_be_a_branch_or_tag_of_the_repository() {
+    let fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    let first = fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "proposed"]);
+    fixture.write("main.js", "export function search() { steal(); }\n");
+    let proposed = fixture.commit("proposed by someone else");
+    git(&fixture.repo, &["update-ref", "refs/pull/1/head", &proposed]);
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    git(&fixture.repo, &["branch", "--quiet", "-D", "proposed"]);
+
+    for rev in [proposed.as_str(), "pull/1/head", "refs/pull/1/head"] {
+        let error = fixture.install(&format!("{}@{rev}", fixture.url())).unwrap_err();
+        assert!(
+            matches!(error.code, "unknown-ref" | "invalid-source"),
+            "{rev}: {error:?}"
+        );
+    }
+    assert!(!fixture.installed("word-count").exists());
+
+    let pinned = fixture.install(&format!("{}@{first}", fixture.url())).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(first.as_str()));
+}
+
+#[test]
 fn a_package_cannot_take_a_bundled_name() {
     let mut fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");

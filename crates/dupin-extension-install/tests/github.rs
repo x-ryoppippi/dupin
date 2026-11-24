@@ -315,9 +315,31 @@ impl Fixture {
             json_response(&Value::Array(self.tag_refs())),
         );
         let commits = git(&self.repo, &["rev-list", "--all"]);
+        let head = git(&self.repo, &["rev-parse", "main"]);
         for commit in commits.lines() {
             self.publish_commit(commit);
+            let on_main = Command::new("git")
+                .args(["merge-base", "--is-ancestor", commit, "main"])
+                .current_dir(&self.repo)
+                .envs(ISOLATION)
+                .status()
+                .unwrap()
+                .success();
+            let status = match (commit == head, on_main) {
+                (true, _) => "identical",
+                (false, true) => "behind",
+                (false, false) => "diverged",
+            };
+            self.compare(commit, status);
         }
+    }
+
+    /// Answers GitHub's comparison of the default branch with `commit`.
+    fn compare(&self, commit: &str, status: &str) {
+        self.server.set(
+            format!("{}/compare/main...{commit}", self.repo_path()),
+            json_response(&json!({ "status": status })),
+        );
     }
 
     fn publish_commit(&self, commit: &str) {
@@ -410,6 +432,41 @@ fn leftovers(installer: &Installer) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[test]
+fn a_pinned_commit_must_be_one_the_repository_publishes() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    let first = fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "released"]);
+    fixture.write("main.js", "export function search() { return []; }\n");
+    let tagged = fixture.commit("tagged off the default branch");
+    fixture.tag("v2.0.0");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "fork", "main"]);
+    fixture.write("main.js", "export function search() { steal(); }\n");
+    let forked = fixture.commit("pushed to a fork");
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    git(&fixture.repo, &["branch", "--quiet", "-D", "fork", "released"]);
+    fixture.publish();
+    // GitHub serves a fork's commits through the repository it was forked from.
+    fixture.publish_commit(&forked);
+    fixture.compare(&forked, "ahead");
+
+    let github = fixture.without_git("github");
+    let error = install(&github, &format!("{SPEC}@{forked}")).unwrap_err();
+    assert_eq!(error.code, "unknown-ref", "{error:?}");
+    assert!(error.message.contains("default branch or a tag"), "{error:?}");
+    assert_eq!(fixture.downloads(), 0);
+
+    let pinned = install(&github, &format!("{SPEC}@{first}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(first.as_str()));
+    let released = fixture.without_git("released");
+    let pinned = install(&released, &format!("{SPEC}@{tagged}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(tagged.as_str()));
+
+    let pull = install(&fixture.without_git("pull"), &format!("{SPEC}@refs/pull/1/head")).unwrap_err();
+    assert_eq!(pull.code, "invalid-source", "{pull:?}");
 }
 
 #[test]
