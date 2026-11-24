@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
-    Acted, Bridge, CataloguePage, Control, Diagnostic, Environment, Exports, Handled, Package, Reply, Row,
-    RunError, Sources,
+    Acted, Bridge, CataloguePage, Control, Diagnostic, Engine, Environment, Exports, Handled, Package, Reply,
+    Row, RunError, Sources,
 };
 
 use crate::sandbox;
@@ -62,7 +62,17 @@ fn run(socket: UnixStream) -> io::Result<()> {
         },
         &[],
     )?;
-    for (message, tail) in received {
+    let mut next = None;
+    let mut ran = false;
+    loop {
+        // Made while no call waits, so that making it isn't part of the next call's latency. A
+        // helper that never ran a package, such as one that compiles, never needs one.
+        if ran && next.is_none() {
+            next = Engine::new().ok();
+        }
+        let Ok((message, tail)) = received.recv() else {
+            return Ok(());
+        };
         let ToHelper::Run {
             id,
             deadline_ms,
@@ -85,7 +95,23 @@ fn run(socket: UnixStream) -> io::Result<()> {
             writer: &mut writer,
             replies: &answered,
         };
-        let answer = match execute(entry, modules, call, environment, control, &mut bridge) {
+        let mut spent = None;
+        let outcome = match call {
+            Call::Compile => compile(entry, modules, control),
+            call => next.take().map_or_else(Engine::new, Ok).and_then(|engine| {
+                ran = true;
+                execute(
+                    entry,
+                    modules,
+                    call,
+                    environment,
+                    control,
+                    &mut bridge,
+                    spent.insert(engine),
+                )
+            }),
+        };
+        let answer = match outcome {
             Ok(Outcome::Compiled(package)) => {
                 let (modules, tail) = wire::spans(package.modules());
                 let bytes: usize = tail.iter().map(|part| part.len()).sum();
@@ -112,8 +138,9 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
         wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
+        // Freed once the answer is on its way, which is as much of a call's cost as making it.
+        drop(spent);
     }
-    Ok(())
 }
 
 /// Carries one run's host requests to Dupin and its replies back.
@@ -192,6 +219,15 @@ enum Outcome {
     Handled(Handled),
 }
 
+fn compile(entry: String, modules: Vec<(String, &[u8])>, control: Control) -> Result<Outcome, RunError> {
+    let files = modules
+        .into_iter()
+        .map(|(name, source)| (name, source.to_vec()))
+        .collect();
+    let sources = Sources::new(entry, files)?;
+    Package::compile(sources, control).map(Outcome::Compiled)
+}
+
 fn execute(
     entry: String,
     modules: Vec<(String, &[u8])>,
@@ -199,15 +235,8 @@ fn execute(
     environment: Option<Environment>,
     control: Control,
     bridge: &mut dyn Bridge,
+    engine: &Engine,
 ) -> Result<Outcome, RunError> {
-    if let Call::Compile = call {
-        let files = modules
-            .into_iter()
-            .map(|(name, source)| (name, source.to_vec()))
-            .collect();
-        let sources = Sources::new(entry, files)?;
-        return Package::compile(sources, control).map(Outcome::Compiled);
-    }
     let bytecode = modules
         .into_iter()
         .map(|(name, bytes)| (name, Box::from(bytes)))
@@ -220,19 +249,22 @@ fn execute(
     // do no more than running the source could.
     let package = unsafe { Package::from_compiled(entry, bytecode) }.with_environment(environment);
     match call {
-        Call::Compile => unreachable!("compiled above"),
-        Call::Check => package.check(control).map(Outcome::Checked),
+        Call::Compile => Err(RunError::Failed(Diagnostic::new(
+            "host-error",
+            "a compile runs in no engine",
+        ))),
+        Call::Check => package.check(engine, control).map(Outcome::Checked),
         Call::Search { query, limit } => package
-            .search_with(&query, limit as usize, control, bridge)
+            .search_with(engine, &query, limit as usize, control, bridge)
             .map(Outcome::Rows),
         Call::Items { cursor, reason } => package
-            .items(cursor.as_deref(), reason, control, bridge)
+            .items(engine, cursor.as_deref(), reason, control, bridge)
             .map(Outcome::Catalogue),
         Call::Action { name, data } => package
-            .action(&name, &data.to_string(), control, bridge)
+            .action(engine, &name, &data.to_string(), control, bridge)
             .map(Outcome::Acted),
         Call::Event { name, event } => package
-            .event(&name, &event.to_string(), control, bridge)
+            .event(engine, &name, &event.to_string(), control, bridge)
             .map(Outcome::Handled),
     }
 }

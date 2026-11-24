@@ -880,4 +880,35 @@ fn a_helper_inside_another_sandbox_refuses_and_says_why() {
     );
 }
 
+#[test]
+fn no_guest_state_outlives_its_call_in_the_resident_helper() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let leaky = package(
+        r#"import * as dupin from 'dupin';
+           export function search() {
+             const seen = [
+               typeof globalThis.left,
+               typeof Array.prototype.left,
+               typeof Object.getPrototypeOf(dupin.storage).left,
+               String(Math.random === globalThis.realRandom),
+             ];
+             globalThis.left = 1;
+             Array.prototype.left = 1;
+             Object.getPrototypeOf(dupin.storage).left = 1;
+             globalThis.realRandom = Math.random;
+             return [{ title: seen.join(' ') }];
+           }"#,
+    );
+    let mut pids = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            titles(&search(&host, &leaky, "", Duration::from_secs(5)).unwrap()),
+            ["undefined undefined undefined false"]
+        );
+        pids.push(host.helper_pid().unwrap());
+    }
+    assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
+}
+
 mod services;

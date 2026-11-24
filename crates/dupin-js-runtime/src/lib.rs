@@ -2,6 +2,9 @@
 //! stack, deadline and promise-job budget, and with no APIs beyond the language itself and the
 //! host's `dupin` module: no files, network, processes or timers.
 //!
+//! A call's runtime is an [`Engine`], which the caller may make before the call and drop after
+//! answering, so that neither is part of the call's latency.
+//!
 //! Dupin itself only reads a package's [`Sources`]; compiling and running them, and erasing the
 //! types of TypeScript modules first, is the extension host's work.
 
@@ -47,6 +50,59 @@ const HOST_MODULE: &str = "dupin";
 pub struct Control {
     pub deadline: Instant,
     pub is_cancelled: Box<dyn Fn() -> bool>,
+}
+
+/// A QuickJS runtime and a context with the language's standard library and the host's `dupin`
+/// module, for one call.
+///
+/// Making them is most of what a call costs before any guest code runs, and freeing them most of
+/// what it costs after, so the extension host makes the next call's engine while it waits and
+/// drops each after answering. Only the host's own module runs in an engine before the call that
+/// takes it, and its guest's code is the only guest code that ever runs there. A second call
+/// refuses it, so no guest state reaches another call.
+pub struct Engine {
+    calls: host::Shared,
+    invalidation: Rc<host::Invalidation>,
+    // Dropped in order: the context's values before the runtime that owns them.
+    context: Context,
+    runtime: Runtime,
+    taken: Cell<bool>,
+}
+
+impl Engine {
+    pub fn new() -> Result<Self, RunError> {
+        let bytecode = host::bytecode().map_err(|error| internal(&error))?;
+        let runtime = Runtime::new().map_err(|error| internal(&error))?;
+        runtime.set_memory_limit(HEAP_BYTES);
+        runtime.set_max_stack_size(STACK_BYTES);
+        let context = Context::full(&runtime).map_err(|_| memory_limit())?;
+        let calls = host::Shared::default();
+        let invalidation = Rc::<host::Invalidation>::default();
+        context
+            .with(|ctx| {
+                host::install(&ctx, &calls, &invalidation)?;
+                // SAFETY: `host::bytecode` wrote these bytes in this process from the host's own
+                // module source.
+                let (_, evaluated) = unsafe { Module::load(ctx.clone(), bytecode) }?.eval()?;
+                evaluated.finish::<()>()
+            })
+            .map_err(|error| internal(&error))?;
+        Ok(Self {
+            calls,
+            invalidation,
+            context,
+            runtime,
+            taken: Cell::new(false),
+        })
+    }
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("taken", &self.taken.get())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -136,11 +192,11 @@ impl Package {
             .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
     }
 
-    /// Links and evaluates the entry module, and reports which of `search` and `items` it
-    /// exports. A package must export at least one.
-    pub fn check(&self, control: Control) -> Result<Exports, RunError> {
+    /// Links and evaluates the entry module in `engine`, and reports which of `search` and
+    /// `items` it exports. A package must export at least one.
+    pub fn check(&self, engine: &Engine, control: Control) -> Result<Exports, RunError> {
         let mut bridge = Unavailable::default();
-        let sandbox = Sandbox::new(self, control, &mut bridge, Work::Search)?;
+        let sandbox = Sandbox::new(self, engine, control, &mut bridge, Work::Search)?;
         sandbox.run(|ctx| {
             let namespace = sandbox.namespace(ctx)?;
             let exports = Exports {
@@ -154,21 +210,29 @@ impl Package {
         })
     }
 
-    /// Calls `search(query, { limit })` with no host services and reads its answer.
+    /// Calls `search(query, { limit })` in an engine of its own, with no host services, and reads
+    /// its answer.
     pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<Row>, RunError> {
-        self.search_with(query, limit, control, &mut Unavailable::default())
+        self.search_with(
+            &Engine::new()?,
+            query,
+            limit,
+            control,
+            &mut Unavailable::default(),
+        )
     }
 
-    /// Calls `search(query, { limit })`, carrying its host requests through `bridge`, and reads
-    /// its answer. At most `limit` rows are kept.
+    /// Calls `search(query, { limit })` in `engine`, carrying its host requests through
+    /// `bridge`, and reads its answer. At most `limit` rows are kept.
     pub fn search_with(
         &self,
+        engine: &Engine,
         query: &str,
         limit: usize,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<Vec<Row>, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Search)?;
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Search)?;
         sandbox.run(|ctx| {
             let search = sandbox.function(ctx, "search")?;
             let options = Object::new(ctx.clone())?;
@@ -179,17 +243,18 @@ impl Package {
         })
     }
 
-    /// Calls `items({ cursor, reason })`, carrying its host requests through `bridge`, and reads
-    /// the part of the catalogue it answers with. The catalogue loads as the user types, before
-    /// any row is chosen, so Dupin answers its requests as it does a search's.
+    /// Calls `items({ cursor, reason })` in `engine`, carrying its host requests through
+    /// `bridge`, and reads the part of the catalogue it answers with. The catalogue loads as the
+    /// user types, before any row is chosen, so Dupin answers its requests as it does a search's.
     pub fn items(
         &self,
+        engine: &Engine,
         cursor: Option<&str>,
         reason: Reason,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<CataloguePage, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Items)?;
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Items)?;
         sandbox.run(|ctx| {
             let items = sandbox.function(ctx, "items")?;
             let context = Object::new(ctx.clone())?;
@@ -204,46 +269,48 @@ impl Package {
         })
     }
 
-    /// Calls `actions[name](data, ctx)`, which runs because the user chose it, and reads the
-    /// effect it returns and whether it invalidated the catalogue. `data` is the JSON the item's
-    /// action carried.
+    /// Calls `actions[name](data, ctx)` in `engine`, which runs because the user chose it, and
+    /// reads the effect it returns and whether it invalidated the catalogue. `data` is the JSON
+    /// the item's action carried.
     pub fn action(
         &self,
+        engine: &Engine,
         name: &str,
         data: &str,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<Acted, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Action)?;
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Action)?;
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "actions", name)?;
             let data = ctx.json_parse(data)?;
             let context = frozen(ctx, Object::new(ctx.clone())?)?;
             let answer = sandbox.call(ctx, handler, (data, context))?;
             Ok(Acted {
-                invalidated: sandbox.invalidated.get(),
+                invalidated: sandbox.invalidation.called.get(),
                 effect: output::effect(&self.entry, &answer)?,
             })
         })
     }
 
-    /// Calls `events[name](event)` for something Dupin watches on the package's behalf, such as
-    /// a clipboard change, and reports whether it invalidated the catalogue. What it returns is
-    /// ignored.
+    /// Calls `events[name](event)` in `engine` for something Dupin watches on the package's
+    /// behalf, such as a clipboard change, and reports whether it invalidated the catalogue. What
+    /// it returns is ignored.
     pub fn event(
         &self,
+        engine: &Engine,
         name: &str,
         event: &str,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<Handled, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Event)?;
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Event)?;
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "events", name)?;
             let event = ctx.json_parse(event)?;
             sandbox.call(ctx, handler, (frozen(ctx, event)?,))?;
             Ok(Handled {
-                invalidated: sandbox.invalidated.get(),
+                invalidated: sandbox.invalidation.called.get(),
             })
         })
     }
@@ -574,28 +641,30 @@ enum Stage {
 
 struct Sandbox<'a> {
     package: &'a Package,
-    /// Set when an action or event handler calls `items.invalidate()`.
-    invalidated: Rc<Cell<bool>>,
+    invalidation: Rc<host::Invalidation>,
     watchdog: Watchdog,
     problem: LinkProblem,
     work: Work,
     calls: host::Shared,
     bridge: RefCell<&'a mut dyn Bridge>,
-    // Dropped in order: the context's values before the runtime that owns them.
-    context: Context,
-    _runtime: Runtime,
+    context: &'a Context,
 }
 
 impl<'a> Sandbox<'a> {
     fn new(
         package: &'a Package,
+        engine: &'a Engine,
         control: Control,
         bridge: &'a mut dyn Bridge,
         work: Work,
     ) -> Result<Self, RunError> {
-        let runtime = Runtime::new().map_err(|error| internal(&error))?;
-        runtime.set_memory_limit(HEAP_BYTES);
-        runtime.set_max_stack_size(STACK_BYTES);
+        if engine.taken.replace(true) {
+            return Err(RunError::Failed(Diagnostic::new(
+                "engine-error",
+                "an engine runs one call, and this one already ran",
+            )));
+        }
+        let runtime = &engine.runtime;
         let watchdog = Watchdog::new(control);
         let interrupt = watchdog.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || interrupt.tripped())));
@@ -610,29 +679,25 @@ impl<'a> Sandbox<'a> {
                 problem: problem.clone(),
             },
         );
-        let context = Context::full(&runtime).map_err(|_| memory_limit())?;
-        let calls = host::Shared::default();
-        let invalidated = Rc::<Cell<bool>>::default();
-        let invalidating = matches!(work, Work::Action | Work::Event).then(|| invalidated.clone());
-        context
-            .with(|ctx| {
-                host::install(&ctx, &calls, invalidating)?;
-                match &package.environment {
-                    Some(environment) => environment::install(&ctx, environment),
-                    None => Ok(()),
-                }
-            })
-            .map_err(|_| memory_limit())?;
+        let context = &engine.context;
+        engine
+            .invalidation
+            .allowed
+            .set(matches!(work, Work::Action | Work::Event));
+        if let Some(environment) = &package.environment {
+            context
+                .with(|ctx| environment::install(&ctx, environment))
+                .map_err(|_| memory_limit())?;
+        }
         Ok(Self {
             package,
-            invalidated,
+            invalidation: engine.invalidation.clone(),
             watchdog,
             problem,
             work,
-            calls,
+            calls: engine.calls.clone(),
             bridge: RefCell::new(bridge),
             context,
-            _runtime: runtime,
         })
     }
 

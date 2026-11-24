@@ -13,6 +13,10 @@ mod items;
 
 const DEADLINE: Duration = Duration::from_secs(2);
 
+fn engine() -> Engine {
+    Engine::new().unwrap()
+}
+
 fn timeout(timeout: Duration) -> Control {
     Control {
         deadline: Instant::now() + timeout,
@@ -67,11 +71,38 @@ fn run(source: &str, query: &str) -> Result<Vec<Row>, RunError> {
 }
 
 #[test]
+fn an_engine_runs_one_call_and_refuses_a_second() {
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        "export function search() { globalThis.left = (globalThis.left ?? 0) + 1; return [{ title: String(globalThis.left) }]; }",
+    )]);
+    let package = loaded.unwrap();
+    let engine = engine();
+    let mut bridge = Unavailable::default();
+    let rows = package
+        .search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge)
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
+    let refused = failure(package.search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge));
+    assert_eq!(refused.code, "engine-error", "{refused:?}");
+    let rows = package
+        .search_with(
+            &Engine::new().unwrap(),
+            "",
+            MAX_ROWS,
+            timeout(DEADLINE),
+            &mut bridge,
+        )
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
+}
+
+#[test]
 fn the_word_count_example_counts_words_and_copies_the_count() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
     let package = load(&root).unwrap();
     assert_eq!(
-        package.check(timeout(DEADLINE)).unwrap(),
+        package.check(&engine(), timeout(DEADLINE)).unwrap(),
         Exports {
             search: true,
             items: false
@@ -219,7 +250,9 @@ fn deep_recursion_hits_the_stack_limit() {
 fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
     let looping = load(&fixture("startup-loop")).unwrap();
     for result in [
-        looping.check(timeout(Duration::from_millis(100))).map(drop),
+        looping
+            .check(&engine(), timeout(Duration::from_millis(100)))
+            .map(drop),
         looping
             .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
             .map(drop),
@@ -228,7 +261,7 @@ fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
         assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
     }
     let allocating = load(&fixture("startup-allocation")).unwrap();
-    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|_| Vec::new()));
+    let diagnostic = failure(allocating.check(&engine(), timeout(DEADLINE)).map(|_| Vec::new()));
     assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
