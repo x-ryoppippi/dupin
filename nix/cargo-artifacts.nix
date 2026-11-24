@@ -58,7 +58,13 @@ let
     cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
+  # The checks never read debug info: a failing test still prints where it panicked. Without
+  # it, the debug dependency output each lockfile change adds to CI's cache is half the size.
+  checkEnv = baseArgs.env // {
+    CARGO_PROFILE_DEV_DEBUG = "false";
+  };
   debugArgs = baseArgs // {
+    env = checkEnv;
     CARGO_PROFILE = "dev";
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
