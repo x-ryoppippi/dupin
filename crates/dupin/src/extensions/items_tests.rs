@@ -471,6 +471,8 @@ fn a_port_answers_like_the_native_catalogue_it_replaces() {
                 detail: None,
                 match_text: None,
                 time: None,
+                file: None,
+                file_actions: Vec::new(),
             }
         })
         .collect();

@@ -26,6 +26,7 @@ pub(super) const FEATURE: Feature = Feature {
     bundled: Some(Bundled {
         package: PACKAGE,
         command: CALENDAR,
+        enabled: |config| config.calendar.enabled,
     }),
     ..Feature::EMPTY
 };

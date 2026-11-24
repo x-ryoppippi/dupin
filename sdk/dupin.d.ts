@@ -56,6 +56,8 @@ declare module 'dupin' {
 		alternate?: boolean;
 		/** Dupin asks this first, one line, with the action's title as the button and Cancel selected. */
 		confirm?: string;
+		/** It acts on the item's `file`: while the file is gone, Dupin leaves it out. */
+		needsFile?: boolean;
 	}
 
 	/** An item of an `items` catalogue, which may carry words that also find it. */
@@ -71,7 +73,11 @@ declare module 'dupin' {
 		matchText?: string;
 		/** Milliseconds since the epoch the item is from: its subtitle starts with how long ago that was. */
 		time?: number;
-		/** An absolute path whose Finder icon the item shows, unless it has an `icon`. */
+		/**
+		 * The file the item stands for, by absolute path: it shows the file's Finder icon unless
+		 * it has an `icon`, and while the file is gone it shows as Unavailable, without the
+		 * actions that need it.
+		 */
 		file?: string;
 	}
 

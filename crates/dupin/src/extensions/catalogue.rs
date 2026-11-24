@@ -344,6 +344,8 @@ mod tests {
                 detail: None,
                 match_text: None,
                 time: None,
+                file: None,
+                file_actions: Vec::new(),
             }
         }
 

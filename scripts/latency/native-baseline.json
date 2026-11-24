@@ -2,6 +2,34 @@
 	"schema": 1,
 	"results": [
 		{
+			"id": "clipboard.bak",
+			"feature": "clipboard",
+			"implementation": "native",
+			"commit": "fd42d7caa849f633a5720ab60db8868c6a12080d",
+			"runs": 1,
+			"p50_ms": 11.888875,
+			"p95_ms": 30.534834,
+			"p99_ms": 31.432416999999997,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.586833,
+					"p95": 1.229583
+				},
+				"provider_ms": {
+					"p50": 0.456584,
+					"p95": 4.628832999999999
+				},
+				"merge_ms": {
+					"p50": 8.132041,
+					"p95": 14.263542000000001
+				},
+				"layout_ms": {
+					"p50": 2.8730420000000003,
+					"p95": 10.327584000000002
+				}
+			}
+		},
+		{
 			"id": "dictionary.run",
 			"feature": "dictionary",
 			"implementation": "native",

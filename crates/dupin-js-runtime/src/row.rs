@@ -95,6 +95,9 @@ pub struct RowAction {
     /// What Dupin asks before it runs, with the action's title as the button.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm: Option<String>,
+    /// It acts on the row's `file`, so it isn't offered while the file is gone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_file: bool,
 }
 
 impl RowAction {
@@ -105,6 +108,7 @@ impl RowAction {
             effect,
             alternate: false,
             confirm: None,
+            needs_file: false,
         }
     }
 }
@@ -265,10 +269,10 @@ impl Row {
         }
         for action in &self.actions {
             line("actions.title", &action.title, MAX_ACTION_TITLE_BYTES)?;
-            if (action.alternate || action.confirm.is_some())
+            if (action.alternate || action.confirm.is_some() || action.needs_file)
                 && !matches!(action.effect, RowEffect::Run { .. })
             {
-                return Err("only a `run` action is `alternate` or asks to `confirm`".into());
+                return Err("only a `run` action is `alternate`, asks to `confirm` or `needsFile`".into());
             }
             if let Some(confirm) = &action.confirm {
                 line("actions.confirm", confirm, MAX_ACTION_TITLE_BYTES)?;

@@ -166,6 +166,8 @@ impl Convert for Extension {
         let keywords = std::mem::take(&mut row.keywords);
         let match_text = row.match_text.take();
         let time = row.time.map(|ms| ms / 1000);
+        let file = row.file.clone().map(Into::into);
+        let file_actions = file_actions(&row);
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
@@ -174,6 +176,8 @@ impl Convert for Extension {
             detail,
             match_text,
             time,
+            file,
+            file_actions,
         }
     }
 
@@ -181,6 +185,16 @@ impl Convert for Extension {
     fn entry_id(&self, id: &str) -> String {
         format!("extension:{}/{id}", self.id)
     }
+}
+
+/// The IDs [`row_item`] gives the row's actions that act on its file.
+fn file_actions(row: &Row) -> Vec<String> {
+    row.actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| action.needs_file || matches!(action.effect, RowEffect::Reveal { .. }))
+        .map(|(index, _)| format!("action-{index}"))
+        .collect()
 }
 
 pub(super) fn row_item(

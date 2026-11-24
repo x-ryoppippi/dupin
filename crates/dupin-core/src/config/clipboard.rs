@@ -37,6 +37,21 @@ pub enum Retention {
     Forever,
 }
 
+impl Clipboard {
+    /// Apps whose copies are never read, which every extension follows too.
+    pub fn ignored_apps(&self) -> &[String] {
+        &self.ignored_apps
+    }
+
+    pub fn max_entry_bytes(&self) -> usize {
+        self.max_entry_bytes
+    }
+
+    pub fn max_image_bytes(&self) -> usize {
+        self.max_image_bytes
+    }
+}
+
 impl Retention {
     pub const ALL: [Retention; 5] = [
         Retention::Day,
@@ -45,18 +60,6 @@ impl Retention {
         Retention::Quarter,
         Retention::Forever,
     ];
-
-    /// How long an entry lives, in seconds; `None` keeps it until it is deleted or pushed out.
-    pub(crate) fn seconds(self) -> Option<u64> {
-        let days = match self {
-            Retention::Day => 1,
-            Retention::Week => 7,
-            Retention::Month => 30,
-            Retention::Quarter => 90,
-            Retention::Forever => return None,
-        };
-        Some(days * 86_400)
-    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -198,16 +201,20 @@ mod tests {
 
     #[test]
     fn retention_reads_every_documented_period() {
-        for (value, retention, seconds) in [
-            ("1d", Retention::Day, Some(86_400)),
-            ("7d", Retention::Week, Some(7 * 86_400)),
-            ("30d", Retention::Month, Some(30 * 86_400)),
-            ("90d", Retention::Quarter, Some(90 * 86_400)),
-            ("forever", Retention::Forever, None),
+        for (value, retention) in [
+            ("1d", Retention::Day),
+            ("7d", Retention::Week),
+            ("30d", Retention::Month),
+            ("90d", Retention::Quarter),
+            ("forever", Retention::Forever),
         ] {
             let config = Config::parse(&format!("[clipboard]\nretention = \"{value}\"")).unwrap();
             assert_eq!(config.clipboard.retention, retention);
-            assert_eq!(retention.seconds(), seconds);
+            assert_eq!(
+                serde_json::to_value(retention).unwrap(),
+                value,
+                "the package reads it as written"
+            );
         }
         assert_eq!(Retention::ALL.len(), 5);
     }

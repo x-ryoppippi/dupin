@@ -1,5 +1,5 @@
-//! Watching the general pasteboard for clipboard history and extensions, putting history
-//! entries back on it, and reading and writing it.
+//! The general pasteboard for the `clipboard` host service: watching it for new copies, reading
+//! each copy in the one form clipboard history keeps, and writing it.
 //!
 //! One monitor thread polls `changeCount` while anything watches, as AppKit posts no
 //! notification for pasteboard changes. Concealed copies and ignored apps must be identified
@@ -7,12 +7,11 @@
 
 mod image;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dupin_core::clipboard::{Access, Content, FileRef, History, Policy};
 use dupin_core::{Action, Item, ItemAction, View};
 use dupin_host_services::clipboard::{self as service, Limits, Pasteboard, Peek, SOURCE_TYPE, Watch, Write};
 use dupin_host_services::{OsAccess, ServiceError};
@@ -21,7 +20,7 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::sel;
 use objc2_app_kit::{
     NSPasteboard, NSPasteboardAccessBehavior, NSPasteboardTypeFileURL, NSPasteboardTypePNG,
-    NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting, NSRunningApplication, NSWorkspace,
+    NSPasteboardTypeString, NSPasteboardWriting, NSRunningApplication, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 use objc2_uniform_type_identifiers::UTType;
@@ -30,6 +29,7 @@ use crate::privacy;
 
 const INTERVAL: Duration = Duration::from_millis(500);
 const FILE_URL_TYPE: &str = "public.file-url";
+const URL_TYPE: &str = "public.url";
 const STRING_TYPE: &str = "public.utf8-plain-text";
 /// Image types in the order they are preferred when a copy offers several.
 const IMAGE_TYPES: [&str; 5] = [
@@ -43,11 +43,9 @@ const IMAGE_TYPES: [&str; 5] = [
 const MAX_SOURCE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SOURCE_ID_BYTES: usize = 1024;
 
-/// What the monitor needs from a pasteboard, so tests can hand it a fixture instead of the
+/// What reading a copy needs from a pasteboard, so tests can hand it a fixture instead of the
 /// user's clipboard.
 trait Board {
-    fn change_count(&self) -> isize;
-    fn access(&self) -> Access;
     fn types(&self) -> Vec<String>;
     /// The string of type `kind`, or `None` when it is longer than `max_bytes`, measured before
     /// it is copied out.
@@ -58,14 +56,6 @@ trait Board {
 }
 
 impl Board for NSPasteboard {
-    fn change_count(&self) -> isize {
-        self.changeCount()
-    }
-
-    fn access(&self) -> Access {
-        background_access(behavior(self))
-    }
-
     fn types(&self) -> Vec<String> {
         self.types()
             .map(|types| types.iter().map(|kind| kind.to_string()).collect())
@@ -98,6 +88,18 @@ impl Board for NSPasteboard {
     }
 }
 
+/// Whether the system lets Dupin read the clipboard in the background.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Access {
+    #[default]
+    Allowed,
+    /// Reading would raise the system's paste prompt, which Dupin has never raised. Only a
+    /// deliberate request may raise it, never a background read.
+    Unasked,
+    /// The system asks or refuses on every read; the user changes that in System Settings.
+    Restricted,
+}
+
 /// An app that was frontmost around a copy.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct App {
@@ -105,23 +107,11 @@ struct App {
     name: Option<String>,
 }
 
-enum Tick<'a> {
-    Access(Access),
-    Copied {
-        board: &'a NSPasteboard,
-        count: isize,
-        access: Access,
-        /// The apps frontmost around the copy, which happened at some point since the last poll.
-        apps: &'a [Option<App>],
-    },
-}
-
-type Listener = Arc<dyn Fn(&Tick) + Send + Sync>;
+type Listener = Arc<dyn Fn(&NSPasteboard, isize, &[Option<App>]) + Send + Sync>;
 
 struct Subscriber {
     id: u64,
     listener: Listener,
-    reported: Option<Access>,
     /// The change count this subscriber last heard about, so it never hears of a copy made
     /// before it subscribed.
     seen: isize,
@@ -147,8 +137,8 @@ static HUB: Mutex<Hub> = Mutex::new(Hub {
     origin: None,
 });
 
-/// Calls `listener` on the monitor thread with each access change, starting with the current
-/// access, and each copy made after it subscribed, until the subscription is dropped.
+/// Calls `listener` on the monitor thread with each copy made after it subscribed, and the apps
+/// frontmost around it, until the subscription is dropped.
 fn subscribe(listener: Listener) -> std::io::Result<Subscription> {
     let seen = autoreleasepool(|_| NSPasteboard::generalPasteboard().changeCount());
     let mut hub = HUB.lock().unwrap();
@@ -160,12 +150,7 @@ fn subscribe(listener: Listener) -> std::io::Result<Subscription> {
             .spawn(poll)?;
         hub.running = true;
     }
-    hub.subscribers.push(Subscriber {
-        id,
-        listener,
-        reported: None,
-        seen,
-    });
+    hub.subscribers.push(Subscriber { id, listener, seen });
     Ok(Subscription(id))
 }
 
@@ -200,7 +185,6 @@ fn poll() {
     loop {
         std::thread::sleep(INTERVAL);
         let stop = autoreleasepool(|_| {
-            let access = Board::access(&*board);
             let current = frontmost();
             let count = board.changeCount();
             let apps = if count == seen {
@@ -222,30 +206,17 @@ fn poll() {
                 }
                 hub.subscribers
                     .iter_mut()
-                    .map(|subscriber| {
-                        let report = subscriber.reported.replace(access) != Some(access);
-                        let copied = std::mem::replace(&mut subscriber.seen, count) != count;
-                        (subscriber.listener.clone(), report, copied)
+                    .filter_map(|subscriber| {
+                        (std::mem::replace(&mut subscriber.seen, count) != count)
+                            .then(|| subscriber.listener.clone())
                     })
                     .collect::<Vec<_>>()
             };
             seen = count;
             // Listeners run without the hub's lock, so one may unsubscribe while holding a
             // lock another listener takes.
-            for (listener, report, _) in &listeners {
-                if *report {
-                    listener(&Tick::Access(access));
-                }
-            }
-            for (listener, _, copied) in &listeners {
-                if *copied {
-                    listener(&Tick::Copied {
-                        board: &board,
-                        count,
-                        access,
-                        apps: &apps,
-                    });
-                }
+            for listener in &listeners {
+                listener(&board, count, &apps);
             }
             previous = current;
             false
@@ -253,47 +224,6 @@ fn poll() {
         if stop {
             return;
         }
-    }
-}
-
-/// Records clipboard changes into a history until dropped.
-pub struct Monitor {
-    active: Arc<AtomicBool>,
-    _subscription: Subscription,
-}
-
-impl Monitor {
-    pub fn start(history: Arc<Mutex<History>>) -> std::io::Result<Monitor> {
-        let active = Arc::new(AtomicBool::new(true));
-        let subscription = subscribe(Arc::new({
-            let active = active.clone();
-            move |tick: &Tick| match *tick {
-                Tick::Access(access) => {
-                    if let Ok(mut history) = history.lock()
-                        && active.load(Ordering::Acquire)
-                    {
-                        history.set_access(access);
-                    }
-                }
-                Tick::Copied {
-                    board,
-                    count,
-                    access: Access::Allowed,
-                    apps,
-                } => capture(board, count, apps, &history, &active),
-                Tick::Copied { .. } => {}
-            }
-        }))?;
-        Ok(Monitor {
-            active,
-            _subscription: subscription,
-        })
-    }
-}
-
-impl Drop for Monitor {
-    fn drop(&mut self) {
-        self.active.store(false, Ordering::Release);
     }
 }
 
@@ -311,6 +241,11 @@ fn background_access(policy: Option<NSPasteboardAccessBehavior>) -> Access {
     }
 }
 
+/// Whether macOS lets Dupin read the clipboard in the background now, read without prompting.
+pub fn access() -> Access {
+    autoreleasepool(|_| background_access(behavior(&NSPasteboard::generalPasteboard())))
+}
+
 /// The pasteboard policy as Settings → Permissions shows it, read without prompting.
 pub(crate) fn policy_access() -> privacy::Access {
     policy_status(behavior(&NSPasteboard::generalPasteboard()))
@@ -326,6 +261,7 @@ fn policy_status(policy: Option<NSPasteboardAccessBehavior>) -> privacy::Access 
     }
 }
 
+/// The row clipboard history shows above its entries while macOS keeps it from recording.
 pub fn access_item(access: Access) -> Option<Item> {
     let (title, subtitle, action) = match access {
         Access::Allowed => return None,
@@ -387,83 +323,43 @@ fn app_named(id: String) -> App {
     App { id, name }
 }
 
-fn capture(
-    board: &impl Board,
-    count: isize,
-    apps: &[Option<App>],
-    history: &Mutex<History>,
-    active: &AtomicBool,
-) {
+/// Files, then a URL, then text, then an image: the one form of a copy clipboard history keeps.
+/// Finder also offers copied files' names as text, and a copy that offers both text and a
+/// picture of it is the text. Images are read from PNG, TIFF, HEIC, HEIF or JPEG and converted
+/// to a PNG at most [`image::MAX_PIXELS`] on its longest side; files are described, never read.
+fn read_content(board: &impl Board, limits: &Limits) -> Option<service::Content> {
     let types = board.types();
-    if service::withheld(&types) {
-        return;
-    }
-    let Ok(guard) = history.lock() else {
-        return;
-    };
-    let ids = apps.iter().map(|app| app.as_ref().map(|app| app.id.as_str()));
-    if !active.load(Ordering::Acquire) || !ids.into_iter().all(|id| guard.accepts_source(id)) {
-        return;
-    }
-    let policy = guard.policy().clone();
-    drop(guard);
-
-    if board.access() != Access::Allowed {
-        return;
-    }
-    let mut source = apps.iter().rev().flatten().next().cloned();
-    if types.iter().any(|kind| kind == SOURCE_TYPE) {
-        let named = board.string(SOURCE_TYPE, MAX_SOURCE_ID_BYTES);
-        let accepted = history
-            .lock()
-            .is_ok_and(|history| history.accepts_source(named.as_deref()));
-        if !accepted {
-            return;
-        }
-        source = named.map(app_named).or(source);
-    }
-    let Some(content) = read(board, &types, &policy) else {
-        return;
-    };
-    // Another copy landed while this one was read; the next poll records that one instead.
-    if board.change_count() != count {
-        return;
-    }
-    // The owner drops the monitor while holding the history's lock as it clears it, so checking
-    // under the lock keeps a copy read before turning the history off from landing after.
-    if let Ok(mut history) = history.lock()
-        && active.load(Ordering::Acquire)
-    {
-        let source = source.map(|app| app.name.unwrap_or(app.id));
-        history.push(content, source, dupin_core::session::unix_now());
-    }
-}
-
-/// The one representation of a copy the history keeps: the files, else the text, else the
-/// image. Kinds the policy leaves out are never read.
-fn read(board: &impl Board, types: &[String], policy: &Policy) -> Option<Content> {
     let offers = |kind: &str| types.iter().any(|offered| offered == kind);
     if offers(FILE_URL_TYPE) {
-        // Finder also offers the names as text; a copy of files is never recorded as that.
-        return policy
-            .include_files
-            .then(|| Content::Files(board.file_urls().into_iter().map(describe).collect()));
+        let paths = board.file_urls();
+        return (!paths.is_empty() && paths.len() <= limits.files).then(|| service::Content::Files {
+            files: paths.into_iter().map(describe).collect(),
+        });
+    }
+    if offers(URL_TYPE) {
+        return board
+            .string(URL_TYPE, service::MAX_URL_BYTES)
+            .map(|url| service::Content::Url { url });
     }
     if offers(STRING_TYPE) {
         return board
-            .string(STRING_TYPE, policy.max_entry_bytes)
-            .map(Content::Text);
-    }
-    if !policy.include_images {
-        return None;
+            .string(STRING_TYPE, limits.text_bytes)
+            .map(|text| service::Content::Text { text });
     }
     let kind = IMAGE_TYPES.into_iter().find(|kind| offers(kind))?;
     let data = board.data(kind, MAX_SOURCE_IMAGE_BYTES)?;
-    image::to_png(&data, image::MAX_PIXELS, policy.max_image_bytes).map(Content::Image)
+    let image = image::to_png(&data, image::MAX_PIXELS, limits.image_bytes)?;
+    Some(service::Content::Image {
+        media_type: "image/png".into(),
+        width: image.width,
+        height: image.height,
+        data: image.png,
+    })
 }
 
-/// A file as it was when copied: its size from the file system, its type from its name.
-fn describe(path: PathBuf) -> FileRef {
+/// A copied file as it was when copied: its size from the file system and its type from its
+/// name, so its contents are never read.
+fn describe(path: PathBuf) -> service::FileRef {
     let metadata = std::fs::metadata(&path).ok();
     let kind = path
         .extension()
@@ -478,46 +374,16 @@ fn describe(path: PathBuf) -> FileRef {
                 .is_some_and(|metadata| metadata.is_dir())
                 .then(|| "public.folder".to_owned())
         });
-    FileRef {
+    service::FileRef {
+        folder: path
+            .parent()
+            .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy())),
         size: metadata
             .filter(|metadata| metadata.is_file())
             .map(|metadata| metadata.len()),
         kind,
-        path,
+        ..service::FileRef::new(&path)
     }
-}
-
-/// Put a history entry back on the general pasteboard as it was copied: the text, the image as
-/// PNG, or the files as Finder's Copy offers them.
-pub fn write(content: &Content) -> Result<(), String> {
-    autoreleasepool(|_| {
-        let board = NSPasteboard::generalPasteboard();
-        let written = match content {
-            Content::Text(text) => {
-                board.clearContents();
-                board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
-            }
-            Content::Image(image) => {
-                board.clearContents();
-                board.setData_forType(Some(&NSData::with_bytes(&image.png)), unsafe {
-                    NSPasteboardTypePNG
-                })
-            }
-            Content::Files(files) => return copy_files(&restorable(files, |path| path.exists())?),
-        };
-        written
-            .then_some(())
-            .ok_or_else(|| "Couldn't copy to the clipboard.".to_owned())
-    })
-}
-
-/// The files of an entry still there to put back, as its row offers them.
-fn restorable(files: &[FileRef], exists: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, String> {
-    let paths = FileRef::present(files, exists);
-    if paths.is_empty() {
-        return Err("Those files are no longer there.".to_owned());
-    }
-    Ok(paths)
 }
 
 /// Put files on the general pasteboard, as Finder's Copy does.
@@ -548,9 +414,9 @@ fn write_urls(urls: impl FnOnce() -> Vec<objc2::rc::Retained<NSURL>>) -> Option<
     })
 }
 
-/// The general pasteboard, for the extension `clipboard` capability. It keeps the monitor
-/// running while it exists, because only the monitor sees which app was frontmost as a copy
-/// landed; a copy it didn't see has no known origin, so it is read only while no app is ignored.
+/// The general pasteboard, for the `clipboard` capability. It keeps the monitor running while
+/// it exists, because only the monitor sees which app was frontmost as a copy landed; a copy it
+/// didn't see has no known origin, so it is read only while no app is ignored.
 pub struct GeneralPasteboard {
     _origins: Option<Subscription>,
 }
@@ -558,7 +424,7 @@ pub struct GeneralPasteboard {
 impl Default for GeneralPasteboard {
     fn default() -> Self {
         Self {
-            _origins: subscribe(Arc::new(|_: &Tick| {})).ok(),
+            _origins: subscribe(Arc::new(|_: &NSPasteboard, _, _: &[Option<App>]| {})).ok(),
         }
     }
 }
@@ -597,7 +463,8 @@ impl Pasteboard for GeneralPasteboard {
     fn read(&self, change: i64, limits: &Limits) -> Option<service::Content> {
         autoreleasepool(|_| {
             let board = NSPasteboard::generalPasteboard();
-            let content = read_content(&board, limits)?;
+            let content = read_content(&*board, limits)?;
+            // Another copy landed while this one was read; the next change delivers that one.
             (board.changeCount() as i64 == change).then_some(content)
         })
     }
@@ -636,12 +503,8 @@ impl Pasteboard for GeneralPasteboard {
         let active = Arc::new(AtomicBool::new(true));
         let subscription = subscribe(Arc::new({
             let active = active.clone();
-            move |tick: &Tick| {
-                if let Tick::Copied {
-                    board, count, apps, ..
-                } = *tick
-                    && active.load(Ordering::Acquire)
-                {
+            move |board: &NSPasteboard, count, apps: &[Option<App>]| {
+                if active.load(Ordering::Acquire) {
                     changed(Peek {
                         change: count as i64,
                         types: Board::types(board),
@@ -666,54 +529,6 @@ struct Unwatch {
 impl Drop for Unwatch {
     fn drop(&mut self) {
         self.active.store(false, Ordering::Release);
-    }
-}
-
-/// Files, then a URL, then text, then an image: the one form of a copy clipboard history keeps.
-/// Finder also offers copied files' names as text, and a copy that offers both text and a
-/// picture of it is the text. Images are read from PNG, TIFF, HEIC, HEIF or JPEG and converted
-/// to a PNG at most [`image::MAX_PIXELS`] on its longest side; files are described, never read.
-fn read_content(board: &NSPasteboard, limits: &Limits) -> Option<service::Content> {
-    let types = Board::types(board);
-    let offers = |kind: &str| types.iter().any(|offered| offered == kind);
-    if offers(FILE_URL_TYPE) {
-        let paths = board.file_urls();
-        return (!paths.is_empty() && paths.len() <= limits.files).then(|| service::Content::Files {
-            files: paths.into_iter().map(described).collect(),
-        });
-    }
-    if offers(&unsafe { NSPasteboardTypeURL }.to_string()) {
-        let url = board.stringForType(unsafe { NSPasteboardTypeURL })?;
-        return (url.len() <= service::MAX_URL_BYTES).then(|| service::Content::Url { url: url.to_string() });
-    }
-    if offers(STRING_TYPE) {
-        // Measured before it is copied out, so an oversized copy is never duplicated.
-        return Board::string(board, STRING_TYPE, limits.text_bytes)
-            .map(|text| service::Content::Text { text });
-    }
-    let kind = IMAGE_TYPES.into_iter().find(|kind| offers(kind))?;
-    let data = Board::data(board, kind, MAX_SOURCE_IMAGE_BYTES)?;
-    let image = image::to_png(&data, image::MAX_PIXELS, limits.image_bytes)?;
-    Some(service::Content::Image {
-        media_type: "image/png".into(),
-        width: image.width,
-        height: image.height,
-        data: image.png.clone(),
-    })
-}
-
-/// A copied file as the service describes it: its size from the file system and its type from
-/// its name, so its contents are never read.
-fn described(path: PathBuf) -> service::FileRef {
-    let file = describe(path);
-    service::FileRef {
-        folder: file
-            .path
-            .parent()
-            .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy())),
-        size: file.size,
-        kind: file.kind,
-        ..service::FileRef::new(&file.path)
     }
 }
 

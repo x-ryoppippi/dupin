@@ -28,6 +28,10 @@ pub struct Entry {
     pub match_text: Option<String>,
     /// Unix seconds the row is from; its subtitle starts with how long ago that was.
     pub time: Option<u64>,
+    /// The file the row stands for. While it is gone, the row shows as unavailable, without
+    /// its icon and the actions in `file_actions`.
+    pub file: Option<std::path::PathBuf>,
+    pub file_actions: Vec<String>,
 }
 
 /// How a catalogue matches what is typed.
@@ -392,16 +396,30 @@ impl Catalogue {
 }
 
 /// The row's item as it shows at `now`: with a time, its subtitle starts with how long ago
-/// that was.
+/// that was, and a row whose file is gone says so and offers only what needs no file.
 fn shown(entry: &Entry, now: u64) -> Item {
     let mut item = entry.item.clone();
-    if let (Some(time), crate::View::Text { subtitle, .. }) = (entry.time, &mut item.view) {
-        let ago = ago(now, time);
-        *subtitle = if subtitle.is_empty() {
-            ago
-        } else {
-            format!("{ago} · {subtitle}")
+    let gone = entry.file.as_deref().is_some_and(|file| !file.exists());
+    let crate::View::Text { subtitle, .. } = &mut item.view else {
+        return item;
+    };
+    let parts = [
+        entry.time.map(|time| ago(now, time)),
+        gone.then(|| "Unavailable".to_owned()),
+        (!subtitle.is_empty()).then(|| std::mem::take(subtitle)),
+    ];
+    *subtitle = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    if gone {
+        item.icon = None;
+        item.actions
+            .retain(|action| !entry.file_actions.contains(&action.id));
+        let offered = |id: &Option<String>| {
+            id.as_ref()
+                .filter(|id| item.actions.iter().any(|action| &action.id == *id))
+                .cloned()
         };
+        item.primary = offered(&item.primary);
+        item.alternate = offered(&item.alternate);
     }
     item
 }
@@ -484,6 +502,7 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.section.as_ref().map_or(0, |section| section.len())
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
         + entry.match_text.as_ref().map_or(0, String::len)
+        + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
 }
 
 /// Every action names each of its variants, so one added later must say what it holds.
@@ -542,9 +561,6 @@ fn action_bytes(action: &Action) -> usize {
                 }
         }
         Action::System(_)
-        | Action::RestoreClipboardEntry { .. }
-        | Action::DeleteClipboardEntry(_)
-        | Action::ClearClipboardHistory
         | Action::RequestClipboardAccess
         | Action::OpenPreferences
         | Action::ArrangeWindow(_) => 0,
@@ -584,6 +600,8 @@ mod tests {
             detail: None,
             match_text: None,
             time: None,
+            file: None,
+            file_actions: Vec::new(),
         }
     }
 

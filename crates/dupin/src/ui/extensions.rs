@@ -238,8 +238,9 @@ impl Ui {
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
     /// has already handed the broker every declaration, which never grants anything.
-    fn install_declarations(&mut self) {
+    pub(super) fn install_declarations(&mut self) {
         let bridge = self.extensions.bridge.clone();
+        let config = self.configuration.values.borrow().clone();
         for (_, extension) in self.extensions.packages.present() {
             let id = &extension.package;
             let watches = extension
@@ -248,7 +249,8 @@ impl Ui {
                     dupin_extension_bridge::ClipboardAccess::Watch,
                 ))
                 .is_some();
-            if !watches {
+            let feature_off = crate::features::ported_enabled(&extension.id, &config) == Some(false);
+            if !watches || feature_off {
                 bridge.unwatch_clipboard(id);
                 continue;
             }
@@ -387,7 +389,7 @@ impl Ui {
                         ..
                     }) => {
                         let paste = effect == dupin_extension_host::ActionEffect::Paste;
-                        ui.close_after_copy(paste, tx);
+                        ui.close_after_copy(&extension, paste, tx);
                         return;
                     }
                     Ok(Acted { effect: None, .. }) | Err(RunError::Cancelled) => None,

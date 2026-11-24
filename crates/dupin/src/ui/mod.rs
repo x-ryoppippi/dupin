@@ -54,9 +54,11 @@ use snippets::SnippetRun;
 
 enum PendingPaste {
     Snippet(SnippetRun),
-    ClipboardEntry(u64),
-    /// What an extension's action just put on the clipboard.
-    Clipboard,
+    /// What an extension's action just put on the clipboard, pasted only while the permit to
+    /// paste for it still holds.
+    Clipboard {
+        permit: dupin_extension_bridge::Permit,
+    },
     /// An extension row's text, pasted only while the permit to paste for it still holds.
     Extension {
         text: String,
@@ -194,7 +196,6 @@ impl Ui {
             apps_provider.clone(),
             history,
             (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
-            clipboard.history(),
             currency.calculator(),
         )
         .expect("built-in command registration is valid");
@@ -212,7 +213,7 @@ impl Ui {
             scripts: registration.scripts.clone(),
             runner: runner.clone(),
             calendar_access: calendar_access.clone(),
-            history: clipboard.history(),
+            clipboard: clipboard.settings(),
         });
         bridge.set_listener({
             let me = me.clone();

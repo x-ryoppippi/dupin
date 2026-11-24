@@ -48,6 +48,17 @@ pub(super) struct Bundled {
     pub package: &'static str,
     /// The command the feature registers while it is on.
     pub command: &'static str,
+    /// Whether the feature is on, and so may the package watch on its behalf.
+    pub enabled: fn(&Config) -> bool,
+}
+
+/// Whether the feature that ships as the extension called `package` is on, if one does.
+pub(crate) fn ported_enabled(package: &str, config: &Config) -> Option<bool> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.package == package)
+        .map(|bundled| (bundled.enabled)(config))
 }
 
 /// The built-in command the extension called `package` answers, if a feature ships as it.

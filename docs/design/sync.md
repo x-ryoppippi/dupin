@@ -215,7 +215,7 @@ Item IDs that are paths under the home folder are stored relative to `~`. The me
 
 Clipboard sync is a separate switch, **Sync clipboard history**, off by default, under Settings → Sync and only available while clipboard history is on. It exports only copies made after it is turned on, as clipboard history itself records only copies made after it is turned on. The concealed, transient, auto-generated and ignored-app rules are applied before recording, so excluded copies are never stored and never synced.
 
-Clipboard sync changes what clipboard history promises. Today it lives only in memory and is gone when Dupin quits; with sync on, it is kept sealed in the local `clipboard` namespace and in the folder, so it survives quitting. Turning the switch on says so, and `docs/features/clipboard.md` changes when this ships. With the switch off, clipboard history stays in memory only.
+Clipboard sync changes what clipboard history promises. Today it is kept sealed in the bundled `clipboard-history` package's own namespace on this Mac only; with sync on, it is also kept in the folder, so other Macs see it. Turning the switch on says so, and `docs/features/clipboard.md` changes when this ships. With the switch off, clipboard history stays on this Mac.
 
 Turning **Sync clipboard history** off, or clipboard history itself, withdraws this Mac's copies. It replaces each clipboard record it wrote in the folder with a tombstone, which carries no content and also removes the entry from the other Macs, deletes the blobs that only its records referenced and deletes the local `clipboard` namespace. Copies made on other Macs stay. The Mac then leaves the namespace as in [Leaving and rejoining](#leaving-and-rejoining).
 

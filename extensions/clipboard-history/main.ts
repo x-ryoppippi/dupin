@@ -42,11 +42,10 @@ type Stored =
 type Copy = Extract<Stored, { kind: 'text' | 'image' | 'files' }>;
 
 /**
- * Where `items` is: the newest record it saw, by when it was copied and its ID, since copies
- * made within one millisecond share a time; the oldest copy it kept; and while it pages, where.
+ * Where `items` is: the newest record it listed, which storage lists before everything stored
+ * after it, whatever the clock said; the oldest copy it kept; and while it pages, where.
  */
 interface Cursor {
-	newest: number;
 	newestId?: string;
 	oldest: number;
 	before?: string;
@@ -145,9 +144,10 @@ function lines(text: string): number {
 
 function row(record: StoredRecord, copy: Copy): CatalogueItem {
 	const data = { id: record.id };
+	const needsFile = copy.kind === 'files' ? { needsFile: true } : {};
 	const actions: Action[] = [
-		{ title: 'Copy', run: 'copy', data },
-		{ title: 'Paste', run: 'paste', data, alternate: true },
+		{ title: 'Copy', run: 'copy', data, ...needsFile },
+		{ title: 'Paste', run: 'paste', data, alternate: true, ...needsFile },
 	];
 	const item = { id: record.id, time: copy.copiedAt, actions };
 	const ending: Action[] = [
@@ -221,7 +221,6 @@ async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResul
 	const cutoff = cutoffOf(prefs);
 	const part = (from?.part ?? 0) + 1;
 	let before = from?.before;
-	let newest = from?.newest ?? 0;
 	let newestId = from?.newestId;
 	let oldest = from?.oldest ?? Number.MAX_SAFE_INTEGER;
 	let listed = from?.listed ?? 0;
@@ -235,10 +234,7 @@ async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResul
 			if (kept(stored, prefs, cutoff) && listed < prefs.maxEntries) {
 				listed++;
 				rows.push(row(record, stored));
-				if (newestId === undefined) {
-					newest = stored.copiedAt;
-					newestId = record.id;
-				}
+				newestId ??= record.id;
 				oldest = Math.min(oldest, stored.copiedAt);
 			} else if (deletes < MAX_DELETES) {
 				await storage.delete(record.id);
@@ -252,9 +248,7 @@ async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResul
 		}
 	}
 	const more = !done && part < MAX_PARTS;
-	const cursor: Cursor = more
-		? { newest, newestId, oldest, before, part, listed }
-		: { newest, newestId, oldest };
+	const cursor: Cursor = more ? { newestId, oldest, before, part, listed } : { newestId, oldest };
 	const answer = { cursor: JSON.stringify(cursor), more, ttl: TTL };
 	return from ? { ...answer, type: 'update', append: rows } : { ...answer, items: rows };
 }
@@ -265,7 +259,7 @@ async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult 
 	if (page.records.length === 0) {
 		return {
 			items: [],
-			cursor: JSON.stringify({ newest: 0, oldest: Number.MAX_SAFE_INTEGER }),
+			cursor: JSON.stringify({ oldest: Number.MAX_SAFE_INTEGER }),
 			ttl: TTL,
 		};
 	}
@@ -273,12 +267,11 @@ async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult 
 	const prepend: CatalogueItem[] = [];
 	const remove: string[] = [];
 	const notes: string[] = [];
-	let newest = cursor.newest;
 	let newestId = cursor.newestId;
 	let caughtUp = false;
 	for (const record of page.records) {
 		const stored = record.data as unknown as Stored;
-		if (stored.copiedAt < cursor.newest || record.id === cursor.newestId) {
+		if (record.id === cursor.newestId) {
 			caughtUp = true;
 			break;
 		}
@@ -291,15 +284,12 @@ async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult 
 		remove.push(record.id);
 		if (kept(stored, prefs, cutoff)) {
 			prepend.push(row(record, stored));
-			if (prepend.length === 1) {
-				newest = stored.copiedAt;
-				newestId = record.id;
-			}
+			if (prepend.length === 1) newestId = record.id;
 		}
 	}
 	if (!caughtUp && page.next) return null;
 	for (const id of notes) await storage.delete(id);
-	const next: Cursor = { newest, newestId, oldest: cursor.oldest };
+	const next: Cursor = { newestId, oldest: cursor.oldest };
 	return {
 		type: 'update',
 		prepend,

@@ -856,7 +856,7 @@ impl<'a> Reader<'a> {
             for key in action.keys::<String>() {
                 let key = key?;
                 match key.as_str() {
-                    "title" | "data" | "alternate" | "confirm" => {}
+                    "title" | "data" | "alternate" | "confirm" | "needsFile" => {}
                     "copy" | "paste" | "open" | "reveal" | "run" => kinds.push(key),
                     _ => {
                         return Err(self
@@ -879,7 +879,7 @@ impl<'a> Reader<'a> {
                     .into());
             };
             let data: Value = action.get("data")?;
-            for key in ["data", "alternate", "confirm"] {
+            for key in ["data", "alternate", "confirm", "needsFile"] {
                 let value: Value = action.get(key)?;
                 if *kind != "run" && !value.is_undefined() {
                     return Err(self
@@ -908,6 +908,10 @@ impl<'a> Reader<'a> {
                 "confirm",
                 MAX_ACTION_TITLE_BYTES,
             )?;
+            let needs_file = self
+                .boolean(&action, "needsFile")
+                .map_err(|failure| self.nested(failure, &at))?
+                .unwrap_or(false);
             let effect = match kind.as_str() {
                 "copy" => RowEffect::Copy {
                     text: self
@@ -968,6 +972,7 @@ impl<'a> Reader<'a> {
                 effect,
                 alternate,
                 confirm,
+                needs_file,
             });
         }
         Ok(())

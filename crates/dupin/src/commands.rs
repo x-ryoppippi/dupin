@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 use dupin_core::snippets::SnippetCatalog;
 use dupin_core::{
@@ -108,7 +108,6 @@ pub(super) struct Providers<'a> {
     pub apps: Arc<AppsProvider>,
     /// `None` in a headless run, which reads fixture events.
     pub calendar_access: Option<CalendarAccess>,
-    pub clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
     pub calculator: Arc<crate::calculator::Calculator>,
 }
 
@@ -128,7 +127,6 @@ pub fn register(
     apps: Arc<AppsProvider>,
     history: History,
     calendar_access: Option<CalendarAccess>,
-    clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
     calculator: crate::calculator::Calculator,
 ) -> Result<Registration, CommandError> {
     let ConfiguredCommands {
@@ -158,7 +156,6 @@ pub fn register(
         registration: &mut registration,
         apps,
         calendar_access,
-        clipboard,
         calculator: Arc::new(calculator),
     };
     for feature in MANIFEST {
