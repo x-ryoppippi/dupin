@@ -7,18 +7,18 @@ pub struct Clipboard {
     pub enabled: bool,
     pub max_entries: usize,
     /// Larger copies are skipped rather than truncated, so a copied-back entry is never partial.
-    pub(crate) max_entry_bytes: usize,
+    max_entry_bytes: usize,
     /// How long an entry is kept after it was copied.
     pub retention: Retention,
     pub include_images: bool,
     pub include_files: bool,
     /// The largest image kept, after converting it to PNG.
-    pub(crate) max_image_bytes: usize,
+    max_image_bytes: usize,
     /// Bundle identifiers of apps whose copies are never recorded.
-    pub(crate) ignored_apps: Vec<String>,
+    ignored_apps: Vec<String>,
 }
 
-const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=1000;
+const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=10_000;
 const CLIPBOARD_ENTRY_BYTES: std::ops::RangeInclusive<usize> = 1024..=1024 * 1024;
 const CLIPBOARD_IMAGE_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=32 * 1024 * 1024;
 
@@ -37,6 +37,21 @@ pub enum Retention {
     Forever,
 }
 
+impl Clipboard {
+    /// Apps whose copies are never read, which every extension follows too.
+    pub fn ignored_apps(&self) -> &[String] {
+        &self.ignored_apps
+    }
+
+    pub fn max_entry_bytes(&self) -> usize {
+        self.max_entry_bytes
+    }
+
+    pub fn max_image_bytes(&self) -> usize {
+        self.max_image_bytes
+    }
+}
+
 impl Retention {
     pub const ALL: [Retention; 5] = [
         Retention::Day,
@@ -45,18 +60,6 @@ impl Retention {
         Retention::Quarter,
         Retention::Forever,
     ];
-
-    /// How long an entry lives, in seconds; `None` keeps it until it is deleted or pushed out.
-    pub(crate) fn seconds(self) -> Option<u64> {
-        let days = match self {
-            Retention::Day => 1,
-            Retention::Week => 7,
-            Retention::Month => 30,
-            Retention::Quarter => 90,
-            Retention::Forever => return None,
-        };
-        Some(days * 86_400)
-    }
 
     pub fn label(self) -> &'static str {
         match self {
@@ -198,16 +201,20 @@ mod tests {
 
     #[test]
     fn retention_reads_every_documented_period() {
-        for (value, retention, seconds) in [
-            ("1d", Retention::Day, Some(86_400)),
-            ("7d", Retention::Week, Some(7 * 86_400)),
-            ("30d", Retention::Month, Some(30 * 86_400)),
-            ("90d", Retention::Quarter, Some(90 * 86_400)),
-            ("forever", Retention::Forever, None),
+        for (value, retention) in [
+            ("1d", Retention::Day),
+            ("7d", Retention::Week),
+            ("30d", Retention::Month),
+            ("90d", Retention::Quarter),
+            ("forever", Retention::Forever),
         ] {
             let config = Config::parse(&format!("[clipboard]\nretention = \"{value}\"")).unwrap();
             assert_eq!(config.clipboard.retention, retention);
-            assert_eq!(retention.seconds(), seconds);
+            assert_eq!(
+                serde_json::to_value(retention).unwrap(),
+                value,
+                "the package reads it as written"
+            );
         }
         assert_eq!(Retention::ALL.len(), 5);
     }
@@ -216,7 +223,7 @@ mod tests {
     fn clipboard_limits_and_unknown_keys_are_rejected() {
         for field in [
             "max_entries = 0",
-            "max_entries = 1001",
+            "max_entries = 10001",
             "max_entry_bytes = 1023",
             "max_entry_bytes = 1048577",
             "max_entries = -1",

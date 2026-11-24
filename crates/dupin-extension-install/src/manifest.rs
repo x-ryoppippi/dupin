@@ -67,7 +67,14 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
     if let Some(key) = dupin.keys().find(|key| {
         !matches!(
             key.as_str(),
-            "title" | "keyword" | "main" | "defaultSearch" | "emptyQuery" | "capabilities"
+            "title"
+                | "keyword"
+                | "main"
+                | "defaultSearch"
+                | "emptyQuery"
+                | "match"
+                | "preferences"
+                | "capabilities"
         )
     }) {
         return Err(invalid(&format!("dupin.{key}"), "is not a key Dupin reads"));

@@ -1,0 +1,504 @@
+{
+	"fixture": 1,
+	"description": "Kept copies list newest first with how long ago they were copied; every typed word must appear, ignoring case; Enter copies the entry back and hides the panel, and ⌘Enter's Paste pastes it.",
+	"environment": {
+		"now": "2026-11-24T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"storage": [
+			{
+				"copiedAt": 1795942800000,
+				"kind": "text",
+				"text": "cargo clippy --workspace --all-targets -- -D warnings"
+			},
+			{
+				"copiedAt": 1796021600000,
+				"files": [
+					{
+						"folder": "/Users/Shared/Fixtures",
+						"handle": "fixture",
+						"name": "Quarterly report.pdf",
+						"path": "/Users/Shared/Fixtures/Quarterly report.pdf",
+						"size": 1250000
+					}
+				],
+				"kind": "files"
+			},
+			{
+				"copiedAt": 1796027300000,
+				"kind": "text",
+				"text": "Meeting moved to Thursday at 14:00.\nRoom: Baker Street 221B\nBring the printed agenda."
+			},
+			{
+				"copiedAt": 1796028000000,
+				"height": 720,
+				"kind": "image",
+				"size": 912345,
+				"source": "Preview",
+				"width": 1280
+			},
+			{
+				"copiedAt": 1796028795000,
+				"kind": "text",
+				"text": "The game is afoot."
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "bca59a873ff65311d20bba851caa152e",
+						"subtitle": "18 characters",
+						"title": "The game is afoot."
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "a40b9a43d1d967952561aae565c7120f",
+						"subtitle": "912 KB · Preview",
+						"title": "Image · 1280×720 PNG"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "5b4299e38a29b6e5e60f5b9a139e8fe1",
+						"subtitle": "3 lines",
+						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"reveal": "/Users/Shared/Fixtures/Quarterly report.pdf",
+								"title": "Reveal in Finder"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "7c3a5ec159650211a273b0ac5bcbcba0",
+						"subtitle": "/Users/Shared/Fixtures · 1.3 MB",
+						"title": "Quarterly report.pdf"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "2c20b0a46c277aa7bab7b8ac56fcba1a"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "2c20b0a46c277aa7bab7b8ac56fcba1a"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "2c20b0a46c277aa7bab7b8ac56fcba1a"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "2c20b0a46c277aa7bab7b8ac56fcba1a",
+						"subtitle": "53 characters",
+						"title": "cargo clippy --workspace --all-targets -- -D warnings"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "BAKER room",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "5b4299e38a29b6e5e60f5b9a139e8fe1",
+						"subtitle": "3 lines",
+						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "1280x720 preview",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "a40b9a43d1d967952561aae565c7120f"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "a40b9a43d1d967952561aae565c7120f",
+						"subtitle": "912 KB · Preview",
+						"title": "Image · 1280×720 PNG"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "shared",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"reveal": "/Users/Shared/Fixtures/Quarterly report.pdf",
+								"title": "Reveal in Finder"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "7c3a5ec159650211a273b0ac5bcbcba0"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "7c3a5ec159650211a273b0ac5bcbcba0",
+						"subtitle": "/Users/Shared/Fixtures · 1.3 MB",
+						"title": "Quarterly report.pdf"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "game",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "bca59a873ff65311d20bba851caa152e",
+						"subtitle": "18 characters",
+						"title": "The game is afoot."
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy",
+			"expect": {
+				"clipboard": ["The game is afoot."],
+				"effect": {
+					"run": {
+						"action": "copy",
+						"data": {
+							"id": "bca59a873ff65311d20bba851caa152e"
+						}
+					}
+				},
+				"panel": "hide"
+			}
+		},
+		{
+			"activate": "Paste",
+			"expect": {
+				"clipboard": ["The game is afoot."],
+				"effect": {
+					"run": {
+						"action": "paste",
+						"data": {
+							"id": "bca59a873ff65311d20bba851caa152e"
+						}
+					}
+				},
+				"panel": "paste"
+			}
+		}
+	]
+}

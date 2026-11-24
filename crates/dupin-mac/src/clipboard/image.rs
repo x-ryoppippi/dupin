@@ -1,6 +1,5 @@
-//! Converting a copied image to the PNG the history keeps, with ImageIO.
+//! Converting a copied image to the PNG clipboard history keeps, with ImageIO.
 
-use dupin_core::clipboard::Image;
 use objc2_core_foundation::{
     CFBoolean, CFData, CFDictionary, CFMutableData, CFNumber, CFRetained, CFString, CFType,
 };
@@ -15,6 +14,14 @@ use objc2_image_io::{
 pub(crate) const MAX_PIXELS: u32 = 4096;
 
 const PNG: &str = "public.png";
+
+/// A copied image as PNG.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Image {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
 
 /// The image in `data` as PNG, at most `max_pixels` on its longest side, or `None` when it
 /// can't be decoded or its PNG is larger than `max_bytes`. A PNG that already fits is kept as

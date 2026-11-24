@@ -29,6 +29,19 @@ pub fn create_new_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     sync_dir(dir)
 }
 
+static SCRATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Stops flushing writes to disk for the rest of the process, for a headless run or a fixture
+/// whose stores are thrown away when it ends. Every write stays atomic; only a crash or power
+/// loss could lose one.
+pub fn scratch_process() {
+    SCRATCH.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn durable() -> bool {
+    !SCRATCH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A temporary file in `tmp`, written and flushed, ready to be renamed into place.
 pub struct Staged {
     path: PathBuf,
@@ -46,7 +59,9 @@ impl Staged {
         };
         let mut file = private_options().create_new(true).open(&staged.path)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
+        if durable() {
+            file.sync_all()?;
+        }
         Ok(staged)
     }
 
@@ -83,7 +98,9 @@ pub fn sync_parent(path: &Path) -> io::Result<()> {
 
 pub fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
-    File::open(path)?.sync_all()?;
+    if durable() {
+        File::open(path)?.sync_all()?;
+    }
     #[cfg(not(unix))]
     let _ = path;
     Ok(())

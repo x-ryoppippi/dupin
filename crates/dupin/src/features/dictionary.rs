@@ -72,7 +72,7 @@ impl Provider for DictionaryLookup {
 fn unavailable() -> Item {
     Item {
         payload: Payload::default(),
-        id: "unavailable".into(),
+        id: super::UNAVAILABLE_ROW.into(),
         view: View::Text {
             title: "Dictionary isn't available".into(),
             subtitle: "Its bundled extension didn't load; Settings → Extensions says why.".into(),

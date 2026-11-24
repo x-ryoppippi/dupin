@@ -56,22 +56,10 @@ impl Seals {
 /// Where the running Dupin's bundled extensions are, if it has any.
 pub fn directory() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?.canonicalize().ok()?;
-    in_app(&executable)
-        .or_else(|| installed(&executable).filter(|folder| folder.is_dir()))
-        .or_else(|| {
-            let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
-            source.is_dir().then_some(source)
-        })
-}
-
-/// `share/dupin/extensions` for `bin/<executable>`, as a package outside an app bundle, such
-/// as the latency build, installs them.
-fn installed(executable: &Path) -> Option<PathBuf> {
-    let bin = executable.parent()?;
-    if bin.file_name()? != "bin" {
-        return None;
-    }
-    Some(bin.parent()?.join("share/dupin/extensions"))
+    in_app(&executable).or_else(|| {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions");
+        source.is_dir().then_some(source)
+    })
 }
 
 /// `Dupin.app/Contents/Resources/extensions` for `Dupin.app/Contents/MacOS/<executable>`. An
@@ -174,11 +162,6 @@ mod tests {
             ))
         );
         assert_eq!(in_app(Path::new("/repo/target/debug/dupin")), None);
-        assert_eq!(
-            installed(Path::new("/nix/store/x-dupin-latency/bin/dupin")),
-            Some(PathBuf::from("/nix/store/x-dupin-latency/share/dupin/extensions"))
-        );
-        assert_eq!(installed(Path::new("/repo/target/debug/dupin")), None);
         let source = directory().expect("the repository's extensions folder");
         assert!(find(&source, "dupin").is_some(), "{}", source.display());
     }

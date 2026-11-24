@@ -150,11 +150,14 @@ let
     latencyArgs
     // {
       cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
-      # Where `bin/dupin` finds the bundled extensions it sealed, as Dupin.app has them in
-      # Contents/Resources, so the scenarios measure the bundled features.
+      # A binary outside the source tree finds bundled extensions only in an app's Resources,
+      # so the ports are measured running, as the released app runs them.
       postInstall = ''
-        mkdir -p "$out/share/dupin"
-        cp -R extensions "$out/share/dupin/extensions"
+        contents="$out/Dupin.app/Contents"
+        mkdir -p "$contents/MacOS" "$contents/Resources"
+        mv "$out/bin/dupin" "$contents/MacOS/dupin"
+        cp -R extensions "$contents/Resources/extensions"
+        ln -s ../Dupin.app/Contents/MacOS/dupin "$out/bin/dupin"
       '';
     }
   );

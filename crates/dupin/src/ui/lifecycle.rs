@@ -193,7 +193,8 @@ impl Ui {
         }
         match self.paste_after_close.take() {
             Some(PendingPaste::Snippet(snippet)) => self.deliver_snippet(snippet, true, tx),
-            Some(PendingPaste::ClipboardEntry(entry)) => self.deliver_clipboard_entry(entry, true, tx),
+
+            Some(PendingPaste::Clipboard { permit }) => self.paste_clipboard(&permit),
             Some(PendingPaste::Extension { text, permit }) => {
                 if self.extensions.bridge.validate(&permit) {
                     self.paste_text(text);

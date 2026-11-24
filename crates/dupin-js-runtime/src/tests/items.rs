@@ -9,6 +9,7 @@ fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<Catalogue
         &engine(),
         cursor,
         reason,
+        "{}",
         timeout(DEADLINE),
         &mut Unavailable::default(),
     )
@@ -40,6 +41,7 @@ fn a_package_may_export_items_search_or_both() {
             &engine(),
             None,
             Reason::Load,
+            "{}",
             timeout(DEADLINE),
             &mut Unavailable::default()
         ))
@@ -118,6 +120,7 @@ fn items_answers_with_changes_by_id_after_its_cursor() {
         append,
         replace,
         remove,
+        ..
     } = page.change
     else {
         panic!("{:?}", page.change);
@@ -250,6 +253,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
             &engine(),
             name,
             data,
+            "{}",
             timeout(DEADLINE),
             &mut Unavailable::default(),
         )
@@ -316,6 +320,9 @@ fn rows_from_another_process_are_checked_again() {
             title: "A".into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -325,10 +332,7 @@ fn rows_from_another_process_are_checked_again() {
         row
     };
     assert!(row(&|_| {}).validate(row::Source::Search).is_ok());
-    let action = |effect: RowEffect| RowAction {
-        title: "Act".into(),
-        effect,
-    };
+    let action = |effect: RowEffect| RowAction::new("Act", effect);
     for broken in [
         row(&|row| row.title = "a\nb".into()),
         row(&|row| row.keywords = vec!["k".into()]),

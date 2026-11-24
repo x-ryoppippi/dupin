@@ -10,11 +10,20 @@ use std::sync::{Arc, Mutex, Weak};
 use dupin_broker::{ClipboardAccess, Decision, PackageId, Permit, Request, Trigger};
 use serde_json::Value;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+
 use crate::Inner;
 use crate::services::Subscription;
 
 /// The most a change event carries of copied text.
 const MAX_EVENT_TEXT_BYTES: usize = 64 * 1024;
+
+/// A package's latest copied image, held by the bridge under the token its event carries.
+pub(crate) struct Staged {
+    pub token: String,
+    pub png: Arc<Vec<u8>>,
+}
 
 pub(crate) type Deliver = Arc<dyn Fn(Value) + Send + Sync>;
 
@@ -90,6 +99,7 @@ impl Inner {
                     watch.active = None;
                     let changed = changed(
                         Arc::downgrade(self),
+                        id.clone(),
                         permit.clone(),
                         watch.slot.clone(),
                         watch.deliver.clone(),
@@ -107,10 +117,58 @@ impl Inner {
         self.sync();
         self.lock().broker.validate(permit)
     }
+
+    /// The change as `id`'s handler receives it: an image's bytes stay with the bridge under a
+    /// token the handler can store them by, and each copied file carries a handle that lets the
+    /// package put it back on the clipboard, while it may use its storage.
+    fn prepared(self: &Arc<Self>, id: &PackageId, mut event: Value) -> Value {
+        if let Some(data) = event.as_object_mut().and_then(|event| event.remove("data"))
+            && let Some(png) = data.as_str().and_then(|data| BASE64.decode(data).ok())
+        {
+            let mut clips = self.clips.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let serial = clips
+                .get(id)
+                .and_then(|staged| staged.token.strip_prefix("clip:")?.parse::<u64>().ok())
+                .map_or(1, |serial| serial + 1);
+            let token = format!("clip:{serial}");
+            event["size"] = png.len().into();
+            event["blob"] = token.clone().into();
+            clips.insert(
+                id.clone(),
+                Staged {
+                    token,
+                    png: Arc::new(png),
+                },
+            );
+        }
+        let handles = self.session(id, Trigger::Background).map(|session| {
+            event
+                .get("files")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|file| {
+                    file.get("path")
+                        .and_then(Value::as_str)
+                        .map(|path| session.file_handle(path))
+                })
+                .collect::<Vec<_>>()
+        });
+        if let (Some(handles), Some(files)) = (handles, event.get_mut("files").and_then(Value::as_array_mut))
+        {
+            for (file, handle) in files.iter_mut().zip(handles) {
+                if let Some(Some(handle)) = handle {
+                    file["handle"] = handle.into();
+                }
+            }
+        }
+        event
+    }
 }
 
 fn changed(
     inner: Weak<Inner>,
+    id: PackageId,
     permit: Permit,
     slot: Arc<Slot>,
     deliver: Deliver,
@@ -120,10 +178,11 @@ fn changed(
         if !bridge.still_holds(&permit) {
             return;
         }
+        let event = bridge.prepared(&id, bounded(event));
         *slot
             .latest
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(bounded(event));
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(event);
         if slot.busy.swap(true, Ordering::AcqRel) {
             return;
         }

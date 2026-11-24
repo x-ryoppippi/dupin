@@ -49,9 +49,12 @@ config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 package = "bundled:dictionary"
 
-[features.clipboard.native]
+# Clipboard history is the bundled extension `clipboard-history`, held to the native history it
+# replaced (scripts/latency/native-baseline.json).
+[features.clipboard.extension]
 config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"
+package = "bundled:clipboard-history"
 
 [features.web.native]
 config = "scripts/headless/config/dupin/config.toml"

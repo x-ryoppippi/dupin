@@ -148,7 +148,7 @@ impl<'a> Held<'a> {
     fn new(extension: &'a Extension) -> Self {
         Self {
             extension,
-            cached: Cached::default(),
+            cached: Cached::new(extension.matching),
             rows: RefCell::default(),
         }
     }
@@ -164,11 +164,13 @@ impl<'a> Held<'a> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
+        let preferences = self.extension.preferences();
         let mut fetch = |cursor: Option<&str>, reason| {
             host.items(
                 &self.extension.compiled,
                 cursor,
                 reason,
+                &preferences,
                 deadline,
                 cancelled,
                 &call.services,
@@ -320,6 +322,7 @@ fn replay(
                                 &extension.compiled,
                                 handler,
                                 data.as_ref().unwrap_or(&Value::Null),
+                                &extension.preferences(),
                                 Instant::now() + ACTION_DEADLINE,
                                 cancelled,
                                 &call(Trigger::Activation).services,
@@ -333,6 +336,12 @@ fn replay(
                             match acted.map(|acted| acted.effect) {
                                 Ok(Some(ActionEffect::Toast { text })) => {
                                     outcome.insert("toasts".into(), json!([text]));
+                                }
+                                Ok(Some(ActionEffect::Hide)) => {
+                                    outcome.insert("panel".into(), "hide".into());
+                                }
+                                Ok(Some(ActionEffect::Paste)) => {
+                                    outcome.insert("panel".into(), "paste".into());
                                 }
                                 Ok(None) => {}
                                 Err(error) => problem = record(error, &mut outcome),
@@ -360,6 +369,7 @@ fn replay(
                     &extension.compiled,
                     event,
                     data,
+                    &extension.preferences(),
                     Instant::now() + ACTION_DEADLINE,
                     cancelled,
                     &call(Trigger::Background).services,

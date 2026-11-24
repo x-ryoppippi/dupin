@@ -8,11 +8,11 @@ use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::row::{
-    self, CataloguePage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_ID_BYTES,
-    MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_METADATA,
+    self, CataloguePage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_FILE_BYTES, MAX_ID_BYTES,
+    MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA,
     MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES, MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES,
-    MAX_TEXT_BYTES, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail,
-    RowEffect, Source,
+    MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction,
+    RowDetail, RowEffect, Source,
 };
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
@@ -24,6 +24,10 @@ const MAX_TOAST_BYTES: usize = 512;
 pub enum ActionEffect {
     /// One line Dupin shows briefly in the panel.
     Toast { text: String },
+    /// Hide the panel, as copying does.
+    Hide,
+    /// Hide the panel and paste what the action put on the clipboard into the app in front.
+    Paste,
 }
 
 /// Reads an action's answer: nothing, or one effect.
@@ -36,7 +40,7 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
             Diagnostic::new("invalid-effect", message)
                 .file(entry)
                 .field(field)
-                .hint("Return nothing, or `{ type: \"toast\", text: \"Saved\" }`."),
+                .hint("Return nothing, `{ type: \"toast\", text: \"Saved\" }`, `{ type: \"hide\" }` or `{ type: \"paste\" }`."),
         )
     };
     let Some(object) = plain_object(value) else {
@@ -52,16 +56,20 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
         }
     }
     let kind: Value = object.get("type")?;
-    if kind
-        .as_string()
-        .map(|kind| kind.to_string())
-        .transpose()?
-        .as_deref()
-        != Some("toast")
-    {
-        return Err(invalid("type", "must be \"toast\""));
-    }
+    let kind = kind.as_string().map(|kind| kind.to_string()).transpose()?;
+    let bare = match kind.as_deref() {
+        Some("toast") => None,
+        Some("hide") => Some(ActionEffect::Hide),
+        Some("paste") => Some(ActionEffect::Paste),
+        _ => return Err(invalid("type", "must be \"toast\", \"hide\" or \"paste\"")),
+    };
     let text: Value = object.get("text")?;
+    if let Some(effect) = bare {
+        if !text.is_undefined() {
+            return Err(invalid("text", "only goes with \"toast\""));
+        }
+        return Ok(Some(effect));
+    }
     let Some(text) = text.as_string().map(|text| text.to_string()).transpose()? else {
         return Err(invalid("text", "must be a string"));
     };
@@ -79,7 +87,9 @@ const ITEM_FIELDS: [&str; 9] = [
 ];
 const ITEM_FIELDS_HINT: &str =
     "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
-const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
+const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
+/// Fields only an `items()` catalogue's items take.
+const CATALOGUE_ONLY_FIELDS: [&str; 4] = ["keywords", "matchText", "time", "file"];
 
 pub(crate) struct Reader<'a> {
     pub entry: &'a str,
@@ -168,19 +178,27 @@ impl<'a> Reader<'a> {
         let change = if update {
             self.only_keys(
                 &answer,
-                &["type", "append", "replace", "remove", "ttl", "cursor", "more"],
-                "An update takes `append`, `replace` and `remove`, and optionally `ttl`, `cursor` and `more`.",
+                &["type", "prepend", "append", "replace", "remove", "ttl", "cursor", "more"],
+                "An update takes `prepend`, `append`, `replace` and `remove`, and optionally `ttl`, `cursor` and `more`.",
             )?;
+            let prepend = self.optional_items(&answer, "prepend")?;
             let append = self.optional_items(&answer, "append")?;
             let replace = self.optional_items(&answer, "replace")?;
-            if append.len() + replace.len() > MAX_PAGE_ROWS {
-                return Err(self.too_many_rows(append.len() + replace.len()));
+            let rows = prepend.len() + append.len() + replace.len();
+            if rows > MAX_PAGE_ROWS {
+                return Err(self.too_many_rows(rows));
             }
             let mut ids = HashSet::new();
-            for (field, row) in append
+            for (field, row) in prepend
                 .iter()
                 .enumerate()
-                .map(|(i, row)| (format!("append[{i}].id"), row))
+                .map(|(i, row)| (format!("prepend[{i}].id"), row))
+                .chain(
+                    append
+                        .iter()
+                        .enumerate()
+                        .map(|(i, row)| (format!("append[{i}].id"), row)),
+                )
                 .chain(
                     replace
                         .iter()
@@ -194,6 +212,7 @@ impl<'a> Reader<'a> {
             }
             let remove = self.removed(&answer)?;
             PageChange::Update {
+                prepend,
                 append,
                 replace,
                 remove,
@@ -524,11 +543,11 @@ impl<'a> Reader<'a> {
         };
         for key in item.keys::<String>() {
             let key = key?;
-            let catalogue_only = key == "keywords" && self.source == Source::Items;
-            if !ITEM_FIELDS.contains(&key.as_str()) && !catalogue_only {
+            let catalogue_only = CATALOGUE_ONLY_FIELDS.contains(&key.as_str());
+            if !ITEM_FIELDS.contains(&key.as_str()) && !(catalogue_only && self.source == Source::Items) {
                 let hint = match self.source {
-                    Source::Search if key == "keywords" => {
-                        "`keywords` help Dupin match items it holds; export `items` to use them."
+                    Source::Search if catalogue_only => {
+                        "`keywords`, `matchText`, `time` and `file` describe items Dupin holds; export `items` to use them."
                     }
                     Source::Search => ITEM_FIELDS_HINT,
                     Source::Items => CATALOGUE_ITEM_FIELDS_HINT,
@@ -577,6 +596,19 @@ impl<'a> Reader<'a> {
             None => format!("#{index}"),
         };
         let keywords = self.keywords(&item, &field("keywords"))?;
+        let match_text = self.string(&item, &field("matchText"), "matchText", MAX_MATCH_TEXT_BYTES)?;
+        let time = self.time(&item, &field("time"))?;
+        let file = self.string(&item, &field("file"), "file", MAX_FILE_BYTES)?;
+        if let Some(file) = &file {
+            row::check_file(file).map_err(|message| {
+                self.invalid(
+                    "invalid-field",
+                    field("file"),
+                    message.replace("`file` must", "must"),
+                )
+                .hint("Give the full path, such as `/Users/me/Report.pdf`.")
+            })?;
+        }
         let icon = self.string(&item, &field("icon"), "icon", row::MAX_ICON_BYTES)?;
         if let Some(icon) = &icon {
             row::check_icon(icon).map_err(|message| {
@@ -589,16 +621,10 @@ impl<'a> Reader<'a> {
         let mut actions = Vec::new();
         if let Some(url) = self.string(&item, &field("url"), "url", MAX_URL_BYTES)? {
             self.openable_url(&field("url"), &url)?;
-            actions.push(RowAction {
-                title: "Open URL".into(),
-                effect: RowEffect::OpenUrl { url },
-            });
+            actions.push(RowAction::new("Open URL", RowEffect::OpenUrl { url }));
         }
         if let Some(text) = self.string(&item, &field("text"), "text", MAX_TEXT_BYTES)? {
-            actions.push(RowAction {
-                title: "Copy".into(),
-                effect: RowEffect::Copy { text },
-            });
+            actions.push(RowAction::new("Copy", RowEffect::Copy { text }));
         }
         self.actions(&item, &field("actions"), &mut actions)?;
         Ok(Row {
@@ -606,11 +632,36 @@ impl<'a> Reader<'a> {
             title,
             subtitle,
             keywords,
+            match_text,
+            time,
+            file,
             icon,
             section,
             detail,
             actions,
         })
+    }
+
+    /// Milliseconds since the epoch, as `Date.now()` gives them.
+    fn time(&self, item: &Object<'_>, field: &str) -> Result<Option<u64>, Failure> {
+        let value: Value = item.get("time")?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let valid = value
+            .as_number()
+            .filter(|time| time.fract() == 0.0 && *time >= 0.0 && *time <= MAX_TIME_MS as f64);
+        match valid {
+            Some(time) => Ok(Some(time as u64)),
+            None => Err(self
+                .invalid(
+                    "invalid-field",
+                    field,
+                    format!("must be milliseconds since the epoch, not {}", describe(&value)),
+                )
+                .hint("Give `Date.now()` or `date.getTime()`.")
+                .into()),
+        }
     }
 
     fn openable_url(&self, field: &str, url: &str) -> Result<(), Failure> {
@@ -796,12 +847,12 @@ impl<'a> Reader<'a> {
             for key in action.keys::<String>() {
                 let key = key?;
                 match key.as_str() {
-                    "title" | "data" => {}
-                    "copy" | "paste" | "open" | "run" => kinds.push(key),
+                    "title" | "data" | "alternate" | "confirm" | "needsFile" => {}
+                    "copy" | "paste" | "open" | "reveal" | "run" => kinds.push(key),
                     _ => {
                         return Err(self
                             .invalid("unknown-field", format!("{at}.{key}"), "is not an action field")
-                            .hint("An action takes `title` and one of `copy`, `paste`, `open` or `run`, with `data` for `run`.")
+                            .hint("An action takes `title` and one of `copy`, `paste`, `open`, `reveal` or `run`, with `data`, `alternate` and `confirm` for `run`.")
                             .into());
                     }
                 }
@@ -814,17 +865,44 @@ impl<'a> Reader<'a> {
                 })?;
             let [kind] = kinds.as_slice() else {
                 return Err(self
-                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open` or `run`")
+                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open`, `reveal` or `run`")
                     .hint("Give `{ title: \"Open\", open: \"https://…\" }` or `{ title: \"Delete\", run: \"remove\" }`.")
                     .into());
             };
             let data: Value = action.get("data")?;
-            if *kind != "run" && !data.is_undefined() {
+            for key in ["data", "alternate", "confirm", "needsFile"] {
+                let value: Value = action.get(key)?;
+                if *kind != "run" && !value.is_undefined() {
+                    return Err(self
+                        .invalid("unknown-field", format!("{at}.{key}"), "only goes with `run`")
+                        .hint(format!("Leave `{key}` out, or make the action `run` a handler."))
+                        .into());
+                }
+            }
+            let alternate = self
+                .boolean(&action, "alternate")
+                .map_err(|failure| self.nested(failure, &at))?
+                .unwrap_or(false);
+            if alternate && actions.iter().any(|action: &RowAction| action.alternate) {
                 return Err(self
-                    .invalid("unknown-field", format!("{at}.data"), "only goes with `run`")
-                    .hint("Leave `data` out, or make the action `run` a handler.")
+                    .invalid(
+                        "invalid-field",
+                        format!("{at}.alternate"),
+                        "is set on another action too",
+                    )
+                    .hint("Only one action is ⌘Enter.")
                     .into());
             }
+            let confirm = self.line(
+                &action,
+                &format!("{at}.confirm"),
+                "confirm",
+                MAX_ACTION_TITLE_BYTES,
+            )?;
+            let needs_file = self
+                .boolean(&action, "needsFile")
+                .map_err(|failure| self.nested(failure, &at))?
+                .unwrap_or(false);
             let effect = match kind.as_str() {
                 "copy" => RowEffect::Copy {
                     text: self
@@ -844,6 +922,17 @@ impl<'a> Reader<'a> {
                     self.openable_url(&field, &url)?;
                     RowEffect::OpenUrl { url }
                 }
+                "reveal" => {
+                    let field = format!("{at}.reveal");
+                    let path = self
+                        .string(&action, &field, "reveal", row::MAX_FILE_BYTES)?
+                        .expect("present");
+                    row::check_file(&path).map_err(|message| {
+                        self.invalid("invalid-field", &field, message.replace("`file` must", "must"))
+                            .hint("Give the full path of the file to show in Finder.")
+                    })?;
+                    RowEffect::Reveal { path }
+                }
                 _ => {
                     let field = format!("{at}.run");
                     let handler = self
@@ -857,7 +946,13 @@ impl<'a> Reader<'a> {
                     RowEffect::Run { handler, data }
                 }
             };
-            actions.push(RowAction { title, effect });
+            actions.push(RowAction {
+                title,
+                effect,
+                alternate,
+                confirm,
+                needs_file,
+            });
         }
         Ok(())
     }

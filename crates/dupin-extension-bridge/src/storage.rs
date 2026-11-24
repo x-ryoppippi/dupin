@@ -18,8 +18,11 @@ const NAMESPACE_PREFIX: &str = "ext-";
 const MAX_QUOTA_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RETENTION_DAYS: u32 = 3650;
 const MAX_ENTRIES: usize = 10_000;
-/// One record's JSON and its blobs, which must cross to the guest whole.
+/// One record's JSON and the blobs the guest sends with it, which cross from the guest whole.
 pub(crate) const MAX_ITEM_BYTES: u64 = 1024 * 1024;
+/// One record with a copied image the host stores for it, which never crosses to the guest.
+const MAX_STORED_ITEM_BYTES: u64 =
+    MAX_ITEM_BYTES + dupin_host_services::clipboard::MAX_WATCHED_IMAGE_BYTES as u64;
 const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -56,7 +59,7 @@ pub(crate) fn limits(quota_bytes: u64, retention_days: Option<u32>) -> Limits {
         max_age: retention_days.map(|days| DAY * days.clamp(1, MAX_RETENTION_DAYS)),
         max_entries: MAX_ENTRIES,
         max_total_bytes: quota,
-        max_item_bytes: quota.min(MAX_ITEM_BYTES),
+        max_item_bytes: quota.min(MAX_STORED_ITEM_BYTES),
     }
 }
 
@@ -218,7 +221,7 @@ mod tests {
         );
         let widest = limits(u64::MAX, Some(u32::MAX));
         assert_eq!(widest.max_total_bytes, MAX_QUOTA_BYTES);
-        assert_eq!(widest.max_item_bytes, MAX_ITEM_BYTES);
+        assert_eq!(widest.max_item_bytes, MAX_STORED_ITEM_BYTES);
         assert_eq!(widest.max_age, Some(DAY * MAX_RETENTION_DAYS));
         assert_eq!(limits(0, None).max_total_bytes, 1);
         assert_eq!(limits(0, None).max_age, None);
