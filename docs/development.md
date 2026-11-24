@@ -267,14 +267,14 @@ provider = "<the extension's command id>"
 extensions = "scripts/latency/dictionary-extension.extensions"
 ```
 
-Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's does. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's and Snippets' do. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
 
 ```toml
-[features.snippets.extension]
+[features.notes.extension]
 extends = "native"
-settings = { extensions = true, snippets = { enabled = false } }
-provider = "extension.snippets"
-extensions = "scripts/latency/snippets.extensions"
+settings = { extensions = true, notes = { enabled = false } }
+provider = "extension.notes"
+extensions = "scripts/latency/notes.extensions"
 ```
 
 A bundled extension that adds a feature Dupin never had natively has no native implementation to keep parity with. It declares `budget_ms` instead, and `parity` fails when its p95 exceeds it; Emoji & Symbols is held to 5 ms:

@@ -14,11 +14,11 @@
 # implementation that `extends` another of its feature starts from that one, so the port of a
 # built-in declares only its extensions and the settings that hand the feature to them:
 #
-#   [features.snippets.extension]
+#   [features.notes.extension]
 #   extends = "native"
-#   settings = { extensions = true, snippets = { enabled = false } }
-#   provider = "extension.snippets"
-#   extensions = "scripts/latency/snippets.extensions"
+#   settings = { extensions = true, notes = { enabled = false } }
+#   provider = "extension.notes"
+#   extensions = "scripts/latency/notes.extensions"
 #
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
 # its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it.
@@ -48,7 +48,9 @@ provider = "clipboard.history"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "web.keywords"
 
-[features.snippets.native]
+# Snippets are the bundled extension `snippets`, held to the native search it replaced until the
+# native one was removed.
+[features.snippets.extension]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"
 

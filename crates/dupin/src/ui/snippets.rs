@@ -2,8 +2,6 @@ use rune::Tx;
 
 use super::{Busy, PendingPaste, Ui};
 
-const PASTE_ACCESS_NOTICE: &str = "Copied the snippet. To paste it into the front app as well, allow Dupin in System Settings › Privacy & Security › Accessibility, or turn off Paste snippets in Settings › Search.";
-
 /// A snippet's text as Enter found it, with the time its placeholders show.
 pub(super) struct SnippetRun {
     text: String,
@@ -39,7 +37,7 @@ impl Ui {
     /// Copy the snippet now, or paste it once the panel closes if access is granted.
     pub(super) fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
         let snippet = SnippetRun::now(text);
-        if paste && !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
+        if paste && !rune::tooling::is_headless() && self.may_paste(crate::features::snippets::PASTE_NOTICE) {
             self.paste_after_close = Some(PendingPaste::Snippet(snippet));
         } else {
             self.deliver_snippet(snippet, false, tx);
