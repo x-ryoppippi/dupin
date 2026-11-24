@@ -76,6 +76,9 @@ impl Ui {
                         }
                     }
                     Action::CopyFiles(paths) => self.copy_files(&paths, tx),
+                    Action::RestoreClipboardEntry { entry, paste } => {
+                        self.restore_clipboard_entry(entry, paste, tx)
+                    }
                     Action::ChooseApplication(_)
                     | Action::Trash(_)
                     | Action::Browse(_)
@@ -104,7 +107,7 @@ impl Ui {
                 Effect::RunConsuming {
                     id,
                     action: Action::DeleteClipboardEntry(entry),
-                } => self.delete_clipboard_entry(&id, entry),
+                } => self.delete_clipboard_entry(&id, entry, tx),
                 Effect::RunConsuming {
                     action: Action::ClearClipboardHistory,
                     ..

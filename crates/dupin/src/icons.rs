@@ -75,6 +75,16 @@ line_icon!(
     r#"<path d="M9 4.5H7a2 2 0 0 0-2 2V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6.5a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="3" rx="1"/>"#
 );
 line_icon!(
+    IMAGE,
+    "image",
+    r#"<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.5"/><path d="M20.5 15l-4.5-4.5-9 9"/>"#
+);
+line_icon!(
+    CLOCK,
+    "clock",
+    r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>"#
+);
+line_icon!(
     FOLDER,
     "folder",
     r#"<path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>"#

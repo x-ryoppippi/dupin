@@ -1,33 +1,110 @@
-//! Watching the general pasteboard for clipboard history and extensions, and reading and
-//! writing it.
+//! Watching the general pasteboard for clipboard history and extensions, putting history
+//! entries back on it, and reading and writing it.
 //!
 //! One monitor thread polls `changeCount` while anything watches, as AppKit posts no
 //! notification for pasteboard changes. Concealed copies and ignored apps must be identified
 //! before reading the contents, and background reads must never raise the macOS paste prompt.
 
-use std::path::PathBuf;
+mod image;
+
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use dupin_core::clipboard::{Access, Content, History};
+use dupin_core::clipboard::{Access, Content, FileRef, History, Policy};
 use dupin_core::{Action, Item, ItemAction, View};
-use dupin_host_services::clipboard::{
-    self as service, FileRef, Limits, Pasteboard, Peek, SOURCE_TYPE, Watch, Write,
-};
+use dupin_host_services::clipboard::{self as service, Limits, Pasteboard, Peek, SOURCE_TYPE, Watch, Write};
 use dupin_host_services::{OsAccess, ServiceError};
 use objc2::rc::autoreleasepool;
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::sel;
 use objc2_app_kit::{
     NSPasteboard, NSPasteboardAccessBehavior, NSPasteboardTypeFileURL, NSPasteboardTypePNG,
-    NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardTypeURL, NSPasteboardWriting, NSWorkspace,
+    NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardTypeURL, NSPasteboardWriting,
+    NSRunningApplication, NSWorkspace,
 };
-use objc2_foundation::{NSArray, NSString, NSURL};
+use objc2_foundation::{NSArray, NSData, NSString, NSURL};
+use objc2_uniform_type_identifiers::UTType;
 
 use crate::privacy;
 
 const INTERVAL: Duration = Duration::from_millis(500);
+const FILE_URL_TYPE: &str = "public.file-url";
+const STRING_TYPE: &str = "public.utf8-plain-text";
+/// Image types in the order they are preferred when a copy offers several.
+const IMAGE_TYPES: [&str; 5] = [
+    "public.png",
+    "public.tiff",
+    "public.heic",
+    "public.heif",
+    "public.jpeg",
+];
+/// The largest image read off the pasteboard to convert; an uncompressed 5K TIFF fits.
+const MAX_SOURCE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_SOURCE_ID_BYTES: usize = 1024;
+
+/// What the monitor needs from a pasteboard, so tests can hand it a fixture instead of the
+/// user's clipboard.
+trait Board {
+    fn change_count(&self) -> isize;
+    fn access(&self) -> Access;
+    fn types(&self) -> Vec<String>;
+    /// The string of type `kind`, or `None` when it is longer than `max_bytes`, measured before
+    /// it is copied out.
+    fn string(&self, kind: &str, max_bytes: usize) -> Option<String>;
+    /// As `string`, for data.
+    fn data(&self, kind: &str, max_bytes: usize) -> Option<Vec<u8>>;
+    fn file_urls(&self) -> Vec<PathBuf>;
+}
+
+impl Board for NSPasteboard {
+    fn change_count(&self) -> isize {
+        self.changeCount()
+    }
+
+    fn access(&self) -> Access {
+        background_access(behavior(self))
+    }
+
+    fn types(&self) -> Vec<String> {
+        self.types()
+            .map(|types| types.iter().map(|kind| kind.to_string()).collect())
+            .unwrap_or_default()
+    }
+
+    fn string(&self, kind: &str, max_bytes: usize) -> Option<String> {
+        let string = self.stringForType(&NSString::from_str(kind))?;
+        (string.len() <= max_bytes).then(|| string.to_string())
+    }
+
+    fn data(&self, kind: &str, max_bytes: usize) -> Option<Vec<u8>> {
+        let data = self.dataForType(&NSString::from_str(kind))?;
+        (data.length() <= max_bytes).then(|| data.to_vec())
+    }
+
+    fn file_urls(&self) -> Vec<PathBuf> {
+        let Some(items) = self.pasteboardItems() else {
+            return Vec::new();
+        };
+        items
+            .iter()
+            .filter_map(|item| {
+                let url = item.stringForType(unsafe { NSPasteboardTypeFileURL })?;
+                // Finder copies file reference URLs (`file:///.file/id=…`); resolve them to paths.
+                let url = NSURL::URLWithString(&url)?.filePathURL()?;
+                Some(PathBuf::from(url.path()?.to_string()))
+            })
+            .collect()
+    }
+}
+
+/// An app that was frontmost around a copy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct App {
+    id: String,
+    name: Option<String>,
+}
 
 enum Tick<'a> {
     Access(Access),
@@ -36,7 +113,7 @@ enum Tick<'a> {
         count: isize,
         access: Access,
         /// The apps frontmost around the copy, which happened at some point since the last poll.
-        apps: &'a [Option<String>],
+        apps: &'a [Option<App>],
     },
 }
 
@@ -103,6 +180,10 @@ fn origin(count: isize) -> Option<Vec<String>> {
         .map(|origin| origin.apps.clone())
 }
 
+fn app_ids(apps: &[Option<App>]) -> Vec<String> {
+    apps.iter().flatten().map(|app| app.id.clone()).collect()
+}
+
 struct Subscription(u64);
 
 impl Drop for Subscription {
@@ -120,7 +201,7 @@ fn poll() {
     loop {
         std::thread::sleep(INTERVAL);
         let stop = autoreleasepool(|_| {
-            let access = access(&board);
+            let access = Board::access(&*board);
             let current = frontmost();
             let count = board.changeCount();
             let apps = if count == seen {
@@ -137,7 +218,7 @@ fn poll() {
                 if count != seen {
                     hub.origin = Some(Origin {
                         count,
-                        apps: apps.iter().flatten().cloned().collect(),
+                        apps: app_ids(&apps),
                     });
                 }
                 hub.subscribers
@@ -217,10 +298,6 @@ impl Drop for Monitor {
     }
 }
 
-fn access(board: &NSPasteboard) -> Access {
-    background_access(behavior(board))
-}
-
 fn behavior(board: &NSPasteboard) -> Option<NSPasteboardAccessBehavior> {
     board
         .respondsToSelector(sel!(accessBehavior))
@@ -294,73 +371,63 @@ pub fn request_access() {
     });
 }
 
-fn frontmost() -> Option<String> {
-    NSWorkspace::sharedWorkspace()
-        .frontmostApplication()
-        .and_then(|app| app.bundleIdentifier())
-        .map(|id| id.to_string())
+fn frontmost() -> Option<App> {
+    let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+    Some(App {
+        id: app.bundleIdentifier()?.to_string(),
+        name: app.localizedName().map(|name| name.to_string()),
+    })
 }
 
-fn types(board: &NSPasteboard) -> Vec<String> {
-    board
-        .types()
-        .map(|types| types.iter().map(|kind| kind.to_string()).collect())
-        .unwrap_or_default()
-}
-
-fn declared_source(board: &NSPasteboard) -> Option<String> {
-    board
-        .stringForType(&NSString::from_str(SOURCE_TYPE))
-        .map(|id| id.to_string())
+/// The name of a running app, for a copy that names its source.
+fn app_named(id: String) -> App {
+    let name = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(&id))
+        .iter()
+        .find_map(|app| app.localizedName())
+        .map(|name| name.to_string());
+    App { id, name }
 }
 
 fn capture(
-    board: &NSPasteboard,
+    board: &impl Board,
     count: isize,
-    apps: &[Option<String>],
+    apps: &[Option<App>],
     history: &Mutex<History>,
     active: &AtomicBool,
 ) {
-    let types = types(board);
+    let types = board.types();
     if service::withheld(&types) {
         return;
     }
     let Ok(guard) = history.lock() else {
         return;
     };
-    if !active.load(Ordering::Acquire) || !apps.iter().all(|app| guard.accepts_source(app.as_deref())) {
+    let ids = apps.iter().map(|app| app.as_ref().map(|app| app.id.as_str()));
+    if !active.load(Ordering::Acquire) || !ids.into_iter().all(|id| guard.accepts_source(id)) {
         return;
     }
-    let max_bytes = guard.policy().max_entry_bytes;
+    let policy = guard.policy().clone();
     drop(guard);
 
-    if access(board) != Access::Allowed {
+    if board.access() != Access::Allowed {
         return;
     }
+    let mut source = apps.iter().rev().flatten().next().cloned();
     if types.iter().any(|kind| kind == SOURCE_TYPE) {
-        let source = declared_source(board);
+        let named = board.string(SOURCE_TYPE, MAX_SOURCE_ID_BYTES);
         let accepted = history
             .lock()
-            .is_ok_and(|history| history.accepts_source(source.as_deref()));
+            .is_ok_and(|history| history.accepts_source(named.as_deref()));
         if !accepted {
             return;
         }
+        source = named.map(app_named).or(source);
     }
-    let file_type = unsafe { NSPasteboardTypeFileURL }.to_string();
-    let content = if types.contains(&file_type) {
-        Content::Files(file_paths(board))
-    } else {
-        let Some(text) = board.stringForType(unsafe { NSPasteboardTypeString }) else {
-            return;
-        };
-        // Measure before copying the string out, so an oversized copy is never duplicated.
-        if text.len() > max_bytes {
-            return;
-        }
-        Content::Text(text.to_string())
+    let Some(content) = read(board, &types, &policy) else {
+        return;
     };
     // Another copy landed while this one was read; the next poll records that one instead.
-    if board.changeCount() != count {
+    if board.change_count() != count {
         return;
     }
     // The owner drops the monitor while holding the history's lock as it clears it, so checking
@@ -368,23 +435,90 @@ fn capture(
     if let Ok(mut history) = history.lock()
         && active.load(Ordering::Acquire)
     {
-        history.push(content, dupin_core::session::unix_now());
+        let source = source.map(|app| app.name.unwrap_or(app.id));
+        history.push(content, source, dupin_core::session::unix_now());
     }
 }
 
-fn file_paths(board: &NSPasteboard) -> Vec<PathBuf> {
-    let Some(items) = board.pasteboardItems() else {
-        return Vec::new();
-    };
-    items
-        .iter()
-        .filter_map(|item| {
-            let url = item.stringForType(unsafe { NSPasteboardTypeFileURL })?;
-            // Finder copies file reference URLs (`file:///.file/id=…`); resolve them to paths.
-            let url = NSURL::URLWithString(&url)?.filePathURL()?;
-            Some(PathBuf::from(url.path()?.to_string()))
+/// The one representation of a copy the history keeps: the files, else the text, else the
+/// image. Kinds the policy leaves out are never read.
+fn read(board: &impl Board, types: &[String], policy: &Policy) -> Option<Content> {
+    let offers = |kind: &str| types.iter().any(|offered| offered == kind);
+    if offers(FILE_URL_TYPE) {
+        // Finder also offers the names as text; a copy of files is never recorded as that.
+        return policy
+            .include_files
+            .then(|| Content::Files(board.file_urls().into_iter().map(describe).collect()));
+    }
+    if offers(STRING_TYPE) {
+        return board
+            .string(STRING_TYPE, policy.max_entry_bytes)
+            .map(Content::Text);
+    }
+    if !policy.include_images {
+        return None;
+    }
+    let kind = IMAGE_TYPES.into_iter().find(|kind| offers(kind))?;
+    let data = board.data(kind, MAX_SOURCE_IMAGE_BYTES)?;
+    image::to_png(&data, image::MAX_PIXELS, policy.max_image_bytes).map(Content::Image)
+}
+
+/// A file as it was when copied: its size from the file system, its type from its name.
+fn describe(path: PathBuf) -> FileRef {
+    let metadata = std::fs::metadata(&path).ok();
+    let kind = path
+        .extension()
+        .and_then(|extension| {
+            UTType::typeWithFilenameExtension(&NSString::from_str(&extension.to_string_lossy()))
         })
-        .collect()
+        .filter(|kind| !kind.isDynamic())
+        .map(|kind| kind.identifier().to_string())
+        .or_else(|| {
+            metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.is_dir())
+                .then(|| "public.folder".to_owned())
+        });
+    FileRef {
+        size: metadata
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len()),
+        kind,
+        path,
+    }
+}
+
+/// Put a history entry back on the general pasteboard as it was copied: the text, the image as
+/// PNG, or the files as Finder's Copy offers them.
+pub fn write(content: &Content) -> Result<(), String> {
+    autoreleasepool(|_| {
+        let board = NSPasteboard::generalPasteboard();
+        let written = match content {
+            Content::Text(text) => {
+                board.clearContents();
+                board.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
+            }
+            Content::Image(image) => {
+                board.clearContents();
+                board.setData_forType(Some(&NSData::with_bytes(&image.png)), unsafe {
+                    NSPasteboardTypePNG
+                })
+            }
+            Content::Files(files) => return copy_files(&restorable(files, |path| path.exists())?),
+        };
+        written
+            .then_some(())
+            .ok_or_else(|| "Couldn't copy to the clipboard.".to_owned())
+    })
+}
+
+/// The files of an entry still there to put back, as its row offers them.
+fn restorable(files: &[FileRef], exists: impl Fn(&Path) -> bool) -> Result<Vec<PathBuf>, String> {
+    let paths = FileRef::present(files, exists);
+    if paths.is_empty() {
+        return Err("Those files are no longer there.".to_owned());
+    }
+    Ok(paths)
 }
 
 /// Put files on the general pasteboard, as Finder's Copy does.
@@ -441,14 +575,20 @@ impl Pasteboard for GeneralPasteboard {
             let count = board.changeCount();
             Peek {
                 change: count as i64,
-                types: types(&board),
+                types: Board::types(&*board),
                 apps: origin(count),
             }
         })
     }
 
     fn source(&self) -> Option<String> {
-        autoreleasepool(|_| declared_source(&NSPasteboard::generalPasteboard()))
+        autoreleasepool(|_| {
+            Board::string(
+                &*NSPasteboard::generalPasteboard(),
+                SOURCE_TYPE,
+                MAX_SOURCE_ID_BYTES,
+            )
+        })
     }
 
     fn read(&self, change: i64, limits: &Limits) -> Option<service::Content> {
@@ -492,8 +632,8 @@ impl Pasteboard for GeneralPasteboard {
                 {
                     changed(Peek {
                         change: count as i64,
-                        types: types(board),
-                        apps: Some(apps.iter().flatten().cloned().collect()),
+                        types: Board::types(board),
+                        apps: Some(app_ids(apps)),
                     });
                 }
             }
@@ -519,12 +659,12 @@ impl Drop for Unwatch {
 
 /// Files, then a URL, then an image, then text: the most specific form the copy offers.
 fn read_content(board: &NSPasteboard, limits: &Limits) -> Option<service::Content> {
-    let types = types(board);
+    let types = Board::types(board);
     let has = |kind: &NSString| types.iter().any(|offered| *offered == kind.to_string());
     if has(unsafe { NSPasteboardTypeFileURL }) {
-        let paths = file_paths(board);
+        let paths = board.file_urls();
         return (!paths.is_empty() && paths.len() <= limits.files).then(|| service::Content::Files {
-            files: paths.iter().map(|path| FileRef::new(path)).collect(),
+            files: paths.iter().map(|path| service::FileRef::new(path)).collect(),
         });
     }
     if has(unsafe { NSPasteboardTypeURL }) {
@@ -551,56 +691,4 @@ fn read_content(board: &NSPasteboard, limits: &Limits) -> Option<service::Conten
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn access_rows_offer_the_matching_macos_action() {
-        assert!(access_item(Access::Allowed).is_none());
-        assert_eq!(
-            access_item(Access::Unasked).unwrap().action("open"),
-            Some(&Action::RequestClipboardAccess),
-        );
-        assert_eq!(
-            access_item(Access::Restricted).unwrap().action("open"),
-            Some(&Action::OpenUrl(
-                "x-apple.systempreferences:com.apple.preference.security".into(),
-            )),
-        );
-    }
-
-    #[test]
-    fn background_reads_require_always_allow_when_macos_reports_a_policy() {
-        for (policy, expected, status, os) in [
-            (None, Access::Allowed, privacy::Access::Allowed, OsAccess::Allowed),
-            (
-                Some(NSPasteboardAccessBehavior::AlwaysAllow),
-                Access::Allowed,
-                privacy::Access::Allowed,
-                OsAccess::Allowed,
-            ),
-            (
-                Some(NSPasteboardAccessBehavior::Default),
-                Access::Unasked,
-                privacy::Access::NotDetermined,
-                OsAccess::NotDetermined,
-            ),
-            (
-                Some(NSPasteboardAccessBehavior::Ask),
-                Access::Restricted,
-                privacy::Access::NotAllowed,
-                OsAccess::Denied,
-            ),
-            (
-                Some(NSPasteboardAccessBehavior::AlwaysDeny),
-                Access::Restricted,
-                privacy::Access::Denied,
-                OsAccess::Denied,
-            ),
-        ] {
-            assert_eq!(background_access(policy), expected);
-            assert_eq!(policy_status(policy), status);
-            assert_eq!(status.os_access(), os);
-        }
-    }
-}
+mod tests;

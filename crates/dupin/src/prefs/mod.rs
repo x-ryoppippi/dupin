@@ -556,6 +556,41 @@ mod tests {
     }
 
     #[test]
+    fn clipboard_options_follow_the_history_switch_and_its_lock() {
+        use rune::accesskit::Role;
+
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Search);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        let controls = [
+            ("Clipboard history", Role::Switch),
+            ("Keep copies for", Role::ComboBox),
+            ("Clipboard images", Role::Switch),
+            ("Clipboard files", Role::Switch),
+        ];
+
+        for (enabled, locked) in [(true, false), (false, false), (true, true)] {
+            runtime.update(|s, _| {
+                s.config.clipboard.enabled = enabled;
+                s.locked_keys = locked.then(|| "clipboard".to_owned()).into_iter().collect();
+            });
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            for (index, (label, role)) in controls.into_iter().enumerate() {
+                let (_, control) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == role && node.label() == Some(label))
+                    .unwrap_or_else(|| panic!("missing control {label}"));
+                let disabled = locked || (index > 0 && !enabled);
+                assert_eq!(control.is_disabled(), disabled, "{label} {enabled} {locked}");
+            }
+        }
+    }
+
+    #[test]
     fn skipped_extension_problems_follow_the_extensions_switch() {
         let config = Config {
             snippet_paste: false,
