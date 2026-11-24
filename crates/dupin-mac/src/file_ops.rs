@@ -403,40 +403,60 @@ pub fn compress(path: &Path) -> Result<PathBuf, String> {
     if !path.exists() {
         return Err(format!("“{name}” no longer exists."));
     }
-    // ditto replaces whatever is at its destination, so claim the name first.
+    // Claim the name before writing, so an existing entry is never replaced.
+    let mut archive = None;
     let destination = claim(
         parent_folder(path)?,
         file_name::archive_names(name),
         |destination| {
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(destination)
-                .map(drop)
-                .map_err(Attempt::from)
+            archive = Some(
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(destination)?,
+            );
+            Ok(())
         },
     )?;
+    let archive = archive.ok_or("The archive couldn't be created.")?;
+    write_archive(path, &destination, archive)?;
+    Ok(destination)
+}
+
+/// Zip `path` into `archive`, the file claimed as `destination`. ditto writes to standard
+/// output, not to the name: it follows a link there, and another user who can rename
+/// entries in the folder could swap the claimed name for one.
+fn write_archive(path: &Path, destination: &Path, archive: fs::File) -> Result<(), String> {
+    let identity = file_identity(&archive.metadata().map_err(|error| error.to_string())?);
+    let still_ours = || {
+        destination
+            .symlink_metadata()
+            .is_ok_and(|entry| file_identity(&entry) == identity)
+    };
     let mut ditto = Command::new("/usr/bin/ditto");
     ditto.args(["-c", "-k", "--sequesterRsrc"]);
     // A folder's archive holds the folder itself; a file's would otherwise hold its parent.
     if path.is_dir() {
         ditto.arg("--keepParent");
     }
-    let output = ditto.arg(path).arg(&destination).output();
-    match output {
-        Ok(output) if output.status.success() => Ok(destination),
-        failed => {
-            let _ = std::fs::remove_file(&destination);
-            Err(match failed {
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let reason = stderr.lines().find(|line| !line.trim().is_empty());
-                    reason.unwrap_or("ditto failed").trim().to_owned()
-                }
-                Err(error) => error.to_string(),
-            })
+    let output = ditto.arg(path).arg("-").stdout(archive).output();
+    let problem = match output {
+        Ok(output) if output.status.success() && still_ours() => return Ok(()),
+        Ok(output) if output.status.success() => {
+            let name = destination.file_name().unwrap_or_default().to_string_lossy();
+            return Err(format!("“{name}” was replaced while it was being written."));
         }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let reason = stderr.lines().find(|line| !line.trim().is_empty());
+            reason.unwrap_or("ditto failed").trim().to_owned()
+        }
+        Err(error) => error.to_string(),
+    };
+    if still_ours() {
+        let _ = fs::remove_file(destination);
     }
+    Err(problem)
 }
 
 enum Attempt {
@@ -1047,6 +1067,25 @@ mod tests {
             entries.lines().any(|entry| entry == "Docs/inner.txt"),
             "{entries}"
         );
+    }
+
+    #[test]
+    fn compress_writes_only_the_claimed_file_when_its_name_becomes_a_link() {
+        let dir = Scratch::new("compress-link");
+        let source = dir.file("report.pdf", "r");
+        let victim = dir.file("victim", "keep");
+        let destination = dir.0.join("report.pdf.zip");
+        let archive = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .unwrap();
+        fs::remove_file(&destination).unwrap();
+        std::os::unix::fs::symlink(&victim, &destination).unwrap();
+
+        assert!(write_archive(&source, &destination, archive).is_err());
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(destination.symlink_metadata().unwrap().is_symlink());
     }
 
     #[test]
