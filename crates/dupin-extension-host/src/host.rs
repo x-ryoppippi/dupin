@@ -6,12 +6,12 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
+use dupin_js_runtime::{ActionEffect, Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::{self as protocol, PluginItem};
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -32,6 +32,25 @@ const FOOTPRINT_ALLOWANCE: u64 = 64 * 1024 * 1024;
 
 /// Makes the command that starts a helper; the host connects its standard streams.
 pub type Launcher = Box<dyn Fn() -> io::Result<Command> + Send + Sync>;
+
+/// Dupin's host services as one call sees them. The caller builds one per call, for the package
+/// and the reason it runs (typing, a chosen action, a watched event), so the helper can't claim
+/// either.
+pub trait Services: Send + Sync {
+    /// Answers request `op` with `args`, both as the guest sent them, with JSON
+    /// `{"ok": value}` or `{"error": {"code", "message", …}}`. Runs on a thread of its own.
+    /// `cancelled` is set once the call has ended, after which the reply is dropped.
+    fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8>;
+}
+
+/// No host services: every request fails as unavailable.
+pub struct NoServices;
+
+impl Services for NoServices {
+    fn call(&self, _op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+        br#"{"error":{"code":"unavailable","message":"host services are unavailable here"}}"#.to_vec()
+    }
+}
 
 /// A package's bytecode, as the extension host compiled it. Dupin keeps it as opaque bytes and
 /// only ever sends it back to the host, since QuickJS doesn't validate bytecode it loads.
@@ -97,6 +116,8 @@ struct State {
 enum Work {
     Compile,
     Search,
+    Action,
+    Event,
 }
 
 impl Work {
@@ -104,6 +125,8 @@ impl Work {
         match self {
             Work::Compile => "compiling the package",
             Work::Search => "search",
+            Work::Action => "the action",
+            Work::Event => "the event handler",
         }
     }
 
@@ -111,6 +134,8 @@ impl Work {
         match self {
             Work::Compile => "the compile's",
             Work::Search => "search's",
+            Work::Action => "the action's",
+            Work::Event => "the event handler's",
         }
     }
 }
@@ -158,7 +183,8 @@ impl Host {
             Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
-        let (answer, tail) = settle(helper.run(id, request, Instant::now() + limit, is_cancelled))?;
+        let deadline = Instant::now() + limit;
+        let (answer, tail) = settle(helper.run(id, request, deadline, is_cancelled, &no_services()))?;
         let Answer::Compiled { modules } = answer else {
             return Err(mismatch());
         };
@@ -183,13 +209,15 @@ impl Host {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<(), RunError> {
-        match self.call(Request::run(package, Call::Check), deadline, is_cancelled)? {
+        let request = Request::run(package, Call::Check, Work::Search);
+        match self.call(request, deadline, is_cancelled, &no_services())? {
             (Answer::Checked, _) => Ok(()),
             _ => Err(mismatch()),
         }
     }
 
-    /// Calls `search(query, { limit })` in `package`.
+    /// Calls `search(query, { limit })` in `package`, answering its host requests with
+    /// `services`.
     pub fn search(
         &self,
         package: &Compiled,
@@ -197,18 +225,75 @@ impl Host {
         limit: usize,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
     ) -> Result<Vec<PluginItem>, RunError> {
         let limit = limit.min(dupin_js_runtime::MAX_ROWS) as u32;
         let call = Call::Search {
             query: query.into(),
             limit,
         };
-        match self.call(Request::run(package, call), deadline, is_cancelled)? {
+        match self.call(
+            Request::run(package, call, Work::Search),
+            deadline,
+            is_cancelled,
+            services,
+        )? {
             (Answer::Rows { items }, _) => {
                 validate(&items, limit)
                     .map_err(|diagnostic| RunError::Failed(diagnostic.file(package.entry())))?;
                 Ok(items)
             }
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `actions[name](data)` in `package`, which the user chose, answering its host
+    /// requests with `services`.
+    pub fn action(
+        &self,
+        package: &Compiled,
+        name: &str,
+        data: &serde_json::Value,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<Option<ActionEffect>, RunError> {
+        let call = Call::Action {
+            name: name.into(),
+            data: data.clone(),
+        };
+        match self.call(
+            Request::run(package, call, Work::Action),
+            deadline,
+            is_cancelled,
+            services,
+        )? {
+            (Answer::Acted { effect }, _) => Ok(effect),
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `events[name](event)` in `package`, answering its host requests with `services`.
+    pub fn event(
+        &self,
+        package: &Compiled,
+        name: &str,
+        event: &serde_json::Value,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<(), RunError> {
+        let call = Call::Event {
+            name: name.into(),
+            event: event.clone(),
+        };
+        match self.call(
+            Request::run(package, call, Work::Event),
+            deadline,
+            is_cancelled,
+            services,
+        )? {
+            (Answer::Handled, _) => Ok(()),
             _ => Err(mismatch()),
         }
     }
@@ -223,6 +308,7 @@ impl Host {
         request: Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let mut lease = self.lease(&request, deadline, is_cancelled)?;
         if is_cancelled() {
@@ -245,7 +331,7 @@ impl Host {
                 return Err(error);
             }
         }
-        let answer = helper.run(id, request, deadline, is_cancelled);
+        let answer = helper.run(id, request, deadline, is_cancelled, services);
         if answer.is_err() {
             lease.helper = None;
         }
@@ -305,7 +391,7 @@ struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
-    fn run(package: &'a Compiled, call: Call) -> Self {
+    fn run(package: &'a Compiled, call: Call, work: Work) -> Self {
         let (modules, tail) = wire::spans(package.modules());
         let bytes: u64 = tail.iter().map(|part| part.len() as u64).sum();
         Self {
@@ -313,7 +399,7 @@ impl<'a> Request<'a> {
             modules,
             tail,
             call,
-            work: Work::Search,
+            work,
             // The bytecode as read from the socket and as the package the helper rebuilds.
             allowance: 2 * bytes,
         }
@@ -457,7 +543,8 @@ impl Helper {
                     ));
                 }
                 Ok((FromHelper::Refused { reason }, _)) => return Greeting::Failed(refused(reason)),
-                Ok((FromHelper::Done { .. }, _)) | Err(RecvTimeoutError::Disconnected) => {
+                Ok((FromHelper::Done { .. } | FromHelper::Host { .. }, _))
+                | Err(RecvTimeoutError::Disconnected) => {
                     return didnt_start();
                 }
                 Err(RecvTimeoutError::Timeout) => {
@@ -515,6 +602,7 @@ impl Helper {
         request: Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let message = ToHelper::Run {
@@ -527,10 +615,18 @@ impl Helper {
         self.send(&message, &request.tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
         let mut cancel_by = None;
+        let mut requests = Requests::new(services.clone(), deadline);
         loop {
             match self.replies.recv_timeout(TICK) {
                 Ok((FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
                     return Ok((answer, tail));
+                }
+                Ok((FromHelper::Host { id: asking, call, op }, args)) if asking == id => {
+                    requests.start(call, op, args).map_err(|problem| {
+                        RunError::Failed(host_error(format!(
+                            "the extension host broke the rules for host requests: {problem}"
+                        )))
+                    })?;
                 }
                 // Every call given up on stops the helper, so no other reply is ever due.
                 Ok(_) => {
@@ -542,6 +638,9 @@ impl Helper {
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(RunError::Failed(crashed().file(request.entry)));
                 }
+            }
+            for (call, json) in requests.finished() {
+                self.send(&ToHelper::Reply { id, call }, &[&json])?;
             }
             let now = Instant::now();
             if cancel_by.is_none() && is_cancelled() {
@@ -569,6 +668,80 @@ impl Helper {
             }
         }
     }
+}
+
+/// The host requests of one run: each runs on a thread of its own, and every reply that comes
+/// after the run ends is dropped with the channel.
+struct Requests {
+    services: Arc<dyn Services>,
+    deadline: Instant,
+    cancelled: Arc<AtomicBool>,
+    done: mpsc::Sender<(u32, Vec<u8>)>,
+    finished: mpsc::Receiver<(u32, Vec<u8>)>,
+    last: u32,
+    waiting: usize,
+}
+
+impl Requests {
+    fn new(services: Arc<dyn Services>, deadline: Instant) -> Self {
+        let (done, finished) = mpsc::channel();
+        Self {
+            services,
+            deadline,
+            cancelled: Arc::default(),
+            done,
+            finished,
+            last: 0,
+            waiting: 0,
+        }
+    }
+
+    /// Starts request `call`. The guest runtime keeps to these bounds itself, so a helper that
+    /// breaks one has been subverted and is stopped.
+    fn start(&mut self, call: u32, op: String, args: Vec<u8>) -> Result<(), &'static str> {
+        if call != self.last + 1 || call > dupin_js_runtime::MAX_CALLS {
+            return Err("a request out of sequence");
+        }
+        if self.waiting >= dupin_js_runtime::MAX_PENDING {
+            return Err("too many requests waiting");
+        }
+        if op.len() > dupin_js_runtime::MAX_OP_BYTES || args.len() > dupin_js_runtime::MAX_ARGS_BYTES {
+            return Err("a request too large");
+        }
+        self.last = call;
+        self.waiting += 1;
+        let services = self.services.clone();
+        let cancelled = self.cancelled.clone();
+        let done = self.done.clone();
+        let deadline = self.deadline;
+        let started = std::thread::Builder::new()
+            .name("extension-host-request".into())
+            .spawn(move || {
+                let reply = services.call(&op, &args, deadline, &cancelled);
+                let _ = done.send((call, reply));
+            });
+        if started.is_err() {
+            let reply = br#"{"error":{"code":"unavailable","message":"Dupin couldn't start the request"}}"#;
+            let _ = self.done.send((call, reply.to_vec()));
+        }
+        Ok(())
+    }
+
+    fn finished(&mut self) -> Vec<(u32, Vec<u8>)> {
+        let finished: Vec<_> = self.finished.try_iter().collect();
+        self.waiting -= finished.len();
+        finished
+    }
+}
+
+impl Drop for Requests {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+fn no_services() -> Arc<dyn Services> {
+    Arc::new(NoServices)
 }
 
 enum Greeting {
@@ -653,6 +826,9 @@ fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
         }
         Work::Search => {
             "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
+        }
+        Work::Action | Work::Event => {
+            "Do less in one call: Dupin stops actions and event handlers at their deadline."
         }
     };
     Diagnostic::new(

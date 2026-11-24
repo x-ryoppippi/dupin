@@ -119,6 +119,13 @@ pub enum Effect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<serde_json::Value>,
     },
+    /// Run the JavaScript guest's `actions[action]` with `data`, because the user chose it.
+    /// Only the extension that offered it runs it.
+    Run {
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data: Option<serde_json::Value>,
+    },
 }
 
 pub const MAX_URL_BYTES: usize = 2048;
@@ -264,6 +271,10 @@ fn actions(actions: &[PluginAction]) -> Result<(), ProtocolError> {
                 identifier(view, "effect.view")?;
                 printable(title, 512, "effect.title")?;
                 context(carried, "effect.context")?;
+            }
+            Effect::Run { action, data } => {
+                printable(action, 64, "effect.action")?;
+                context(data, "effect.data")?;
             }
         }
         if !ids.insert(&action.id) {

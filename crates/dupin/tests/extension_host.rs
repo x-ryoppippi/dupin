@@ -39,6 +39,7 @@ fn the_dupin_executable_serves_as_the_extension_host() {
             10,
             Instant::now() + Duration::from_secs(5),
             &|| false,
+            &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
         )
         .unwrap();
     assert_eq!(
@@ -73,6 +74,7 @@ fn latency_through_the_extension_host() {
                 50,
                 Instant::now() + Duration::from_secs(2),
                 &|| false,
+                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )
             .unwrap();
         assert_eq!(rows.len(), 50);

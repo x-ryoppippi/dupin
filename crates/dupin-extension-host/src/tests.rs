@@ -97,7 +97,11 @@ fn search(
     query: &str,
     within: Duration,
 ) -> Result<Vec<dupin_plugin_protocol::PluginItem>, RunError> {
-    host.search(package, query, 10, Instant::now() + within, &|| false)
+    host.search(package, query, 10, Instant::now() + within, &|| false, &none())
+}
+
+fn none() -> Arc<dyn Services> {
+    Arc::new(NoServices)
 }
 
 fn titles(rows: &[dupin_plugin_protocol::PluginItem]) -> Vec<String> {
@@ -442,9 +446,14 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
     let pid = host.helper_pid().expect("the starting helper is kept");
 
     let started = Instant::now();
-    let result = host.search(&echo, "", 10, Instant::now() + Duration::from_secs(10), &|| {
-        started.elapsed() > Duration::from_millis(50)
-    });
+    let result = host.search(
+        &echo,
+        "",
+        10,
+        Instant::now() + Duration::from_secs(10),
+        &|| started.elapsed() > Duration::from_millis(50),
+        &none(),
+    );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
         started.elapsed() < Duration::from_millis(400),
@@ -592,6 +601,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -613,6 +623,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -796,3 +807,5 @@ fn a_helper_inside_another_sandbox_refuses_and_says_why() {
         "{stdout}"
     );
 }
+
+mod services;
