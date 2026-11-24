@@ -7,10 +7,12 @@
 //! whose tail is the JSON result.
 
 use std::io::{self, IoSlice, Read, Write};
+use std::sync::Arc;
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
 use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::value::RawValue;
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
@@ -72,20 +74,61 @@ pub enum Call {
         cursor: Option<String>,
         reason: Reason,
         /// `ctx.preferences`: what the user chose for each preference the package declares.
-        preferences: serde_json::Value,
+        preferences: Preferences,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
         name: String,
         data: serde_json::Value,
-        preferences: serde_json::Value,
+        preferences: Preferences,
     },
     /// `events[name](event)`, for something Dupin watched on the package's behalf.
     Event {
         name: String,
         event: serde_json::Value,
-        preferences: serde_json::Value,
+        preferences: Preferences,
     },
+}
+
+/// A call's `ctx.preferences`, a JSON object. Every part of one catalogue hands the package the
+/// same ones, which may hold thousands of snippets, so Dupin encodes them once for all its calls
+/// and the helper decodes them for each.
+#[derive(Clone, Debug)]
+pub struct Preferences(Form);
+
+#[derive(Clone, Debug)]
+enum Form {
+    Encoded(Arc<RawValue>),
+    Decoded(serde_json::Value),
+}
+
+impl Preferences {
+    pub fn encode(preferences: &serde_json::Value) -> Self {
+        let encoded = serde_json::value::to_raw_value(preferences).expect("JSON values always encode");
+        Self(Form::Encoded(encoded.into()))
+    }
+
+    pub(crate) fn into_value(self) -> serde_json::Value {
+        match self.0 {
+            Form::Decoded(value) => value,
+            Form::Encoded(json) => serde_json::from_str(json.get()).expect("encoded from a JSON value"),
+        }
+    }
+}
+
+impl Serialize for Preferences {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.0 {
+            Form::Encoded(json) => json.serialize(serializer),
+            Form::Decoded(value) => value.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Preferences {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde_json::Value::deserialize(deserializer).map(|value| Self(Form::Decoded(value)))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -454,17 +497,17 @@ mod tests {
             Call::Items {
                 cursor: Some("c".into()),
                 reason: Reason::Invalidated,
-                preferences: serde_json::json!({"a": true}),
+                preferences: Preferences::encode(&serde_json::json!({"a": true})),
             },
             Call::Action {
                 name: "run".into(),
                 data: serde_json::Value::Null,
-                preferences: serde_json::json!({}),
+                preferences: Preferences::encode(&serde_json::json!({})),
             },
             Call::Event {
                 name: "clipboard".into(),
                 event: serde_json::json!({}),
-                preferences: serde_json::json!({}),
+                preferences: Preferences::encode(&serde_json::json!({})),
             },
         ];
         let mut shapes: Vec<String> = calls

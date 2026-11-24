@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     mentions
     poll
@@ -26,7 +27,7 @@ export def system-pane [out: path] {
         $focused
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
@@ -35,11 +36,11 @@ export def system-pane [out: path] {
     (poll
         $out bluetooth-evidence-query
         {|r| $r.ok and $r.data?.match?.value? == 'bluetooth' }
-        find --app Dupin --role textfield --first
+        find --app $DUPIN --role textfield --first
     )
     let result = (poll
         $out bluetooth-evidence-selected-result $found
-        find --app Dupin --name 'Bluetooth System Settings' --exact --first
+        find --app $DUPIN --name 'Bluetooth System Settings' --exact --first
     )
     if $result.data?.match?.ref_id? == null {
         error make {msg: 'Bluetooth result has no actionable accessibility reference'}

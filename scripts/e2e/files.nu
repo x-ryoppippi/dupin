@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     log-count
     mentions
@@ -31,7 +32,7 @@ export def file-actions-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'DupinE2EViewer Default'
             --exact
@@ -57,7 +58,7 @@ export def file-actions-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Move “trash-me.dupine2e” to the Trash?'
             --exact
@@ -69,7 +70,7 @@ export def file-actions-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             $trash_path
             --exact
@@ -101,7 +102,7 @@ export def file-actions-stage [out: path] {
             {|r| $r.ok and not (mentions $r $row_name) }
             snapshot
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         (poll
             $out
@@ -109,7 +110,7 @@ export def file-actions-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Moved “trash-me.dupine2e” to the Trash'
             --exact
@@ -133,7 +134,7 @@ def open-trash-confirmation [out: path, name: string] {
             $out
             $'($name)-selection-($step)'
             {|r| (has-match $r) and $r.data.match.name != $previous }
-            find --app Dupin --role button --name '↩' --first
+            find --app $DUPIN --role button --name '↩' --first
         )
         $selected = $row.data.match.name
         if $selected == 'Move to Trash ↩' {
@@ -159,7 +160,7 @@ def find-file-action [out: path, name: string, title: string]: nothing -> record
             let label = $r.data?.match?.name? | default '' | str replace --regex '\s*↩$' '' | str trim
             $r.ok and $r.data?.match?.ref_id? != null and $label == $title
         }
-        find --app Dupin --role button --name $title --first
+        find --app $DUPIN --role button --name $title --first
     )
 }
 
@@ -193,7 +194,7 @@ def file-search [out: path, query: string, found: closure] {
         {|r| is-focused-query $r '' }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
@@ -205,7 +206,7 @@ def file-search [out: path, query: string, found: closure] {
         {|r| is-focused-query $r '' }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --name
@@ -220,7 +221,7 @@ def file-search [out: path, query: string, found: closure] {
         {|r| is-focused-query $r $file }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --name
@@ -234,7 +235,7 @@ def file-search [out: path, query: string, found: closure] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         (file-row-name $out $query)
         --exact
@@ -249,7 +250,7 @@ def file-search [out: path, query: string, found: closure] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         $file
         --exact
@@ -262,7 +263,7 @@ def file-search [out: path, query: string, found: closure] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         $parent
         --exact

@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     file-proof
     log-count
@@ -27,7 +28,7 @@ export def snapshot-stage [out: path] {
             {|r| is-focused-query $r calculator }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -39,7 +40,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Calculator /System/Applications'
             --exact
@@ -63,14 +64,14 @@ export def snapshot-stage [out: path] {
             $r.data?
             | default []
             | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
-        ) } list-windows --app Dupin | ignore
+        ) } list-windows --app $DUPIN | ignore
         (poll
             $out
             snapshots-field
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -84,7 +85,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Historical snapshot · saved content'
             --exact
@@ -99,7 +100,7 @@ export def snapshot-stage [out: path] {
             {|r| is-focused-query $r zzz }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -113,7 +114,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'No matches for this search.'
             --exact
@@ -127,7 +128,7 @@ export def snapshot-stage [out: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -141,7 +142,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Historical snapshot · saved content'
             --exact
@@ -156,7 +157,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --role
             button
             --name
@@ -172,7 +173,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             $prompt
             --exact
@@ -188,7 +189,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --role
             button
             --name
@@ -203,7 +204,7 @@ export def snapshot-stage [out: path] {
             {|r| $r.ok and not ($r | to json --raw | str contains $prompt) }
             snapshot
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         (poll
             $out
@@ -211,7 +212,7 @@ export def snapshot-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --role
             button
             --name
@@ -238,7 +239,7 @@ export def snapshot-stage [out: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         press $out snapshots-summon alt+space | ignore
         (poll
@@ -247,7 +248,7 @@ export def snapshot-stage [out: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first

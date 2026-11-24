@@ -42,7 +42,7 @@ pub(crate) struct Cached {
 
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
 pub(crate) type Fetch<'a> =
-    dyn FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> + 'a;
+    dyn FnMut(Option<&str>, Reason, &Arc<Preferences>) -> Result<CataloguePage, RunError> + 'a;
 
 /// How the rows a package sends become the entries Dupin holds. An entry's ID need not be the
 /// row's, so the IDs an update removes are mapped the same way before they reach the catalogue.
@@ -469,7 +469,7 @@ mod tests {
     fn the_package_is_asked_once_and_typing_only_matches_what_is_held() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Arc<Preferences>| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -499,7 +499,7 @@ mod tests {
     fn parts_and_updates_follow_the_cursor_and_invalidation_asks_with_it() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Arc<Preferences>| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(match (cursor, reason) {
                 (None, Reason::Load) => page(
@@ -573,7 +573,7 @@ mod tests {
             },
         ]
         .into_iter();
-        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
             Ok(page(answers.next().expect("asked once per change"), "1", false))
         };
         assert_eq!(
@@ -608,7 +608,7 @@ mod tests {
     fn an_expired_catalogue_is_asked_again_and_a_failure_starts_over() {
         let cached = Cached::default();
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, reason, _: &Arc<Preferences>| {
             reasons.push(reason);
             match reasons.len() {
                 1 => Ok(CataloguePage {
@@ -660,7 +660,7 @@ mod tests {
         let calls = RefCell::new(Vec::new());
         let failing = Cell::new(true);
         let ask = |role| {
-            let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
+            let mut fetch = |_: Option<&str>, reason, _: &Arc<Preferences>| {
                 calls.borrow_mut().push(reason);
                 if failing.get() {
                     Err(RunError::Failed(Diagnostic::new("items-threw", "needs-consent")))
@@ -759,7 +759,7 @@ mod tests {
         let filling = std::thread::spawn({
             let cached = cached.clone();
             move || {
-                let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+                let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
                     asked.send(()).unwrap();
                     answered.recv().unwrap();
                     Ok(page(
@@ -783,7 +783,7 @@ mod tests {
         assert_eq!(filling.join().unwrap(), ["Before"]);
 
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, reason, _: &Arc<Preferences>| {
             reasons.push(reason);
             Ok(page(
                 PageChange::Reset {
@@ -832,7 +832,7 @@ mod tests {
 
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Arc<Preferences>| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -895,7 +895,7 @@ mod tests {
         let heavy = 7;
         let full = 19;
         let mut sent = 0;
-        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
             sent += 1;
             let rows = if sent <= heavy {
                 let mut large = row(&format!("heavy-{sent}"), "Heavy");
@@ -928,7 +928,7 @@ mod tests {
     #[test]
     fn a_rejected_change_or_endless_parts_drop_the_catalogue() {
         let cached = Cached::default();
-        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
             Ok(page(
                 PageChange::Update {
                     prepend: Vec::new(),
@@ -947,8 +947,9 @@ mod tests {
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
-        let mut endless =
-            |_: Option<&str>, _, _: &Preferences| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
+        let mut endless = |_: Option<&str>, _, _: &Arc<Preferences>| {
+            Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true))
+        };
         let error = cached
             .search("", 10, keyword(&none()), &mut endless, ENTRY)
             .unwrap_err();
@@ -962,7 +963,7 @@ mod tests {
     fn other_preferences_load_the_catalogue_again() {
         let cached = Cached::default();
         let mut seen = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+        let mut fetch = |_: Option<&str>, reason, preferences: &Arc<Preferences>| {
             seen.push((reason, preferences.len()));
             Ok(page(
                 PageChange::Reset {
@@ -991,7 +992,7 @@ mod tests {
     fn other_preferences_ask_a_failed_catalogue_again_from_the_main_search() {
         let cached = Cached::default();
         let mut calls = 0;
-        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
             calls += 1;
             Err(RunError::Failed(Diagnostic::new(
                 "items-threw",

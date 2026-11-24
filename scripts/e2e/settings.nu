@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     log-count
     poll
@@ -17,7 +18,7 @@ export def settings-stage [out: path] {
     # to it and hide before ⌘, arrives.
     wait-frontmost Calculator
     press $out press-hotkey-again alt+space | ignore
-    poll $out field-again $focused find --app Dupin --role textfield --first
+    poll $out field-again $focused find --app $DUPIN --role textfield --first
     press $out open-settings 'cmd+,' | ignore
     let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
     let appearance = (poll
@@ -26,7 +27,7 @@ export def settings-stage [out: path] {
         $page
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Appearance
         --exact
@@ -37,14 +38,14 @@ export def settings-stage [out: path] {
         $r.data
         | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
     ) }
-    poll $out settings-window $settings list-windows --app Dupin
+    poll $out settings-window $settings list-windows --app $DUPIN
     snap $out settings-created
     let before_key = (ad
         $out
         settings-before-key
         find
         --app
-        Dupin
+        $DUPIN
         --role
         group
         --name
@@ -62,7 +63,7 @@ export def settings-stage [out: path] {
         $focused
         find
         --app
-        Dupin
+        $DUPIN
         --role
         group
         --name
@@ -73,7 +74,7 @@ export def settings-stage [out: path] {
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
-    let search = poll $out search $page find --app Dupin --name Search --exact --first
+    let search = poll $out search $page find --app $DUPIN --name Search --exact --first
     ad $out open-search click $search.data.match.ref_id | ignore
     (poll
         $out
@@ -81,7 +82,7 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         'Files shown'
         --exact
@@ -94,7 +95,7 @@ export def settings-stage [out: path] {
         $page
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Appearance
         --exact
@@ -107,13 +108,13 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Backdrop
         --exact
         --first
     )
-    poll $out settings-window-again $settings list-windows --app Dupin
+    poll $out settings-window-again $settings list-windows --app $DUPIN
     snap $out settings-appearance
 
     press $out close-settings cmd+w | ignore
@@ -124,7 +125,7 @@ export def settings-stage [out: path] {
         $focused
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
@@ -136,7 +137,7 @@ export def settings-stage [out: path] {
         {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
@@ -147,7 +148,7 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         'Dupin Settings Preferences'
         --exact
@@ -159,6 +160,6 @@ export def settings-stage [out: path] {
     press $out open-settings-result return | ignore
     wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
-    poll $out settings-from-result $settings list-windows --app Dupin
+    poll $out settings-from-result $settings list-windows --app $DUPIN
     snap $out settings-from-result
 }

@@ -290,21 +290,42 @@ fn execute(
             reason,
             preferences,
         } => package
-            .items(engine, cursor.as_deref(), reason, &preferences, control, bridge)
+            .items(
+                engine,
+                cursor.as_deref(),
+                reason,
+                &preferences.into_value(),
+                control,
+                bridge,
+            )
             .map(Outcome::Catalogue),
         Call::Action {
             name,
             data,
             preferences,
         } => package
-            .action(engine, &name, &data.to_string(), &preferences, control, bridge)
+            .action(
+                engine,
+                &name,
+                &data.to_string(),
+                &preferences.into_value(),
+                control,
+                bridge,
+            )
             .map(Outcome::Acted),
         Call::Event {
             name,
             event,
             preferences,
         } => package
-            .event(engine, &name, &event.to_string(), &preferences, control, bridge)
+            .event(
+                engine,
+                &name,
+                &event.to_string(),
+                &preferences.into_value(),
+                control,
+                bridge,
+            )
             .map(Outcome::Handled),
     }
 }

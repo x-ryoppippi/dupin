@@ -133,12 +133,13 @@ fn unavailable() -> Item {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::time::Instant;
 
     use dupin_core::config::Snippet;
     use dupin_core::{Action, Delivery, Effect, History, Session};
 
     use super::*;
-    use crate::extensions::{ExtensionProvider, bundled, load_bundled};
+    use crate::extensions::{ExtensionProvider, QUERY_DEADLINE, Role, bundled, load_bundled};
 
     fn snippet(name: Option<&str>, text: &str) -> Snippet {
         Snippet {
@@ -270,7 +271,8 @@ mod tests {
         assert_eq!(session.items()[0].primary.as_deref(), Some("copy"));
 
         // What config.toml may hand over always fits the catalogue: as many snippets as it
-        // holds, or their whole text budget spent on the longest keywords and names.
+        // holds, or their whole text budget spent on the longest keywords and names, loaded
+        // within the search's deadline.
         let many = (0..=dupin_core::snippets::MAX_SNIPPETS).map(|i| (format!("s{i:05}"), snippet(None, "x")));
         let long = (0..4000).map(|i| (format!("{i:032}"), snippet(Some(&"😀".repeat(80)), "😀")));
         for snippets in [many.collect(), long.collect::<BTreeMap<_, _>>()] {
@@ -282,12 +284,23 @@ mod tests {
             let last = listed.last().unwrap()["keyword"].as_str().unwrap().to_owned();
             let count = listed.len();
             preferences::set(extension.package.as_str(), held);
-            let found = rows(&ExtensionProvider::new(extension.clone()), &last, 10);
+            let found = extension
+                .catalogue(
+                    &last,
+                    10,
+                    Instant::now() + QUERY_DEADLINE,
+                    &dupin_extension_bridge::Call::none(),
+                    Role::Keyword,
+                )
+                .unwrap_or_else(|error| panic!("{count} snippets: {error:?}"));
             assert_eq!(
-                found.first().map(|row| row.id.clone()),
+                found
+                    .iter()
+                    .flat_map(|batch| &batch.items)
+                    .next()
+                    .map(|row| row.id.clone()),
                 Some(format!("snippet:{last}")),
-                "{count} snippets: {:?}",
-                found.first().map(|row| &row.view)
+                "{count} snippets"
             );
         }
     }

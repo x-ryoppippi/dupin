@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     log-count
     mentions
@@ -20,12 +21,12 @@ export def calculator-stage [out: path] {
     # Fuzzy matching would still find Calculator from a query missing keys, so check every key
     # reached the field.
     let typed = {|r| $r.ok and $r.data?.match?.value? == 'calculator' }
-    poll --tries 5 $out typed-value $typed find --app Dupin --role textfield --first
+    poll --tries 5 $out typed-value $typed find --app $DUPIN --role textfield --first
     # A row's name is its title and subtitle. `--text` would also match the typed field value
     # and every ancestor holding it.
     let row = 'Calculator /System/Applications'
     let found = {|r| has-match $r }
-    poll $out result $found find --app Dupin --name $row --exact --first
+    poll $out result $found find --app $DUPIN --name $row --exact --first
     snap $out results
 
     press $out preview-shortcut cmd+y | ignore
@@ -42,7 +43,7 @@ export def calculator-stage [out: path] {
         $restored
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first

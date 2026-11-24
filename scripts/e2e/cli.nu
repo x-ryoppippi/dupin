@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     file-proof
     log-count
@@ -31,7 +32,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r calculator }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -49,7 +50,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --native-id
             pick-query
             --first
@@ -67,7 +68,7 @@ export def cli-stage [out: path, binary: path] {
             ) }
             snapshot
             --app
-            Dupin
+            $DUPIN
             --include-bounds
         ) | ignore
         snap $out cli-pick
@@ -87,7 +88,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --native-id
             pick-query
             --first
@@ -105,7 +106,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and $r.data?.match? == null }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -126,14 +127,14 @@ export def cli-stage [out: path, binary: path] {
             $r.data?
             | default []
             | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
-        ) } list-windows --app Dupin | ignore
+        ) } list-windows --app $DUPIN | ignore
         (poll
             $out
             cli-snapshot-field
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -150,7 +151,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         let panel_closed = log-count $log 'dupin-trace: panel closed '
         ^$binary open --query calculator --json | from json | ignore
@@ -160,7 +161,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r calculator }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -174,7 +175,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
             error make {msg: 'CLI controls changed the Snapshot archive or launch history'}
