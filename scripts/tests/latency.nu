@@ -2,13 +2,17 @@ use std/assert
 use ../latency.nu [
     PARITY_FLOOR
     parity-pairs
+    stale
+    unheld
+    unmeasured
+    verdicts
+]
+use ../latency/measure.nu [
+    fingerprint
     percentiles
     resolve
     typing-script
     unanswered
-    unheld
-    unmeasured
-    verdicts
 ]
 
 def result [id: string, implementation: string, p95: float]: nothing -> record {
@@ -93,6 +97,48 @@ def main [] {
         | get 0.baseline.p95_ms
     ) 1.0
     assert equal (unmeasured $run $recorded) []
+
+    # A recorded native result holds a port only when the same benchmark measured both: one
+    # from another version of it, or from before results carried one, is stale.
+    let settings = {
+        samples: 210
+        warmup: 10
+        runs: 3
+        gap_ms: 25.0
+        fps: 1000
+    }
+    let scenario = {
+        id: b
+        feature: b
+        prefix: "define "
+        typed: "run"
+    }
+    let current = fingerprint $scenario $settings
+    let held = {|recorded_benchmark, candidate_benchmark|
+        let entry = $recorded | first | if $recorded_benchmark == null { $in } else { insert benchmark $recorded_benchmark }
+        let port = result b extension 2.4 | if $candidate_benchmark == null { $in } else { insert benchmark $candidate_benchmark }
+        stale (parity-pairs [$port] [$entry])
+    }
+    assert equal (do $held $current $current) []
+    assert equal (do $held "earlier" $current) ["b [extension]"]
+    assert equal (do $held null $current) ["b [extension]"]
+    assert equal (do $held null null) ["b [extension]"]
+    # The run's own native result needs no fingerprint, and neither does a port held to a budget.
+    assert equal (stale (parity-pairs [
+        (result b native 1.0)
+        (result b extension 2.4)
+    ] $recorded)) []
+    assert equal (stale (parity-pairs [
+        (result c extension 1.0 | insert budget_ms 5.0)
+    ] $recorded)) []
+
+    # The fingerprint follows what is typed and how the run measures it, not which
+    # implementation answers.
+    assert equal (fingerprint ($scenario | update id other | update feature other) $settings) $current
+    assert not equal (fingerprint ($scenario | update typed "ran") $settings) $current
+    assert not equal (fingerprint ($scenario | update prefix "def ") $settings) $current
+    assert not equal (fingerprint $scenario ($settings | update samples 100)) $current
+    assert not equal (fingerprint $scenario ($settings | update gap_ms 50.0)) $current
     assert equal (unmeasured [
         (result a extension 2.5)
     ] $recorded) [b]
@@ -191,6 +237,13 @@ def main [] {
     let baseline = open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
     | get results
     | get id
+    # Every recorded baseline says which benchmark measured it, or `parity` could never use it.
+    assert equal (
+        open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
+        | get results
+        | where benchmark? == null
+        | get id
+    ) []
     for feature in ($catalogue.features | transpose name implementations) {
         let has_native = "native" in ($feature.implementations | columns)
         let scenarios = $catalogue.scenarios | where feature == $feature.name | get id

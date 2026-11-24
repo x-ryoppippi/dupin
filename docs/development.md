@@ -294,17 +294,22 @@ The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions
 
 Once a port lands and its native implementation is deleted, CI has no native run to hold it to. `parity` then holds each scenario to the native results recorded in `scripts/latency/native-baseline.json`, which come from the last commit that had the native implementation, measured by the Latency workflow on the same runner class, with the same tolerance. A scenario recorded there that the run doesn't measure fails the check, so a port can't go unmeasured by dropping or renaming its scenario. Likewise an implementation besides native with no native result in the run, no recorded baseline and no `budget_ms` fails it, so deleting a native implementation without recording its baseline can't take the port out of the gate.
 
-Record a feature's baseline in the pull request that deletes its native implementation, and refresh it whenever the runner class, the benchmark (`scripts/latency.nu`, the scenarios or the headless fixtures) or what a fair comparison means changes:
+Each recorded result also carries the `benchmark` fingerprint of what measured it: `scripts/latency/measure.nu` (its code, not its comments), the shared clipboard fixture, the scenario's `prefix` and `typed`, and the run's settings. Every `run` result carries the fingerprint of the benchmark it ran, and `parity` refuses a recorded baseline whose fingerprint differs from the port's, so changing how scenarios are measured can't leave a port held to a figure the new benchmark would not reproduce. Each implementation's own config is not part of it, since that is what parity compares.
+
+Record a feature's baseline in the pull request that deletes its native implementation, and re-record it when `parity` reports it stale, or when the runner class or what a fair comparison means changes:
 
 ```sh
 # Measure the last commit with the native implementation; each run is the median of three.
+# `ref` may be a short SHA, a branch or a tag; each dispatch runs to completion on its own.
 gh workflow run latency.yml --ref <your branch> -f ref=<last native commit>
 gh run download <run id> --name latency --dir target/latency/native-1
 # Repeat for more runs if you like, then record the median of each figure:
 nu scripts/latency.nu baseline dictionary target/latency/native-*/results.json
 ```
 
-`baseline` replaces only that feature's entries and records the commit they came from, which `parity` names in its table. Commit the file with the change that needs it.
+`baseline` replaces only that feature's entries and records the commit and fingerprint they came from; `parity` names the commit in its table. It refuses results that carry no fingerprint, or more than one for a scenario. Commit the file with the change that needs it.
+
+A baseline goes stale when the benchmark changes after the native implementation is gone, so the last commit that had it measures with the old benchmark. Branch from that commit, check out `scripts/latency.nu`, `scripts/latency/measure.nu` and `scripts/fixtures/clipboard.json` from your branch, give the feature's scenarios your branch's `prefix` and `typed` while keeping its native implementation, then commit, push, and dispatch the workflow with that commit as `ref`.
 
 The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
 
