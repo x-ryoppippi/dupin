@@ -720,7 +720,7 @@ mod tests {
     fn other_preferences_ask_a_failed_catalogue_again_for_web_searches() {
         let cached = Cached::default();
         let mut calls = 0;
-        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+        let mut fetch = |_: Option<&str>, _, _: &Arc<Preferences>| {
             calls += 1;
             Err(RunError::Failed(Diagnostic::new(
                 "items-threw",
@@ -1024,7 +1024,7 @@ mod tests {
 
         let cached = Cached::default();
         let mut seen = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+        let mut fetch = |_: Option<&str>, reason, preferences: &Arc<Preferences>| {
             seen.push((reason, preferences.len()));
             let mut search = row("g", "Search Google");
             search.web_search = Some(WebSearch {

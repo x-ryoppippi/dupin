@@ -246,8 +246,13 @@ impl Extension {
             generation: call.generation,
             role,
         };
+        let never = || false;
         self.catalogue
-            .web_searches(asking, &mut self.fetch(deadline, call), self)
+            .web_searches(
+                asking,
+                &mut self.fetch(host(), deadline, &never, &call.services),
+                self,
+            )
             .map_err(|error| self.located(error))
     }
 
