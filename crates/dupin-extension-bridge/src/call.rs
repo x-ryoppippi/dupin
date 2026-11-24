@@ -95,10 +95,45 @@ struct ExecArgs {
 #[serde(deny_unknown_fields)]
 struct Put {
     data: Value,
-    /// Base64, as JSON carries bytes.
     #[serde(default)]
-    blobs: Vec<String>,
+    blobs: Vec<BlobArg>,
+    /// Stores the record as the one for this key, replacing the record stored for it before.
+    key: Option<String>,
 }
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BlobArg {
+    /// Base64, as JSON carries bytes.
+    Bytes(String),
+    /// The token of the image the package's latest clipboard change carried, which the bridge
+    /// holds so the bytes never cross to the guest.
+    Clip { clip: String },
+}
+
+/// What `clipboard.write` puts on the clipboard: `{ text }`, or a copy shaped as a watch
+/// delivers one, naming an image by its stored blob and files by their handles.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ClipWrite {
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    text: Option<String>,
+    blob: Option<String>,
+    files: Option<Vec<FileWrite>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileWrite {
+    path: String,
+    handle: String,
+}
+
+/// What a stored key may be: the guest's own name for a record.
+const MAX_KEY_BYTES: usize = 256;
+/// What a copied file's handle vouches for, in the namespace's host tags.
+const FILE_HANDLE_PURPOSE: &str = "clipboard file";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -122,12 +157,6 @@ struct Handle {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Nothing {}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Text {
-    text: String,
-}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -159,12 +188,20 @@ impl Session {
             "files.list" => self.files(decode(args)?, FilesAccess::List),
             "exec.run" => self.exec(decode(args)?, cancelled),
             "storage.put" => {
-                let Put { data, blobs } = decode(args)?;
-                let record = new_record(data, &blobs)?;
+                let Put { data, blobs, key } = decode(args)?;
+                if let Some(key) = &key
+                    && (key.is_empty() || key.len() > MAX_KEY_BYTES)
+                {
+                    return Err(Failure::invalid(format!("a key is 1–{MAX_KEY_BYTES} bytes")));
+                }
+                let record = new_record(data, blobs, |token| self.clip(token))?;
                 let (permit, namespace) = self.storage(StorageOp::Write)?;
                 // A write is an effect, so the permit is checked again just before it.
                 self.release(&permit, cancelled)?;
-                let record = namespace.with(|store| store.put_within_limits(record))?;
+                let record = namespace.with(|store| match &key {
+                    Some(key) => store.upsert_within_limits(key, record),
+                    None => store.put_within_limits(record),
+                })?;
                 Ok(record_json(record))
             }
             "storage.get" => {
@@ -230,11 +267,8 @@ impl Session {
                 Ok(clip.unwrap_or(Value::Null))
             }
             "clipboard.write" => {
-                let Text { text } = decode(args)?;
-                bounded(&text, "text", MAX_CLIPBOARD_TEXT_BYTES)?;
-                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Write))?;
-                self.release(&permit, cancelled)?;
-                self.bridge.services.clipboard.write_text(&text)?;
+                let write: ClipWrite = decode(args)?;
+                self.write_clipboard(write, cancelled)?;
                 Ok(Value::Null)
             }
             "dictionary.lookup" => {
@@ -302,6 +336,113 @@ impl Session {
                 ),
             )),
         }
+    }
+
+    fn write_clipboard(&self, write: ClipWrite, cancelled: &AtomicBool) -> Result<(), Failure> {
+        let clipboard = &self.bridge.services.clipboard;
+        let shape = |kind: &str| {
+            Failure::invalid(format!(
+                "a `{kind}` copy takes only what `clipboard.write` documents for it"
+            ))
+        };
+        match (write.kind.as_deref(), write.text, write.blob, write.files) {
+            (None | Some("text"), Some(text), None, None) => {
+                bounded(&text, "text", MAX_CLIPBOARD_TEXT_BYTES)?;
+                if text.is_empty() {
+                    return Err(Failure::invalid("the text is empty"));
+                }
+                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Write))?;
+                self.release(&permit, cancelled)?;
+                clipboard.write_text(&text)
+            }
+            (Some("image"), None, Some(blob), None) => {
+                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Write))?;
+                let handle: dupin_storage::BlobHandle = blob
+                    .parse()
+                    .map_err(|_| Failure::invalid("`blob` is a stored blob's handle"))?;
+                let (read, namespace) = self.storage(StorageOp::Read)?;
+                let png = namespace.with(|store| store.read_blob(&handle))?;
+                let png =
+                    dupin_host_services::clipboard::Write::image(png.to_vec()).map_err(Failure::from)?;
+                self.release(&read, cancelled)?;
+                self.release(&permit, cancelled)?;
+                let dupin_host_services::clipboard::Write::Image(png) = png else {
+                    unreachable!("`Write::image` makes an image");
+                };
+                clipboard.write_image(&png)
+            }
+            (Some("files"), None, None, Some(files)) => {
+                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Write))?;
+                let (read, namespace) = self.storage(StorageOp::Read)?;
+                let paths = files
+                    .iter()
+                    .map(|file| {
+                        let expected = namespace.with(|store| Ok(handle_for(store, &file.path)))?;
+                        if expected != file.handle {
+                            return Err(Failure::new(
+                                "out-of-scope",
+                                "only files a clipboard watch delivered, with their handles, can be copied",
+                            ));
+                        }
+                        Ok(std::path::PathBuf::from(&file.path))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                let write =
+                    dupin_host_services::clipboard::Write::copied_files(paths).map_err(Failure::from)?;
+                self.release(&read, cancelled)?;
+                self.release(&permit, cancelled)?;
+                let dupin_host_services::clipboard::Write::CopiedFiles(paths) = write else {
+                    unreachable!("`Write::copied_files` makes files");
+                };
+                clipboard.write_files(&paths)
+            }
+            (Some(kind @ ("text" | "image" | "files")), ..) => Err(shape(kind)),
+            _ => Err(Failure::invalid(
+                "write `{ type: \"text\", text }`, `{ type: \"image\", blob }` or `{ type: \"files\", files }`",
+            )),
+        }
+    }
+
+    /// The image the package's latest clipboard change carried, by the token it came with.
+    fn clip(&self, token: &str) -> Result<Arc<Vec<u8>>, Failure> {
+        self.bridge
+            .clips
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&self.package)
+            .filter(|staged| staged.token == token)
+            .map(|staged| staged.png.clone())
+            .ok_or_else(|| {
+                Failure::new(
+                    "not-found",
+                    "that clipboard image is gone; only the latest change's can be stored",
+                )
+            })
+    }
+
+    /// The handle a watch gives the package for the copied file at `path`, while the package
+    /// may read its storage, whose key the handle derives from. Asking never records a consent
+    /// request.
+    pub(crate) fn file_handle(&self, path: &str) -> Option<String> {
+        let permit = {
+            let state = self.bridge.lock();
+            match state.broker.check(
+                &self.package,
+                &self.revision,
+                &Request::Storage { op: StorageOp::Read },
+                self.trigger,
+            ) {
+                dupin_broker::Decision::Allow(permit) => permit,
+                _ => return None,
+            }
+        };
+        let namespace = self
+            .bridge
+            .services
+            .storage
+            .open(&self.namespace, storage_limits(&permit).ok()?)
+            .ok()?;
+        namespace.with(|store| Ok(handle_for(store, path))).ok()
     }
 
     fn fetch(&self, args: Fetch, deadline: Instant, cancelled: &AtomicBool) -> Result<Value, Failure> {
@@ -595,8 +736,19 @@ impl Session {
     }
 }
 
-/// The record to store, refused whole when it is larger than one record may be.
-fn new_record(data: Value, blobs: &[String]) -> Result<dupin_storage::NewRecord, Failure> {
+/// The handle of the copied file at `path` in `store`'s namespace.
+fn handle_for(store: &dupin_storage::Store, path: &str) -> String {
+    store.host_tag(FILE_HANDLE_PURPOSE, path)
+}
+
+/// The record to store, refused whole when the JSON and blobs the guest sent are larger than
+/// one record may be. A clipboard image the bridge holds for the package, named by `clip`,
+/// doesn't count toward that, since it never crossed from the guest.
+fn new_record(
+    data: Value,
+    blobs: Vec<BlobArg>,
+    clip: impl Fn(&str) -> Result<Arc<Vec<u8>>, Failure>,
+) -> Result<dupin_storage::NewRecord, Failure> {
     if blobs.len() > MAX_BLOBS {
         return Err(Failure::new(
             "too-large",
@@ -612,16 +764,21 @@ fn new_record(data: Value, blobs: &[String]) -> Result<dupin_storage::NewRecord,
             ),
         )
     };
+    let mut sent = data.to_string().len();
     let blobs = blobs
-        .iter()
-        .map(|blob| {
-            BASE64
-                .decode(blob)
-                .map_err(|_| Failure::invalid("a blob must be Base64"))
+        .into_iter()
+        .map(|blob| match blob {
+            BlobArg::Bytes(blob) => {
+                let bytes = BASE64
+                    .decode(blob)
+                    .map_err(|_| Failure::invalid("a blob must be Base64"))?;
+                sent += bytes.len();
+                Ok(bytes)
+            }
+            BlobArg::Clip { clip: token } => Ok(clip(&token)?.as_ref().clone()),
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    let bytes = data.to_string().len() + blobs.iter().map(Vec::len).sum::<usize>();
-    if bytes as u64 > storage::MAX_ITEM_BYTES {
+        .collect::<Result<Vec<_>, Failure>>()?;
+    if sent as u64 > storage::MAX_ITEM_BYTES {
         return Err(too_large());
     }
     Ok(dupin_storage::NewRecord { data, blobs })

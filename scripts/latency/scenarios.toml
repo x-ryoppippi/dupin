@@ -21,7 +21,9 @@
 #   extensions = "scripts/latency/snippets.extensions"
 #
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
-# its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it.
+# its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it. Once a
+# port's native implementation is deleted, its scenarios are held to the native baseline recorded
+# in scripts/latency/native-baseline.json. An implementation with none of these fails `parity`.
 #
 # `prefix` is typed in one go and not measured; each character of `typed` is one measured
 # keypress.
@@ -40,7 +42,9 @@ provider = "calendar.events"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 
-[features.clipboard.native]
+# Clipboard history is the bundled extension `clipboard-history`, held to the native history it
+# replaced (scripts/latency/native-baseline.json).
+[features.clipboard.extension]
 config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"
 
@@ -60,14 +64,17 @@ config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension.catalogue"
 extensions = "scripts/latency/catalogue.extensions"
+budget_ms = 5.0
 
 # The main search with that catalogue in it, as its `defaultSearch` asks. It adds to apps rather
-# than replacing a built-in, so it has no native implementation to hold to parity.
+# than replacing a built-in, so it has no native implementation to hold to parity. Both
+# catalogue features are held to the keystroke budget instead.
 [features.search-catalogue.extension]
 config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension-search.catalogue"
 extensions = "scripts/latency/catalogue.extensions"
+budget_ms = 5.0
 
 # The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
 # nothing native ever answered it. The latency binary is built outside the source tree, so it

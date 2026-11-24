@@ -287,7 +287,7 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
-        .action(&engine(), name, data, timeout(DEADLINE), bridge)
+        .action(&engine(), name, data, "{}", timeout(DEADLINE), bridge)
         .map(|acted| acted.effect)
 }
 
@@ -360,7 +360,7 @@ fn items_reaches_host_services_like_search() {
             &engine(),
             None,
             Reason::Load,
-            &Preferences::new(),
+            "{}",
             timeout(DEADLINE),
             &mut bridge,
         )
@@ -390,7 +390,14 @@ fn an_event_handler_may_invalidate_the_catalogue() {
     let mut bridge = Fixture::default();
     let mut handle = |event: &str| {
         package
-            .event(&engine(), "clipboard", event, timeout(DEADLINE), &mut bridge)
+            .event(
+                &engine(),
+                "clipboard",
+                event,
+                "{}",
+                timeout(DEADLINE),
+                &mut bridge,
+            )
             .unwrap()
     };
     assert!(handle(r#"{"type":"text","text":"hi"}"#).invalidated);
@@ -415,6 +422,7 @@ fn event_handlers_receive_a_frozen_event() {
             &engine(),
             "clipboard",
             r#"{"type":"text","text":"hi"}"#,
+            "{}",
             timeout(DEADLINE),
             &mut bridge,
         )
@@ -427,7 +435,7 @@ fn event_handlers_receive_a_frozen_event() {
         )]
     );
     assert_eq!(
-        failure_of(package.event(&engine(), "other", "{}", timeout(DEADLINE), &mut bridge)).code,
+        failure_of(package.event(&engine(), "other", "{}", "{}", timeout(DEADLINE), &mut bridge)).code,
         "missing-handler"
     );
 }

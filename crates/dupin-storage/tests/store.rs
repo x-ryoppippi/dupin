@@ -1279,3 +1279,40 @@ fn a_data_directory_moved_to_other_hardware_writes_as_a_new_device() {
     assert_eq!(store.get(&written.id).unwrap().unwrap().device(), here);
     assert_eq!(store.put(text("y")).unwrap().device(), store.device_id());
 }
+
+#[test]
+fn an_upsert_within_limits_counts_the_record_it_replaces_as_room() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits {
+        max_entries: 2,
+        max_total_bytes: 64,
+        max_item_bytes: 64,
+        ..Limits::default()
+    });
+    let image = |bytes: &[u8]| NewRecord {
+        data: json!({ "text": "image" }),
+        blobs: vec![bytes.to_vec()],
+    };
+    store.put_within_limits(text("first")).unwrap();
+    store.upsert_within_limits("copy", image(&[1; 30])).unwrap();
+    assert!(
+        matches!(
+            store.put_within_limits(text("third")),
+            Err(dupin_storage::Error::QuotaExceeded { .. })
+        ),
+        "a new record needs a third entry"
+    );
+    store
+        .upsert_within_limits("copy", image(&[2; 30]))
+        .expect("the replaced record and its blob make room for the new one");
+    assert_eq!(texts(&store), ["image", "first"]);
+    assert!(matches!(
+        store.upsert_within_limits("copy", image(&[3; 40])),
+        Err(dupin_storage::Error::QuotaExceeded { .. })
+    ));
+    assert_eq!(
+        texts(&store),
+        ["image", "first"],
+        "a refused upsert deletes nothing"
+    );
+}

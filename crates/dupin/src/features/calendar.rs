@@ -26,6 +26,7 @@ pub(super) const FEATURE: Feature = Feature {
     bundled: Some(Bundled {
         package: PACKAGE,
         command: CALENDAR,
+        enabled: |config| config.calendar.enabled,
     }),
     ..Feature::EMPTY
 };
@@ -90,9 +91,9 @@ impl Provider for CalendarSearch {
             None => {
                 emit(
                     vec![row(
-                        "unavailable",
+                        super::UNAVAILABLE_ROW,
                         "Calendar search isn't available",
-                        "Its bundled extension didn't load; Settings → Extensions says why.".into(),
+                        "Its extension is off or didn't load; Settings → Extensions says why.".into(),
                         None,
                     )]
                     .into(),

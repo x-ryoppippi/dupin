@@ -20,7 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). **Web Search** (`web`) lists the [web searches](./web-searches.md), such as `g` for Google, that the main search reaches by their alias. Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md): each keeps its own setting as its switch and its keyword, and Settings → Extensions doesn't list it.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). **Web Search** (`web`) lists the [web searches](./web-searches.md), such as `g` for Google, that the main search reaches by their alias. Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md) and [Clipboard history](./clipboard.md): each keeps its own setting and keywords, and Settings → Extensions lists it as a built-in command. A feature's Settings rows reach its package as the package's [preferences](#preferences), and a package that watches on a feature's behalf watches only while the feature is on.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,6 +41,19 @@ dupin ext eject dupin
 `dupin ext eject NAME` copies the bundled package called `NAME` to `extensions/NAME` with files you can edit, and refuses if that folder exists. A package in the extensions folder with the same `name` as a bundled one replaces it while the extensions folder is on, and Settings → Extensions marks it as your copy. Once its `package.json` or a module differs from the bundled one by a byte, it is a third-party package with its own grants and switch: none of the bundled one's grants, consents or choices apply to it, and each capability it declares needs your consent. Deleting the folder, or turning the extensions folder off, brings back the bundled one with its grants. `dupin ext install` refuses a package named like a bundled one.
 
 A user extension can't take a bundled extension's keyword, as it can't take a built-in command's: `dupin ext install` refuses it, and Settings lists one already in the folder as skipped and marks its row as not answering. Extensions from the folder load only once the bundled ones have been read, so one never holds a bundled keyword for a moment at launch.
+
+### Overriding a built-in
+
+Every bundled extension follows the same rule, including one that answers a built-in command:
+
+- **Copy it.** `dupin ext eject NAME` copies it to `extensions/NAME`. While the extensions folder is on, a package there with the bundled one's `name` answers in its place: under its keyword and in the main search, or, for a built-in command, under that command's keywords.
+- **Unchanged, it is the bundled package.** It keeps the bundled grants and switch, and Settings → Extensions marks it as your unchanged copy.
+- **Changed, it is your own package.** Once a byte of its `package.json` or a module differs, none of the bundled grants, consents or choices apply: it answers what you type but can use nothing it declares until you turn it on, and each capability then needs your consent. Settings → Extensions marks it as replacing the bundled one.
+- **A built-in command keeps its setting and keywords.** The copy answers only while the command's own setting is on, under the keywords that setting gives, and the `keyword` in its `package.json` is ignored. A built-in command has two switches, both of which must be on: its setting registers the command, and the package's switch in Settings → Extensions lets the package run. Turning the package off leaves the command saying it isn't available; turning a copy off doesn't bring the bundled one back.
+- **Delete it to go back.** Deleting the folder, or turning the extensions folder off, brings back the bundled one with its grants and switch as you left them.
+- **Ejecting starts afresh.** `dupin ext eject` forgets what an earlier changed copy of the same name was allowed, turned on or stored, as `dupin ext install` does for a name installed afresh, so a new copy you change waits to be turned on again.
+
+Settings → Extensions lists every bundled extension, built-in commands' included, with where it comes from (bundled, your unchanged copy, or a changed copy that replaces it), its switch and its grants, so each can be adjusted there. A built-in command's row says it answers that command in place of a keyword. The `dupin` crate's `extensions::overrides` test takes each package in `extensions/` through ejecting, answering, editing, its grants, turning the copy and the extensions folder off, deleting the copy and ejecting again, and fails for a package added there without a case of its own.
 
 ## A JavaScript extension
 
@@ -86,6 +99,8 @@ The manifest is the `dupin` key of `package.json`, so a package keeps one file f
 | `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`.                             |
 | `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                                                  |
 | `dupin.emptyQuery`    | Optional, `false` unless set. `true` calls [`search`](#searchquery-ctx) with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed, such as upcoming events. |
+| `dupin.match`         | Optional, `"fuzzy"` unless set. `"words"` matches the [`items()`](#itemsctx) catalogue as a history is searched: see [Matching words](#matching-words).                                                              |
+| `dupin.preferences`   | Optional. Choices every call receives as `ctx.preferences`; see [Preferences](#preferences).                                                                                                                         |
 | `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                                                |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword from config.toml or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else. Web Search alone still lists its web searches without its keyword.
@@ -148,7 +163,7 @@ Typing `bm` and Space lists the catalogue in its own order, under its sections. 
 | `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
 | `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
 
-`ctx` is frozen through and through and holds `cursor`, the last answer's (`null` when Dupin holds nothing), `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action or event handler called `items.invalidate()`, and `preferences`: what the user set for the package, an empty object until packages can declare preferences. A bundled package that replaces a built-in gets that built-in's config.toml settings there, as Web Search gets `webSearches` and `webFallbacks`; a copy you change no longer does. When they change, Dupin drops the catalogue and asks again with `"load"`. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
+`ctx` is frozen through and through and holds `cursor`, the last answer's (`null` when Dupin holds nothing), `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action or event handler called `items.invalidate()`, and `preferences` (see [Preferences](#preferences)). One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`; Dupin takes as many parts as a full catalogue needs when each ends at its items or its text, 29, and drops the catalogue when more keep coming. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
 
 Instead of the whole catalogue, an answer can change the one Dupin holds, by `id`, so a long and busy list such as clipboard history never sends everything again:
 
@@ -164,7 +179,23 @@ export function items(ctx) {
 }
 ```
 
-`append` adds items Dupin doesn't hold after the others, `replace` swaps the items with those IDs in place, and `remove` lists IDs to drop; an ID Dupin doesn't hold is ignored. An update that appends an ID Dupin already holds, or replaces one it doesn't, is refused whole: Dupin shows the failure, drops the catalogue and asks again from the start, with `reason` `"load"` and no cursor. So does any failure of `items`.
+`prepend` adds items Dupin doesn't hold before the others, in its own order, `append` adds them after the others, `replace` swaps the items with those IDs in place, and `remove` lists IDs to drop; an ID Dupin doesn't hold is ignored, and an ID removed may come back in the same update, so removing and prepending it moves it to the top. An update that adds an ID Dupin already holds, or replaces one it doesn't, is refused whole: Dupin shows the failure, drops the catalogue and asks again from the start, with `reason` `"load"` and no cursor. So does any failure of `items`.
+
+A catalogue's items may also carry:
+
+| Item field  | Value                                                                                                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `matchText` | Up to 64 KiB of text that [matching words](#matching-words) finds the item by; it never shows.                                                                                         |
+| `time`      | Milliseconds since the epoch, as `Date.now()` gives them, that the item is from. Its subtitle starts with how long ago that was, written each time the item shows: `5 min ago · …`.    |
+| `file`      | An absolute path: the item shows that file's Finder icon unless it has an `icon`, and while the file is gone it shows as **Unavailable**, without its icon or its `needsFile` actions. |
+
+#### Matching words
+
+With `"match": "words"`, typing keeps the items that hold every word typed, ignoring case, anywhere in their title, keywords or `matchText`, in the catalogue's own order, with the words highlighted in the title. Picks never reorder such a catalogue, and its items are left out of usage ranking.
+
+#### Preferences
+
+`"preferences"` declares up to 16 choices by name, each with a one-line `title` and a `default`: `{ "type": "checkbox", "default": true }`, `{ "type": "select", "options": ["1d", "7d"], "default": "7d" }` or `{ "type": "number", "min": 1, "max": 100, "default": 20 }`. Every `items`, action and event call receives them as `ctx.preferences`, frozen. A built-in feature that ships as a package chooses their values from its own Settings rows; any other package gets its defaults for now. Such a feature may also hand its package config.toml settings no preference can declare, as Web Search gets `webSearches` and `webFallbacks`; a copy of the package that replaces the bundled one gets them too. A change of preferences drops the catalogue, so the next use lists it with them.
 
 Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say; a list that must outlast a restart lives in the package's `storage`, which `items` reads.
 
@@ -220,12 +251,13 @@ The detail's title is the item's.
 
 An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a one-line `title` of up to 512 bytes and exactly one of:
 
-| Action  | What it does                                                                                                                                                                                                                                  |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `copy`  | Copies the text, 1 byte to 16 KiB.                                                                                                                                                                                                            |
-| `paste` | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Only a package that [declares](#clipboard) `"clipboard": ["paste"]`, and that you allow to, may paste; otherwise Dupin copies the text and says why. |
-| `open`  | Opens the `http` or `https` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                                   |
-| `run`   | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep.                                                             |
+| Action   | What it does                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `copy`   | Copies the text, 1 byte to 16 KiB.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `paste`  | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Only a package that [declares](#clipboard) `"clipboard": ["paste"]`, and that you allow to, may paste; otherwise Dupin copies the text and says why.                                                                                                                                                                                             |
+| `open`   | Opens the `http` or `https` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                                                                                                                                                                                                                               |
+| `reveal` | Shows the file at the absolute path selected in Finder; it opens nothing.                                                                                                                                                                                                                                                                                                                                                                 |
+| `run`    | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. `alternate: true` makes ⌘Enter run it, for one action of an item; `confirm` is a question Dupin asks first, with the action's title as the button and Cancel selected; in a catalogue, `needsFile: true` leaves it out while the item's `file` is gone. |
 
 ```js
 import { items as catalogue, storage } from 'dupin';
@@ -250,7 +282,7 @@ export const actions = {
 };
 ```
 
-A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen, empty `ctx`, and may return nothing or `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
+A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen `ctx` holding `preferences`, and may return nothing, `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel, `{ type: "hide" }`, which hides the panel as copying does, or `{ type: "paste" }`, which hides it and pastes what the action put on the clipboard into the app in front, as a [`paste` action](#actions) does: only for a package allowed `clipboard:paste`, and with macOS Accessibility access. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
 
 ### What the module can reach
 
@@ -273,29 +305,31 @@ export const events = {
 };
 ```
 
-`change` is frozen and shaped as `clipboard.read()` returns a copy, with text cut to 64 KiB and `truncated: true` when it was. One delivery runs at a time for each package; copies that land meanwhile are coalesced to the newest, so a slow handler never builds a queue. A handler runs in the background: it may read and use `storage`, but anything that needs an action you chose fails with `needs-activation`. Revoking the scope, turning the extension off or macOS withdrawing access stops the deliveries at once.
+`change` is frozen and shaped as `clipboard.read()` returns a copy, with text cut to 64 KiB and `truncated: true` when it was, and `source`, the name of the app it came from when Dupin knows it. An image's PNG stays with Dupin: `change` carries its `width`, `height`, `size` and a `blob` token that `storage.put(data, { blobs: [change.blob] })` stores while the change is the package's latest, up to 32 MiB, without the bytes crossing to the extension. Each copied file carries its `folder`, `size` and `kind` (its uniform type), and, while the package may use its `storage`, a `handle` that lets `clipboard.write` put it back. Only Dupin can make a handle: it is a keyed hash in the package's storage namespace that no record ID, whatever key the package stores it under, can equal. The handler's second argument is a frozen `ctx` holding `preferences`. One delivery runs at a time for each package; copies that land meanwhile are coalesced to the newest, so a slow handler never builds a queue. A handler runs in the background: it may read and use `storage`, but anything that needs an action you chose fails with `needs-activation`. Revoking the scope, turning the extension off or macOS withdrawing access stops the deliveries at once.
 
-A handler that calls `items.invalidate()` has Dupin ask `items` again, with its cursor and `reason` `"invalidated"`, and, while the panel lists that catalogue under the keyword or in the main search, search the current query again so the change shows at once. Clipboard history is one catalogue kept this way: each copy is stored, the cursor is the newest record's ID, and `items` sends only the records listed before it, or everything again when it is gone or the catalogue expired, which also drops records storage has since deleted:
+A handler that calls `items.invalidate()` has Dupin ask `items` again, with its cursor and `reason` `"invalidated"`, and, while the panel lists that catalogue under the keyword or in the main search, search the current query again so the change shows at once. A history is one catalogue kept this way: each copy is stored under a `key` naming its content, so copying it again replaces it and lists it as the newest, the cursor is the newest record's ID, and `items` prepends only the records listed before it, or sends everything again when it is gone or the catalogue expired. [`extensions/clipboard-history`](../../extensions/clipboard-history/main.ts) is the whole of Dupin's own:
 
 ```js
 import { items as catalogue, storage } from 'dupin';
 
-const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });
+const row = (record) => ({ id: record.id, title: record.data.text, time: record.data.copiedAt });
 
 export async function items(ctx) {
 	const { records } = await storage.list({ limit: 200 });
 	const seen = records.findIndex((record) => record.id === ctx.cursor);
 	const cursor = records[0]?.id;
 	if (ctx.reason !== 'invalidated' || seen < 0) {
-		return { items: [...records].reverse().map(row), cursor, ttl: 3600 };
+		return { items: records.map(row), cursor, ttl: 3600 };
 	}
-	return { type: 'update', append: records.slice(0, seen).reverse().map(row), cursor, ttl: 3600 };
+	const fresh = records.slice(0, seen);
+	const ids = fresh.map((record) => record.id);
+	return { type: 'update', prepend: fresh.map(row), remove: ids, cursor, ttl: 3600 };
 }
 
 export const events = {
 	async clipboard(change) {
 		if (change.type !== 'text') return;
-		await storage.put({ text: change.text });
+		await storage.put({ text: change.text, copiedAt: Date.now() }, { key: change.text });
 		catalogue.invalidate();
 	},
 };
@@ -436,18 +470,18 @@ const { records, next } = await storage.list({ limit: 20 });
 const bytes = await storage.readBlob(record.blobs[0].handle);
 ```
 
-| Function                  | What it does                                                                                                                                                                                         |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `put(data, { blobs })`    | Stores a record and returns it: `{ id, createdAt, data, blobs: [{ handle, size }] }`. Blobs are typed arrays or `ArrayBuffer`s.                                                                      |
-| `get(id)`                 | The record, or `undefined`.                                                                                                                                                                          |
-| `list({ before, limit })` | Up to `limit` records (50 by default, 200 at most) older than the record `before` names, newest first, and `next` to pass as `before` for the following page. A page also ends before 2 MiB of JSON. |
-| `readBlob(handle)`        | The blob's bytes as a `Uint8Array`, while a record still carries it.                                                                                                                                 |
-| `delete(id)`, `clear()`   | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                 |
-| `usage()`                 | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                     |
+| Function                    | What it does                                                                                                                                                                                                                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(data, { blobs, key })` | Stores a record and returns it: `{ id, createdAt, data, blobs: [{ handle, size }] }`. Blobs are typed arrays, `ArrayBuffer`s or the `blob` token of the latest [clipboard change](#events). With `key`, up to 256 bytes, the record replaces the one stored under that key, keeps its ID and lists as the newest. |
+| `get(id)`                   | The record, or `undefined`.                                                                                                                                                                                                                                                                                       |
+| `list({ before, limit })`   | Up to `limit` records (50 by default, 200 at most) older than the record `before` names, newest first, and `next` to pass as `before` for the following page. A page also ends before 2 MiB of JSON.                                                                                                              |
+| `readBlob(handle)`          | The blob's bytes as a `Uint8Array`, while a record still carries it.                                                                                                                                                                                                                                              |
+| `delete(id)`, `clear()`     | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                                                                                                                              |
+| `usage()`                   | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                                                                                                                                  |
 
 Record IDs and blob handles are opaque strings. IDs are random, so they don't sort by when the record was stored; `list` gives that order. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
 
-- **Limits.** A record's JSON and its blobs are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
+- **Limits.** A record's JSON and the blobs the extension sends are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. A clipboard image stored by its token may add up to 32 MiB, but `readBlob` hands the extension at most 4 MiB. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
 - **Where it lives.** Each package has a [`dupin-storage`](./storage.md) namespace of its own, named by a hash of its package ID and where it was installed from, so no package reads another's data, a native feature's, or that of a bundled package it copies. Everything is sealed with the data key in your Keychain.
 - **Revoking keeps the data, removing deletes it.** Revoking `storage` in Settings or the panel stops every request at once and keeps what the package stored, so allowing it again finds it; Settings → Extensions offers **Delete Data** beside the scope. `dupin ext remove` deletes the package's data with it, asking the running Dupin to if it has the data open. The namespace follows the package name, so `dupin ext install` of a name that isn't installed also deletes what an earlier package of that name left behind, and doesn't install while that data can't be deleted.
 
@@ -532,11 +566,11 @@ Events come earliest start first, and the limit keeps the earliest. With `order:
 `"clipboard": ["read", "write", "watch", "paste"]` declares each kind of access separately.
 
 - **Read**: `clipboard.read()` returns the current copy when you choose an action, or `null` when the clipboard is empty or the copy is one Dupin never reads; `clipboard.readText()` returns its text, if it is text.
-- **Write**: `clipboard.writeText(text)` puts up to 1 MiB of text on the clipboard when you choose an action.
+- **Write**: `clipboard.writeText(text)` puts up to 1 MiB of text on the clipboard when you choose an action. `clipboard.write(copy)` also takes `{ type: "image", blob }`, a PNG the package stored, by its blob's handle, or `{ type: "files", files: [{ path, handle }] }`, files a watch handed the package with those handles that are still there; it fails with `out-of-scope` for any other file.
 - **Paste**: a row's [`paste` action](#actions) puts its text in the app in front of Dupin when you choose it. Dupin presses ⌘V for it, which needs macOS Accessibility access; until both are allowed, choosing it copies the text, shows why, and leaves the request in the panel and Settings. The extension's code never pastes: the action is data, and `clipboard:paste` only lets Dupin carry it out.
 - **Watch**: [`events.clipboard`](#events) receives each new copy, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are; at most 16 run at once. Keeping a history is up to the extension, in its own `storage`.
 
-A copy is the most specific form it offers: `{ "type": "files", "files": [{ "path", "name" }] }`, then `{ "type": "url", "url" }`, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then `{ "type": "text", "text" }`. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`, followed from the next copy when it changes), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, so while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); writing needs no macOS permission.
+A copy is read in the one form clipboard history keeps: `{ "type": "files", "files": [{ "path", "name", "folder", "size", "kind" }] }`, then `{ "type": "url", "url" }`, then `{ "type": "text", "text" }`, then an image converted to PNG and scaled to 4096 pixels on its longest side (`{ "type": "image", "mediaType": "image/png", "width", "height", "data": "<base64>" }`, up to 2 MiB for a read and `[clipboard] max_image_bytes` for a watch). Files are described, never read, and Finder's names for them are never read as text. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`, followed from the next copy when it changes), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, so while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); writing needs no macOS permission.
 
 TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin never type-checks and never runs a package manager or the package's scripts.
 
@@ -699,14 +733,14 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 }
 ```
 
-| Key           | Value                                                                                                                       |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `fixture`     | Required. The format version, `1`. A fixture of another version is reported, not guessed at.                                |
-| `description` | Optional text for people.                                                                                                   |
-| `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                       |
-| `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                    |
-| `preferences` | Optional. The object `items` sees as `ctx.preferences`, empty when left out. `snap` doesn't pass it on.                     |
-| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate` and `event`, and `expect`. |
+| Key           | Value                                                                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `fixture`     | Required. The format version, `1`. A fixture of another version is reported, not guessed at.                                              |
+| `description` | Optional text for people.                                                                                                                 |
+| `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                                     |
+| `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                                  |
+| `preferences` | Optional. What the package's feature chooses, which `ctx.preferences` holds in place of the declared defaults. `snap` doesn't pass it on. |
+| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate` and `event`, and `expect`.               |
 
 | `environment` key | Default                        | Fixes                                                                                                      |
 | ----------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |

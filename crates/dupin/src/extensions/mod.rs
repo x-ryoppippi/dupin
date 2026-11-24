@@ -11,10 +11,12 @@ mod fixtures;
 #[cfg(test)]
 mod items_tests;
 mod manifest;
+#[cfg(test)]
+mod overrides;
 pub mod packages;
 #[cfg(test)]
 pub(crate) mod parity;
-pub mod preferences;
+pub(crate) mod preferences;
 mod provider;
 
 use std::collections::HashMap;
@@ -25,17 +27,15 @@ use std::time::{Instant, SystemTime};
 
 use dupin_core::{Batch, Item, Page};
 use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
-use dupin_extension_host::{Compiled, Host, ItemsContext, Services};
+use dupin_extension_host::{Compiled, Host, Services};
 use dupin_js_runtime::web_search::WebSearch;
-use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
-};
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Exports, Handled, Reason, Row, RunError, Sources};
 
 use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
-pub(crate) use provider::is_answered_consent_row;
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub(crate) use provider::{is_answered_consent_row, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -53,6 +53,9 @@ pub struct Extension {
     pub default_search: bool,
     /// The package's `search` answers its keyword before anything is typed.
     pub empty_query: bool,
+    /// How its catalogue is matched, which also decides whether picks rank it.
+    pub matching: dupin_core::catalogue::Matching,
+    preferences: preferences::Preferences,
     /// What the package exports, once a call has linked it.
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
@@ -121,7 +124,15 @@ impl Extension {
         deadline: Instant,
         services: &Arc<dyn Services>,
     ) -> Result<Acted, RunError> {
-        let acted = host().action(&self.compiled, name, data, deadline, &|| false, services)?;
+        let acted = host().action(
+            &self.compiled,
+            name,
+            data,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
         if acted.invalidated {
             self.catalogue.invalidate();
         }
@@ -137,7 +148,15 @@ impl Extension {
         deadline: Instant,
         services: &Arc<dyn Services>,
     ) -> Result<Handled, RunError> {
-        let handled = host().event(&self.compiled, name, event, deadline, &|| false, services)?;
+        let handled = host().event(
+            &self.compiled,
+            name,
+            event,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
         if handled.invalidated {
             self.catalogue.invalidate();
         }
@@ -159,7 +178,7 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<Batch>, RunError> {
-        let preferences = preferences::of(&self.package);
+        let preferences = Arc::new(self.preferences());
         let asking = Asking {
             preferences: &preferences,
             generation: call.generation,
@@ -178,7 +197,7 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<(Item, WebSearch)>, RunError> {
-        let preferences = preferences::of(&self.package);
+        let preferences = Arc::new(self.preferences());
         let asking = Asking {
             preferences: &preferences,
             generation: call.generation,
@@ -195,7 +214,7 @@ impl Extension {
         if !self.exports.get()?.items {
             return Some(Vec::new());
         }
-        self.catalogue.held_web_searches(&preferences::of(&self.package))
+        self.catalogue.held_web_searches(&Arc::new(self.preferences()))
     }
 
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
@@ -203,18 +222,26 @@ impl Extension {
         self.catalogue.forget();
     }
 
+    /// What `ctx.preferences` holds for the package's calls.
+    pub fn preferences(&self) -> serde_json::Value {
+        self.preferences.values(&self.id)
+    }
+
     fn fetch(
         &self,
         deadline: Instant,
         call: &Call,
-    ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
+    ) -> impl FnMut(Option<&str>, Reason, &serde_json::Value) -> Result<CataloguePage, RunError> {
         move |cursor, reason, preferences| {
-            let asked = ItemsContext {
+            host().items(
+                &self.compiled,
                 cursor,
                 reason,
                 preferences,
-            };
-            host().items(&self.compiled, asked, deadline, &|| false, &call.services)
+                deadline,
+                &|| false,
+                &call.services,
+            )
         }
     }
 
@@ -484,8 +511,10 @@ fn load_with(
             root: folder.to_path_buf(),
             default_search: manifest.default_search,
             empty_query: manifest.empty_query,
+            matching: manifest.matching,
+            preferences: manifest.preferences,
             exports: OnceLock::new(),
-            catalogue: catalogue::Cached::default(),
+            catalogue: catalogue::Cached::new(manifest.matching),
             package,
             revision,
             capabilities: manifest.capabilities,
@@ -668,6 +697,8 @@ pub(crate) mod tests {
             root: PathBuf::from("/fixture"),
             default_search: false,
             empty_query: false,
+            matching: Default::default(),
+            preferences: Default::default(),
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             revision: Revision::new("blake3:fixture").unwrap(),

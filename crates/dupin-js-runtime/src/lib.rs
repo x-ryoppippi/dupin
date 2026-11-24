@@ -36,9 +36,6 @@ pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
 pub use row::{CataloguePage, Reason, Row};
 
-/// What the user set for a package, which `items` reads as `ctx.preferences`.
-pub type Preferences = serde_json::Map<String, serde_json::Value>;
-
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
 /// Promise jobs one call may run before it is stopped.
@@ -248,15 +245,16 @@ impl Package {
         })
     }
 
-    /// Calls `items({ cursor, reason, preferences })` in `engine`, carrying its host requests through
-    /// `bridge`, and reads the part of the catalogue it answers with. The catalogue loads as the
-    /// user types, before any row is chosen, so Dupin answers its requests as it does a search's.
+    /// Calls `items({ cursor, reason, preferences })` in `engine`, carrying its host requests
+    /// through `bridge`, and reads the part of the catalogue it answers with. The catalogue loads
+    /// as the user types, before any row is chosen, so Dupin answers its requests as it does a
+    /// search's. `preferences` is a JSON object.
     pub fn items(
         &self,
         engine: &Engine,
         cursor: Option<&str>,
         reason: Reason,
-        preferences: &Preferences,
+        preferences: &str,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<CataloguePage, RunError> {
@@ -269,8 +267,7 @@ impl Package {
                 None => context.set("cursor", rquickjs::Null)?,
             }
             context.set("reason", reason.as_str())?;
-            let preferences = serde_json::Value::Object(preferences.clone());
-            context.set("preferences", frozen_json(ctx, &preferences)?)?;
+            context.set("preferences", frozen_through(ctx, ctx.json_parse(preferences)?)?)?;
             let context = frozen(ctx, context)?;
             let answer = sandbox.call(ctx, items, (context,))?;
             output::Reader::items(&self.entry).page(answer)
@@ -279,12 +276,13 @@ impl Package {
 
     /// Calls `actions[name](data, ctx)` in `engine`, which runs because the user chose it, and
     /// reads the effect it returns and whether it invalidated the catalogue. `data` is the JSON
-    /// the item's action carried.
+    /// the item's action carried, and `preferences` the JSON object `ctx.preferences` holds.
     pub fn action(
         &self,
         engine: &Engine,
         name: &str,
         data: &str,
+        preferences: &str,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<Acted, RunError> {
@@ -292,7 +290,9 @@ impl Package {
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "actions", name)?;
             let data = ctx.json_parse(data)?;
-            let context = frozen(ctx, Object::new(ctx.clone())?)?;
+            let context = Object::new(ctx.clone())?;
+            context.set("preferences", frozen_through(ctx, ctx.json_parse(preferences)?)?)?;
+            let context = frozen(ctx, context)?;
             let answer = sandbox.call(ctx, handler, (data, context))?;
             Ok(Acted {
                 invalidated: sandbox.invalidation.called.get(),
@@ -301,14 +301,15 @@ impl Package {
         })
     }
 
-    /// Calls `events[name](event)` in `engine` for something Dupin watches on the package's
-    /// behalf, such as a clipboard change, and reports whether it invalidated the catalogue. What
-    /// it returns is ignored.
+    /// Calls `events[name](event, ctx)` in `engine` for something Dupin watches on the
+    /// package's behalf, such as a clipboard change, and reports whether it invalidated the
+    /// catalogue. What it returns is ignored.
     pub fn event(
         &self,
         engine: &Engine,
         name: &str,
         event: &str,
+        preferences: &str,
         control: Control,
         bridge: &mut dyn Bridge,
     ) -> Result<Handled, RunError> {
@@ -316,7 +317,10 @@ impl Package {
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "events", name)?;
             let event = ctx.json_parse(event)?;
-            sandbox.call(ctx, handler, (frozen(ctx, event)?,))?;
+            let context = Object::new(ctx.clone())?;
+            context.set("preferences", frozen_through(ctx, ctx.json_parse(preferences)?)?)?;
+            let context = frozen(ctx, context)?;
+            sandbox.call(ctx, handler, (frozen(ctx, event)?, context))?;
             Ok(Handled {
                 invalidated: sandbox.invalidation.called.get(),
             })
@@ -358,29 +362,15 @@ fn frozen<'js>(ctx: &Ctx<'js>, value: impl rquickjs::IntoJs<'js>) -> rquickjs::R
     freeze.call((value,))
 }
 
-/// `value` as JavaScript, with every object and array in it frozen.
-fn frozen_json<'js>(ctx: &Ctx<'js>, value: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
-    use rquickjs::IntoJs;
-    match value {
-        serde_json::Value::Null => Ok(Value::new_null(ctx.clone())),
-        serde_json::Value::Bool(value) => value.into_js(ctx),
-        serde_json::Value::Number(number) => number.as_f64().unwrap_or_default().into_js(ctx),
-        serde_json::Value::String(text) => text.as_str().into_js(ctx),
-        serde_json::Value::Array(values) => {
-            let array = rquickjs::Array::new(ctx.clone())?;
-            for (index, value) in values.iter().enumerate() {
-                array.set(index, frozen_json(ctx, value)?)?;
-            }
-            frozen(ctx, array)
-        }
-        serde_json::Value::Object(values) => {
-            let object = Object::new(ctx.clone())?;
-            for (key, value) in values {
-                object.set(key.as_str(), frozen_json(ctx, value)?)?;
-            }
-            frozen(ctx, object)
-        }
+/// `value` with every object and array in it frozen, so a guest can't change what it was handed.
+fn frozen_through<'js>(ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Value<'js>> {
+    let Some(object) = value.as_object().cloned() else {
+        return Ok(value);
+    };
+    for property in object.values::<Value>() {
+        frozen_through(ctx, property?)?;
     }
+    frozen(ctx, value)
 }
 
 fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {

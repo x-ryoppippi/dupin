@@ -39,6 +39,9 @@ pub struct Listed {
     pub registered: bool,
     /// Its catalogue answers the main search too.
     pub main_search: bool,
+    /// It answers a built-in command, under that command's keywords and behind its setting,
+    /// rather than its own keyword.
+    pub built_in: bool,
 }
 
 pub struct Packages {
@@ -75,8 +78,14 @@ impl Packages {
                 .set_bundled(&extension.package, extension.revision.clone());
         }
         let fixture = super::fixtures::headless();
-        for (_, extension) in self.present() {
-            self.bridge.install(
+        for (kind, extension) in self.present() {
+            let install = if kind == Kind::Bundled {
+                Bridge::install_bundled
+            } else {
+                Bridge::install
+            };
+            install(
+                &self.bridge,
                 &extension.package,
                 extension.revision.clone(),
                 extension.capabilities.clone(),
@@ -128,6 +137,7 @@ impl Packages {
                 kind,
                 registered: registered(&extension),
                 main_search: extension.default_search,
+                built_in: crate::features::ported_command(&extension.id).is_some(),
             })
             .collect()
     }

@@ -4,14 +4,14 @@ use super::*;
 use crate::row::{self, PageChange, RowAction, RowEffect};
 
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
-    items_with(source, cursor, reason, &Preferences::new())
+    items_with(source, cursor, reason, "{}")
 }
 
 fn items_with(
     source: &str,
     cursor: Option<&str>,
     reason: Reason,
-    preferences: &Preferences,
+    preferences: &str,
 ) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded.unwrap().items(
@@ -57,7 +57,7 @@ fn a_package_may_export_items_search_or_both() {
             &engine(),
             None,
             Reason::Load,
-            &Preferences::new(),
+            "{}",
             timeout(DEADLINE),
             &mut Unavailable::default(),
         ))
@@ -136,6 +136,7 @@ fn items_answers_with_changes_by_id_after_its_cursor() {
         append,
         replace,
         remove,
+        ..
     } = page.change
     else {
         panic!("{:?}", page.change);
@@ -268,6 +269,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
             &engine(),
             name,
             data,
+            "{}",
             timeout(DEADLINE),
             &mut Unavailable::default(),
         )
@@ -334,6 +336,9 @@ fn rows_from_another_process_are_checked_again() {
             title: "A".into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -344,10 +349,7 @@ fn rows_from_another_process_are_checked_again() {
         row
     };
     assert!(row(&|_| {}).validate(row::Source::Search).is_ok());
-    let action = |effect: RowEffect| RowAction {
-        title: "Act".into(),
-        effect,
-    };
+    let action = |effect: RowEffect| RowAction::new("Act", effect);
     for broken in [
         row(&|row| row.title = "a\nb".into()),
         row(&|row| row.keywords = vec!["k".into()]),
@@ -377,10 +379,7 @@ fn rows_from_another_process_are_checked_again() {
 
 #[test]
 fn items_sees_the_preferences_frozen_through_and_through() {
-    let preferences: Preferences = serde_json::from_str(
-        r#"{ "webSearches": { "docs": { "name": "Docs", "url": "https://docs.example/?q={query}" } }, "webFallbacks": ["docs"] }"#,
-    )
-    .unwrap();
+    let preferences = r#"{ "webSearches": { "docs": { "name": "Docs", "url": "https://docs.example/?q={query}" } }, "webFallbacks": ["docs"] }"#;
     let source = r#"export function items(ctx) {
          const searches = ctx.preferences.webSearches ?? {};
          let frozen = Object.isFrozen(ctx.preferences) && Object.isFrozen(searches.docs ?? {})
@@ -390,7 +389,7 @@ fn items_sees_the_preferences_frozen_through_and_through() {
            id: alias, title: `${name} ${frozen} ${ctx.preferences.webFallbacks[0]}`,
          }));
        }"#;
-    let rows = reset_rows(items_with(source, None, Reason::Load, &preferences).unwrap());
+    let rows = reset_rows(items_with(source, None, Reason::Load, preferences).unwrap());
     assert_eq!(rows[0].title, "Docs true docs");
     let empty = r#"export function items(ctx) { return [{ id: 'a', title: String(Object.keys(ctx.preferences).length) }]; }"#;
     assert_eq!(

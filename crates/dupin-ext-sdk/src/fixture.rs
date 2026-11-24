@@ -21,11 +21,12 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 10] = [
+const EXPECTATIONS: [&str; 11] = [
     "rows",
     "selected",
     "effect",
     "toasts",
+    "panel",
     "clipboard",
     "error",
     "sections",
@@ -44,7 +45,8 @@ pub struct Fixture {
     pub environment: Environment,
     #[serde(default, skip_serializing_if = "Replies::is_empty")]
     pub replies: Replies,
-    /// What `items` sees as `ctx.preferences`.
+    /// What the package's feature chose, which `ctx.preferences` holds in place of declared
+    /// defaults.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub preferences: Map<String, Value>,
     pub steps: Vec<Step>,
@@ -631,6 +633,7 @@ pub fn effect(effect: &RowEffect) -> Map<String, Value> {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
         RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
+        RowEffect::Reveal { path } => ("reveal", Value::from(path.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])

@@ -219,6 +219,15 @@ impl NamespaceKeys {
         let mac = hmac(self.name.as_ref(), &[b"record-key", key.as_bytes()]);
         mac[..ID_LEN].try_into().expect("an HMAC-SHA256 is 32 bytes")
     }
+
+    /// A tag the host vouches for `value` with, apart from every record ID, which an owner can
+    /// name by any key it likes.
+    pub fn host_tag(&self, purpose: &str, value: &str) -> [u8; 32] {
+        hmac(
+            self.name.as_ref(),
+            &[b"host-tag", purpose.as_bytes(), value.as_bytes()],
+        )
+    }
 }
 
 /// The key that seals `storage.state`, which belongs to the device, not to a namespace.
@@ -354,6 +363,19 @@ mod tests {
         assert_ne!(namespace_id(&vault), namespace_id(&keys("a")));
         assert_ne!(vault.key_id("k"), keys("a").key_id("k"));
         assert_ne!(vault.blob_handle(b"x"), keys("a").blob_handle(b"x"));
+    }
+
+    #[test]
+    fn no_record_key_names_a_host_tag() {
+        let a = keys("a");
+        let tag = a.host_tag("file", "/x");
+        assert_eq!(tag, a.host_tag("file", "/x"));
+        assert_ne!(tag, a.host_tag("file", "/y"));
+        assert_ne!(tag, a.host_tag("other", "/x"));
+        assert_ne!(tag, keys("b").host_tag("file", "/x"));
+        for key in ["file/x", "file\0/x", "host-tagfile/x"] {
+            assert_ne!(tag[..ID_LEN], a.key_id(key));
+        }
     }
 
     #[test]

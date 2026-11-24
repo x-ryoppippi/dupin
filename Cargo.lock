@@ -919,7 +919,6 @@ dependencies = [
  "serde_json",
  "toml",
  "unicode-normalization",
- "zeroize",
 ]
 
 [[package]]

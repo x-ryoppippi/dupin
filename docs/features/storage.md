@@ -1,6 +1,6 @@
 # Encrypted storage
 
-`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name (`clipboard`), and an extension through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
+`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name, and an extension, such as the bundled clipboard history, through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
 
 ## What a namespace holds
 

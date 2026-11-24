@@ -168,8 +168,10 @@ function stored(record) {
 
 export const storage = Object.freeze({
 	async put(data, options = {}) {
-		const blobs = Array.from(options.blobs ?? [], (blob) => toBase64(blobBytes(blob)));
-		return stored(await call('storage.put', { data, blobs }));
+		const blobs = Array.from(options.blobs ?? [], (blob) =>
+			typeof blob === 'string' ? { clip: blob } : toBase64(blobBytes(blob)),
+		);
+		return stored(await call('storage.put', { data, blobs, key: options.key }));
 	},
 	async get(id) {
 		return stored(await call('storage.get', { id }));
@@ -203,6 +205,21 @@ export const clipboard = Object.freeze({
 	},
 	async writeText(text) {
 		await call('clipboard.write', { text });
+	},
+	async write(clip) {
+		switch (clip?.type) {
+			case 'text':
+				return void (await call('clipboard.write', { type: 'text', text: clip.text }));
+			case 'image':
+				return void (await call('clipboard.write', { type: 'image', blob: clip.blob }));
+			case 'files':
+				return void (await call('clipboard.write', {
+					type: 'files',
+					files: Array.from(clip.files ?? [], (file) => ({ path: file.path, handle: file.handle })),
+				}));
+			default:
+				throw new DupinError({ code: 'invalid', message: 'write a copy of type "text", "image" or "files"' });
+		}
 	},
 });
 

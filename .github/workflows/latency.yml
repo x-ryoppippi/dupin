@@ -42,8 +42,9 @@ on:
         type: string
         required: false
 
+# A newer push supersedes a run, but each dispatch is one of a baseline's repeated measurements.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -56,9 +57,23 @@ jobs:
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 45
     steps:
+      # actions/checkout takes only a full SHA, branch or tag, so a short SHA is resolved first.
+      - name: Resolve the commit to measure
+        id: target
+        if: ${{ inputs.ref }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          if ! sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$REF" --jq .sha)"; then
+            echo "::error::ref $REF names no commit of $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ steps.target.outputs.sha }}
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache

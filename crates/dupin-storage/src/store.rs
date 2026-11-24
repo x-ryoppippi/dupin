@@ -1004,6 +1004,12 @@ impl Store {
         RecordId(self.keys.key_id(key))
     }
 
+    /// A tag only the host can make for `value` in this namespace, for `purpose`: no record ID,
+    /// whatever key its owner stores it under, is ever one.
+    pub fn host_tag(&self, purpose: &str, value: &str) -> String {
+        hex(&self.keys.host_tag(purpose, value))
+    }
+
     /// Seals and stores a new record under a random ID. Blobs already stored in this
     /// namespace are shared, not written again. The plaintext buffers are zeroized before
     /// this returns.
@@ -1023,6 +1029,12 @@ impl Store {
     /// before, which keeps its creation time. The key itself is never written.
     pub fn upsert(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
         self.write(self.key_id(key), record, false)
+    }
+
+    /// Like [`Store::upsert`], but refuses a record there is no room for, as
+    /// [`Store::put_within_limits`] does. The record it replaces makes room for it.
+    pub fn upsert_within_limits(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
+        self.write(self.key_id(key), record, true)
     }
 
     fn write(&self, id: RecordId, record: NewRecord, within_limits: bool) -> Result<Record, Error> {
@@ -1055,8 +1067,20 @@ impl Store {
                 .filter(|(handle, _)| !state.blobs.contains_key(handle) && new_blobs.insert(**handle))
                 .map(|(_, blob)| blob.len() as u64)
                 .sum();
-            let entries = state.records.len() + 1;
-            let bytes = state.total + body.len() as u64 + new_blob_bytes;
+            let replaced = state.records.get(&id);
+            let entries = state.records.len() + usize::from(replaced.is_none());
+            // A blob only the replaced record carries goes with it.
+            let freed: u64 = replaced.map_or(0, |meta| {
+                meta.body_len
+                    + meta
+                        .blobs
+                        .iter()
+                        .filter(|blob| !handles.contains(&blob.handle))
+                        .filter(|blob| state.blobs.get(&blob.handle).is_some_and(|entry| entry.refs == 1))
+                        .map(|blob| blob.len)
+                        .sum::<u64>()
+            });
+            let bytes = (state.total + body.len() as u64 + new_blob_bytes).saturating_sub(freed);
             if entries > state.limits.max_entries || bytes > state.limits.max_total_bytes {
                 return Err(Error::QuotaExceeded { entries, bytes });
             }

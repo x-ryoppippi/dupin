@@ -10,13 +10,14 @@ use std::time::Instant;
 use dupin_core::config::Config;
 use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
 use dupin_extension_bridge::{Bridge, Call, Trigger};
-use dupin_js_runtime::Preferences;
 use dupin_js_runtime::web_search::{self, PLACEHOLDER, WebSearch};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::extensions::{Extension, QUERY_DEADLINE, Role};
 
-/// The bundled package that lists config.toml's web searches, as the broker knows it.
+/// The bundled package that lists config.toml's web searches, by its `name`.
+pub const WEB_SEARCH: &str = "web-search";
+/// [`WEB_SEARCH`] as the broker knows the bundled copy.
 pub const WEB_SEARCH_PACKAGE: &str = "bundled:web-search";
 const MAX_NAME_CHARS: usize = 80;
 const MAX_FALLBACKS: usize = 20;
@@ -29,7 +30,7 @@ pub const DEFAULT_ALIASES: [&str; 4] = ["g", "gh", "maps", "yt"];
 pub struct Configured {
     /// `web_searches` and `web_fallbacks`, only what is set and only entries the package can
     /// list, which it reads as `ctx.preferences`.
-    pub preferences: Preferences,
+    pub preferences: Map<String, Value>,
     /// The aliases it lists from them, or its defaults. Like any configured keyword, no
     /// extension keyword takes one.
     pub aliases: HashSet<String>,
@@ -476,7 +477,7 @@ mod tests {
 
     fn set(extension: &Extension, config: &Config) {
         let (web, _) = configured(config, |_| false);
-        held::set(extension.package.as_str(), web.preferences);
+        held::choose(&extension.id, web.preferences);
     }
 
     // One test, so nothing else changes the package's preferences while it runs.
@@ -623,7 +624,7 @@ mod tests {
         set(&extension, &config);
         assert!(collect(&web, "g term", 5).is_empty());
         assert!(collect(&fallbacks, "term", 5).is_empty());
-        held::set(extension.package.as_str(), Preferences::new());
+        held::choose(&extension.id, Map::new());
     }
 
     #[test]

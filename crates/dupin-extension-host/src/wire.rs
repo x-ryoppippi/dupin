@@ -9,14 +9,12 @@
 use std::io::{self, IoSlice, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Preferences, Reason, Row,
-};
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -73,18 +71,20 @@ pub enum Call {
     Items {
         cursor: Option<String>,
         reason: Reason,
-        #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
-        preferences: Preferences,
+        /// `ctx.preferences`: what the user chose for each preference the package declares.
+        preferences: serde_json::Value,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
         name: String,
         data: serde_json::Value,
+        preferences: serde_json::Value,
     },
     /// `events[name](event)`, for something Dupin watched on the package's behalf.
     Event {
         name: String,
         event: serde_json::Value,
+        preferences: serde_json::Value,
     },
 }
 
@@ -345,6 +345,9 @@ mod tests {
                 title: "a".into(),
                 subtitle: control(1),
                 keywords: vec!["a".into(); 16],
+                match_text: None,
+                time: None,
+                file: None,
                 icon: Some("a.png".into()),
                 section: Some("a".into()),
                 detail: Some(RowDetail {
@@ -357,13 +360,7 @@ mod tests {
                         12
                     ],
                 }),
-                actions: vec![
-                    RowAction {
-                        title: "a".into(),
-                        effect: RowEffect::Copy { text: control(1) },
-                    };
-                    8
-                ],
+                actions: vec![RowAction::new("a", RowEffect::Copy { text: control(1) }); 8],
                 web_search: None,
             })
             .collect();
@@ -414,6 +411,9 @@ mod tests {
             title: "A".into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -443,15 +443,17 @@ mod tests {
             Call::Items {
                 cursor: Some("c".into()),
                 reason: Reason::Invalidated,
-                preferences: serde_json::json!({ "p": 1 }).as_object().unwrap().clone(),
+                preferences: serde_json::json!({"a": true}),
             },
             Call::Action {
                 name: "run".into(),
                 data: serde_json::Value::Null,
+                preferences: serde_json::json!({}),
             },
             Call::Event {
                 name: "clipboard".into(),
                 event: serde_json::json!({}),
+                preferences: serde_json::json!({}),
             },
         ];
         let mut shapes: Vec<String> = calls
@@ -496,6 +498,7 @@ mod tests {
             Answer::Catalogue {
                 page: CataloguePage {
                     change: PageChange::Update {
+                        prepend: Vec::new(),
                         append: vec![row.clone()],
                         replace: vec![web_search],
                         remove: vec!["b".into()],
@@ -543,7 +546,7 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (8, SHAPES.map(str::to_owned).to_vec()),
+            (9, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
@@ -552,9 +555,9 @@ mod tests {
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"p":1}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"a":true}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
         r#"{"kind":"cancel","id":1}"#,
         r#"{"kind":"reply","id":1,"call":2}"#,
