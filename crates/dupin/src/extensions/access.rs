@@ -86,9 +86,10 @@ pub fn open(platform: Platform) -> Bridge {
 }
 
 /// Reports what macOS allows for each permission an extension scope can need, as the Settings
-/// → Permissions row for it reads it. Reading never prompts, so this runs at startup, when the
-/// panel shows and when Settings regains focus.
+/// → Permissions row for it reads it, and reads the grant files again if they changed. Reading
+/// never prompts, so this runs at startup, when the panel shows and when Settings regains focus.
 pub fn refresh_os_access(bridge: &Bridge, calendar: &CalendarAccess) {
+    bridge.reload();
     if cfg!(test) || rune::tooling::is_headless() {
         return;
     }

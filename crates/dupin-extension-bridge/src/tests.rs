@@ -657,3 +657,99 @@ fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
     assert_eq!(bridge.set_enabled(&id, true), Err(BrokerError::GrantsUnreadable));
     assert_eq!(std::fs::read_to_string(&local).unwrap(), "not = [valid");
 }
+
+/// A bridge over grant files in `folder`, with `weather` declaring the dictionary and
+/// `notes` declaring nothing, both on and `weather`'s dictionary allowed.
+fn granted_on_disk(folder: &Path) -> (Bridge, PackageId, PackageId, Arc<Mutex<Vec<Notice>>>) {
+    let bridge = Bridge::open(
+        &folder.join("base.toml"),
+        &folder.join("grants.toml"),
+        Services::none(),
+    );
+    let notices = Arc::new(Mutex::new(Vec::new()));
+    bridge.set_listener({
+        let notices = notices.clone();
+        move |notice| notices.lock().unwrap().push(notice)
+    });
+    let (weather, notes) = (
+        PackageId::new("weather").unwrap(),
+        PackageId::new("notes").unwrap(),
+    );
+    let dictionary = Capabilities::parse(&serde_json::json!({ "dictionary": ["lookup"] })).unwrap();
+    bridge.install(&weather, revision(), dictionary);
+    bridge.install(&notes, revision(), Capabilities::default());
+    let scope = bridge.scopes(&weather).remove(0).scope;
+    bridge.allow(&weather, &revision(), &scope, None).unwrap();
+    bridge.set_enabled(&notes, true).unwrap();
+    assert_eq!(
+        bridge.scopes(&weather)[0].state,
+        ConsentState::Granted(GrantSource::Local)
+    );
+    notices.lock().unwrap().clear();
+    (bridge, weather, notes, notices)
+}
+
+#[test]
+fn grants_another_process_forgets_stay_forgotten() {
+    let folder = tempfile::tempdir().unwrap();
+    let (bridge, weather, notes, notices) = granted_on_disk(folder.path());
+
+    // What `dupin ext remove weather` does while Dupin runs.
+    let local = folder.path().join("grants.toml");
+    let mut other = Broker::new(
+        Base::default(),
+        Local::parse(&std::fs::read_to_string(&local).unwrap()).unwrap(),
+    );
+    other.uninstall(&weather);
+    other.save(&local).unwrap();
+
+    // Any save of the app's own must not write the removed grants back.
+    bridge.set_enabled(&notes, false).unwrap();
+    let saved = std::fs::read_to_string(&local).unwrap();
+    assert!(!saved.contains("weather"), "{saved}");
+    assert!(saved.contains("notes"), "{saved}");
+    assert!(!bridge.is_enabled(&weather));
+    assert_eq!(bridge.scopes(&weather)[0].state, ConsentState::Undecided);
+    assert!(
+        notices
+            .lock()
+            .unwrap()
+            .contains(&Notice::Changed(weather.clone()))
+    );
+
+    // A package that later takes the name inherits nothing.
+    let other_weather = Capabilities::parse(&serde_json::json!({ "dictionary": ["lookup"] })).unwrap();
+    bridge.install(&weather, Revision::new("sha256:other").unwrap(), other_weather);
+    assert!(!bridge.is_enabled(&weather));
+    assert_eq!(bridge.scopes(&weather)[0].state, ConsentState::Undecided);
+}
+
+#[test]
+fn a_declared_base_changed_while_running_applies_its_denials_at_once() {
+    let folder = tempfile::tempdir().unwrap();
+    let (bridge, weather, notes, notices) = granted_on_disk(folder.path());
+    let call = bridge.call(&weather, Trigger::Activation);
+
+    std::fs::write(
+        folder.path().join("base.toml"),
+        "version = 1\n[packages.weather]\ndeny = [\"dictionary\"]\n[packages.notes]\nenabled = false\n",
+    )
+    .unwrap();
+    bridge.reload();
+    assert_eq!(bridge.scopes(&weather)[0].state, ConsentState::DeniedByBase);
+    assert!(!bridge.is_enabled(&notes), "a declared `enable = false` holds");
+    assert!(
+        !bridge.is_current(&weather, call.generation),
+        "in-flight results are dropped"
+    );
+    let changed = notices.lock().unwrap().clone();
+    assert!(changed.contains(&Notice::Changed(weather.clone())), "{changed:?}");
+    assert!(changed.contains(&Notice::Changed(notes.clone())), "{changed:?}");
+
+    notices.lock().unwrap().clear();
+    bridge.reload();
+    assert!(
+        notices.lock().unwrap().is_empty(),
+        "an unchanged file is not read again"
+    );
+}

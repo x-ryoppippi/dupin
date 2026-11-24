@@ -103,7 +103,8 @@ impl Inner {
         }
     }
 
-    fn still_holds(&self, permit: &Permit) -> bool {
+    fn still_holds(self: &Arc<Self>, permit: &Permit) -> bool {
+        self.sync();
         self.lock().broker.validate(permit)
     }
 }

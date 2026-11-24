@@ -480,6 +480,7 @@ impl Session {
 
     /// Asks the broker for `request` under this call's trigger.
     fn permit(&self, request: &Request) -> Result<Permit, Failure> {
+        self.bridge.sync();
         let mut state = self.bridge.lock();
         if state.broker.generation(&self.package) != Some(self.generation) {
             return Err(revoked());
@@ -518,6 +519,7 @@ impl Session {
                 "the call ended before the request finished",
             ));
         }
+        self.bridge.sync();
         let state = self.bridge.lock();
         if permit.generation() != self.generation || !state.broker.validate(permit) {
             return Err(revoked());

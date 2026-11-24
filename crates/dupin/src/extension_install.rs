@@ -36,6 +36,9 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
     let (lines, value) = match command {
         Command::Install(spec) => {
             let change = installer.install(&spec, &cwd, &taken).map_err(diagnostic)?;
+            if change.previous.is_none() {
+                forget_grants(&change.name)?;
+            }
             (describe(&change, "Installed"), change_json(&change))
         }
         Command::Update(name) => batch(
@@ -116,7 +119,9 @@ fn granted(broker: &mut Broker, folder: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
-/// Uninstalling forgets the user's decisions, so a later install of the name starts over.
+/// Uninstalling forgets the user's decisions, and so does installing a name afresh, since the
+/// decisions left under it were about another package. A running Dupin reads the file again
+/// before it next decides or saves.
 fn forget_grants(name: &str) -> Result<(), Diagnostic> {
     let (mut broker, Some(path)) = grants() else {
         return Ok(());

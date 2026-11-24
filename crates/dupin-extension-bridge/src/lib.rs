@@ -5,7 +5,9 @@
 //! perform it, runs the service and checks the permit again before releasing the result.
 //!
 //! The bridge owns the one grant store: the read-only declarative base, which Home Manager and
-//! the installer write, and the user's local grants, which it saves after every decision. It
+//! the installer write, and the user's local grants, which it saves after every decision. Both
+//! are files other processes change too, such as `dupin ext remove` or a Home Manager switch,
+//! so the bridge reads either again whenever it changed before deciding or saving. It
 //! never prompts. A request that needs consent fails with `needs-consent` and is kept as a
 //! [`ConsentRequest`] for the panel and Settings to show; granting it runs nothing again.
 
@@ -17,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
@@ -122,6 +124,8 @@ pub struct Bridge {
 struct Inner {
     state: Mutex<State>,
     services: Services,
+    /// The declarative base, if the bridge reads one from a file.
+    base: Option<PathBuf>,
     /// The local grant file decisions are saved to, if there is one.
     local: Option<PathBuf>,
     files: Mutex<HashMap<PackageId, FilesTable>>,
@@ -141,10 +145,64 @@ struct State {
     os: HashMap<OsPermission, OsAccess>,
     /// Problems reading or saving grant files, for Settings.
     problems: Vec<String>,
+    /// Each grant file as the bridge last read or wrote it.
+    seen: Seen,
+}
+
+#[derive(Default)]
+struct Seen {
+    base: Option<Stamp>,
+    local: Option<Stamp>,
+}
+
+/// What a file looked like, so a change another process made, even an atomic replace of the
+/// same size, is noticed without reading the file each time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Stamp {
+    modified: Option<SystemTime>,
+    len: u64,
+    inode: u64,
+}
+
+fn stamp(path: &Path) -> Option<Stamp> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path).ok()?;
+    Some(Stamp {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+        inode: metadata.ino(),
+    })
+}
+
+/// A missing file declares nothing.
+fn read_base(path: &Path) -> Result<Base, String> {
+    match std::fs::read_to_string(path) {
+        Ok(source) => Base::parse(&source).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Base::default()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// A missing file holds no decisions; one that can't be read stands for unknown decisions.
+fn read_local(path: &Path) -> Result<Local, String> {
+    match std::fs::read_to_string(path) {
+        Ok(source) => Local::parse(&source).map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Local::default()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 impl Bridge {
+    /// A bridge over `broker`, which already holds what `local` contains, if anything.
     pub fn new(broker: Broker, local: Option<PathBuf>, services: Services) -> Self {
+        Self::over(broker, None, local, services)
+    }
+
+    fn over(broker: Broker, base: Option<PathBuf>, local: Option<PathBuf>, services: Services) -> Self {
+        let seen = Seen {
+            base: base.as_deref().and_then(stamp),
+            local: local.as_deref().and_then(stamp),
+        };
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State {
@@ -153,8 +211,10 @@ impl Bridge {
                     asked_while_off: HashSet::new(),
                     os: HashMap::new(),
                     problems: Vec::new(),
+                    seen,
                 }),
                 services,
+                base,
                 local,
                 files: Mutex::default(),
                 watches: watch::Watches::default(),
@@ -168,31 +228,37 @@ impl Bridge {
     /// base is reported and grants nothing.
     pub fn open(base: &Path, local: &Path, services: Services) -> Self {
         let mut problems = Vec::new();
-        let base = match std::fs::read_to_string(base) {
-            Ok(source) => Base::parse(&source).unwrap_or_else(|error| {
-                problems.push(format!("{}: {error}", base.display()));
-                Base::default()
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Base::default(),
-            Err(error) => {
-                problems.push(format!("{}: {error}", base.display()));
-                Base::default()
-            }
+        // Stamped before reading, so a change made during the read is read again later.
+        let seen = Seen {
+            base: stamp(base),
+            local: stamp(local),
         };
-        let local_grants = match std::fs::read_to_string(local) {
-            Ok(source) => Local::parse(&source).unwrap_or_else(|error| {
-                problems.push(format!("{}: {error}", local.display()));
-                Local::unreadable()
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Local::default(),
-            Err(error) => {
-                problems.push(format!("{}: {error}", local.display()));
-                Local::unreadable()
-            }
-        };
-        let bridge = Self::new(Broker::new(base, local_grants), Some(local.to_owned()), services);
-        bridge.inner.lock().problems = problems;
+        let base_grants = read_base(base).unwrap_or_else(|error| {
+            problems.push(format!("{}: {error}", base.display()));
+            Base::default()
+        });
+        let local_grants = read_local(local).unwrap_or_else(|error| {
+            problems.push(format!("{}: {error}", local.display()));
+            Local::unreadable()
+        });
+        let bridge = Self::over(
+            Broker::new(base_grants, local_grants),
+            Some(base.to_owned()),
+            Some(local.to_owned()),
+            services,
+        );
+        let mut state = bridge.inner.lock();
+        state.problems = problems;
+        state.seen = seen;
+        drop(state);
         bridge
+    }
+
+    /// Reads either grant file again if another process changed it since the bridge last read
+    /// or wrote it. Every call and request does this itself; the app also does it when it
+    /// shows what extensions may do.
+    pub fn reload(&self) {
+        self.inner.sync();
     }
 
     /// Calls `listener` whenever grants change or a call needs consent, from whichever thread
@@ -209,6 +275,7 @@ impl Bridge {
     /// a new revision widens needs consent again, and what it no longer declares is dropped.
     pub fn install(&self, id: &PackageId, revision: Revision, capabilities: Capabilities) -> Reconciliation {
         let mut state = self.inner.lock();
+        let synced = self.inner.sync_locked(&mut state);
         let before = state.broker.generation(id);
         let report = state.broker.install(id.clone(), revision, capabilities);
         let changed = before != state.broker.generation(id);
@@ -223,12 +290,14 @@ impl Bridge {
             self.inner.forget_files(id);
             self.inner.notify(Notice::Changed(id.clone()));
         }
+        self.inner.announce(synced);
         report
     }
 
     /// Host services for one call of `id`, as `trigger` describes why it runs. The app sets the
     /// trigger from what it saw: typing, a chosen action or a watched event.
     pub fn call(&self, id: &PackageId, trigger: Trigger) -> Call {
+        self.inner.sync();
         let state = self.inner.lock();
         let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
         else {
@@ -413,8 +482,13 @@ impl Bridge {
         change: impl FnOnce(&mut Broker) -> Result<(), BrokerError>,
     ) -> Result<(), BrokerError> {
         let mut state = self.inner.lock();
+        let synced = self.inner.sync_locked(&mut state);
         let before = state.broker.generation(id);
-        change(&mut state.broker)?;
+        if let Err(error) = change(&mut state.broker) {
+            drop(state);
+            self.inner.announce(synced);
+            return Err(error);
+        }
         let bumped = state.broker.generation(id) != before;
         self.inner.save(&mut state);
         drop(state);
@@ -422,6 +496,7 @@ impl Bridge {
             self.inner.forget_files(id);
         }
         self.inner.notify(Notice::Changed(id.clone()));
+        self.inner.announce(synced);
         self.inner.refresh_watches();
         Ok(())
     }
@@ -445,12 +520,69 @@ impl Inner {
 
     fn save(&self, state: &mut State) {
         let Some(path) = &self.local else { return };
-        if let Err(error) = state.broker.save(path) {
-            let problem = format!("{}: {error}", path.display());
-            if !state.problems.contains(&problem) {
-                state.problems.push(problem);
+        match state.broker.save(path) {
+            Ok(()) => state.seen.local = stamp(path),
+            Err(error) => {
+                let problem = format!("{}: {error}", path.display());
+                if !state.problems.contains(&problem) {
+                    state.problems.push(problem);
+                }
             }
         }
+    }
+
+    /// Reads the grant files again if they changed, then tells the app what that changed.
+    fn sync(self: &Arc<Self>) {
+        let changed = {
+            let mut state = self.lock();
+            self.sync_locked(&mut state)
+        };
+        self.announce(changed);
+    }
+
+    /// Reads again each grant file whose stamp moved and returns the packages that changed,
+    /// which the caller passes to [`Inner::announce`] once it lets go of the state.
+    fn sync_locked(&self, state: &mut State) -> Vec<PackageId> {
+        let mut changed = Vec::new();
+        if let Some(path) = &self.base {
+            let now = stamp(path);
+            if now != state.seen.base {
+                state.seen.base = now;
+                let base = read_base(path);
+                note_problem(state, path, base.as_ref().err());
+                changed.extend(state.broker.replace_base(base.unwrap_or_default()));
+            }
+        }
+        if let Some(path) = &self.local {
+            let now = stamp(path);
+            if now != state.seen.local {
+                state.seen.local = now;
+                let local = read_local(path);
+                note_problem(state, path, local.as_ref().err());
+                changed.extend(
+                    state
+                        .broker
+                        .replace_local(local.unwrap_or_else(|_| Local::unreadable())),
+                );
+            }
+        }
+        changed.sort();
+        changed.dedup();
+        state
+            .pending
+            .retain(|request| !changed.contains(&request.package));
+        changed
+    }
+
+    fn announce(self: &Arc<Self>, changed: Vec<PackageId>) {
+        if changed.is_empty() {
+            return;
+        }
+        for id in changed {
+            self.forget_files(&id);
+            self.notify(Notice::Changed(id));
+        }
+        self.refresh_watches();
     }
 
     fn files(&self, id: &PackageId) -> FilesTable {
@@ -512,6 +644,15 @@ impl Inner {
         state.pending.insert(0, request);
         state.pending.truncate(MAX_PENDING);
         failure
+    }
+}
+
+/// Replaces what Settings shows about reading `path` with `problem`, if any.
+fn note_problem(state: &mut State, path: &Path, problem: Option<&String>) {
+    let prefix = format!("{}: ", path.display());
+    state.problems.retain(|known| !known.starts_with(&prefix));
+    if let Some(problem) = problem {
+        state.problems.push(format!("{prefix}{problem}"));
     }
 }
 
