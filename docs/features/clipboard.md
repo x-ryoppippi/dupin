@@ -2,11 +2,13 @@
 
 Turn on clipboard history in Settings → Search (it is off by default; see [configuration](#configuration)). Then type `clip` and Space: a "Clipboard" chip shows the mode and the list starts with your most recent copies, each with how long ago it was copied. Type to keep only entries containing every word, ignoring case; the list stays newest first. ↑ and ↓ move through the list even with an empty query. Clipboard search terms are not kept for query recall.
 
-Each row is text for now:
+Each kind of copy shows its own way:
 
 - **Text** shows its first words, up to 200 characters, with its line or character count. Words match anywhere in the text. Dupin holds at most 8 MB of a history's text in memory to match it: past that, the newest entries are still found by all their text and older ones by as much of their beginning as fits, and when even that runs short, their first words are shortened.
-- **Images** show as "Image · 1280×720 PNG", with their size and the app they were copied from. They match `image`, `png`, their dimensions (`1280x720` or `1280×720`), their size (`1.2 mb`) and that app's name.
-- **Files** show their names and the first file's Finder icon, with their folder and size. They match their names and full paths. A file that has since been moved or deleted shows as **Unavailable**, without its icon, and can only be deleted from the history.
+- **Images** show a thumbnail of the picture as their icon and "Image · 1280×720 PNG", with their size and the app they were copied from. Selected, an image shows large, with its dimensions, size and that app. They match `image`, `png`, their dimensions (`1280x720` or `1280×720`), their size (`1.2 mb`) and that app's name.
+- **Files** show their names and the first file's Finder icon, with their folder and size; when that file is a picture (PNG, JPEG, HEIC, HEIF, TIFF, GIF, WebP or BMP), a thumbnail of it instead, and one picture copied on its own shows large while selected, with its folder and size. They match their names and full paths. A file that has since been moved or deleted shows as **Unavailable**, without its icon, and can only be deleted from the history.
+
+Thumbnails are drawn from the history's encrypted storage, or for files from the file itself, only for the entries on screen and a screenful either side, so a history of thousands of images keeps only a screenful of them in memory. The pictures never pass through the extension: it names each by the handle Dupin gave it, as [images](./extensions.md#images) describes.
 
 Enter copies the selected entry back to the clipboard as it was copied — the text, the image, or the files as Finder's Copy offers them — and hides the panel. ⌘Enter pastes it into the frontmost app instead, which needs Accessibility access; without it the entry is copied and a notice explains how to allow it. The action screen (→, ⌘K or Ctrl+K) also offers Reveal in Finder for files, Delete from History and Clear History. Deleting removes that entry only; the clipboard itself keeps whatever it holds. Clear History asks for confirmation with Cancel selected before forgetting every entry. Clipboard results can't be saved as snapshots and are not recorded in usage-ranking history.
 

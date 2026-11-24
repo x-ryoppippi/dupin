@@ -17,5 +17,15 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
     if ($grants | path exists) {
         cp $grants ($config_dir | path join dupin extension-grants.toml)
     }
-    {XDG_CONFIG_HOME: $config_dir}
+    # And a clipboard history of its own, as `<name>.clipboard/history.json` beside the images it
+    # names, in place of the shared one, which the latency baselines are fingerprinted by.
+    let clipboard = $script | path parse | update extension clipboard | path join | path join history.json
+    if ($clipboard | path exists) {
+        {
+            XDG_CONFIG_HOME: $config_dir
+            DUPIN_HEADLESS_CLIPBOARD: ($clipboard | path expand)
+        }
+    } else {
+        {XDG_CONFIG_HOME: $config_dir}
+    }
 }
