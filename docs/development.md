@@ -98,7 +98,7 @@ builder. The non-flake `default.nix` build uses it too, with crane at the rev
 Rune has no releases, so `Cargo.toml` pins every Rune crate, and every crate Rune's own workspace patches, at one commit of Rune's default branch, `dev`. An update flows through three steps:
 
 1. Renovate proposes the newest `dev` commit once a week (Mondays, 00:00–06:00 UTC) as one pull request that rewrites every rev. A Git commit has no release timestamp, so the three-day release age can't apply; instead the pull request never automerges, and a person merges it.
-2. On that pull request, the `autofix.ci` workflow runs `scripts/update-rune.nu`. It relocks Rune's packages in `Cargo.lock`, along with any crate `[patch.crates-io]` takes from Rune that the lock still takes from elsewhere, and recomputes Rune's source hash in `nix/cargo-vendor.nix`, and autofix.ci commits the result. If a patch still doesn't apply after that, because Dupin's own requirement rules out the version Rune patches, the script fails rather than leave the crate unpatched. When the lock and the hash already match the pinned rev, the script changes nothing and reaches no network, so the workflow runs on every pull request that touches `Cargo.toml`, `Cargo.lock` or `nix/cargo-vendor.nix`.
+2. On that pull request, the `autofix.ci` workflow runs `scripts/update-rune.nu`. It relocks Rune's packages in `Cargo.lock`, along with any crate `[patch.crates-io]` takes from Rune that the lock still takes from elsewhere, and recomputes Rune's source hash in `nix/cargo-vendor.nix`, and autofix.ci commits the result. If a patch still doesn't apply after that, because Dupin's own requirement rules out the version Rune patches, the script fails rather than leave the crate unpatched. When the lock and the hash already match the pinned rev, the script changes nothing and reaches no network, so the workflow runs it on every pull request.
 3. CI builds and tests the result like any other change.
 
 Before merging, read Rune's changelog (`changelog/unreleased/` in its repository) between the two revs. Renovate can't add a crate Rune's workspace newly patches, and an item in [Working around Rune](./rune-workarounds.md) may no longer be needed. To bump Rune by hand, change every rev and run the script; the dev shell doesn't evaluate until the hash matches, so take its tools from nixpkgs:
@@ -155,6 +155,8 @@ RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
 ## Formatting
 
 `nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
+
+On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune step](#rune-updates), and autofix.ci commits both fixes in one commit, so unformatted files come back formatted instead of failing CI. The flake targets only aarch64-darwin, but it exports the same treefmt configuration as `formatter.x86_64-linux`, so the workflow runs on a cheap Linux runner. The `treefmt` check in CI still fails where autofix.ci can't commit, such as a pull request from a fork that hasn't installed the app, and on what the formatters report but can't fix, such as a typo, an actionlint error or a zizmor finding.
 
 ## Headless renders
 
