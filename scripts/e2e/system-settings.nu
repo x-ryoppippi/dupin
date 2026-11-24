@@ -1,4 +1,11 @@
-use driver.nu [ad mentions poll snap wait-frontmost]
+use driver.nu [
+    ad
+    mentions
+    poll
+    press
+    snap
+    wait-frontmost
+]
 use ../e2e-state.nu [has-match is-focused-match]
 
 export def system-pane [out: path] {
@@ -10,8 +17,8 @@ export def system-pane [out: path] {
             msg: 'System Settings was already running; a stale pane could falsely pass'
         }
     }
-    ad $out bluetooth-evidence-close-preferences press cmd+w | ignore
-    ad $out bluetooth-evidence-hotkey press alt+space | ignore
+    press $out bluetooth-evidence-close-preferences cmd+w | ignore
+    press $out bluetooth-evidence-hotkey alt+space | ignore
     (poll
         $out
         bluetooth-evidence-field

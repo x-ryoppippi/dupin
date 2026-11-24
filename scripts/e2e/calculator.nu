@@ -3,6 +3,7 @@ use driver.nu [
     log-count
     mentions
     poll
+    press
     snap
     wait-for-log
 ]
@@ -31,13 +32,13 @@ export def calculator-stage [out: path] {
     poll $out result $found find --app Dupin --name $row --exact --first
     snap $out results
 
-    ad $out preview-shortcut press cmd+y | ignore
+    press $out preview-shortcut cmd+y | ignore
     # Quick Look is visible in recordings but absent from Dupin's AX window list.
     wait-for-log $log 'dupin-trace: quick-look shown visible=true key=true'
     snap $out quick-look
     let left_before = log-count $log 'dupin-trace: key Left '
     let closed_before = log-count $log 'dupin-trace: quick-look picker input visible=false key=false'
-    ad $out close-preview press escape | ignore
+    press $out close-preview escape | ignore
     let restored = {|r| is-focused-query $r calculator }
     (poll
         $out
@@ -62,7 +63,7 @@ export def calculator-stage [out: path] {
             msg: 'Calculator was running before ↩, so its launch would prove nothing'
         }
     }
-    ad $out press-return press return | ignore
+    press $out press-return return | ignore
     poll --tries 15 $out opened {|r| $r.ok and (mentions $r Calculator) } list-apps
     snap $out opened
 }

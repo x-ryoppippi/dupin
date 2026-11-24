@@ -2,6 +2,7 @@ use driver.nu [
     ad
     log-count
     poll
+    press
     snap
     wait-for-log
     wait-frontmost
@@ -14,7 +15,7 @@ export def settings-stage [out: path] {
     # Calculator can still be coming forward; summoned before then, the panel would lose focus
     # to it and hide before ⌘, arrives.
     wait-frontmost Calculator
-    ad $out press-hotkey-again press alt+space | ignore
+    press $out press-hotkey-again alt+space | ignore
     poll $out field-again $focused find --app Dupin --role textfield --first
     ^osascript -e 'tell application "System Events" to keystroke "," using command down'
     let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
@@ -53,7 +54,7 @@ export def settings-stage [out: path] {
     if not $before_key.ok or $before_key.data?.match? == null or 'focused' in ($before_key.data?.match?.states? | default []) {
         error make {msg: 'General must exist without keyboard focus before the Tab test'}
     }
-    ad $out settings-tab press tab | ignore
+    press $out settings-tab tab | ignore
     (poll
         $out
         settings-keyboard-focused
@@ -114,8 +115,8 @@ export def settings-stage [out: path] {
     poll $out settings-window-again $settings list-windows --app Dupin
     snap $out settings-appearance
 
-    ad $out close-settings press cmd+w | ignore
-    ad $out settings-search-hotkey press alt+space | ignore
+    press $out close-settings cmd+w | ignore
+    press $out settings-search-hotkey alt+space | ignore
     (poll
         $out
         settings-search-field
@@ -159,7 +160,7 @@ export def settings-stage [out: path] {
     let log = $out | path join dupin.log
     let requests_before = log-count $log 'dupin-trace: settings requested '
     let closed_before = log-count $log 'dupin-trace: settings panel closed '
-    ad $out open-settings-result press return | ignore
+    press $out open-settings-result return | ignore
     wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
     poll $out settings-from-result $settings list-windows --app Dupin

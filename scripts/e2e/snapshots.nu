@@ -3,6 +3,7 @@ use driver.nu [
     file-proof
     log-count
     poll
+    press
     snap
     wait-for-log
 ]
@@ -48,7 +49,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        ad $out snapshots-save press cmd+shift+s | ignore
+        press $out snapshots-save cmd+shift+s | ignore
         wait-for-log $log 'dupin-trace: snapshot capture accepted'
         wait-for-log $log 'dupin-trace: snapshot saved'
         let saved = open $archive
@@ -60,7 +61,7 @@ export def snapshot-stage [out: path] {
         snap $out snapshots-saved
 
         let closed = log-count $log 'dupin-trace: panel closed '
-        ad $out snapshots-open press cmd+shift+o | ignore
+        press $out snapshots-open cmd+shift+o | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
         poll $out snapshots-window {|r| $r.ok and (
             $r.data?
@@ -234,7 +235,7 @@ export def snapshot-stage [out: path] {
                 error make {msg: $'Unexpected snapshot ($event)'}
             }
         }
-        ad $out snapshots-close press cmd+w | ignore
+        press $out snapshots-close cmd+w | ignore
         (poll
             $out
             snapshots-closed
@@ -243,7 +244,7 @@ export def snapshot-stage [out: path] {
             --app
             Dupin
         ) | ignore
-        ad $out snapshots-summon press alt+space | ignore
+        press $out snapshots-summon alt+space | ignore
         (poll
             $out
             snapshots-panel

@@ -4,6 +4,7 @@ use driver.nu [
     log-count
     mentions
     poll
+    press
     snap
     wait-for-log
 ]
@@ -37,7 +38,7 @@ export def cli-stage [out: path, binary: path] {
         ) | ignore
         snap $out cli-open
         let closed = log-count $log 'dupin-trace: panel closed '
-        ad $out cli-hide press escape | ignore
+        press $out cli-hide escape | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
 
         let selected_closed = log-count $log 'dupin-trace: panel closed '
@@ -94,7 +95,7 @@ export def cli-stage [out: path, binary: path] {
             pick-query
             --first
         ) | ignore
-        ad $out cli-cancel press escape | ignore
+        press $out cli-cancel escape | ignore
         let result = job recv --tag 3 --timeout 20sec
         $result | to json | save ($out | path join cli-cancelled.json)
         if $result.exit_code != 1 or ($result.stdout | from json).error != Cancelled {
