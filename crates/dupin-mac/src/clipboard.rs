@@ -46,23 +46,35 @@ struct Subscriber {
     id: u64,
     listener: Listener,
     reported: Option<Access>,
+    /// The change count this subscriber last heard about, so it never hears of a copy made
+    /// before it subscribed.
+    seen: isize,
+}
+
+/// The apps frontmost around the copy with this change count, which only the monitor can know.
+struct Origin {
+    count: isize,
+    apps: Vec<String>,
 }
 
 struct Hub {
     subscribers: Vec<Subscriber>,
     running: bool,
     next: u64,
+    origin: Option<Origin>,
 }
 
 static HUB: Mutex<Hub> = Mutex::new(Hub {
     subscribers: Vec::new(),
     running: false,
     next: 0,
+    origin: None,
 });
 
 /// Calls `listener` on the monitor thread with each access change, starting with the current
 /// access, and each copy made after it subscribed, until the subscription is dropped.
 fn subscribe(listener: Listener) -> std::io::Result<Subscription> {
+    let seen = autoreleasepool(|_| NSPasteboard::generalPasteboard().changeCount());
     let mut hub = HUB.lock().unwrap();
     hub.next += 1;
     let id = hub.next;
@@ -76,8 +88,19 @@ fn subscribe(listener: Listener) -> std::io::Result<Subscription> {
         id,
         listener,
         reported: None,
+        seen,
     });
     Ok(Subscription(id))
+}
+
+/// The apps frontmost around the copy with change count `count`, if the monitor saw it land.
+fn origin(count: isize) -> Option<Vec<String>> {
+    HUB.lock()
+        .unwrap()
+        .origin
+        .as_ref()
+        .filter(|origin| origin.count == count)
+        .map(|origin| origin.apps.clone())
 }
 
 struct Subscription(u64);
@@ -98,33 +121,44 @@ fn poll() {
         std::thread::sleep(INTERVAL);
         let stop = autoreleasepool(|_| {
             let access = access(&board);
+            let current = frontmost();
+            let count = board.changeCount();
+            let apps = if count == seen {
+                [None, None]
+            } else {
+                [previous.take(), current.clone()]
+            };
             let listeners = {
                 let mut hub = HUB.lock().unwrap();
                 if hub.subscribers.is_empty() {
                     hub.running = false;
                     return true;
                 }
+                if count != seen {
+                    hub.origin = Some(Origin {
+                        count,
+                        apps: apps.iter().flatten().cloned().collect(),
+                    });
+                }
                 hub.subscribers
                     .iter_mut()
                     .map(|subscriber| {
                         let report = subscriber.reported.replace(access) != Some(access);
-                        (subscriber.listener.clone(), report)
+                        let copied = std::mem::replace(&mut subscriber.seen, count) != count;
+                        (subscriber.listener.clone(), report, copied)
                     })
                     .collect::<Vec<_>>()
             };
+            seen = count;
             // Listeners run without the hub's lock, so one may unsubscribe while holding a
             // lock another listener takes.
-            for (listener, report) in &listeners {
+            for (listener, report, _) in &listeners {
                 if *report {
                     listener(&Tick::Access(access));
                 }
             }
-            let current = frontmost();
-            let count = board.changeCount();
-            if count != seen {
-                seen = count;
-                let apps = [previous.take(), current.clone()];
-                for (listener, _) in &listeners {
+            for (listener, _, copied) in &listeners {
+                if *copied {
                     listener(&Tick::Copied {
                         board: &board,
                         count,
@@ -381,9 +415,20 @@ fn write_urls(urls: impl FnOnce() -> Vec<objc2::rc::Retained<NSURL>>) -> Option<
     })
 }
 
-/// The general pasteboard, for the extension `clipboard` capability.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct GeneralPasteboard;
+/// The general pasteboard, for the extension `clipboard` capability. It keeps the monitor
+/// running while it exists, because only the monitor sees which app was frontmost as a copy
+/// landed; a copy it didn't see has no known origin, so it is read only while no app is ignored.
+pub struct GeneralPasteboard {
+    _origins: Option<Subscription>,
+}
+
+impl Default for GeneralPasteboard {
+    fn default() -> Self {
+        Self {
+            _origins: subscribe(Arc::new(|_: &Tick| {})).ok(),
+        }
+    }
+}
 
 impl Pasteboard for GeneralPasteboard {
     fn access(&self) -> OsAccess {
@@ -393,10 +438,11 @@ impl Pasteboard for GeneralPasteboard {
     fn peek(&self) -> Peek {
         autoreleasepool(|_| {
             let board = NSPasteboard::generalPasteboard();
+            let count = board.changeCount();
             Peek {
-                change: board.changeCount() as i64,
+                change: count as i64,
                 types: types(&board),
-                apps: frontmost().into_iter().collect(),
+                apps: origin(count),
             }
         })
     }
@@ -430,7 +476,7 @@ impl Pasteboard for GeneralPasteboard {
                     .collect()
             })
             .ok_or_else(failed),
-            Write::Files(paths) => copy_files(paths).map_err(ServiceError::Failed),
+            Write::Files(files) => copy_files(files.paths()).map_err(ServiceError::Failed),
         }
     }
 
@@ -447,7 +493,7 @@ impl Pasteboard for GeneralPasteboard {
                     changed(Peek {
                         change: count as i64,
                         types: types(board),
-                        apps: apps.iter().flatten().cloned().collect(),
+                        apps: Some(apps.iter().flatten().cloned().collect()),
                     });
                 }
             }

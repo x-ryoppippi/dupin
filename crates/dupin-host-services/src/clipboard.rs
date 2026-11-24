@@ -9,12 +9,14 @@
 //! the guest is called on each change rather than polling. Keeping a history is the
 //! extension's job, through its `storage` capability.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, Weak};
 
 use dupin_broker::{OsAccess, OsPermission, Trigger};
 use serde::{Serialize, Serializer};
 
+use crate::files::{FileError, Files, Handle};
 use crate::service::ServiceError;
 
 pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
@@ -22,6 +24,10 @@ pub const MAX_URL_BYTES: usize = 8192;
 pub const MAX_FILES: usize = 64;
 pub const MAX_PATH_BYTES: usize = 4096;
 pub const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+/// Watches one [`Clipboard`] keeps at once.
+pub const MAX_WATCHES: usize = 16;
+/// Copies a watch may fall behind by before it misses the newer ones.
+const WATCH_BACKLOG: usize = 4;
 
 /// Reading and watching need this; writing needs none.
 pub const PERMISSION: OsPermission = OsPermission::Pasteboard;
@@ -100,7 +106,18 @@ pub struct Clip {
 pub enum Write {
     Text(String),
     Url(String),
-    Files(Vec<PathBuf>),
+    Files(ScopedFiles),
+}
+
+/// Paths of entries inside the extension's granted file scopes, only made by [`Write::files`],
+/// because whatever the user pastes them into acts on them with the user's authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScopedFiles(Vec<PathBuf>);
+
+impl ScopedFiles {
+    pub fn paths(&self) -> &[PathBuf] {
+        &self.0
+    }
 }
 
 impl Write {
@@ -127,24 +144,25 @@ impl Write {
         Ok(Self::Url(url))
     }
 
-    pub fn files(paths: Vec<PathBuf>) -> Result<Self, ServiceError> {
-        if paths.is_empty() || paths.len() > MAX_FILES {
+    /// The entries `handles` name, each still inside the scope of `files` that issued it.
+    pub fn files(files: &Files, handles: &[Handle]) -> Result<Self, ServiceError> {
+        if handles.is_empty() || handles.len() > MAX_FILES {
             return Err(ServiceError::Invalid(format!("name 1–{MAX_FILES} files")));
         }
-        let valid = |path: &PathBuf| {
-            path.is_absolute()
-                && path.as_os_str().len() <= MAX_PATH_BYTES
-                && !path.to_string_lossy().contains('\0')
-                && path
-                    .components()
-                    .all(|component| matches!(component, Component::RootDir | Component::Normal(_)))
-        };
-        if !paths.iter().all(valid) {
-            return Err(ServiceError::Invalid(format!(
-                "a file is an absolute path of at most {MAX_PATH_BYTES} bytes, with no `..`"
-            )));
-        }
-        Ok(Self::Files(paths))
+        let paths = handles
+            .iter()
+            .map(|&handle| match files.open(handle) {
+                Ok(opened) if opened.path.as_os_str().len() <= MAX_PATH_BYTES => Ok(opened.path),
+                Ok(_) => Err(ServiceError::Invalid(format!(
+                    "a file's path is at most {MAX_PATH_BYTES} bytes"
+                ))),
+                Err(FileError::Io(error)) => Err(ServiceError::Failed(error.to_string())),
+                Err(error) => Err(ServiceError::OutOfScope(
+                    error.to_string().trim_end_matches('.').to_owned(),
+                )),
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self::Files(ScopedFiles(paths)))
     }
 }
 
@@ -153,8 +171,9 @@ impl Write {
 pub struct Peek {
     pub change: i64,
     pub types: Vec<String>,
-    /// Bundle IDs of the apps that were frontmost around the copy.
-    pub apps: Vec<String>,
+    /// Bundle IDs of the apps that were frontmost around the copy, or `None` when the backend
+    /// didn't see the copy happen and so can't tell which app made it.
+    pub apps: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,7 +200,8 @@ impl Watch {
 pub trait Pasteboard: Send + Sync {
     /// Whether Dupin may read without the system's paste prompt, checked without reading.
     fn access(&self) -> OsAccess;
-    /// The change count, types and frontmost apps, without reading any contents.
+    /// The change count, types and the apps frontmost around the copy, without reading any
+    /// contents.
     fn peek(&self) -> Peek;
     /// The app the copy declares as its source, if it declares one.
     fn source(&self) -> Option<String>;
@@ -190,6 +210,7 @@ pub trait Pasteboard: Send + Sync {
     fn read(&self, change: i64, limits: &Limits) -> Option<Content>;
     fn write(&self, content: &Write) -> Result<(), ServiceError>;
     /// Calls `changed` on each new copy, from the monitor's thread, until the watch is dropped.
+    /// `changed` never blocks.
     fn watch(&self, changed: Box<dyn Fn(Peek) + Send + Sync>) -> Result<Watch, ServiceError>;
 }
 
@@ -233,6 +254,17 @@ impl Default for Policy {
 struct Inner<P> {
     board: P,
     policy: Mutex<Policy>,
+    watches: Mutex<Watches>,
+}
+
+/// One subscription to the pasteboard serves every watch, so a copy is read once however many
+/// watches there are, and each watch delivers on its own thread, so a guest that is slow to take
+/// a copy holds up neither the native monitor, which clipboard history shares, nor other watches.
+#[derive(Default)]
+struct Watches {
+    next: u64,
+    queues: Vec<(u64, SyncSender<Arc<Clip>>)>,
+    source: Option<Watch>,
 }
 
 pub struct Clipboard<P> {
@@ -245,6 +277,7 @@ impl<P: Pasteboard + 'static> Clipboard<P> {
             inner: Arc::new(Inner {
                 board,
                 policy: Mutex::new(policy),
+                watches: Mutex::default(),
             }),
         }
     }
@@ -269,18 +302,93 @@ impl<P: Pasteboard + 'static> Clipboard<P> {
         self.inner.board.write(content)
     }
 
-    /// Calls `deliver` with each new copy that may be read, until the watch is dropped.
-    pub fn watch(&self, deliver: impl Fn(Clip) + Send + Sync + 'static) -> Result<Watch, ServiceError> {
+    /// Calls `deliver`, on a thread of the watch's own, with each new copy that may be read,
+    /// until the watch is dropped. A watch more than a few copies behind misses the newer ones.
+    pub fn watch(&self, deliver: impl Fn(&Clip) + Send + 'static) -> Result<Watch, ServiceError> {
         self.inner.allowed()?;
-        let inner: Weak<Inner<P>> = Arc::downgrade(&self.inner);
+        let mut watches = self.inner.watches.lock().unwrap();
+        if watches.queues.len() >= MAX_WATCHES {
+            return Err(ServiceError::Invalid(format!(
+                "at most {MAX_WATCHES} clipboard watches at once"
+            )));
+        }
+        let (queue, clips) = sync_channel::<Arc<Clip>>(WATCH_BACKLOG);
+        std::thread::Builder::new()
+            .name("dupin-clipboard-watch".into())
+            .spawn(move || {
+                for clip in clips {
+                    deliver(&clip);
+                }
+            })
+            .map_err(|error| ServiceError::Failed(format!("Couldn't watch the clipboard: {error}")))?;
+        if watches.source.is_none() {
+            watches.source = Some(self.subscribe()?);
+        }
+        watches.next += 1;
+        let id = watches.next;
+        watches.queues.push((id, queue));
+        Ok(Watch::new(Unsubscribe {
+            inner: Arc::downgrade(&self.inner),
+            id,
+        }))
+    }
+
+    fn subscribe(&self) -> Result<Watch, ServiceError> {
+        let (copied, copies) = sync_channel::<Peek>(WATCH_BACKLOG);
+        let inner = Arc::downgrade(&self.inner);
+        std::thread::Builder::new()
+            .name("dupin-clipboard-watches".into())
+            .spawn(move || dispatch(&inner, copies))
+            .map_err(|error| ServiceError::Failed(format!("Couldn't watch the clipboard: {error}")))?;
+        let inner = Arc::downgrade(&self.inner);
         self.inner.board.watch(Box::new(move |peek| {
-            if let Some(inner) = inner.upgrade()
-                && inner.allowed().is_ok()
-                && let Some(clip) = inner.capture(peek)
-            {
-                deliver(clip);
+            // Checked as the copy lands rather than when it is read, so a copy made while access
+            // was withdrawn is never delivered however soon access comes back.
+            if inner.upgrade().is_some_and(|inner| inner.allowed().is_ok()) {
+                let _ = copied.try_send(peek);
             }
         }))
+    }
+}
+
+fn dispatch<P: Pasteboard>(inner: &Weak<Inner<P>>, copies: Receiver<Peek>) {
+    for peek in copies {
+        let Some(inner) = inner.upgrade() else {
+            return;
+        };
+        if inner.allowed().is_err() {
+            continue;
+        }
+        let Some(clip) = inner.capture(peek) else {
+            continue;
+        };
+        let clip = Arc::new(clip);
+        for (_, queue) in &inner.watches.lock().unwrap().queues {
+            let _ = queue.try_send(clip.clone());
+        }
+    }
+}
+
+struct Unsubscribe<P> {
+    inner: Weak<Inner<P>>,
+    id: u64,
+}
+
+impl<P> Drop for Unsubscribe<P> {
+    fn drop(&mut self) {
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        let source = {
+            let mut watches = inner.watches.lock().unwrap();
+            watches.queues.retain(|(id, _)| *id != self.id);
+            if watches.queues.is_empty() {
+                watches.source.take()
+            } else {
+                None
+            }
+        };
+        drop(source);
     }
 }
 
@@ -295,7 +403,11 @@ impl<P: Pasteboard> Inner<P> {
         }
         let policy = self.policy.lock().unwrap().clone();
         let ignored = |app: &str| policy.ignored_apps.iter().any(|ignored| ignored == app);
-        if peek.apps.iter().any(|app| ignored(app)) {
+        let from_ignored = match &peek.apps {
+            Some(apps) => apps.iter().any(|app| ignored(app)),
+            None => !policy.ignored_apps.is_empty(),
+        };
+        if from_ignored {
             return None;
         }
         if peek.types.iter().any(|kind| kind == SOURCE_TYPE)
@@ -359,7 +471,7 @@ impl Fixture {
             state.peek = Peek {
                 change,
                 types: all,
-                apps: app.into_iter().map(str::to_owned).collect(),
+                apps: Some(app.into_iter().map(str::to_owned).collect()),
             };
             state.source = source.map(str::to_owned);
             state.content = Some(content);
@@ -375,6 +487,11 @@ impl Fixture {
         for watcher in watchers {
             watcher(peek.clone());
         }
+    }
+
+    /// Forgets which app made the current copy, as a backend that didn't see it happen does.
+    pub fn forget_apps(&self) {
+        self.state.lock().unwrap().peek.apps = None;
     }
 
     /// How many times the contents were read.
@@ -429,14 +546,15 @@ impl Pasteboard for Fixture {
         state.written.push(content.clone());
         state.peek = Peek {
             change: state.peek.change + 1,
-            ..Peek::default()
+            types: Vec::new(),
+            apps: Some(Vec::new()),
         };
         state.source = None;
         state.content = Some(match content {
             Write::Text(text) => Content::Text { text: text.clone() },
             Write::Url(url) => Content::Url { url: url.clone() },
-            Write::Files(paths) => Content::Files {
-                files: paths.iter().map(|path| FileRef::new(path)).collect(),
+            Write::Files(files) => Content::Files {
+                files: files.paths().iter().map(|path| FileRef::new(path)).collect(),
             },
         });
         Ok(())
