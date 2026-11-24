@@ -471,11 +471,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
         Action::ExtEject(name) => {
-            let bundled = crate::extensions::bundled::directory()
-                .ok_or("this build of Dupin has no bundled extensions")?;
-            let user = crate::extensions::directory()
-                .ok_or("couldn't find the extensions folder beside config.toml")?;
-            let copy = crate::extensions::bundled::eject(&bundled, &user, &name)?;
+            let copy = crate::extension_install::eject(&name)?;
             let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
             if json {
                 return Ok(serde_json::json!({

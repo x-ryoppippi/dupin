@@ -6,13 +6,13 @@ Enter opens the word in Dictionary.app. Right Arrow, Cmd+K or the Actions link o
 
 ## The bundled extension
 
-Dictionary is the [bundled extension](./extensions.md#bundled-extensions) `dictionary`, in TypeScript in the repository's [`extensions/dictionary`](../../extensions/dictionary). It looks each word up with the extension [`dictionary` capability](./extensions.md#dictionary), which reads Dictionary Services and lays the entry out in Dupin, and shows the entry's Markdown as the row's detail. It answers Dictionary's own command, so `dictionary_keywords` choose its keywords, the `keyword` in its `package.json` is never used, and Settings → Extensions doesn't list it separately. If it can't load, Dictionary's keywords say so instead of searching. To change it, copy it into the extensions folder and edit the copy:
+Dictionary is the [bundled extension](./extensions.md#bundled-extensions) `dictionary`, in TypeScript in the repository's [`extensions/dictionary`](../../extensions/dictionary). It looks each word up with the extension [`dictionary` capability](./extensions.md#dictionary), which reads Dictionary Services and lays the entry out in Dupin, and shows the entry's Markdown as the row's detail. It answers Dictionary's own command, so `dictionary_keywords` choose its keywords, the `keyword` in its `package.json` is never used, and Settings → Extensions lists it as a built-in command, with where it comes from, its package switch and its grant. `define` answers only while that package switch is on; with it off, Dictionary says it isn't available. If it can't load, Dictionary's keywords say so instead of searching. To change it, copy it into the extensions folder and edit the copy:
 
 ```sh
 dupin ext eject dictionary
 ```
 
-While the extensions folder is on, your copy answers Dictionary's keywords in place of the bundled one. Once it differs from the bundled package, it is a third-party extension: the panel asks you to turn it on and to allow it to look words up before it shows any definition. Its fixtures run with `dupin ext test ~/.config/dupin/extensions/dictionary`.
+While the extensions folder is on, your copy answers Dictionary's keywords in place of the bundled one, as [Overriding a built-in](./extensions.md#overriding-a-built-in) describes. Once it differs from the bundled package, it is a third-party extension: the panel asks you to turn it on and to allow it to look words up before it shows any definition. Its fixtures run with `dupin ext test ~/.config/dupin/extensions/dictionary`.
 
 ## Configuration
 
