@@ -85,7 +85,9 @@ declare module 'dupin' {
 	 * `copy` and `paste` take 1 byte to 64 KiB of text. With `template`, Dupin fills `{date}`
 	 * (`2026-01-31`), `{time}` (`09:05`), `{datetime}` and `{clipboard}` (the clipboard's text)
 	 * when the action is chosen, so the package never sees the clipboard; other braces stay as
-	 * written. `paste` needs the `clipboard: ['paste']` scope, and copies without it.
+	 * written. Only a bundled package that replaces a built-in gets templates; any other's text
+	 * is copied or pasted as written. `paste` needs the `clipboard: ['paste']` scope, and copies
+	 * without it.
 	 */
 	export type Action =
 		| { title: string; copy: string; template?: boolean }

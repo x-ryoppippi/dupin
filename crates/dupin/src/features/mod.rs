@@ -15,9 +15,11 @@ pub(super) mod web;
 pub(super) mod windows;
 
 use dupin_core::{CommandError, Config};
+use dupin_extension_bridge::PackageId;
 use dupin_mac::privacy::Permission;
 
 use crate::commands::{Configure, ConfiguredCommands, Providers};
+use crate::extensions::BUNDLED_PREFIX;
 use crate::ui::Ui;
 
 pub(super) struct Feature {
@@ -65,10 +67,20 @@ pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
     bundled(package).map(|bundled| bundled.command)
 }
 
-/// What Dupin says when it can't paste for the feature the extension called `package` ships,
-/// if that feature pastes.
-pub(crate) fn paste_notice(package: &str) -> Option<&'static str> {
-    bundled(package).and_then(|bundled| bundled.paste_notice)
+/// The feature `package` ships, when it is the package Dupin shipped for a built-in rather
+/// than a copy in the extensions folder that took its name.
+fn shipped(package: &PackageId) -> Option<Bundled> {
+    bundled(package.as_str().strip_prefix(BUNDLED_PREFIX)?)
+}
+
+/// What Dupin says when it can't paste for the feature `package` ships, if that feature pastes.
+pub(crate) fn paste_notice(package: &PackageId) -> Option<&'static str> {
+    shipped(package).and_then(|bundled| bundled.paste_notice)
+}
+
+/// Whether Dupin fills the placeholders of `package`'s template actions.
+pub(crate) fn fills_templates(package: &PackageId) -> bool {
+    shipped(package).is_some()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

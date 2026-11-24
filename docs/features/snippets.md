@@ -55,4 +55,4 @@ To change how snippets are listed, copy the package into the extensions folder a
 dupin ext eject snippets
 ```
 
-While the extensions folder is on, your copy answers the snippet keywords in place of the bundled one. Once it differs from the bundled package it is a third-party extension: Dupin no longer hands it your snippets, and it must be allowed to paste. Delete the copy to go back. `dupin ext test` replays the package's [fixtures](./extensions.md#fixtures) in `extensions/snippets/fixtures`.
+While the extensions folder is on, your copy answers the snippet keywords in place of the bundled one. Once it differs from the bundled package it is a third-party extension: Dupin no longer hands it your snippets or fills its templates, and it must be allowed to paste before Dupin asks macOS for Accessibility access. Delete the copy to go back. `dupin ext test` replays the package's [fixtures](./extensions.md#fixtures) in `extensions/snippets/fixtures`.

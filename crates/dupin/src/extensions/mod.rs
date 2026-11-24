@@ -396,6 +396,12 @@ pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     load(folder, None, false).map(|loaded| loaded.extension)
 }
 
+/// Loads the package in `folder` as one bundled with Dupin, without checking its seal.
+#[cfg(test)]
+pub(crate) fn load_bundled(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    load(folder, None, true).map(|loaded| loaded.extension)
+}
+
 /// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
 /// reports, and what `dupin ext build` and `dupin ext dev` require before a result is kept.
 pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
@@ -480,11 +486,13 @@ fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, D
         .map_err(|error| Diagnostic::new("host-error", error))
 }
 
+pub(crate) const BUNDLED_PREFIX: &str = "bundled:";
+
 /// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
 /// A bundled package is `bundled:<name>`, which no package.json name can be, so grants and
 /// choices never pass between it and a package in the extensions folder that reuses its name.
 fn package_id(manifest: &manifest::Manifest, bundled: bool) -> Result<PackageId, Diagnostic> {
-    let prefix = if bundled { "bundled:" } else { "" };
+    let prefix = if bundled { BUNDLED_PREFIX } else { "" };
     PackageId::new(format!("{prefix}{}", manifest.id)).map_err(|error| {
         Diagnostic::new("invalid-manifest", error)
             .file(manifest::PACKAGE_JSON)

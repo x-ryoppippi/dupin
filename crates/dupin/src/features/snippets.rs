@@ -137,7 +137,7 @@ mod tests {
     use dupin_core::{Action, Delivery, Effect, History, Session};
 
     use super::*;
-    use crate::extensions::{ExtensionProvider, bundled, load_folder};
+    use crate::extensions::{ExtensionProvider, bundled, load_bundled};
 
     fn snippet(name: Option<&str>, text: &str) -> Snippet {
         Snippet {
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn the_bundled_extension_lists_config_snippets_under_their_command() {
         dupin_extension_host::skip_inside_a_sandbox!();
-        let extension = load_folder(&bundled::directory().unwrap().join(PACKAGE)).unwrap();
+        let extension = load_bundled(&bundled::directory().unwrap().join(PACKAGE)).unwrap();
         let port = ExtensionProvider::new(extension.clone());
         let mut config = Config {
             snippets: BTreeMap::from([

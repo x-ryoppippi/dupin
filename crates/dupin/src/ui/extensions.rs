@@ -214,7 +214,7 @@ impl Ui {
                     && listed
                         .package
                         .as_str()
-                        .strip_prefix("bundled:")
+                        .strip_prefix(crate::extensions::BUNDLED_PREFIX)
                         .and_then(crate::features::ported_command)
                         .is_some())
             })

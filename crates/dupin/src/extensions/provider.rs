@@ -208,11 +208,16 @@ pub(super) fn row_item(
         }
         Arc::new(shown)
     });
+    // Dupin reads the clipboard unfiltered to fill a template, as the built-in it ports did, so
+    // only the package Dupin shipped for a built-in gets templates; any other copies as written.
+    let templates = crate::features::fills_templates(&extension.package);
     // Text Dupin fills in only when it is chosen isn't the row's text until then.
     let payload = offered
         .iter()
         .find_map(|action| match &action.effect {
-            RowEffect::Copy { text } if !action.template || !snippets::has_placeholders(text) => {
+            RowEffect::Copy { text }
+                if !(templates && action.template) || !snippets::has_placeholders(text) =>
+            {
                 Some(Payload::text(text.clone()))
             }
             RowEffect::Copy { .. } => Some(Payload::default()),
@@ -231,7 +236,7 @@ pub(super) fn row_item(
                     first.to_owned()
                 }
             };
-            let template = action.template;
+            let template = templates && action.template;
             match action.effect {
                 RowEffect::Copy { text } if template => ItemAction::new(
                     &name(&mut copy, "copy"),
@@ -617,6 +622,52 @@ mod tests {
             })
         );
         assert_eq!(rows[0].payload, Payload::text("🍵"));
+    }
+
+    #[test]
+    fn only_the_package_dupin_shipped_for_a_built_in_fills_templates() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(super::super::manifest::PACKAGE_JSON),
+            r#"{"name": "snippets", "version": "0.1.0", "dupin": {"title": "Snippets", "keyword": "snip"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            folder.path().join("main.js"),
+            "export function search() { return [{ title: 'Quote', actions: [{ title: 'Paste', paste: '> {clipboard}', template: true }, { title: 'Copy', copy: '> {clipboard}', template: true }] }]; }",
+        )
+        .unwrap();
+        let paste = |template| Action::Extension {
+            extension: "snippets".into(),
+            request: ExtensionRequest::Paste {
+                text: "> {clipboard}".into(),
+                template,
+            },
+        };
+
+        let copy = super::super::load_folder(folder.path()).unwrap();
+        assert_eq!(crate::features::paste_notice(&copy.package), None);
+        let rows = search(&ExtensionProvider::new(copy), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(false)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Copy("> {clipboard}".into()))
+        );
+        assert_eq!(rows[0].payload, Payload::text("> {clipboard}"));
+
+        let shipped = super::super::load_bundled(folder.path()).unwrap();
+        assert!(crate::features::paste_notice(&shipped.package).is_some());
+        let rows = search(&ExtensionProvider::new(shipped), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(true)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Snippet {
+                text: "> {clipboard}".into(),
+                paste: false,
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::default());
     }
 
     #[test]

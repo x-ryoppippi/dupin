@@ -32,7 +32,7 @@ impl Ui {
     /// first use and explains a refusal with the built-in's notice.
     pub(super) fn run_paste(&mut self, extension: &Extension, text: String, template: bool, tx: &mut Tx) {
         let text = RowText::new(text, template);
-        if let Some(notice) = crate::features::paste_notice(&extension.id) {
+        if let Some(notice) = crate::features::paste_notice(&extension.package) {
             if rune::tooling::is_headless() || !self.may_paste(notice) {
                 return self.hand_over(text, false, tx);
             }
