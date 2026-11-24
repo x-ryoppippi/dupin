@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
@@ -10,7 +10,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::crypto::{NONCE_LEN, NamespaceKeys, TAG_LEN, VERSION};
+use crate::crypto::{ID_LEN, KEY_TAG_LEN, KeySource, NONCE_LEN, NamespaceKeys, StateKeys, TAG_LEN, VERSION};
+use crate::device::{Device, DeviceId, Stamp, hardware_hash};
 use crate::fs::{Staged, create_private_dir, remove_if_exists, sync_dir};
 use crate::key::{DataKey, KeyProvider};
 use crate::{Error, MAX_BLOBS_PER_RECORD, MAX_PAGE, hex, secret, unhex, validate_namespace};
@@ -18,7 +19,11 @@ use crate::{Error, MAX_BLOBS_PER_RECORD, MAX_PAGE, hex, secret, unhex, validate_
 const RECORD_MAGIC: &[u8; 4] = b"DUPR";
 const BLOB_MAGIC: &[u8; 4] = b"DUPB";
 const CHECK_MAGIC: &[u8; 4] = b"DUPK";
-const PREFIX_LEN: usize = 4 + 1;
+/// Magic, format version and key tag: what every sealed file starts with.
+const PREFIX_LEN: usize = 4 + 1 + KEY_TAG_LEN;
+/// The prefix, the origin device's ID and the sealed header's length.
+const RECORD_PREFIX_LEN: usize = PREFIX_LEN + ID_LEN + 4;
+const BLOB_OVERHEAD: u64 = (PREFIX_LEN + NONCE_LEN + TAG_LEN) as u64;
 const MAX_HEADER_LEN: usize = 64 * 1024;
 const CHECK_PLAINTEXT: &[u8] = b"dupin-storage key check";
 
@@ -100,17 +105,23 @@ impl Default for Limits {
     }
 }
 
-/// A record's name: when it was stored (Unix milliseconds) and a sequence number that keeps
-/// records stored in the same millisecond in order. IDs sort oldest first.
+/// A record's stable 128-bit name. It stays the same when the record is replaced: random for
+/// [`Store::put`], derived from the owner's key for [`Store::upsert`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RecordId {
-    millis: u64,
-    seq: u32,
-}
+pub struct RecordId([u8; ID_LEN]);
 
 impl RecordId {
-    fn created_at(&self) -> SystemTime {
-        UNIX_EPOCH + Duration::from_millis(self.millis)
+    /// Reserved for the marker [`Store::clear`] writes.
+    const CLEAR_MARKER: RecordId = RecordId([0; ID_LEN]);
+
+    fn random() -> Result<Self, Error> {
+        loop {
+            let mut bytes = [0u8; ID_LEN];
+            getrandom::fill(&mut bytes).map_err(|error| Error::Io(io::Error::other(error)))?;
+            if bytes != Self::CLEAR_MARKER.0 {
+                return Ok(Self(bytes));
+            }
+        }
     }
 
     fn file_name(&self) -> String {
@@ -120,7 +131,7 @@ impl RecordId {
 
 impl fmt::Display for RecordId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:016x}{:08x}", self.millis, self.seq)
+        f.write_str(&hex(&self.0))
     }
 }
 
@@ -128,11 +139,37 @@ impl FromStr for RecordId {
     type Err = Error;
 
     fn from_str(text: &str) -> Result<Self, Error> {
-        let bytes = unhex::<12>(text).ok_or(Error::NotFound)?;
-        let (millis, seq) = bytes.split_at(8);
+        unhex::<ID_LEN>(text).map(Self).ok_or(Error::NotFound)
+    }
+}
+
+/// Where [`Store::list`] continues: the version stamp and ID of the last record a page
+/// returned. It survives that record being replaced or deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Cursor {
+    stamp: Stamp,
+    id: RecordId,
+}
+
+impl fmt::Display for Cursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:016x}{}{}", self.stamp.hlc, self.stamp.device, self.id)
+    }
+}
+
+impl FromStr for Cursor {
+    type Err = Error;
+
+    fn from_str(text: &str) -> Result<Self, Error> {
+        let bytes = unhex::<{ 8 + 2 * ID_LEN }>(text).ok_or(Error::NotFound)?;
+        let (hlc, rest) = bytes.split_at(8);
+        let (device, id) = rest.split_at(ID_LEN);
         Ok(Self {
-            millis: u64::from_be_bytes(millis.try_into().expect("8 bytes")),
-            seq: u32::from_be_bytes(seq.try_into().expect("4 bytes")),
+            stamp: Stamp {
+                hlc: u64::from_be_bytes(hlc.try_into().expect("8 bytes")),
+                device: DeviceId(device.try_into().expect("ID length")),
+            },
+            id: RecordId(id.try_into().expect("ID length")),
         })
     }
 }
@@ -194,20 +231,35 @@ pub struct Record {
     pub data: serde_json::Value,
     /// In the order they were given to `put`.
     pub blobs: Vec<BlobRef>,
+    stamp: Stamp,
+    created_at: u64,
 }
 
 impl Record {
+    /// When the record was first stored, from the wall clock. Replacing it keeps this time.
     pub fn created_at(&self) -> SystemTime {
-        self.id.created_at()
+        UNIX_EPOCH + Duration::from_millis(self.created_at)
+    }
+
+    /// The device that wrote this version.
+    pub fn device(&self) -> DeviceId {
+        self.stamp.device
+    }
+
+    fn cursor(&self) -> Cursor {
+        Cursor {
+            stamp: self.stamp,
+            id: self.id,
+        }
     }
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Page {
-    /// Newest first.
+    /// Newest version first.
     pub records: Vec<Record>,
     /// Pass as `before` to get the next page; `None` when this page reached the oldest.
-    pub next: Option<RecordId>,
+    pub next: Option<Cursor>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -227,17 +279,33 @@ pub struct OpenReport {
     orphan_blobs: usize,
     /// Records the limits removed.
     pub expired: usize,
+    /// Records sealed under a key this device doesn't hold, or in a newer format. They are
+    /// left on disk untouched and not listed.
+    pub skipped_records: usize,
 }
 
+/// A record version's sealed header. Unknown fields are ignored, so a later version can add
+/// fields without older builds taking its files for damage.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Header {
+    stamp: Stamp,
+    /// Wall-clock milliseconds when the record was first stored; age limits use it.
+    created_at: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    deleted: bool,
+    /// Only on the clear marker: every version stamped before this is cleared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    clear_before: Option<Stamp>,
     body_len: u64,
     blobs: Vec<BlobRef>,
 }
 
 #[derive(Debug)]
 struct Meta {
+    stamp: Stamp,
+    created_at: u64,
+    deleted: bool,
+    clear_before: Option<Stamp>,
     body_len: u64,
     blobs: Vec<BlobRef>,
 }
@@ -264,12 +332,15 @@ impl Paths {
     }
 }
 
-/// The root of all namespaces, usually `<data dir>/storage`. Asks its key provider once.
+/// The root of all namespaces, usually `<data dir>/storage`. Asks its key provider once, and
+/// keeps the device's state in `storage.state` beside the root.
 pub struct Storage {
     dir: PathBuf,
     keys: Box<dyn KeyProvider>,
     key: Mutex<Option<DataKey>>,
     clock: Arc<dyn Clock>,
+    hardware: Option<String>,
+    device: Mutex<Option<Arc<Device>>>,
 }
 
 impl Storage {
@@ -279,11 +350,21 @@ impl Storage {
             keys: Box::new(keys),
             key: Mutex::new(None),
             clock: Arc::new(SystemClock),
+            hardware: None,
+            device: Mutex::new(None),
         }
     }
 
     pub fn with_clock(mut self, clock: impl Clock + 'static) -> Self {
         self.clock = Arc::new(clock);
+        self
+    }
+
+    /// The machine's hardware identity (`IOPlatformUUID`, `/etc/machine-id`). When it differs
+    /// from the one the device ID was minted on, the data directory has moved to another
+    /// machine, which then gets a device ID of its own.
+    pub fn with_hardware_id(mut self, identity: &[u8]) -> Self {
+        self.hardware = Some(hardware_hash(identity));
         self
     }
 
@@ -295,6 +376,32 @@ impl Storage {
         let key = self.keys.data_key()?;
         *cached = Some(key.clone());
         Ok(key)
+    }
+
+    fn state_path(&self) -> PathBuf {
+        match self.dir.file_name() {
+            Some(name) => {
+                let mut name = name.to_owned();
+                name.push(".state");
+                self.dir.with_file_name(name)
+            }
+            // A root with no name of its own; `.state` can never be a namespace.
+            None => self.dir.join(".state"),
+        }
+    }
+
+    fn device(&self, data_key: &DataKey) -> Result<Arc<Device>, Error> {
+        let mut device = self.device.lock().unwrap_or_else(|poison| poison.into_inner());
+        if let Some(device) = &*device {
+            return Ok(device.clone());
+        }
+        let loaded = Arc::new(Device::load(
+            self.state_path(),
+            StateKeys::derive(data_key),
+            self.hardware.clone(),
+        )?);
+        *device = Some(loaded.clone());
+        Ok(loaded)
     }
 
     /// Opens a namespace, repairs what an interrupted write left behind and applies `limits`.
@@ -309,13 +416,14 @@ impl Storage {
             create_private_dir(path)?;
         }
         let lock = lock_namespace(&dir)?;
-        let keys = NamespaceKeys::derive(&self.data_key()?, namespace);
+        let data_key = self.data_key()?;
+        let keys = NamespaceKeys::derive(&data_key, KeySource::Device, namespace);
         let mut report = OpenReport {
             abandoned_writes: clear_dir(&paths.tmp)?,
             ..OpenReport::default()
         };
 
-        let mut records = BTreeMap::new();
+        let mut found = Vec::new();
         let mut unreadable = Vec::new();
         for entry in fs::read_dir(&paths.records)? {
             let path = entry?.path();
@@ -329,24 +437,33 @@ impl Storage {
                 continue;
             };
             match read_header(&keys, &path, &id) {
-                Ok(meta) => {
-                    records.insert(id, meta);
-                }
+                Ok(Some(meta)) => found.push((id, meta)),
+                Ok(None) => report.skipped_records += 1,
                 Err(Error::Corrupt(_)) => unreadable.push(path),
                 Err(error) => return Err(error),
             }
         }
 
-        verify_key(
-            &keys,
-            &dir.join(CHECK),
-            !records.is_empty(),
-            !unreadable.is_empty(),
-        )?;
+        verify_key(&keys, &dir.join(CHECK), !found.is_empty(), !unreadable.is_empty())?;
+        let device = self.device(&data_key)?;
+        if let Some(newest) = found.iter().map(|(_, meta)| meta.stamp.hlc).max() {
+            device.observe(newest)?;
+        }
 
         report.corrupt_records += unreadable.len();
         for path in unreadable {
             remove_if_exists(&path)?;
+        }
+
+        // A clear or delete that stopped part way finishes now, the cleared records before
+        // the marker and tombstones that stand for them.
+        let clear_before = found.iter().filter_map(|(_, meta)| meta.clear_before).max();
+        let (gone, live): (Vec<_>, Vec<_>) = found
+            .into_iter()
+            .partition(|(_, meta)| meta.deleted || clear_before.is_some_and(|before| meta.stamp < before));
+        let (markers, cleared): (Vec<_>, Vec<_>) = gone.into_iter().partition(|(_, meta)| meta.deleted);
+        for (id, _) in cleared.iter().chain(&markers) {
+            remove_if_exists(&paths.records.join(id.file_name()))?;
         }
 
         let mut blobs = HashMap::new();
@@ -359,37 +476,51 @@ impl Storage {
                 .and_then(|name| name.to_str())
                 .and_then(|name| name.strip_suffix(".blob"))
                 .and_then(|stem| stem.parse::<BlobHandle>().ok());
-            let overhead = (PREFIX_LEN + NONCE_LEN + TAG_LEN) as u64;
-            match (handle, entry.metadata()?.len().checked_sub(overhead)) {
-                (Some(handle), Some(len)) => {
-                    blobs.insert(handle, BlobEntry { len, refs: 0 });
-                }
-                _ => stray_blobs.push(path),
+            let Some(handle) = handle else {
+                stray_blobs.push(path);
+                continue;
+            };
+            match read_prefix(BLOB_MAGIC, &path, keys.source())? {
+                Prefix::Ours => match entry.metadata()?.len().checked_sub(BLOB_OVERHEAD) {
+                    Some(len) => {
+                        blobs.insert(handle, BlobEntry { len, refs: 0 });
+                    }
+                    None => stray_blobs.push(path),
+                },
+                Prefix::Skip => {}
+                Prefix::Damaged => stray_blobs.push(path),
             }
         }
 
-        let mut broken = Vec::new();
-        for (id, meta) in &records {
-            let intact = meta
-                .blobs
-                .iter()
-                .all(|blob| blobs.get(&blob.handle).is_some_and(|entry| entry.len == blob.len));
-            if intact {
-                for blob in &meta.blobs {
-                    blobs.get_mut(&blob.handle).expect("checked above").refs += 1;
-                }
-            } else {
-                broken.push(*id);
+        let mut state = State {
+            limits,
+            records: HashMap::new(),
+            order: BTreeSet::new(),
+            blobs,
+            total: 0,
+        };
+        for (id, meta) in live {
+            let intact = meta.blobs.iter().all(|blob| {
+                state
+                    .blobs
+                    .get(&blob.handle)
+                    .is_some_and(|entry| entry.len == blob.len)
+            });
+            if !intact {
+                report.corrupt_records += 1;
+                remove_if_exists(&paths.records.join(id.file_name()))?;
+                continue;
             }
-        }
-        report.corrupt_records += broken.len();
-        for id in broken {
-            records.remove(&id);
-            remove_if_exists(&paths.records.join(id.file_name()))?;
+            for blob in &meta.blobs {
+                state.blobs.get_mut(&blob.handle).expect("checked above").refs += 1;
+            }
+            state.insert(id, meta);
         }
 
-        blobs.retain(|handle, entry| {
-            if entry.refs == 0 {
+        // A skipped record's blobs can't be told apart from orphans, so none is removed.
+        let keep_unreferenced = report.skipped_records > 0;
+        state.blobs.retain(|handle, entry| {
+            if entry.refs == 0 && !keep_unreferenced {
                 stray_blobs.push(paths.blobs.join(handle.file_name()));
             }
             entry.refs > 0
@@ -401,25 +532,20 @@ impl Storage {
         sync_dir(&paths.records)?;
         sync_dir(&paths.blobs)?;
 
-        let total = records.values().map(|meta| meta.body_len).sum::<u64>()
-            + blobs.values().map(|entry| entry.len).sum::<u64>();
-        let last_id = records.keys().next_back().copied();
+        state.total += state.blobs.values().map(|entry| entry.len).sum::<u64>();
         let store = Store {
             namespace: namespace.to_owned(),
             paths,
             keys,
+            device,
             clock: self.clock.clone(),
-            state: Mutex::new(State {
-                limits,
-                records,
-                blobs,
-                total,
-                last_id,
-            }),
+            state: Mutex::new(state),
             report: Mutex::new(report),
             _lock: lock,
             #[cfg(test)]
             crash_before_rename: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(test)]
+            crash_after_marking: std::sync::atomic::AtomicBool::new(false),
         };
         let expired = store.sweep()?;
         store
@@ -468,7 +594,8 @@ fn clear_dir(dir: &Path) -> io::Result<usize> {
 
 /// Confirms the namespace was sealed with this key before anything is deleted as corrupt.
 /// A damaged check file is rewritten only when a record proves the key; a missing one is also
-/// written for a fresh namespace, where no record exists to contradict the key.
+/// written for a fresh namespace, where no record exists to contradict the key. A check
+/// tagged with another key is never this key's to judge or replace.
 fn verify_key(
     keys: &NamespaceKeys,
     path: &Path,
@@ -478,8 +605,14 @@ fn verify_key(
     let aad = keys.aad("check", &[]);
     match fs::read(path) {
         Ok(bytes) => {
-            let opened = parse_sealed(CHECK_MAGIC, &bytes)
-                .and_then(|(nonce, ciphertext)| keys.open(&nonce, &aad, ciphertext.to_vec()));
+            let parsed = parse_sealed(CHECK_MAGIC, &bytes);
+            if let Some((Some(source), _, _)) = parsed
+                && source != keys.source()
+            {
+                return Err(Error::WrongKey);
+            }
+            let opened =
+                parsed.and_then(|(_, nonce, ciphertext)| keys.open(&nonce, &aad, ciphertext.to_vec()));
             if opened.is_some_and(|plaintext| plaintext.as_slice() == CHECK_PLAINTEXT) {
                 return Ok(());
             }
@@ -495,7 +628,7 @@ fn verify_key(
         Err(error) => return Err(error.into()),
     }
     let (nonce, ciphertext) = keys.seal(&aad, CHECK_PLAINTEXT)?;
-    let file = framed(CHECK_MAGIC, &[&nonce, &ciphertext]);
+    let file = framed(CHECK_MAGIC, keys.source(), &[&nonce, &ciphertext]);
     let tmp = path
         .parent()
         .expect("the check file is in the namespace")
@@ -504,57 +637,110 @@ fn verify_key(
     Ok(())
 }
 
-fn framed(magic: &[u8; 4], parts: &[&[u8]]) -> Vec<u8> {
+fn framed(magic: &[u8; 4], source: KeySource, parts: &[&[u8]]) -> Vec<u8> {
     let mut out = Vec::with_capacity(PREFIX_LEN + parts.iter().map(|part| part.len()).sum::<usize>());
     out.extend_from_slice(magic);
     out.push(VERSION);
+    out.extend_from_slice(&source.tag());
     for part in parts {
         out.extend_from_slice(part);
     }
     out
 }
 
-/// The nonce and ciphertext of a single-part sealed file.
-fn parse_sealed<'a>(magic: &[u8; 4], bytes: &'a [u8]) -> Option<([u8; NONCE_LEN], &'a [u8])> {
+/// The key tag (`None` when it names no key), nonce and ciphertext of a single-part sealed
+/// file in this format.
+fn parse_sealed<'a>(
+    magic: &[u8; 4],
+    bytes: &'a [u8],
+) -> Option<(Option<KeySource>, [u8; NONCE_LEN], &'a [u8])> {
     let rest = bytes.strip_prefix(magic.as_slice())?.strip_prefix(&[VERSION])?;
+    let (tag, rest) = rest.split_at_checked(KEY_TAG_LEN)?;
     let (nonce, ciphertext) = rest.split_at_checked(NONCE_LEN)?;
-    Some((nonce.try_into().ok()?, ciphertext))
+    Some((
+        KeySource::from_tag(tag.try_into().ok()?),
+        nonce.try_into().ok()?,
+        ciphertext,
+    ))
 }
 
-/// A record file: magic, version, the sealed header's length, then the header's nonce and
-/// ciphertext, then the body's. The header lists the body length and the blobs, so opening a
-/// namespace reads only headers.
+enum Prefix {
+    /// This format, sealed under the namespace's key.
+    Ours,
+    /// A newer format, or sealed under another key: neither this build's to read nor damage.
+    Skip,
+    Damaged,
+}
+
+fn classify(magic: &[u8; 4], prefix: &[u8], source: KeySource) -> Prefix {
+    let Some(rest) = prefix.strip_prefix(magic.as_slice()) else {
+        return Prefix::Damaged;
+    };
+    match rest[0] {
+        version if version > VERSION => return Prefix::Skip,
+        VERSION => {}
+        _ => return Prefix::Damaged,
+    }
+    let tag: &[u8; KEY_TAG_LEN] = rest[1..1 + KEY_TAG_LEN].try_into().expect("prefix length");
+    match KeySource::from_tag(tag) {
+        Some(tagged) if tagged == source => Prefix::Ours,
+        Some(_) => Prefix::Skip,
+        None => Prefix::Damaged,
+    }
+}
+
+fn read_prefix(magic: &[u8; 4], path: &Path, source: KeySource) -> Result<Prefix, Error> {
+    let mut prefix = [0u8; PREFIX_LEN];
+    match File::open(path)?.read_exact(&mut prefix) {
+        Ok(()) => Ok(classify(magic, &prefix, source)),
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => Ok(Prefix::Damaged),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// A record file: the prefix with its key tag, the ID of the device that wrote the version,
+/// the sealed header's length, then the header's nonce and ciphertext, then, unless the
+/// version is a tombstone, the body's. The header holds the version stamp and lists the body
+/// length and the blobs, so opening a namespace reads only headers. The associated data names
+/// the version's identity (namespace, origin device, record ID), never its directory, so the
+/// same bytes open wherever the file is copied under its own name.
 struct RecordFile;
 
 impl RecordFile {
-    fn header_aad(keys: &NamespaceKeys, id: &RecordId) -> Vec<u8> {
-        keys.aad("record-header", &[id.to_string().as_bytes()])
+    fn header_aad(keys: &NamespaceKeys, origin: &DeviceId, id: &RecordId) -> Vec<u8> {
+        keys.aad("record-header", &[&origin.0, &id.0])
     }
 
     /// The body is bound to its own header's nonce, so headers and bodies can't be swapped.
-    fn body_aad(keys: &NamespaceKeys, id: &RecordId, header_nonce: &[u8; NONCE_LEN]) -> Vec<u8> {
-        keys.aad("record-body", &[id.to_string().as_bytes(), header_nonce])
+    fn body_aad(
+        keys: &NamespaceKeys,
+        origin: &DeviceId,
+        id: &RecordId,
+        header_nonce: &[u8; NONCE_LEN],
+    ) -> Vec<u8> {
+        keys.aad("record-body", &[&origin.0, &id.0, header_nonce])
     }
 
     fn encode(keys: &NamespaceKeys, id: &RecordId, header: &Header, body: &[u8]) -> Result<Vec<u8>, Error> {
+        let origin = header.stamp.device;
         let header_plain = secret::to_json(header)?;
-        let (header_nonce, header_ct) = keys.seal(&Self::header_aad(keys, id), &header_plain)?;
-        let (body_nonce, body_ct) = keys.seal(&Self::body_aad(keys, id, &header_nonce), body)?;
+        let (header_nonce, header_ct) = keys.seal(&Self::header_aad(keys, &origin, id), &header_plain)?;
         let header_len = u32::try_from(header_ct.len()).expect("headers are small");
-        Ok(framed(
-            RECORD_MAGIC,
-            &[
-                &header_len.to_le_bytes(),
-                &header_nonce,
-                &header_ct,
-                &body_nonce,
-                &body_ct,
-            ],
-        ))
+        let body = match header.deleted {
+            true => None,
+            false => Some(keys.seal(&Self::body_aad(keys, &origin, id, &header_nonce), body)?),
+        };
+        let header_len = header_len.to_le_bytes();
+        let mut parts: Vec<&[u8]> = vec![&origin.0, &header_len, &header_nonce, &header_ct];
+        if let Some((body_nonce, body_ct)) = &body {
+            parts.extend([body_nonce.as_slice(), body_ct]);
+        }
+        Ok(framed(RECORD_MAGIC, keys.source(), &parts))
     }
 }
 
-fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Meta, Error> {
+/// A record's header, or `None` for a file this build must leave alone.
+fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Option<Meta>, Error> {
     let corrupt = || Error::Corrupt(format!("record {id}"));
     let truncated = |error: io::Error| match error.kind() {
         io::ErrorKind::UnexpectedEof => corrupt(),
@@ -562,12 +748,19 @@ fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Meta,
     };
     let mut file = File::open(path)?;
     let file_len = file.metadata()?.len();
-    let mut prefix = [0u8; PREFIX_LEN + 4];
+    let mut prefix = [0u8; RECORD_PREFIX_LEN];
     file.read_exact(&mut prefix).map_err(truncated)?;
-    if &prefix[..4] != RECORD_MAGIC || prefix[4] != VERSION {
-        return Err(corrupt());
+    match classify(RECORD_MAGIC, &prefix, keys.source()) {
+        Prefix::Ours => {}
+        Prefix::Skip => return Ok(None),
+        Prefix::Damaged => return Err(corrupt()),
     }
-    let header_len = u32::from_le_bytes(prefix[PREFIX_LEN..].try_into().expect("4 bytes")) as usize;
+    let origin = DeviceId(
+        prefix[PREFIX_LEN..PREFIX_LEN + ID_LEN]
+            .try_into()
+            .expect("ID length"),
+    );
+    let header_len = u32::from_le_bytes(prefix[PREFIX_LEN + ID_LEN..].try_into().expect("4 bytes")) as usize;
     if header_len > MAX_HEADER_LEN {
         return Err(corrupt());
     }
@@ -576,54 +769,59 @@ fn read_header(keys: &NamespaceKeys, path: &Path, id: &RecordId) -> Result<Meta,
     let mut ciphertext = vec![0u8; header_len];
     file.read_exact(&mut ciphertext).map_err(truncated)?;
     let plain = keys
-        .open(&nonce, &RecordFile::header_aad(keys, id), ciphertext)
+        .open(&nonce, &RecordFile::header_aad(keys, &origin, id), ciphertext)
         .ok_or_else(corrupt)?;
     let header: Header = serde_json::from_slice(&plain).map_err(|_| corrupt())?;
-    let expected = (PREFIX_LEN + 4 + NONCE_LEN + header_len + NONCE_LEN + TAG_LEN) as u64 + header.body_len;
-    if file_len != expected || header.blobs.len() > MAX_BLOBS_PER_RECORD {
+    let body = if header.deleted {
+        0
+    } else {
+        (NONCE_LEN + TAG_LEN) as u64 + header.body_len
+    };
+    let expected = (RECORD_PREFIX_LEN + NONCE_LEN + header_len) as u64 + body;
+    let marker = *id == RecordId::CLEAR_MARKER;
+    let consistent = header.stamp.device == origin
+        && header.blobs.len() <= MAX_BLOBS_PER_RECORD
+        && (!header.deleted || (header.body_len == 0 && header.blobs.is_empty()))
+        && marker == header.clear_before.is_some()
+        && (!marker || header.deleted);
+    if file_len != expected || !consistent {
         return Err(corrupt());
     }
-    Ok(Meta {
+    Ok(Some(Meta {
+        stamp: header.stamp,
+        created_at: header.created_at,
+        deleted: header.deleted,
+        clear_before: header.clear_before,
         body_len: header.body_len,
         blobs: header.blobs,
-    })
+    }))
 }
 
 struct State {
     limits: Limits,
-    records: BTreeMap<RecordId, Meta>,
+    records: HashMap<RecordId, Meta>,
+    /// Every record by `(stamp, id)`: the order `list` pages in and limits evict from.
+    order: BTreeSet<(Stamp, RecordId)>,
     blobs: HashMap<BlobHandle, BlobEntry>,
     total: u64,
-    last_id: Option<RecordId>,
 }
 
 impl State {
-    /// An unused ID stamped with `now`, even when the clock has gone back since the last
-    /// record: an ID's time is the record's age, which retention relies on.
-    fn next_id(&self, now: u64) -> RecordId {
-        let mut millis = now;
-        loop {
-            let taken = self
-                .records
-                .range(
-                    ..=RecordId {
-                        millis,
-                        seq: u32::MAX,
-                    },
-                )
-                .next_back()
-                .map(|(id, _)| *id)
-                .into_iter()
-                .chain(self.last_id)
-                .filter(|id| id.millis == millis)
-                .map(|id| id.seq)
-                .max();
-            match taken.map(|seq| seq.checked_add(1)) {
-                None => return RecordId { millis, seq: 0 },
-                Some(Some(seq)) => return RecordId { millis, seq },
-                Some(None) => millis += 1,
-            }
-        }
+    fn insert(&mut self, id: RecordId, meta: Meta) {
+        self.total += meta.body_len;
+        self.order.insert((meta.stamp, id));
+        self.records.insert(id, meta);
+    }
+
+    fn forget(&mut self, id: &RecordId) -> Option<Meta> {
+        let meta = self.records.remove(id)?;
+        self.order.remove(&(meta.stamp, *id));
+        self.total -= meta.body_len;
+        Some(meta)
+    }
+
+    fn oldest(&self) -> Option<RecordId> {
+        self.order.first().map(|(_, id)| *id)
     }
 }
 
@@ -632,12 +830,15 @@ pub struct Store {
     namespace: String,
     paths: Paths,
     keys: NamespaceKeys,
+    device: Arc<Device>,
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
     report: Mutex<OpenReport>,
     _lock: File,
     #[cfg(test)]
     crash_before_rename: std::sync::atomic::AtomicBool,
+    #[cfg(test)]
+    crash_after_marking: std::sync::atomic::AtomicBool,
 }
 
 impl fmt::Debug for Store {
@@ -651,6 +852,11 @@ impl fmt::Debug for Store {
 impl Store {
     pub fn open_report(&self) -> OpenReport {
         *self.report.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    /// The device this store stamps its writes with.
+    pub fn device_id(&self) -> DeviceId {
+        self.device.id()
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -673,9 +879,25 @@ impl Store {
         }
     }
 
-    /// Seals and stores a record and its blobs. Blobs already stored in this namespace are
-    /// shared, not written again. The plaintext buffers are zeroized before this returns.
+    /// The ID [`Store::upsert`] stores `key` under in this namespace.
+    pub fn key_id(&self, key: &str) -> RecordId {
+        RecordId(self.keys.key_id(key))
+    }
+
+    /// Seals and stores a new record under a random ID. Blobs already stored in this
+    /// namespace are shared, not written again. The plaintext buffers are zeroized before
+    /// this returns.
     pub fn put(&self, record: NewRecord) -> Result<Record, Error> {
+        self.write(RecordId::random()?, record)
+    }
+
+    /// Stores `record` as the record for the owner's logical `key`, replacing the one stored
+    /// before, which keeps its creation time. The key itself is never written.
+    pub fn upsert(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
+        self.write(self.key_id(key), record)
+    }
+
+    fn write(&self, id: RecordId, record: NewRecord) -> Result<Record, Error> {
         let NewRecord { data, blobs } = record;
         let blobs: Vec<Zeroizing<Vec<u8>>> = blobs.into_iter().map(Zeroizing::new).collect();
         if blobs.len() > MAX_BLOBS_PER_RECORD {
@@ -699,18 +921,27 @@ impl Store {
             let handle = BlobHandle(self.keys.blob_handle(blob));
             let len = blob.len() as u64;
             if !state.blobs.contains_key(&handle) && !written.contains_key(&handle) {
-                let aad = self.keys.aad("blob", &[handle.to_string().as_bytes()]);
-                let (nonce, ciphertext) = self.keys.seal(&aad, blob)?;
-                Staged::write(&self.paths.tmp, &framed(BLOB_MAGIC, &[&nonce, &ciphertext]))?
-                    .commit(&self.paths.blobs.join(handle.file_name()))?;
+                let aad = self.keys.aad("blob", &[&handle.0]);
+                let (nonce, ciphertext) = self.keys.seal_blob(&handle.0, &aad, blob)?;
+                Staged::write(
+                    &self.paths.tmp,
+                    &framed(BLOB_MAGIC, self.keys.source(), &[&nonce, &ciphertext]),
+                )?
+                .commit(&self.paths.blobs.join(handle.file_name()))?;
                 written.insert(handle, len);
             }
             refs.push(BlobRef { handle, len });
         }
         drop(blobs);
 
-        let id = state.next_id(unix_millis(self.clock.now()));
+        let now = unix_millis(self.clock.now());
+        let stamp = self.device.stamp(now)?;
+        let created_at = state.records.get(&id).map_or(now, |meta| meta.created_at);
         let header = Header {
+            stamp,
+            created_at,
+            deleted: false,
+            clear_before: None,
             body_len: body.len() as u64,
             blobs: refs.clone(),
         };
@@ -734,19 +965,26 @@ impl Store {
                 .expect("written or already stored")
                 .refs += 1;
         }
-        state.total += header.body_len;
-        state.records.insert(
+        if let Some(replaced) = state.forget(&id) {
+            self.release(&mut state, replaced.blobs)?;
+        }
+        state.insert(
             id,
             Meta {
+                stamp,
+                created_at,
+                deleted: false,
+                clear_before: None,
                 body_len: header.body_len,
                 blobs: refs.clone(),
             },
         );
-        state.last_id = Some(id);
         let record = Record {
             id,
             data: serde_json::from_slice(&body)?,
             blobs: refs,
+            stamp,
+            created_at,
         };
         self.enforce(&mut state)?;
         Ok(record)
@@ -760,26 +998,26 @@ impl Store {
         self.read_record(&mut state, id).map(Some)
     }
 
-    /// Up to `limit` records (at most [`MAX_PAGE`]) older than `before`, newest first.
-    /// Records that turn out to be corrupt are dropped and skipped.
-    pub fn list(&self, before: Option<&RecordId>, limit: usize) -> Result<Page, Error> {
+    /// Up to `limit` records (at most [`MAX_PAGE`]) older than `before`, newest version
+    /// first. Records that turn out to be corrupt are dropped and skipped.
+    pub fn list(&self, before: Option<&Cursor>, limit: usize) -> Result<Page, Error> {
         let limit = limit.clamp(1, MAX_PAGE);
         let mut state = self.state();
         let mut page = Page::default();
-        let mut cursor = before.copied();
+        let mut cursor = before.map(|cursor| (cursor.stamp, cursor.id));
         loop {
-            let ids: Vec<RecordId> = match cursor {
-                Some(before) => state.records.range(..before),
-                None => state.records.range(..),
+            let keys: Vec<(Stamp, RecordId)> = match cursor {
+                Some(before) => state.order.range(..before),
+                None => state.order.range(..),
             }
             .rev()
             .take(limit - page.records.len())
-            .map(|(id, _)| *id)
+            .copied()
             .collect();
-            let Some(&oldest) = ids.last() else {
+            let Some(&oldest) = keys.last() else {
                 break;
             };
-            for id in ids {
+            for (_, id) in keys {
                 match self.read_record(&mut state, &id) {
                     Ok(record) => page.records.push(record),
                     Err(Error::Corrupt(_)) => {}
@@ -792,7 +1030,7 @@ impl Store {
             }
         }
         page.next = match page.records.last() {
-            Some(last) if state.records.range(..last.id).next().is_some() => Some(last.id),
+            Some(last) if state.order.range(..(last.stamp, last.id)).next().is_some() => Some(last.cursor()),
             _ => None,
         };
         Ok(page)
@@ -823,7 +1061,7 @@ impl Store {
 
     fn decode_blob(&self, handle: &BlobHandle, len: u64) -> Result<Zeroizing<Vec<u8>>, Error> {
         let path = self.paths.blobs.join(handle.file_name());
-        let expected = (PREFIX_LEN + NONCE_LEN + TAG_LEN) as u64 + len;
+        let expected = BLOB_OVERHEAD + len;
         let corrupt = || Error::Corrupt(format!("blob {handle}"));
         let mut file = match File::open(&path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(corrupt()),
@@ -834,28 +1072,66 @@ impl Store {
         }
         let mut bytes = Vec::with_capacity(expected as usize);
         file.read_to_end(&mut bytes)?;
-        let (nonce, ciphertext) = parse_sealed(BLOB_MAGIC, &bytes).ok_or_else(corrupt)?;
-        let aad = self.keys.aad("blob", &[handle.to_string().as_bytes()]);
+        let (source, nonce, ciphertext) = parse_sealed(BLOB_MAGIC, &bytes).ok_or_else(corrupt)?;
+        if source != Some(self.keys.source()) {
+            return Err(corrupt());
+        }
+        let aad = self.keys.aad("blob", &[&handle.0]);
         self.keys
             .open(&nonce, &aad, ciphertext.to_vec())
             .ok_or_else(corrupt)
     }
 
+    /// Writes a tombstone in the record's place, then, as this namespace doesn't sync, drops
+    /// it as soon as it is durable.
     pub fn delete(&self, id: &RecordId) -> Result<bool, Error> {
         let mut state = self.state();
-        if !state.records.contains_key(id) {
+        let Some(created_at) = state.records.get(id).map(|meta| meta.created_at) else {
             return Ok(false);
+        };
+        self.mark(id, created_at, false)?;
+        #[cfg(test)]
+        if self.crash_after_marking.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(true);
         }
         self.remove(&mut state, id)?;
         Ok(true)
     }
 
+    /// Writes a clear marker that every version stored so far is older than, deletes those
+    /// versions, then, as this namespace doesn't sync, drops the marker.
     pub fn clear(&self) -> Result<(), Error> {
         let mut state = self.state();
-        while let Some((&id, _)) = state.records.first_key_value() {
+        let now = unix_millis(self.clock.now());
+        let marker = RecordId::CLEAR_MARKER;
+        let before = self.mark(&marker, now, true)?;
+        #[cfg(test)]
+        if self.crash_after_marking.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
+        while let Some(id) = state.oldest().filter(|id| state.records[id].stamp < before) {
             self.remove(&mut state, &id)?;
         }
+        remove_if_exists(&self.paths.records.join(marker.file_name()))?;
+        sync_dir(&self.paths.records)?;
         Ok(())
+    }
+
+    /// Durably writes a tombstone, or with `clear` the clear marker, at `id`; returns its
+    /// stamp.
+    fn mark(&self, id: &RecordId, created_at: u64, clear: bool) -> Result<Stamp, Error> {
+        let stamp = self.device.stamp(unix_millis(self.clock.now()))?;
+        let header = Header {
+            stamp,
+            created_at,
+            deleted: true,
+            clear_before: clear.then_some(stamp),
+            body_len: 0,
+            blobs: Vec::new(),
+        };
+        let file = RecordFile::encode(&self.keys, id, &header, &[])?;
+        Staged::write(&self.paths.tmp, &file)?.commit(&self.paths.records.join(id.file_name()))?;
+        Ok(stamp)
     }
 
     /// Deletes records past the namespace's limits, oldest first; returns how many.
@@ -864,22 +1140,26 @@ impl Store {
         self.enforce(&mut state)
     }
 
+    /// Retention deletes files outright and never writes tombstones.
     fn enforce(&self, state: &mut State) -> Result<usize, Error> {
         let mut removed = 0;
         if let Some(max_age) = state.limits.max_age {
             let now = unix_millis(self.clock.now());
             let max_age = u64::try_from(max_age.as_millis()).unwrap_or(u64::MAX);
             let cutoff = now.saturating_sub(max_age);
-            while let Some((&oldest, _)) = state.records.first_key_value() {
-                if oldest.millis >= cutoff {
-                    break;
-                }
-                self.remove(state, &oldest)?;
+            let expired: Vec<RecordId> = state
+                .records
+                .iter()
+                .filter(|(_, meta)| meta.created_at < cutoff)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in expired {
+                self.remove(state, &id)?;
                 removed += 1;
             }
         }
         while state.records.len() > state.limits.max_entries || state.total > state.limits.max_total_bytes {
-            let Some((&oldest, _)) = state.records.first_key_value() else {
+            let Some(oldest) = state.oldest() else {
                 break;
             };
             self.remove(state, &oldest)?;
@@ -905,12 +1185,17 @@ impl Store {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(corrupt()),
             other => other?,
         };
-        let rest = bytes
-            .strip_prefix(RECORD_MAGIC.as_slice())
-            .and_then(|rest| rest.strip_prefix(&[VERSION]))
-            .ok_or_else(corrupt)?;
-        let (header_len, rest) = rest.split_at_checked(4).ok_or_else(corrupt)?;
-        let header_len = u32::from_le_bytes(header_len.try_into().expect("4 bytes")) as usize;
+        let (prefix, rest) = bytes.split_at_checked(RECORD_PREFIX_LEN).ok_or_else(corrupt)?;
+        if !matches!(classify(RECORD_MAGIC, prefix, self.keys.source()), Prefix::Ours) {
+            return Err(corrupt());
+        }
+        let origin = DeviceId(
+            prefix[PREFIX_LEN..PREFIX_LEN + ID_LEN]
+                .try_into()
+                .expect("ID length"),
+        );
+        let header_len =
+            u32::from_le_bytes(prefix[PREFIX_LEN + ID_LEN..].try_into().expect("4 bytes")) as usize;
         let (header_nonce, rest) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
         let header_nonce: [u8; NONCE_LEN] = header_nonce.try_into().expect("nonce length");
         let (header_ct, rest) = rest.split_at_checked(header_len).ok_or_else(corrupt)?;
@@ -918,12 +1203,16 @@ impl Store {
             .keys
             .open(
                 &header_nonce,
-                &RecordFile::header_aad(&self.keys, id),
+                &RecordFile::header_aad(&self.keys, &origin, id),
                 header_ct.to_vec(),
             )
             .ok_or_else(corrupt)?;
         let header: Header = serde_json::from_slice(&header_plain).map_err(|_| corrupt())?;
-        if header.body_len != meta.body_len || header.blobs != meta.blobs {
+        if header.deleted
+            || header.stamp != meta.stamp
+            || header.body_len != meta.body_len
+            || header.blobs != meta.blobs
+        {
             return Err(corrupt());
         }
         let (body_nonce, body_ct) = rest.split_at_checked(NONCE_LEN).ok_or_else(corrupt)?;
@@ -932,7 +1221,7 @@ impl Store {
             .keys
             .open(
                 &body_nonce,
-                &RecordFile::body_aad(&self.keys, id, &header_nonce),
+                &RecordFile::body_aad(&self.keys, &origin, id, &header_nonce),
                 body_ct.to_vec(),
             )
             .ok_or_else(corrupt)?;
@@ -940,18 +1229,23 @@ impl Store {
             id: *id,
             data: serde_json::from_slice(&body).map_err(|_| corrupt())?,
             blobs: header.blobs,
+            stamp: header.stamp,
+            created_at: header.created_at,
         })
     }
 
     /// Removes the record file first: a crash after that leaves only unreferenced blobs, which
     /// the next open deletes.
     fn remove(&self, state: &mut State, id: &RecordId) -> Result<(), Error> {
-        let Some(meta) = state.records.remove(id) else {
+        let Some(meta) = state.forget(id) else {
             return Ok(());
         };
-        state.total -= meta.body_len;
         remove_if_exists(&self.paths.records.join(id.file_name()))?;
-        for blob in meta.blobs {
+        self.release(state, meta.blobs)
+    }
+
+    fn release(&self, state: &mut State, blobs: Vec<BlobRef>) -> Result<(), Error> {
+        for blob in blobs {
             let Some(entry) = state.blobs.get_mut(&blob.handle) else {
                 continue;
             };
@@ -970,6 +1264,12 @@ impl Store {
         self.crash_before_rename
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
+
+    #[cfg(test)]
+    fn simulate_crash_after_marking(&self) {
+        self.crash_after_marking
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 #[cfg(test)]
@@ -977,20 +1277,33 @@ mod tests {
     use super::*;
     use crate::MemoryKey;
 
+    fn text(value: &str) -> NewRecord {
+        NewRecord {
+            data: serde_json::json!(value),
+            blobs: Vec::new(),
+        }
+    }
+
     #[test]
-    fn record_ids_sort_by_time_then_sequence_and_round_trip() {
-        let a = RecordId { millis: 5, seq: 9 };
-        let b = RecordId { millis: 6, seq: 0 };
-        assert!(a < b);
-        assert_eq!(a.to_string().parse::<RecordId>().unwrap(), a);
-        assert_eq!(a.to_string().len(), 24);
+    fn record_ids_and_cursors_round_trip() {
+        let id = RecordId::random().unwrap();
+        assert_eq!(id.to_string().parse::<RecordId>().unwrap(), id);
+        assert_eq!(id.to_string().len(), 32);
         assert!("zz".parse::<RecordId>().is_err());
+        let cursor = Cursor {
+            stamp: Stamp {
+                hlc: 0x0123_4567_89ab_cdef,
+                device: DeviceId([5; ID_LEN]),
+            },
+            id,
+        };
+        assert_eq!(cursor.to_string().parse::<Cursor>().unwrap(), cursor);
     }
 
     #[test]
     fn a_crash_between_writing_and_renaming_leaves_no_trace() {
         let dir = tempfile::tempdir().unwrap();
-        let storage = Storage::new(dir.path(), MemoryKey::random());
+        let storage = Storage::new(dir.path().join("storage"), MemoryKey::random());
         let store = storage.open("clipboard", Limits::default()).unwrap();
         let kept = store
             .put(NewRecord {
@@ -1007,11 +1320,9 @@ mod tests {
                 })
                 .is_err()
         );
-        assert_eq!(fs::read_dir(dir.path().join("clipboard/tmp")).unwrap().count(), 1);
-        assert_eq!(
-            fs::read_dir(dir.path().join("clipboard/blobs")).unwrap().count(),
-            2
-        );
+        let ns = dir.path().join("storage/clipboard");
+        assert_eq!(fs::read_dir(ns.join("tmp")).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(ns.join("blobs")).unwrap().count(), 2);
         drop(store);
 
         let store = storage.open("clipboard", Limits::default()).unwrap();
@@ -1021,11 +1332,83 @@ mod tests {
         assert_eq!(report.corrupt_records, 0);
         let page = store.list(None, 10).unwrap();
         assert_eq!(page.records, vec![kept.clone()]);
-        assert_eq!(fs::read_dir(dir.path().join("clipboard/tmp")).unwrap().count(), 0);
-        assert_eq!(
-            fs::read_dir(dir.path().join("clipboard/blobs")).unwrap().count(),
-            1
-        );
+        assert_eq!(fs::read_dir(ns.join("tmp")).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(ns.join("blobs")).unwrap().count(), 1);
         assert_eq!(&**store.read_blob(&kept.blobs[0].handle).unwrap(), b"kept blob");
+    }
+
+    #[test]
+    fn a_tombstone_left_by_a_crash_keeps_the_record_deleted_and_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().join("storage"), MemoryKey::random());
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        let gone = store
+            .put(NewRecord {
+                data: serde_json::json!("gone"),
+                blobs: vec![b"gone blob".to_vec()],
+            })
+            .unwrap();
+        let kept = store.put(text("kept")).unwrap();
+        store.simulate_crash_after_marking();
+        assert!(store.delete(&gone.id).unwrap());
+        let records = dir.path().join("storage/clipboard/records");
+        assert_eq!(
+            fs::read_dir(&records).unwrap().count(),
+            2,
+            "the tombstone is on disk"
+        );
+        drop(store);
+
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        assert_eq!(store.open_report().corrupt_records, 0);
+        assert_eq!(store.open_report().orphan_blobs, 1);
+        assert_eq!(store.list(None, 10).unwrap().records, vec![kept]);
+        assert_eq!(fs::read_dir(&records).unwrap().count(), 1);
+        assert_eq!(store.get(&gone.id).unwrap(), None);
+    }
+
+    #[test]
+    fn a_clear_marker_left_by_a_crash_finishes_the_clear() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().join("storage"), MemoryKey::random());
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        for value in ["one", "two"] {
+            store.put(text(value)).unwrap();
+        }
+        store.simulate_crash_after_marking();
+        store.clear().unwrap();
+        let records = dir.path().join("storage/clipboard/records");
+        assert!(records.join(RecordId::CLEAR_MARKER.file_name()).exists());
+        drop(store);
+
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        assert_eq!(store.usage(), Usage::default());
+        assert_eq!(fs::read_dir(&records).unwrap().count(), 0);
+        let after = store.put(text("after")).unwrap();
+        drop(store);
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        assert_eq!(store.list(None, 10).unwrap().records, vec![after]);
+    }
+
+    #[test]
+    fn one_clock_orders_writes_across_namespaces_and_restarts() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = MemoryKey::random();
+        let storage = Storage::new(dir.path().join("storage"), key.clone());
+        let first = storage
+            .open("a", Limits::default())
+            .unwrap()
+            .put(text("a"))
+            .unwrap();
+        drop(storage);
+
+        let storage = Storage::new(dir.path().join("storage"), key);
+        let store = storage.open("b", Limits::default()).unwrap();
+        let second = store.put(text("b")).unwrap();
+        assert!(second.stamp > first.stamp);
+        assert_eq!(second.device(), first.device());
+        assert_eq!(store.device_id(), first.device());
+        assert!(dir.path().join("storage.state").exists());
+        assert!(!dir.path().join("storage").join("storage.state").exists());
     }
 }
