@@ -50,6 +50,27 @@ in
           inherit lib pkgs;
           module = self.homeManagerModules.default;
         };
+        treefmt-typos-report-only =
+          pkgs.runCommand "dupin-treefmt-typos-report-only"
+            { nativeBuildInputs = [ config.treefmt.build.wrapper ]; }
+            ''
+              export HOME=$TMPDIR
+              mkdir repo
+              cd repo
+              touch flake.nix
+              cp ${root + "/typos.toml"} typos.toml
+              text='teh behaviour' # spellchecker:disable-line
+              printf '%s\n' "$text" > notes.txt
+              if treefmt --no-cache notes.txt; then
+                echo "treefmt accepted a typo instead of reporting it" >&2
+                exit 1
+              fi
+              if [ "$(cat notes.txt)" != "$text" ]; then
+                echo "typos rewrote notes.txt: $(cat notes.txt)" >&2
+                exit 1
+              fi
+              touch $out
+            '';
         renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
         # The bundled extensions against sdk/dupin.d.ts, as their authors' editors see them.
         extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''
