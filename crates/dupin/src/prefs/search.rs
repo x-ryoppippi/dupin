@@ -3,7 +3,7 @@ use rune_kit::{Kit, Switch};
 
 use super::Prefs;
 use super::controls::{
-    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button,
+    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button,
 };
 use crate::icons;
 
@@ -20,9 +20,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         clipboard_setting(s, k),
         snippet_paste_setting(s, k),
         window_management_setting(s, k),
-        extensions_setting(s, k),
     ];
-    rows.extend(extension_problems(s, k));
     rows.extend(snippet_accessibility(s, k));
     let mut body = vec![card(k, hair, rows)];
     body.extend(
@@ -197,56 +195,6 @@ fn window_management_setting(s: &Prefs, k: &Kit) -> El {
         window_management,
         s.lock_note(locked),
     )
-}
-
-fn extensions_setting(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("extensions");
-    let enabled = s.config.extensions;
-    let switch = Switch::new(enabled)
-        .label("Extensions")
-        .hide_label()
-        .disabled(locked)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
-        .build(k);
-    let folder = crate::extensions::directory()
-        .map(|path| tilde(&path.to_string_lossy()))
-        .unwrap_or_else(|| "the extensions folder".into());
-    let (loaded, _) = &s.extensions;
-    let status = if !enabled {
-        format!("Off. Extensions are third-party code; when on, extensions in {folder} answer their keywords")
-    } else if loaded.is_empty() {
-        format!("No extensions loaded from {folder}")
-    } else {
-        format!("Loaded from {folder}: {}", loaded.join(", "))
-    };
-    setting_with_lock(
-        k,
-        &icons::PUZZLE,
-        "Extensions",
-        Some(&status),
-        switch,
-        s.lock_note(locked),
-    )
-}
-
-fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {
-    let (_, problems) = &s.extensions;
-    (s.config.extensions && !problems.is_empty()).then(|| {
-        col()
-            .key("extension-problems")
-            .w_full()
-            .px(ROW_PX)
-            .py(10.0)
-            .gap(4.0)
-            .child(text("Skipped extensions").font(k.ty.ui).color(k.c.text_base))
-            .children(problems.iter().map(|problem| {
-                text(problem.clone())
-                    .font(DESCRIPTION)
-                    .color(k.c.text_muted)
-                    .wrap()
-                    .w_full()
-            }))
-    })
 }
 
 fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {

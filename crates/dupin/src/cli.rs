@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -24,6 +24,8 @@ enum Action {
     ExtNew(String, dupin_ext_sdk::Template),
     ExtBuild(String, dupin_ext_sdk::BuildOptions),
     ExtDev(String, dupin_ext_sdk::BuildOptions),
+    /// Copy a bundled extension into the extensions folder.
+    ExtEject(String),
     Mcp,
 }
 
@@ -121,6 +123,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "remove", name] if !name.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Remove(name.to_string())))
         }
+        ["ext", "eject", name] if !name.starts_with('-') => Ok(Action::ExtEject(name.to_string())),
         ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
             Ok(Action::ExtRun(folder.to_string(), query.to_string()))
@@ -396,6 +399,31 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
+        Action::ExtEject(name) => {
+            let bundled = crate::extensions::bundled::directory()
+                .ok_or("this build of Dupin has no bundled extensions")?;
+            let user = crate::extensions::directory()
+                .ok_or("couldn't find the extensions folder beside config.toml")?;
+            let copy = crate::extensions::bundled::eject(&bundled, &user, &name)?;
+            let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
+            if json {
+                return Ok(serde_json::json!({
+                    "name": name,
+                    "path": copy,
+                    "extensions": config.extensions,
+                }));
+            }
+            println!(
+                "Copied the bundled {name} to {}. It replaces the bundled one while the extensions folder is on, without the bundled grants once you change it; delete it to go back.",
+                copy.display()
+            );
+            if !config.extensions {
+                println!(
+                    "The extensions folder is off: turn it on in Settings → Extensions to use your copy."
+                );
+            }
+            Ok(Value::Null)
+        }
         Action::ExtNew(folder, template) => {
             let files = dupin_ext_sdk::scaffold(std::path::Path::new(&folder), template)?;
             let files: Vec<String> = files.iter().map(|file| file.display().to_string()).collect();
@@ -689,7 +717,7 @@ mod tests {
         for (edit, code) in [
             (
                 r#""keyword": "greeter", "capabilities": { "http": {} }"#,
-                "unsupported-capability",
+                "invalid-type",
             ),
             (r#""keyword": "greeter", "icon": "x""#, "invalid-manifest"),
         ] {
@@ -830,6 +858,11 @@ mod tests {
             );
             assert!(parse(&args(&["ext", "install", "--upload-pack=x"])).is_err());
         }
+        assert_eq!(
+            parse(&args(&["ext", "eject", "dupin", "--json"])).unwrap(),
+            Action::ExtEject("dupin".into())
+        );
+        assert!(parse(&args(&["ext", "eject"])).is_err());
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(

@@ -1,0 +1,9 @@
+{
+	"name": "dupin",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Dupin",
+		"keyword": "help"
+	}
+}

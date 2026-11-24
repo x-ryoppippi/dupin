@@ -12,6 +12,6 @@ macOS grants access to Dupin as a whole, but that never lets an extension use it
 - Dupin asks only when you turn an extension on, choose Request Access, or deliberately use something that needs a grant, never at startup, on opening Settings, on reload or while you type.
 - Turning an extension off or revoking a grant takes effect at once: work it was doing is cancelled and its results are dropped. Granting again doesn't bring them back.
 - A grant covers the exact version you approved. An update that asks for more asks you again; anything it no longer needs is dropped.
-- Extensions that ship with Dupin are on by default with their own grants in place, but still ask macOS for access on first use. A copy you change is treated like any other extension.
+- [Extensions that ship with Dupin](./extensions.md#bundled-extensions) are on by default with their own grants in place, but still ask macOS for access on first use. A copy you change, such as one `dupin ext eject` made, is treated like any other extension and loses those grants.
 
 An extension that reads calendar events needs Calendars access, and one that reads or watches the clipboard needs Dupin allowed to paste from other apps. Settings → Permissions will list those extensions beside the features that use the same access. Extensions can't use any of this yet; [Capability broker](../capability-broker.md) describes the rules.

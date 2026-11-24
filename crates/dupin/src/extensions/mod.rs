@@ -1,9 +1,11 @@
-//! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
-//! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process,
-//! or a Wasm guest. Guests get the query and return views; neither runtime gives them any host
-//! access.
+//! Extensions, each routed by one keyword: those bundled with Dupin and the user's own in
+//! `extensions/<name>/` beside config.toml. Each is a JavaScript package compiled and run by
+//! QuickJS-ng in the sandboxed extension host process, or a Wasm guest. Guests get the query
+//! and return views; neither runtime gives them any host access.
 
+pub mod bundled;
 mod manifest;
+pub mod packages;
 mod provider;
 
 use std::collections::HashMap;
@@ -13,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
+use dupin_broker::{Capabilities, Revision};
 use dupin_core::Page;
 use dupin_extension_host::{Compiled, Host};
 use dupin_js_runtime::{Diagnostic, RunError, Sources};
@@ -31,9 +34,20 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
+    /// The package's identity for its grants: a hash of its manifest and of the code the guest
+    /// was built from, so changing either is a new revision.
+    pub revision: Revision,
+    pub capabilities: Capabilities,
     guest: Guest,
     /// Numbers each Wasm request, which the guest must echo back.
     requests: AtomicU64,
+}
+
+/// Where an extension was found. A user extension with a bundled one's `name` replaces it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    Bundled,
+    User,
 }
 
 /// package.json's `dupin` key declares a JavaScript package; extension.toml a Wasm module.
@@ -254,9 +268,9 @@ struct LoadedExtension {
     entry: PathBuf,
     /// Every file the guest was built from: the Wasm module, or each JavaScript file.
     files: Vec<FileStamp>,
-    /// What a JavaScript package's bytecode was compiled from, so a revision whose files are
-    /// unchanged reuses it.
-    content: Option<blake3::Hash>,
+    /// What the guest was built from, so a JavaScript revision whose files are unchanged reuses
+    /// its bytecode.
+    content: blake3::Hash,
     extension: Arc<Extension>,
 }
 
@@ -322,6 +336,11 @@ fn load_with(
     let entry = PathBuf::from(&manifest.entry);
     let files = revision(folder, &entry)?;
     let built = build(folder, &manifest.entry, &files, previous.as_ref())?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(manifest.digest.as_bytes());
+    hasher.update(built.content.as_bytes());
+    let revision = Revision::new(format!("blake3:{}", hasher.finalize().to_hex()))
+        .map_err(|error| Diagnostic::new("host-error", error))?;
     Ok(LoadedExtension {
         manifests,
         entry,
@@ -333,6 +352,8 @@ fn load_with(
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
+            revision,
+            capabilities: manifest.capabilities,
             guest: built.guest,
             requests: AtomicU64::new(0),
         }),
@@ -341,7 +362,8 @@ fn load_with(
 
 struct Built {
     guest: Guest,
-    content: Option<blake3::Hash>,
+    /// What the guest was built from: every JavaScript file, or the Wasm module.
+    content: blake3::Hash,
 }
 
 fn build_guest(
@@ -354,7 +376,7 @@ fn build_guest(
         let sources = Sources::read(folder, entry_name)?;
         let content = content_hash(&sources);
         let unchanged = previous
-            .filter(|previous| previous.content == Some(content))
+            .filter(|previous| previous.content == content)
             .and_then(|previous| match &previous.extension.guest {
                 Guest::JavaScript(compiled) => Some(compiled.clone()),
                 Guest::Wasm(_) => None,
@@ -373,7 +395,7 @@ fn build_guest(
         };
         return Ok(Built {
             guest: Guest::JavaScript(compiled),
-            content: Some(content),
+            content,
         });
     }
     let bytes = read_capped(&files[0].path, MAX_MODULE_BYTES)
@@ -382,7 +404,7 @@ fn build_guest(
         .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))?;
     Ok(Built {
         guest: Guest::Wasm(module),
-        content: None,
+        content: blake3::hash(&bytes),
     })
 }
 
@@ -452,10 +474,20 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Scans now and after changes under `directory`, delivering changed catalogues in order.
-pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
+/// Scans now and after changes under `directory`, delivering changed catalogues in order. Only
+/// the user's folder holds packages extensions.lock pins.
+pub fn watch(
+    directory: PathBuf,
+    origin: Origin,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
     let mut scanner = Scanner {
-        integrity: crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new),
+        integrity: match origin {
+            Origin::User => {
+                crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new)
+            }
+            Origin::Bundled => None,
+        },
         ..Scanner::default()
     };
     Watch::start(
@@ -515,6 +547,8 @@ pub(crate) mod tests {
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
+            revision: Revision::new("blake3:test").unwrap(),
+            capabilities: Capabilities::default(),
             guest: Guest::Wasm(module),
             requests: AtomicU64::new(0),
         }
@@ -544,7 +578,7 @@ pub(crate) mod tests {
 
     fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
         let (updates, received) = mpsc::channel();
-        let watcher = watch(directory.to_owned(), move |catalog| {
+        let watcher = watch(directory.to_owned(), Origin::Bundled, move |catalog| {
             let _ = updates.send(catalog);
         })
         .unwrap();
@@ -649,6 +683,30 @@ pub(crate) mod tests {
         .unwrap();
         wait_for_keyword(&received, Some("edited"));
         drop(watcher);
+    }
+
+    #[test]
+    fn a_revision_covers_the_manifest_and_the_code() {
+        let fixture = folder();
+        let words = fixture.path().join("words");
+        let revision = || load_folder(&words).unwrap().revision.clone();
+        install(
+            fixture.path(),
+            "words",
+            &manifest("words", "wc"),
+            Some(&guest("{}")),
+        );
+        let first = revision();
+        assert_eq!(revision(), first);
+
+        fs::write(words.join(MANIFEST), manifest("words", "words")).unwrap();
+        let declared = revision();
+        assert_ne!(declared, first);
+
+        fs::write(words.join(MANIFEST), manifest("words", "wc")).unwrap();
+        assert_eq!(revision(), first);
+        fs::write(words.join("guest.wasm"), guest("{\"changed\":true}")).unwrap();
+        assert_ne!(revision(), first);
     }
 
     #[test]

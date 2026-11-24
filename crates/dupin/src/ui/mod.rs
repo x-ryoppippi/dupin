@@ -272,7 +272,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
-            extensions: Extensions::default(),
+            extensions: Extensions::load(),
             _apps_watcher: apps_watcher,
             clipboard,
             position: config.position,

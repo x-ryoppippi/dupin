@@ -48,7 +48,7 @@ declare module 'dupin' {
 		keyword: string;
 		/** The module that exports `search`, inside the package. Defaults to `main.js`. */
 		main?: `${string}.js` | `${string}.mjs`;
-		/** Reserved: apiVersion 1 grants no capabilities, so any entry is an error. */
+		/** The most the extension may ask for. apiVersion 1 checks and lists it but has nothing to call yet. */
 		capabilities?: v2.Capabilities;
 	}
 
@@ -71,7 +71,7 @@ declare module 'dupin' {
 	/**
 	 * Drafts of what later API versions are planned to add, from docs/design/extension-platform.md.
 	 * apiVersion 1 hosts provide none of it: the `dupin` module exports no such values, an item
-	 * with these fields is rejected, and a manifest that declares capabilities is an error.
+	 * with these fields is rejected, and declared capabilities give it nothing to call.
 	 * Shapes may change before they ship.
 	 */
 	export namespace v2 {

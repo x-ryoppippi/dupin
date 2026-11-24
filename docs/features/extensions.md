@@ -1,22 +1,44 @@
 # Extensions
 
-An extension is a folder that answers one keyword. Type its keyword and Space, then a query: Dupin hands the query to the extension and shows the rows it returns. An extension is a JavaScript module, or a WebAssembly module for the older guest interface. Extensions are third-party code, so they are off until you turn them on.
+An extension is a folder that answers one keyword. Type its keyword and Space, then a query: Dupin hands the query to the extension and shows the rows it returns. An extension is a JavaScript module, or a WebAssembly module for the older guest interface. Some extensions ship with Dupin and are on from the start; any others are third-party code, so they are off until you turn them on.
 
 ## Turning them on
 
-`extensions` turns on extensions: third-party folders in `extensions/` beside `config.toml`, each answering its own keyword. It is off by default; Settings → Search has the same switch.
+`extensions` turns on the extensions folder: third-party folders in `extensions/` beside `config.toml`, each answering its own keyword. It is off by default; **Extensions folder** in Settings → Extensions is the same switch.
 
 ```toml
 extensions = false # run extensions from the extensions folder beside config.toml
 ```
 
-Switch on **Extensions** in Settings → Search, or set this in `config.toml`:
+Switch on **Extensions folder** in Settings → Extensions, or set this in `config.toml`:
 
 ```toml
 extensions = true
 ```
 
-Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/extensions/`). Each folder in it holds one extension. Adding, editing or removing a folder, or any JavaScript file in it, applies while Dupin runs. Settings → Search lists the loaded extensions with their keywords, and every folder it skipped with the reason.
+Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/extensions/`). Each folder in it holds one extension. Adding, editing or removing a folder, or any JavaScript file in it, applies while Dupin runs. Settings → Extensions lists the loaded extensions with their keywords and a switch for each, and every folder it skipped with the reason. Turning one off is kept in `grants.toml` in Dupin's data directory (`$XDG_DATA_HOME/dupin`, else `~/Library/Application Support/Dupin`).
+
+## Bundled extensions
+
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. The first is **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website.
+
+| Where                        | What                                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Dupin.app`                  | `Contents/Resources/extensions/<name>/`, read-only and sealed by the app's code signature.                                                                                                              |
+| A build from the source tree | The repository's [`extensions/`](../../extensions), so `cargo run` and headless renders load them without packaging.                                                                                    |
+| The repository               | Each package is plain JavaScript checked with `// @ts-check` against [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts). `checks.extensions-typecheck` runs `tsc --noEmit` over `extensions/tsconfig.json` in CI. |
+
+A bundled extension is on until you turn it off in Settings → Extensions. Dupin knows it by its `name` and a hash of its `package.json` and JavaScript: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs you pick, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)).
+
+To change one, copy it into the extensions folder:
+
+```sh
+dupin ext eject dupin
+```
+
+`dupin ext eject NAME` copies the bundled package called `NAME` to `extensions/NAME` with files you can edit, and refuses if that folder exists. A package in the extensions folder with the same `name` as a bundled one replaces it while the extensions folder is on, and Settings → Extensions marks it as your copy. Once its `package.json` or JavaScript differs from the bundled one by a byte, it is a third-party package: the bundled grants no longer apply, and each capability it declares needs your consent. Deleting the folder, or turning the extensions folder off, brings back the bundled one with its grants.
+
+A user extension can't take a bundled extension's keyword, as it can't take a built-in command's: Settings lists it as skipped.
 
 ## A JavaScript extension
 
@@ -60,7 +82,7 @@ The manifest is the `dupin` key of `package.json`, so a package keeps one file f
 | `dupin.title`        | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                             |
 | `dupin.keyword`      | Required. Up to 32 bytes, no spaces.                                                                                                  |
 | `dupin.main`         | Optional. The module that exports `search`, a `.js` or `.mjs` file inside the folder, such as `dist/index.js`. Defaults to `main.js`. |
-| `dupin.capabilities` | Reserved. Dupin grants no capabilities yet, so any entry in it is an error.                                                           |
+| `dupin.capabilities` | Optional. The most the extension may ask for; see [Asking for more](#asking-for-more).                                                |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
 
@@ -86,7 +108,7 @@ There are no files, network, processes, clipboard, timers or console. Each query
 
 ### Asking for more
 
-Host services aren't connected yet. When they are, an extension will ask for them by declaring `capabilities` in the `dupin` field of its `package.json`, and Dupin will check every call against that declaration and your grants:
+An extension asks for host services by declaring `capabilities` in the `dupin` field of its `package.json`. Dupin reads the declaration when it loads the package, rejects one it can't parse, and Settings → Extensions lists each scope it asks for and whether it is granted. The services themselves aren't connected to extensions yet; once they are, Dupin will check every call against that declaration and your grants:
 
 ```json
 "capabilities": {
@@ -184,7 +206,7 @@ With `--ts`, `package.json` adds `"source": "src/main.ts"`, pins `rolldown` to a
 
 The `--ts` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and declared capabilities are checked and listed but give the extension nothing to call.
 
 ### `dupin ext build <dir> [--sourcemap]`
 
@@ -198,7 +220,7 @@ A package without `source` is plain JavaScript and needs no build; `build` only 
 
 ### `dupin ext dev <dir> [--sourcemap]`
 
-Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the JavaScript into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
+Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the JavaScript into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions folder** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
 
 `dev` refuses to replace an `extensions/<name>` that is not its own symlink, so an installed extension of the same name is safe. Stop `dev` with ⌃C; the last revision stays installed until you delete `extensions/<name>` and `extensions/.dev/<name>`.
 
@@ -233,7 +255,7 @@ Installing never runs anything from the package, and there is no package manager
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
 
-A folder source skips `.git` and its top-level `node_modules`. The package is written into a hidden folder beside the others and then renamed into place, swapping with the previous copy on an update, so a running Dupin sees the old package or the new one and never half of either. It runs once [Extensions](#turning-them-on) is on, like any other folder there.
+A folder source skips `.git` and its top-level `node_modules`. The package is written into a hidden folder beside the others and then renamed into place, swapping with the previous copy on an update, so a running Dupin sees the old package or the new one and never half of either. It runs once the [extensions folder](#turning-them-on) is on, like any other folder there.
 
 | Command                   | What it does                                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -265,7 +287,7 @@ granted = []
 
 `requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't connected yet.
 
-When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Search shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
+When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Extensions shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
 
 The lock is also how to reproduce a set of extensions: copy `extensions.lock` to another Mac and run `dupin ext sync`.
 

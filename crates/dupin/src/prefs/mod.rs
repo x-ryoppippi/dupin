@@ -5,6 +5,7 @@
 
 mod appearance;
 mod controls;
+mod extensions;
 mod general;
 mod permissions;
 mod search;
@@ -43,6 +44,7 @@ const GUTTER: f32 = 32.0;
 enum Page {
     General,
     Search,
+    Extensions,
     Appearance,
     Permissions,
     Updates,
@@ -53,6 +55,7 @@ impl Page {
         match self {
             Page::General => "General",
             Page::Search => "Search",
+            Page::Extensions => "Extensions",
             Page::Appearance => "Appearance",
             Page::Permissions => "Permissions",
             Page::Updates => "Updates",
@@ -64,6 +67,7 @@ impl Page {
         match self {
             Page::General => "page-general",
             Page::Search => "page-search",
+            Page::Extensions => "page-extensions",
             Page::Appearance => "page-appearance",
             Page::Permissions => "page-permissions",
             Page::Updates => "page-updates",
@@ -74,6 +78,7 @@ impl Page {
         match self {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
+            Page::Extensions => &icons::PUZZLE,
             Page::Appearance => &icons::SPARKLES,
             Page::Permissions => &icons::SHIELD,
             Page::Updates => &icons::REFRESH,
@@ -104,8 +109,8 @@ pub struct Prefs {
     pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
-    /// Loaded extensions as "Name (keyword)", and why others were skipped.
-    extensions: (Vec<String>, Vec<String>),
+    /// Loaded extensions, and why others were skipped.
+    extensions: (Vec<crate::extensions::packages::Listed>, Vec<String>),
 }
 
 impl Prefs {
@@ -165,8 +170,12 @@ impl Prefs {
         self.refresh_permissions();
     }
 
-    pub fn reflect_extensions(&mut self, loaded: Vec<String>, problems: Vec<String>) {
-        self.extensions = (loaded, problems);
+    pub fn reflect_extensions(
+        &mut self,
+        listed: Vec<crate::extensions::packages::Listed>,
+        problems: Vec<String>,
+    ) {
+        self.extensions = (listed, problems);
     }
 
     pub fn reflect_config(
@@ -320,6 +329,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (Some(step), _) => welcome::page(s, k, hair, step),
         (None, Page::General) => general::page(s, k, hair),
         (None, Page::Search) => search::page(s, k, hair),
+        (None, Page::Extensions) => extensions::page(s, k, hair),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Permissions) => permissions::page(s, k, hair),
         (None, Page::Updates) => updates::page(s, k, hair),
@@ -398,7 +408,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_follows()
         .gap(4.0);
     let permissions = permissions::available().then_some(Page::Permissions);
-    for page in [Page::General, Page::Search, Page::Appearance]
+    for page in [Page::General, Page::Search, Page::Extensions, Page::Appearance]
         .into_iter()
         .chain(permissions)
     {
@@ -556,29 +566,52 @@ mod tests {
     }
 
     #[test]
-    fn skipped_extension_problems_follow_the_extensions_switch() {
-        let config = Config {
-            snippet_paste: false,
-            ..Config::default()
-        };
-        let current = Rc::new(RefCell::new(config));
+    fn the_extensions_page_lists_each_extension_with_its_switch_and_problems() {
+        use crate::extensions::packages::{Kind, Listed};
+        use rune::accesskit::Role;
+
+        let current = Rc::new(RefCell::new(Config::default()));
         let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let mut state = state(current, settings, false);
-        state.reflect_extensions(Vec::new(), vec!["fixture: invalid manifest".into()]);
-        state.show(Page::Search);
+        let listed = |id: &str, title: &str, kind, enabled| Listed {
+            id: id.into(),
+            title: title.into(),
+            keyword: id.into(),
+            kind,
+            enabled,
+            scopes: Vec::new(),
+        };
+        state.reflect_extensions(
+            vec![
+                listed("dupin", "Dupin", Kind::Bundled, true),
+                listed("words", "Words", Kind::Modified, false),
+            ],
+            vec!["fixture: invalid manifest".into()],
+        );
+        state.show(Page::Extensions);
         let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
 
-        for (extensions, window_management) in [(true, false), (false, true)] {
-            runtime.update(|s, _| {
-                s.config.extensions = extensions;
-                s.config.window_management = window_management;
-            });
-            runtime.frame(0.0);
-            let shows_problems = runtime
-                .elements()
+        let keys: Vec<_> = runtime
+            .elements()
+            .iter()
+            .filter_map(|element| element.key.clone())
+            .collect();
+        for key in ["extension-dupin", "extension-words", "extension-problems"] {
+            assert!(keys.iter().any(|k| k == key), "{key}");
+        }
+        let tree = runtime.accessibility_tree();
+        for (label, on) in [("Dupin", true), ("Words", false), ("Extensions folder", false)] {
+            let (_, switch) = tree
+                .nodes
                 .iter()
-                .any(|element| element.key.as_deref() == Some("extension-problems"));
-            assert_eq!(shows_problems, extensions);
+                .find(|(_, node)| node.role() == Role::Switch && node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing switch {label}"));
+            assert_eq!(
+                switch.toggled() == Some(rune::accesskit::Toggled::True),
+                on,
+                "{label}"
+            );
         }
     }
 

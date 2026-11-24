@@ -48,6 +48,7 @@ def main [
     ^chmod -R u+w $bundle
 
     unlink-store ($bundle | path join Contents/MacOS/dupin)
+    bundle-extensions ($bundle | path join Contents/Resources/extensions)
 
     let plist = $bundle | path join Contents/Info.plist
     ^/usr/bin/plutil -replace CFBundleShortVersionString -string $release.version $plist
@@ -91,6 +92,18 @@ def main [
     }
     $feed | to json | save ($out | path join update.json)
     $feed
+}
+
+# This checkout's bundled extensions, each package folder in extensions/, in place of whatever
+# the bundle held. Their files are read-only so nothing edits them in place; folders stay
+# writable, or the updater couldn't delete the bundle it replaces.
+def bundle-extensions [target: path]: nothing -> nothing {
+    rm --recursive --force $target
+    mkdir $target
+    for package in (ls extensions | where type == dir | get name) {
+        ^cp -R $package $target
+    }
+    ^find $target -type f -exec chmod a-w '{}' +
 }
 
 # The disk image's window background, at 1x and 2x in one TIFF so Finder picks the sharp one.
