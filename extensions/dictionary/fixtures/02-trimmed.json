@@ -1,0 +1,82 @@
+{
+	"fixture": 1,
+	"description": "A query is looked up without its surrounding spaces.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"dictionary": {
+			"serendipity": [
+				{
+					"dictionary": null,
+					"groups": [
+						{
+							"note": null,
+							"partOfSpeech": "Noun",
+							"senses": [
+								{
+									"definition": "the happy accident of finding something good without looking for it",
+									"examples": ["a moment of pure serendipity."],
+									"senses": []
+								}
+							]
+						}
+					],
+					"headword": "serendipity",
+					"markdown": "### Noun\n\nthe happy accident of finding something good without looking for it: *a moment of pure serendipity\\.*\n\n\n## Origin\n\nmid 18th century\\: from Serendip\\, an old name for Sri Lanka\\, after a fairy tale whose heroes kept making such discoveries\\.",
+					"pronunciation": "ˌsɛr(ə)nˈdɪpɪti",
+					"sections": [
+						{
+							"text": "mid 18th century: from Serendip, an old name for Sri Lanka, after a fairy tale whose heroes kept making such discoveries.",
+							"title": "Origin"
+						}
+					],
+					"text": "serendipity | ˌsɛr(ə)nˈdɪpɪti | noun the happy accident of finding something good without looking for it: a moment of pure serendipity. ORIGIN mid 18th century: from Serendip, an old name for Sri Lanka, after a fairy tale whose heroes kept making such discoveries.",
+					"truncated": false
+				}
+			]
+		}
+	},
+	"steps": [
+		{
+			"query": " serendipity ",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open in Dictionary",
+								"url": "dict://serendipity"
+							},
+							{
+								"copy": "serendipity | ˌsɛr(ə)nˈdɪpɪti | noun the happy accident of finding something good without looking for it: a moment of pure serendipity. ORIGIN mid 18th century: from Serendip, an old name for Sri Lanka, after a fairy tale whose heroes kept making such discoveries.",
+								"title": "Copy Definition"
+							}
+						],
+						"detail": {
+							"markdown": "### Noun\n\nthe happy accident of finding something good without looking for it: *a moment of pure serendipity\\.*\n\n\n## Origin\n\nmid 18th century\\: from Serendip\\, an old name for Sri Lanka\\, after a fairy tale whose heroes kept making such discoveries\\.",
+							"metadata": [
+								{
+									"label": "Pronunciation",
+									"text": "ˌsɛr(ə)nˈdɪpɪti"
+								}
+							]
+						},
+						"id": "dictionary:serendipity",
+						"subtitle": "the happy accident of finding something good without looking for it",
+						"title": "serendipity"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

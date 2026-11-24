@@ -35,6 +35,13 @@ provider = "calendar.events"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 
+# The bundled Dictionary extension, under its own keyword while the native feature gives up
+# its aliases. Both look words up in the same fixed definitions.
+[features.dictionary.extension]
+extends = "native"
+settings = { dictionary_keywords = [] }
+provider = "extension.dictionary"
+
 [features.clipboard.native]
 config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"

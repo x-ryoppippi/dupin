@@ -1,0 +1,100 @@
+{
+	"fixture": 1,
+	"description": "Each entry is a row of its own, the first with the plain id. An entry without a pronunciation has no metadata, one without text offers nothing to copy, and the term is encoded in its dict:// URL.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"dictionary": {
+			"a b/#é": [
+				{
+					"dictionary": null,
+					"groups": [
+						{
+							"note": null,
+							"partOfSpeech": null,
+							"senses": [
+								{
+									"definition": "a made-up entry",
+									"examples": [],
+									"senses": []
+								}
+							]
+						}
+					],
+					"headword": "a b/#é",
+					"markdown": "a made\\-up entry",
+					"pronunciation": null,
+					"sections": [],
+					"text": "a b/#é a made-up entry",
+					"truncated": false
+				},
+				{
+					"dictionary": null,
+					"groups": [],
+					"headword": "a b/#é",
+					"markdown": "",
+					"pronunciation": null,
+					"sections": [],
+					"text": "",
+					"truncated": false
+				}
+			]
+		}
+	},
+	"steps": [
+		{
+			"query": "a b/#é",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open in Dictionary",
+								"url": "dict://a%20b%2F%23%C3%A9"
+							},
+							{
+								"copy": "a b/#é a made-up entry",
+								"title": "Copy Definition"
+							}
+						],
+						"detail": {
+							"markdown": "a made\\-up entry"
+						},
+						"id": "dictionary:a b/#é",
+						"subtitle": "a made-up entry",
+						"title": "a b/#é"
+					},
+					{
+						"actions": [
+							{
+								"title": "Open in Dictionary",
+								"url": "dict://a%20b%2F%23%C3%A9"
+							}
+						],
+						"detail": {},
+						"id": "dictionary:a b/#é#1",
+						"title": "a b/#é"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "open",
+			"expect": {
+				"effect": {
+					"url": "dict://a%20b%2F%23%C3%A9"
+				}
+			}
+		}
+	]
+}

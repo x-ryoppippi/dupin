@@ -56,7 +56,8 @@ pub struct Platform {
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service; a headless render may still declare a base beside its own config.
+/// and reaches no service of this Mac; a headless render may still declare a base beside its
+/// own config, and looks words up in fixed definitions, as the bundled Dictionary renders them.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) || rune::tooling::is_headless() {
         let base = base_path()
@@ -64,7 +65,11 @@ pub fn open(platform: Platform) -> Bridge {
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|source| Base::parse(&source).ok())
             .unwrap_or_default();
-        return Bridge::new(Broker::new(base, Local::default()), None, Services::none());
+        let mut services = Services::none();
+        if !cfg!(test) {
+            services.dictionary = fixed_dictionary();
+        }
+        return Bridge::new(Broker::new(base, Local::default()), None, services);
     }
     let services = Services {
         http: Box::new(HttpService::new(HttpConfig {
@@ -189,6 +194,14 @@ impl services::Clipboard for Pasteboard {
 }
 
 struct Dictionaries(dictionary::Dictionary<dupin_mac::DictionaryProvider>);
+
+/// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
+/// depend on the dictionaries this Mac has.
+pub(crate) fn fixed_dictionary() -> Box<dyn services::Dictionary> {
+    Box::new(Dictionaries(dictionary::Dictionary::new(
+        dupin_mac::DictionaryProvider::fixtures(),
+    )))
+}
 
 impl services::Dictionary for Dictionaries {
     fn lookup(&self, word: &str) -> Result<Value, Failure> {
