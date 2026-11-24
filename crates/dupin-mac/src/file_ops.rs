@@ -222,13 +222,9 @@ fn rename_across_parents(
     }
 
     // Moving a directory to another parent needs write access to update its `..`.
-    // Read access lets us keep a descriptor to restore the mode even if the name changes.
-    fs::set_permissions(source, fs::Permissions::from_mode(original.mode() | 0o600))?;
-    let (result, restoration) = match open_directory(source) {
-        Ok(entry) => (rename(source, destination), entry.set_permissions(original)),
-        Err(error) => (Err(error), fs::set_permissions(source, original)),
-    };
-    if let Err(error) = restoration {
+    let entry = unlock_directory(source, &metadata)?;
+    let result = rename(source, destination);
+    if let Err(error) = entry.set_permissions(original) {
         return Err(io::Error::other(match result {
             Ok(()) => format!(
                 "The folder is at “{}”, but its permissions couldn't be restored ({error}).",
@@ -240,6 +236,26 @@ fn rename_across_parents(
         }));
     }
     result
+}
+
+/// Give the owner write and search access to the folder `checked` describes, returning a
+/// descriptor to restore its mode by. Nothing here follows a link: another user who can
+/// rename entries in the parent could have put one where the folder was.
+fn unlock_directory(source: &Path, checked: &fs::Metadata) -> io::Result<fs::File> {
+    let path = CString::new(source.as_os_str().as_encoded_bytes())?;
+    let mode = (checked.permissions().mode() | 0o300) as libc::mode_t;
+    // SAFETY: The path is NUL-terminated and lives through the call.
+    if unsafe { libc::lchmod(path.as_ptr(), mode) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let entry = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_SEARCH | libc::O_NOFOLLOW)
+        .open(source)?;
+    if file_identity(&entry.metadata()?) != file_identity(checked) {
+        return Err(io::Error::other("The folder changed during the move."));
+    }
+    Ok(entry)
 }
 
 #[derive(PartialEq, Eq)]
@@ -678,6 +694,31 @@ mod tests {
         assert!(!staged.exists());
         assert_eq!(destination.metadata().unwrap().mode() & 0o7777, 0o555);
         assert_eq!(fs::read_to_string(destination.join("child")).unwrap(), "original");
+    }
+
+    #[test]
+    fn unlocking_a_read_only_folder_never_changes_what_a_link_in_its_place_names() {
+        let dir = Scratch::new("unlock-link");
+        let aside = dir.0.join("aside");
+        fs::create_dir(&aside).unwrap();
+        fs::set_permissions(&aside, fs::Permissions::from_mode(0o555)).unwrap();
+        let secret = dir.file("secret", "s");
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
+        let private = dir.0.join("private");
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let checked = aside.symlink_metadata().unwrap();
+        let folder = dir.0.join("folder");
+
+        for target in [&secret, &private] {
+            std::os::unix::fs::symlink(target, &folder).unwrap();
+            assert!(unlock_directory(&folder, &checked).is_err());
+            fs::remove_file(&folder).unwrap();
+        }
+        assert_eq!(secret.metadata().unwrap().mode() & 0o7777, 0o600);
+        assert_eq!(private.metadata().unwrap().mode() & 0o7777, 0o700);
+        assert_eq!(aside.metadata().unwrap().mode() & 0o7777, 0o555);
+        fs::set_permissions(&aside, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
