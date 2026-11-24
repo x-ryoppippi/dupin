@@ -352,7 +352,11 @@ fn keywords_and_folders_belong_to_one_package() {
 
     let sibling = fixture.installed("counter");
     std::fs::create_dir_all(&sibling).unwrap();
-    std::fs::write(sibling.join("extension.toml"), "keyword = \"wc\"\n").unwrap();
+    std::fs::write(
+        sibling.join("package.json"),
+        r#"{"name": "counter", "version": "0.1.0", "dupin": {"title": "Counter", "keyword": "wc"}}"#,
+    )
+    .unwrap();
     let error = fixture.install(&fixture.url()).unwrap_err();
     assert!(error.message.contains("counter"), "{error}");
     std::fs::remove_dir_all(&sibling).unwrap();

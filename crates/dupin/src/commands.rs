@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn extensions_get_keyword_routes_without_taking_existing_keywords() {
-        use crate::extensions::tests::{extension, module};
+        use crate::extensions::tests::extension;
 
         let config = Config {
             dictionary_keywords: vec!["define".into()],
@@ -605,7 +605,7 @@ mod tests {
             ("Second Count", "wc"),
         ]
         .into_iter()
-        .map(|(name, keyword)| Arc::new(extension(name, keyword, module("{}"))))
+        .map(|(name, keyword)| Arc::new(extension(name, keyword)))
         .collect();
         let added = add_extensions(&mut configured, &extensions);
 

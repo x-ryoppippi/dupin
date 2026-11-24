@@ -10,7 +10,6 @@ use serde_json::{Map, Value};
 use crate::Error;
 
 pub(crate) const PACKAGE_JSON: &str = "package.json";
-const WASM_MANIFEST: &str = "extension.toml";
 const DEFAULT_MAIN: &str = "main.js";
 const MAX_PACKAGE_JSON_BYTES: u64 = 64 * 1024;
 
@@ -160,15 +159,10 @@ fn valid_keyword(keyword: &str) -> bool {
         && !keyword.chars().any(|ch| ch.is_whitespace() || ch.is_control())
 }
 
-/// The keyword another folder in the extensions directory answers, from package.json or a Wasm
-/// guest's extension.toml, so an install can refuse to take it.
+/// The keyword another folder in the extensions directory answers, so an install can refuse to
+/// take it.
 pub(crate) fn keyword_of(folder: &Path) -> Option<String> {
-    if let Ok(package) = read(folder) {
-        return Some(package.keyword);
-    }
-    let source = std::fs::read_to_string(folder.join(WASM_MANIFEST)).ok()?;
-    let table: toml::Table = source.parse().ok()?;
-    table.get("keyword")?.as_str().map(str::to_owned)
+    read(folder).ok().map(|package| package.keyword)
 }
 
 #[cfg(test)]

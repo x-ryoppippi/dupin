@@ -8,9 +8,8 @@ use dupin_core::{
 };
 use dupin_js_runtime::RunError;
 use dupin_js_runtime::row::{Row, RowEffect};
-use dupin_plugin_protocol as protocol;
 
-use super::{Answer, Extension};
+use super::Extension;
 
 /// Shorter than the command's session deadline, so a slow guest ends with its own error row
 /// rather than the generic expiry.
@@ -74,27 +73,25 @@ pub fn answer(
     deadline: Instant,
     is_cancelled: impl Fn() -> bool + 'static,
 ) -> Result<Vec<Batch>, RunError> {
+    if page.is_some() {
+        return Err(super::views_unsupported());
+    }
     let exports = extension.check(deadline)?;
     let mut batches = Vec::new();
-    // Like any keyword command, `search` runs once there is something to search for, except in
-    // a view, whose filter starts empty.
-    if exports.search && (page.is_some() || !query.trim().is_empty()) {
-        match extension.query(query, page, limit, deadline, is_cancelled)? {
-            Answer::Wasm(outcome) => batches.push(Batch::from(wasm_items(outcome)?)),
-            Answer::Rows(rows) => {
-                let scored = exports.items;
-                let rows = rows.into_iter().enumerate().map(|(index, row)| {
-                    let (mut item, detail, section) = row_item(extension, row, false);
-                    if scored {
-                        item.score = Some(COMPUTED_SCORE - index as i32);
-                    }
-                    (item, detail, section)
-                });
-                batches.extend(sectioned(rows));
+    // Like any keyword command, `search` runs once there is something to search for.
+    if exports.search && !query.trim().is_empty() {
+        let scored = exports.items;
+        let rows = extension.query(query, None, limit, deadline, is_cancelled)?;
+        let rows = rows.into_iter().enumerate().map(|(index, row)| {
+            let (mut item, detail, section) = row_item(extension, row, false);
+            if scored {
+                item.score = Some(COMPUTED_SCORE - index as i32);
             }
-        }
+            (item, detail, section)
+        });
+        batches.extend(sectioned(rows));
     }
-    if exports.items && page.is_none() {
+    if exports.items {
         let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
         batches.extend(extension.catalogue(query, left)?);
     }
@@ -222,62 +219,6 @@ fn row_item(extension: &Extension, row: Row, catalogue: bool) -> (Item, Option<A
     (item, detail, section)
 }
 
-fn wasm_items(outcome: protocol::Outcome) -> Result<Vec<Item>, RunError> {
-    Ok(match outcome {
-        protocol::Outcome::Results { items, .. } => items
-            .into_iter()
-            .map(|row| item(row.id, row.view, row.actions))
-            .collect(),
-        protocol::Outcome::Detail {
-            title,
-            body,
-            actions: offered,
-        } => vec![item("detail".into(), View::Detail { title, body }, offered)],
-        protocol::Outcome::Error { message, .. } => {
-            return Err(RunError::Failed(dupin_js_runtime::Diagnostic::new(
-                "guest-error",
-                message,
-            )));
-        }
-    })
-}
-
-fn item(id: String, view: View, offered: Vec<protocol::PluginAction>) -> Item {
-    let payload = offered
-        .iter()
-        .find_map(|action| match &action.effect {
-            protocol::Effect::Copy { text } => Some(Payload::text(text.clone())),
-            _ => None,
-        })
-        .unwrap_or_default();
-    let actions: Vec<_> = offered
-        .into_iter()
-        .map(|action| {
-            let run = match action.effect {
-                protocol::Effect::Copy { text } => Action::Copy(text),
-                protocol::Effect::OpenUrl { url } => Action::OpenUrl(url),
-                protocol::Effect::Push { view, title, context } => {
-                    Action::Push(Page { view, title, context })
-                }
-            };
-            ItemAction::new(&action.id, &action.title, run)
-        })
-        .collect();
-    Item {
-        id,
-        view,
-        payload,
-        record_usage: false,
-        icon: None,
-        matched: Vec::new(),
-        completion: None,
-        score: None,
-        primary: actions.first().map(|action| action.id.clone()),
-        alternate: None,
-        actions,
-    }
-}
-
 impl Provider for ExtensionProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
         self.search_batches(request, &mut |batch| emit(batch.items))
@@ -336,7 +277,6 @@ fn capitalized(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::tests::{extension, module};
 
     fn search(provider: &ExtensionProvider, query: &str) -> Vec<Item> {
         let mut rows = Vec::new();
@@ -347,184 +287,27 @@ mod tests {
     }
 
     #[test]
-    fn guest_views_become_rows_with_only_copy_and_web_actions() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "count", "view": {"kind": "pair", "source": "two words", "result": "2 words"},
-                 "actions": [
-                    {"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}},
-                    {"id": "web", "title": "Search", "effect": {"kind": "open_url", "url": "https://example.com/?q=2"}}
-                 ]},
-                {"id": "detail", "view": {"kind": "detail", "title": "Details", "body": "Body"}, "actions": []}
-            ]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
-        assert_eq!(rows.len(), 2);
-        assert_eq!(
-            rows[0].view,
-            View::Pair {
-                source: "two words".into(),
-                result: "2 words".into()
-            }
-        );
-        assert_eq!(rows[0].primary.as_deref(), Some("copy"));
-        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
-        assert_eq!(rows[0].payload, Payload::text("2"));
-        assert_eq!(
-            rows[0].action("web"),
-            Some(&Action::OpenUrl("https://example.com/?q=2".into()))
-        );
-        assert!(!rows[0].record_usage);
-        assert_eq!(rows[1].primary, None);
-    }
-
-    fn page() -> Page {
-        Page {
+    fn a_page_never_reaches_the_guest() {
+        let provider =
+            ExtensionProvider::new(Arc::new(crate::extensions::tests::extension("Word Count", "wc")));
+        let page = Page {
             view: "stats".into(),
             title: "Statistics".into(),
-            context: Some(serde_json::json!({"text": "two words"})),
-        }
-    }
-
-    #[test]
-    fn push_effects_become_push_actions_and_views_reach_the_guest() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "count", "view": {"kind": "text", "title": "2 words", "subtitle": ""},
-                 "actions": [{"id": "stats", "title": "Statistics", "effect":
-                    {"kind": "push", "view": "stats", "title": "Statistics", "context": {"text": "two words"}}}]}
-            ]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
-        assert_eq!(rows[0].action("stats"), Some(&Action::Push(page())));
-        assert_eq!(rows[0].primary.as_deref(), Some("stats"));
-
-        let root = provider.extension.wire("q", None, 10);
-        assert_eq!((root.view, root.context), (None, None));
-        let wire = provider.extension.wire("filter", Some(&page()), 10);
-        assert_eq!(wire.query, "filter");
-        assert_eq!(wire.view.as_deref(), Some("stats"));
-        assert_eq!(wire.context, page().context);
-        assert!(wire.encode().is_ok());
-    }
-
-    #[test]
-    fn a_detail_answer_to_a_view_is_one_detail_row_and_is_refused_outside_one() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "detail", "title": "Statistics", "body": "2 words\n9 characters",
-                "actions": [{"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}}]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
+            context: None,
+        };
         let mut rows = Vec::new();
         provider
-            .search(&Request::detached_page("", page(), 10), &mut |batch| {
+            .search(&Request::detached_page("", page, 10), &mut |batch| {
                 rows.extend(batch)
             })
             .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].view,
-            View::Detail {
-                title: "Statistics".into(),
-                body: "2 words\n9 characters".into()
-            }
-        );
-        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
         assert_eq!(
             rows[0].view,
             View::Text {
                 title: "Word Count failed".into(),
-                subtitle: "Plugin protocol: invalid field: outcome".into()
+                subtitle: "Extensions can't open views yet".into(),
             }
         );
-    }
-
-    #[test]
-    fn traps_and_invalid_responses_become_a_visible_error_row() {
-        let trapping = dupin_plugin_runtime::GuestModule::load(
-            &wat::parse_str(
-                r#"(module
-                (memory (export "memory") 8)
-                (global $next (mut i32) (i32.const 1024))
-                (func (export "dupin_abi_version") (result i32) i32.const 1)
-                (func (export "dupin_alloc") (param i32) (result i32)
-                    global.get $next global.get $next local.get 0 i32.add global.set $next)
-                (func (export "dupin_query") (param i32 i32 i32 i32) (result i32) unreachable))"#,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let looping = dupin_plugin_runtime::GuestModule::load(
-            &wat::parse_str(
-                r#"(module
-                (memory (export "memory") 8)
-                (global $next (mut i32) (i32.const 1024))
-                (func (export "dupin_abi_version") (result i32) i32.const 1)
-                (func (export "dupin_alloc") (param i32) (result i32)
-                    global.get $next global.get $next local.get 0 i32.add global.set $next)
-                (func (export "dupin_query") (param i32 i32 i32 i32) (result i32) (loop br 0) i32.const 0))"#,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let file_url = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "x", "view": {"kind": "text", "title": "x", "subtitle": ""},
-                 "actions": [{"id": "open", "title": "Open", "effect": {"kind": "open_url", "url": "file:///"}}]}
-            ]}
-        });
-        let guest_error = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "error", "code": "invalid_query", "message": "Type some words"}
-        });
-        for (guest, subtitle) in [
-            (trapping, "Plugin execution trapped"),
-            (
-                module(&file_url.to_string()),
-                "Plugin protocol: invalid field: effect.url",
-            ),
-            (module(&guest_error.to_string()), "Type some words"),
-        ] {
-            let provider = ExtensionProvider::new(Arc::new(extension("Word Count", "wc", guest)));
-            let rows = search(&provider, "query");
-            assert_eq!(rows.len(), 1);
-            assert_eq!(
-                rows[0].view,
-                View::Text {
-                    title: "Word Count failed".into(),
-                    subtitle: subtitle.into(),
-                }
-            );
-            assert!(rows[0].actions.is_empty());
-        }
-        // Fuel or the deadline ends it first, depending on how fast this build runs.
-        let provider = ExtensionProvider::new(Arc::new(extension("Word Count", "wc", looping)));
-        let rows = search(&provider, "query");
-        assert_eq!(rows[0].display_title(), "Word Count failed");
     }
 
     fn javascript(source: &str) -> (tempfile::TempDir, ExtensionProvider) {
@@ -540,15 +323,12 @@ mod tests {
     }
 
     #[test]
-    fn the_javascript_word_counter_answers_like_the_wasm_one() {
+    fn the_word_counter_counts_words_and_copies_the_count() {
         dupin_extension_host::skip_inside_a_sandbox!();
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
-        assert_eq!(
-            (extension.runtime(), extension.keyword.as_str()),
-            ("javascript", "wc")
-        );
+        assert_eq!(extension.keyword, "wc");
         let rows = search(&ExtensionProvider::new(extension), "two words");
         assert_eq!(rows.len(), 1);
         assert_eq!(

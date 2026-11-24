@@ -53,6 +53,15 @@ impl std::fmt::Debug for Compiled {
 }
 
 impl Compiled {
+    /// A package with no bytecode, for tests that route or list extensions without running one.
+    #[cfg(feature = "testing")]
+    pub fn empty() -> Self {
+        Self {
+            entry: dupin_js_runtime::DEFAULT_ENTRY.into(),
+            modules: Arc::from([]),
+        }
+    }
+
     /// The module the package's calls start from, as diagnostics name it.
     pub fn entry(&self) -> &str {
         &self.entry

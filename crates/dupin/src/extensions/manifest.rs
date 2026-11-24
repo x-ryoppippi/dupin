@@ -1,19 +1,18 @@
-//! What an extension folder declares, read without running guest code: the `dupin` key of
-//! package.json for a JavaScript package, or extension.toml for a Wasm module.
+//! What an extension folder declares, read without running guest code: the `dupin` key of its
+//! package.json.
 
 use std::path::{Component, Path};
 
 use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
-use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::{FileStamp, read_capped};
 
 pub const PACKAGE_JSON: &str = "package.json";
+/// The manifest of the Wasm extensions Dupin no longer runs, read only to say so.
 pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
-const MAX_WASM_MANIFEST_BYTES: usize = 16 * 1024;
 const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch` and `capabilities`";
 const DEFAULT_SEARCH_HINT: &str =
     "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
@@ -25,7 +24,7 @@ pub(super) struct Manifest {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// Relative to the folder: a JavaScript or TypeScript module, or a .wasm module.
+    /// Relative to the folder: a JavaScript or TypeScript module.
     pub entry: String,
     /// The package's `items()` catalogue also answers the default search.
     pub default_search: bool,
@@ -36,7 +35,7 @@ pub(super) struct Manifest {
 #[derive(PartialEq, Eq)]
 pub(super) struct Stamps {
     package: Option<FileStamp>,
-    wasm: Option<FileStamp>,
+    wasm_leftover: bool,
 }
 
 impl Stamps {
@@ -55,57 +54,50 @@ impl Stamps {
         };
         Ok(Self {
             package: stamp(PACKAGE_JSON)?,
-            wasm: stamp(WASM_MANIFEST)?,
+            wasm_leftover: folder.join(WASM_MANIFEST).exists(),
         })
     }
 }
 
-/// A package.json with a `dupin` key makes a JavaScript extension; otherwise extension.toml
-/// makes a Wasm one. Beside extension.toml, package.json may belong only to the author's
-/// tooling, so there it counts only when it parses and holds a non-null `dupin` key.
+/// A package.json with a `dupin` key makes an extension. A folder that holds a Wasm guest's
+/// extension.toml and no such key is told that Wasm extensions are gone, not that package.json
+/// is missing, since a folder of that shape once loaded. A package.json that can't be read is
+/// reported before that: it may be the port in progress, and its own error locates the fix.
 pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
-    match stamps {
-        Stamps {
-            package,
-            wasm: Some(wasm),
-        } => {
-            let declares_dupin = package.as_ref().is_some_and(|package| {
-                parse_package(&package.path)
-                    .is_ok_and(|package| package.get("dupin").is_some_and(|dupin| !dupin.is_null()))
-            });
-            if declares_dupin {
-                return Err(Diagnostic::new(
-                    "ambiguous-manifest",
-                    "sits beside a package.json with a `dupin` key",
-                )
-                .file(WASM_MANIFEST)
-                .hint("Delete extension.toml: package.json's `dupin` key already describes this JavaScript extension."));
-            }
-            wasm_manifest(&wasm.path)
-        }
-        Stamps {
-            package: Some(package),
-            wasm: None,
-        } => {
-            let package = parse_package(&package.path)?;
-            match package.get("dupin") {
-                Some(dupin) => javascript(&package, dupin),
-                None => Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
-                    .file(PACKAGE_JSON)
-                    .field("dupin")
-                    .hint(format!(
-                        "Add a `dupin` key holding {DUPIN_KEYS} to make the folder a Dupin extension."
-                    ))),
-            }
-        }
-        Stamps {
-            package: None,
-            wasm: None,
-        } => Err(Diagnostic::new("missing-manifest", "is missing")
+    let package = stamps
+        .package
+        .as_ref()
+        .map(|package| parse_package(&package.path))
+        .transpose()?;
+    let declares_dupin = package
+        .as_ref()
+        .and_then(|package| package.get("dupin"))
+        .is_some_and(|dupin| !dupin.is_null());
+    if stamps.wasm_leftover && !declares_dupin {
+        return Err(Diagnostic::new(
+            "wasm-removed",
+            "Wasm extensions were removed; port to JavaScript",
+        )
+        .file(WASM_MANIFEST)
+        .hint(format!(
+            "Describe the extension in package.json, with `name`, `version` and a `dupin` key holding {DUPIN_KEYS}, export `search` from main.js and delete extension.toml. `dupin ext new` writes a starting point."
+        )));
+    }
+    let Some(package) = package else {
+        return Err(Diagnostic::new("missing-manifest", "is missing")
             .file(PACKAGE_JSON)
             .hint(
                 "Create package.json with `name`, `version` and a `dupin` key holding `title` and `keyword`.",
-            )),
+            ));
+    };
+    match package.get("dupin") {
+        Some(dupin) => javascript(&package, dupin),
+        None => Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
+            .file(PACKAGE_JSON)
+            .field("dupin")
+            .hint(format!(
+                "Add a `dupin` key holding {DUPIN_KEYS} to make the folder a Dupin extension."
+            ))),
     }
 }
 
@@ -181,14 +173,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
             }
         },
     };
-    let fields = Fields {
-        file: PACKAGE_JSON,
-        id: "name",
-        name: "dupin.title",
-        version: "version",
-        keyword: "dupin.keyword",
-    };
-    fields.validate(&manifest)?;
+    validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
         .filter(|entry| is_module(entry))
         .ok_or_else(|| {
@@ -233,70 +218,6 @@ fn check_capabilities(capabilities: &Value) -> Result<(), Diagnostic> {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WasmManifest {
-    id: String,
-    name: String,
-    version: String,
-    keyword: String,
-    entry: Option<String>,
-}
-
-fn wasm_manifest(path: &Path) -> Result<Manifest, Diagnostic> {
-    let source = read_capped(path, MAX_WASM_MANIFEST_BYTES)
-        .map_err(|error| Diagnostic::new("invalid-manifest", error).file(WASM_MANIFEST))?;
-    let source = std::str::from_utf8(&source).map_err(|_| {
-        Diagnostic::new("invalid-manifest", "is not UTF-8")
-            .file(WASM_MANIFEST)
-            .hint("Save extension.toml as UTF-8.")
-    })?;
-    let manifest: WasmManifest = toml::from_str(source).map_err(|error| toml_problem(source, &error))?;
-    let not_wasm = || {
-        Diagnostic::new(
-            "invalid-manifest",
-            "must be a relative path to a .wasm file inside the folder",
-        )
-        .file(WASM_MANIFEST)
-        .field("entry")
-        .hint("extension.toml describes Wasm modules only; describe a JavaScript extension with a `dupin` key in package.json.")
-    };
-    let entry = manifest.entry.ok_or_else(not_wasm)?;
-    let manifest = Manifest {
-        id: manifest.id,
-        name: manifest.name,
-        version: manifest.version,
-        keyword: manifest.keyword,
-        entry,
-        default_search: false,
-    };
-    let fields = Fields {
-        file: WASM_MANIFEST,
-        id: "id",
-        name: "name",
-        version: "version",
-        keyword: "keyword",
-    };
-    fields.validate(&manifest)?;
-    let entry = relative_inside(&manifest.entry)
-        .filter(|entry| super::is_wasm(Path::new(entry)))
-        .ok_or_else(not_wasm)?;
-    Ok(Manifest { entry, ..manifest })
-}
-
-fn toml_problem(source: &str, error: &toml::de::Error) -> Diagnostic {
-    let mut diagnostic = Diagnostic::new("invalid-manifest", error.message().trim_end())
-        .file(WASM_MANIFEST)
-        .hint("extension.toml takes `id`, `name`, `version`, `keyword` and `entry`, all strings.");
-    if let Some(span) = error.span() {
-        let before = &source[..span.start.min(source.len())];
-        let line = before.matches('\n').count() + 1;
-        let column = before.rsplit('\n').next().unwrap_or_default().chars().count() + 1;
-        diagnostic = diagnostic.at(line as u32, column as u32);
-    }
-    diagnostic
-}
-
 /// `path` spelt as the folder-relative file name the loaders compare entries with, or `None`
 /// when it could lead outside the folder.
 fn relative_inside(path: &str) -> Option<String> {
@@ -317,61 +238,50 @@ const VERSION_HINT: &str = "Use a version such as `0.1.0`.";
 const KEYWORD_HINT: &str = "Use a short word such as `wc`.";
 const MAIN_HINT: &str = "Leave `main` out to use main.js.";
 
-/// Where each shared value lives in one manifest format, for its diagnostics.
-struct Fields {
-    file: &'static str,
-    id: &'static str,
-    name: &'static str,
-    version: &'static str,
-    keyword: &'static str,
-}
-
-impl Fields {
-    fn validate(&self, manifest: &Manifest) -> Result<(), Diagnostic> {
-        let invalid = |field: &str, message: &str, hint: &str| {
-            Diagnostic::new("invalid-manifest", message)
-                .file(self.file)
-                .field(field)
-                .hint(hint)
-        };
-        let id = &manifest.id;
-        if id.is_empty()
-            || id.len() > 64
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        {
-            return Err(invalid(
-                self.id,
-                "must be 1–64 lowercase letters, digits or hyphens",
-                ID_HINT,
-            ));
-        }
-        let name = &manifest.name;
-        if name.trim().is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
-            return Err(invalid(
-                self.name,
-                "must be 1–80 printable characters",
-                TITLE_HINT,
-            ));
-        }
-        let unspaced = |value: &str| !value.chars().any(|ch| ch.is_whitespace() || ch.is_control());
-        if manifest.version.is_empty() || manifest.version.len() > 32 || !unspaced(&manifest.version) {
-            return Err(invalid(
-                self.version,
-                "must be 1–32 characters without spaces",
-                VERSION_HINT,
-            ));
-        }
-        if manifest.keyword.is_empty() || manifest.keyword.len() > 32 || !unspaced(&manifest.keyword) {
-            return Err(invalid(
-                self.keyword,
-                "must be 1–32 bytes without spaces",
-                KEYWORD_HINT,
-            ));
-        }
-        Ok(())
+fn validate(manifest: &Manifest) -> Result<(), Diagnostic> {
+    let invalid = |field: &str, message: &str, hint: &str| {
+        Diagnostic::new("invalid-manifest", message)
+            .file(PACKAGE_JSON)
+            .field(field)
+            .hint(hint)
+    };
+    let id = &manifest.id;
+    if id.is_empty()
+        || id.len() > 64
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        return Err(invalid(
+            "name",
+            "must be 1–64 lowercase letters, digits or hyphens",
+            ID_HINT,
+        ));
     }
+    let name = &manifest.name;
+    if name.trim().is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
+        return Err(invalid(
+            "dupin.title",
+            "must be 1–80 printable characters",
+            TITLE_HINT,
+        ));
+    }
+    let unspaced = |value: &str| !value.chars().any(|ch| ch.is_whitespace() || ch.is_control());
+    if manifest.version.is_empty() || manifest.version.len() > 32 || !unspaced(&manifest.version) {
+        return Err(invalid(
+            "version",
+            "must be 1–32 characters without spaces",
+            VERSION_HINT,
+        ));
+    }
+    if manifest.keyword.is_empty() || manifest.keyword.len() > 32 || !unspaced(&manifest.keyword) {
+        return Err(invalid(
+            "dupin.keyword",
+            "must be 1–32 bytes without spaces",
+            KEYWORD_HINT,
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -538,36 +448,61 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_decides_its_runtime_unambiguously() {
-        let wasm = read_folder(&[(WASM_MANIFEST, WASM)]).unwrap();
-        assert_eq!(wasm.entry, "guest.wasm");
-        let oversized = format!(
-            r#"{{"name": "tooling", "x": "{}"}}"#,
-            " ".repeat(MAX_PACKAGE_JSON_BYTES)
-        );
-        for tooling in [
-            r#"{"name": "tooling"}"#,
-            r#"{ "name": "tooling", }"#,
-            "[]",
-            r#"{"name": "tooling", "dupin": null}"#,
-            &oversized,
+    fn a_leftover_wasm_manifest_says_wasm_was_removed() {
+        for package in [
+            None,
+            Some(r#"{"name": "tooling"}"#),
+            Some(r#"{"name": "tooling", "dupin": null}"#),
         ] {
-            let wasm = read_folder(&[(PACKAGE_JSON, tooling), (WASM_MANIFEST, WASM)])
-                .unwrap_or_else(|diagnostic| panic!("{tooling:.40}: {diagnostic}"));
-            assert_eq!(wasm.entry, "guest.wasm");
+            let mut files = vec![(WASM_MANIFEST, WASM)];
+            files.extend(package.map(|package| (PACKAGE_JSON, package)));
+            let removed = problem(&files);
+            assert_eq!(
+                (removed.code.as_ref(), removed.file.as_deref()),
+                ("wasm-removed", Some(WASM_MANIFEST)),
+                "{package:.40?}"
+            );
+            assert_eq!(
+                removed.to_string(),
+                "extension.toml: Wasm extensions were removed; port to JavaScript"
+            );
+            assert!(removed.hint.as_deref().unwrap().contains("package.json"));
         }
-        let dotted = read_folder(&[(WASM_MANIFEST, &WASM.replace("guest.wasm", "./guest.wasm"))]).unwrap();
-        assert_eq!(dotted.entry, "guest.wasm");
 
-        let both = problem(&[
+        let ported = read_folder(&[
             (PACKAGE_JSON, &package(r#"{"title": "W", "keyword": "wc"}"#)),
             (WASM_MANIFEST, WASM),
-        ]);
-        assert_eq!(
-            (both.code.as_ref(), both.file.as_deref()),
-            ("ambiguous-manifest", Some(WASM_MANIFEST))
-        );
+        ])
+        .unwrap();
+        assert_eq!(ported.entry, "main.js");
+    }
 
+    #[test]
+    fn a_broken_package_json_beside_a_leftover_wasm_manifest_reports_itself() {
+        let oversized = format!(
+            r#"{{"name": "w", "dupin": {{}}, "x": "{}"}}"#,
+            " ".repeat(MAX_PACKAGE_JSON_BYTES)
+        );
+        for (package, message) in [
+            (
+                r#"{"name": "w", "dupin": {"title": "W", "keyword": "wc"},}"#,
+                "trailing comma",
+            ),
+            ("[]", "must be a JSON object"),
+            (oversized.as_str(), "larger than 64 KiB"),
+        ] {
+            let broken = problem(&[(WASM_MANIFEST, WASM), (PACKAGE_JSON, package)]);
+            assert_eq!(
+                (broken.code.as_ref(), broken.file.as_deref()),
+                ("invalid-manifest", Some(PACKAGE_JSON)),
+                "{package:.40?}"
+            );
+            assert!(broken.message.contains(message), "{broken}");
+        }
+    }
+
+    #[test]
+    fn a_folder_without_a_dupin_package_is_not_an_extension() {
         let plain = problem(&[(PACKAGE_JSON, r#"{"name": "plain", "version": "1.0.0"}"#)]);
         assert_eq!(
             (plain.code.as_ref(), plain.file.as_deref(), plain.field.as_deref()),
@@ -578,19 +513,5 @@ mod tests {
             (empty.code.as_ref(), empty.file.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON))
         );
-
-        for toml in [
-            WASM.replace("entry = \"guest.wasm\"\n", ""),
-            WASM.replace("guest.wasm", "main.js"),
-            WASM.replace("guest.wasm", "../guest.wasm"),
-        ] {
-            let javascript = problem(&[(WASM_MANIFEST, &toml)]);
-            assert_eq!(
-                (javascript.code.as_ref(), javascript.field.as_deref()),
-                ("invalid-manifest", Some("entry")),
-                "{toml}"
-            );
-            assert!(javascript.hint.as_deref().unwrap().contains("package.json"));
-        }
     }
 }

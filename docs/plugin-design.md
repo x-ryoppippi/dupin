@@ -1,6 +1,6 @@
 # Plugin design proposal
 
-Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96.
+Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96. The [extension platform design](./design/extension-platform.md) supersedes its runtime choice: guests are JavaScript in a sandboxed extension host, and the Wasm runtime this proposal started from has been removed.
 
 ## Product boundary
 

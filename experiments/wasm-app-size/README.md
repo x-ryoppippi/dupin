@@ -1,5 +1,7 @@
 # App-level Wasm size experiment
 
+> **Historical.** Dupin no longer links wasmi: it was removed with the Wasm guest path once JavaScript extensions ran in the sandboxed extension host ([rollout](../../docs/design/extension-platform.md#rollout)). The script measures pinned revisions, so it still runs, but its results describe a runtime Dupin no longer ships.
+
 This measures a pinned Dupin revision, not the current working tree. It applies a
 measurement-only patch to disposable `git archive` snapshots and leaves the app's
 normal startup, permissions and local configuration untouched.
