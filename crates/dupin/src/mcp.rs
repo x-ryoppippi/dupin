@@ -1,10 +1,13 @@
 //! `dupin mcp`: the Model Context Protocol over stdio, one JSON-RPC message per line. Each tool
 //! is a client of the same local control socket as the `dupin` commands, or reads configuration
-//! as the launcher does; none writes configuration, runs a script or opens a file.
+//! as the launcher does; none writes configuration, runs a script or opens a file. With
+//! `--workspace`, the extension tools check, run, test and render packages inside that folder
+//! offline, with fixture replies only, and never write to it.
 use crate::control::{self, Command};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 /// Newest first; an unknown requested version is answered with the newest.
@@ -12,7 +15,9 @@ const VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-
 const MAX_MESSAGE: usize = control::MAX_FRAME;
 const MAX_CONFIG: usize = 64 * 1024;
 const INSTRUCTIONS: &str = "Dupin is a macOS launcher. These tools read and validate its config.toml and show its panel; \
-     open_panel and pick need the launcher running. They never write configuration, run scripts or open files.";
+     open_panel and pick need the launcher running. They never write configuration, run scripts or open files. \
+     Started with --workspace, ext_check, ext_run, ext_test and ext_snap check, run, replay the fixtures of and render \
+     extension packages in that folder, offline and without writing to it.";
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
@@ -23,11 +28,20 @@ const INVALID_PARAMS: i64 = -32602;
 pub trait Host: Sync {
     fn control(&self, command: Command, cancel: &Cancel) -> Result<Value, String>;
     fn config_file(&self) -> Result<Value, String>;
+    /// The folder, canonical, whose extension packages the extension tools may use.
+    fn workspace(&self) -> Option<&Path> {
+        None
+    }
 }
 
 /// The running launcher, reached through its control socket.
-struct Local;
+struct Local {
+    workspace: Option<PathBuf>,
+}
 impl Host for Local {
+    fn workspace(&self) -> Option<&Path> {
+        self.workspace.as_deref()
+    }
     fn control(&self, command: Command, cancel: &Cancel) -> Result<Value, String> {
         let pending = control::send(command)?;
         cancel.on_cancel(pending.abort_handle()?);
@@ -72,8 +86,18 @@ fn config_files(paths: &crate::settings::Paths) -> Result<Value, String> {
     }))
 }
 
-pub fn run() -> io::Result<()> {
-    serve(io::stdin().lock(), &mut io::stdout(), &Local)
+pub fn run(workspace: Option<PathBuf>) -> io::Result<()> {
+    let workspace = match workspace {
+        Some(folder) => {
+            let canonical = folder.canonicalize()?;
+            if !canonical.is_dir() {
+                return Err(io::Error::other(format!("{} is not a folder", folder.display())));
+            }
+            Some(canonical)
+        }
+        None => None,
+    };
+    serve(io::stdin().lock(), &mut io::stdout(), &Local { workspace })
 }
 
 /// Aborts a tool call's launcher command, when the client cancels the call or goes away.
@@ -107,6 +131,10 @@ impl Cancel {
             abort();
         }
     }
+    /// Whether the call was aborted, for work that polls instead of registering an abort.
+    fn is_aborted(&self) -> bool {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).aborted
+    }
     /// A call the client cancelled gets no response, as MCP asks.
     fn by_client(&self) -> bool {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).by_client
@@ -131,7 +159,7 @@ pub fn serve(mut input: impl BufRead, output: &mut (impl Write + Send), host: &i
             };
             let reply = match message.and_then(classify) {
                 Ok(Message::Request { id, method, params }) if method == "tools/call" => {
-                    match tool_call(params) {
+                    match tool_call(params, host.workspace().is_some()) {
                         Ok((name, arguments)) => {
                             let key = id.to_string();
                             let cancel = Cancel::default();
@@ -154,7 +182,7 @@ pub fn serve(mut input: impl BufRead, output: &mut (impl Write + Send), host: &i
                         Err(message) => Some(error(id, INVALID_PARAMS, &message)),
                     }
                 }
-                Ok(Message::Request { id, method, params }) => Some(match respond(&method, &params) {
+                Ok(Message::Request { id, method, params }) => Some(match respond(&method, &params, host) {
                     Ok(result) => success(id, result),
                     Err((code, message)) => error(id, code, &message),
                 }),
@@ -292,7 +320,7 @@ fn classify(message: Value) -> Result<Message, Value> {
     })
 }
 
-fn respond(method: &str, params: &Map<String, Value>) -> Result<Value, (i64, String)> {
+fn respond(method: &str, params: &Map<String, Value>, host: &impl Host) -> Result<Value, (i64, String)> {
     match method {
         "initialize" => {
             let requested = params.get("protocolVersion").and_then(Value::as_str);
@@ -312,18 +340,21 @@ fn respond(method: &str, params: &Map<String, Value>) -> Result<Value, (i64, Str
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tools()})),
+        "tools/list" => Ok(json!({"tools": tools(host.workspace().is_some())})),
         _ => Err((METHOD_NOT_FOUND, format!("method not found: {method}"))),
     }
 }
 
 /// The tool a call names and its arguments. Arguments that a known tool rejects are its own
 /// error result, so a model can correct them; an unknown tool is a protocol error.
-fn tool_call(mut params: Map<String, Value>) -> Result<(String, Map<String, Value>), String> {
+fn tool_call(
+    mut params: Map<String, Value>,
+    workspace: bool,
+) -> Result<(String, Map<String, Value>), String> {
     let Some(Value::String(name)) = params.remove("name") else {
         return Err("name must be a string".into());
     };
-    if !tools().iter().any(|tool| tool["name"] == name.as_str()) {
+    if !tools(workspace).iter().any(|tool| tool["name"] == name.as_str()) {
         return Err(format!("unknown tool: {name}"));
     }
     match params.remove("arguments") {
@@ -333,10 +364,10 @@ fn tool_call(mut params: Map<String, Value>) -> Result<(String, Map<String, Valu
     }
 }
 
-fn tools() -> Vec<Value> {
+fn tools(workspace: bool) -> Vec<Value> {
     let none = json!({"type": "object", "properties": {}, "additionalProperties": false});
     let read_only = json!({"readOnlyHint": true, "openWorldHint": false});
-    vec![
+    let mut tools = vec![
         json!({
             "name": "read_config",
             "title": "Read configuration",
@@ -386,7 +417,158 @@ fn tools() -> Vec<Value> {
             },
             "annotations": {"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
         }),
+    ];
+    if workspace {
+        tools.extend(extension_tools(&read_only));
+    }
+    tools
+}
+
+fn extension_tools(read_only: &Value) -> [Value; 4] {
+    let package = json!({"type": "string", "description": "The package's folder, relative to the workspace, such as `word-count`."});
+    let schema = |properties: Value, required: &[&str]| json!({"type": "object", "properties": properties, "required": required, "additionalProperties": false});
+    [
+        json!({
+            "name": "ext_check",
+            "title": "Check an extension",
+            "description": "Load a prebuilt extension package as the launcher does, compile it in the sandboxed extension host and confirm it exports `search`. Returns its id, name, version and keyword, or a diagnostic with a code, file, field, position and hint.",
+            "inputSchema": schema(json!({"package": package}), &["package"]),
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "ext_run",
+            "title": "Run an extension",
+            "description": "Ask a prebuilt extension package one query in the sandboxed extension host and return its rows and their actions, as `dupin ext run --json` prints them. Nothing is activated.",
+            "inputSchema": schema(json!({"package": package, "query": {"type": "string", "maxLength": dupin_ext_sdk::fixture::MAX_QUERY_BYTES}}), &["package", "query"]),
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "ext_test",
+            "title": "Test an extension",
+            "description": "Replay every fixture in the package's fixtures/ folder with its fixed clock, seed and time zone and its synthetic host-service replies, and report each step's outcome and how it differs from the fixture's expectations. Never rewrites the fixtures.",
+            "inputSchema": schema(json!({"package": package}), &["package"]),
+            "annotations": read_only,
+        }),
+        json!({
+            "name": "ext_snap",
+            "title": "Render an extension's panel",
+            "description": "Render the panel after a fixture's step (the last by default) with Dupin's own view, headless, and return it as a PNG. Needs a Dupin build with headless rendering.",
+            "inputSchema": schema(json!({
+                "package": package,
+                "fixture": {"type": "string", "description": "The fixture, relative to the package, such as `fixtures/search.json`."},
+                "step": {"type": "integer", "minimum": 1, "maximum": dupin_ext_sdk::fixture::MAX_STEPS},
+            }), &["package", "fixture"]),
+            "annotations": read_only,
+        }),
     ]
+}
+
+/// A tool's answer: JSON, or JSON with the image it describes.
+enum Output {
+    Json(Value),
+    Png(Value, Vec<u8>),
+}
+
+/// `relative` inside `root`, following links, so a tool can't reach outside the workspace.
+fn inside(root: &Path, relative: Option<&Value>, what: &str) -> Result<PathBuf, String> {
+    let Some(Value::String(relative)) = relative else {
+        return Err(format!("{what} must be a string"));
+    };
+    let path = Path::new(relative);
+    if relative.is_empty() || path.is_absolute() {
+        return Err(format!("{what} must be a path relative to the workspace"));
+    }
+    let resolved = root
+        .join(path)
+        .canonicalize()
+        .map_err(|error| format!("{what} {relative:?}: {error}"))?;
+    if !resolved.starts_with(root) {
+        return Err(format!("{what} {relative:?} is outside the workspace"));
+    }
+    Ok(resolved)
+}
+
+fn diagnostic(diagnostic: dupin_js_runtime::Diagnostic) -> String {
+    json!({"error": diagnostic.to_string(), "diagnostic": diagnostic}).to_string()
+}
+
+fn extension_tool(
+    workspace: &Path,
+    name: &str,
+    arguments: &Map<String, Value>,
+    cancel: &Cancel,
+) -> Result<Output, String> {
+    let cancelled = {
+        let cancel = cancel.clone();
+        move || cancel.is_aborted()
+    };
+    let package = inside(workspace, arguments.get("package"), "package")?;
+    match name {
+        "ext_check" => {
+            let extension = crate::extensions::check_folder(&package).map_err(diagnostic)?;
+            Ok(Output::Json(json!({
+                "id": extension.id,
+                "name": extension.name,
+                "version": extension.version,
+                "keyword": extension.keyword,
+            })))
+        }
+        "ext_run" => {
+            let Some(Value::String(query)) = arguments.get("query") else {
+                return Err("query must be a string".into());
+            };
+            if query.len() > dupin_ext_sdk::fixture::MAX_QUERY_BYTES {
+                return Err("query too large".into());
+            }
+            let extension = crate::extensions::load_folder(&package).map_err(diagnostic)?;
+            let items = extension
+                .query(
+                    query,
+                    None,
+                    dupin_js_runtime::MAX_ROWS,
+                    std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                    cancelled.clone(),
+                    &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
+                )
+                .map_err(|error| match error {
+                    dupin_js_runtime::RunError::Failed(failure) => diagnostic(failure),
+                    dupin_js_runtime::RunError::Cancelled => "the query was cancelled".into(),
+                })?;
+            serde_json::to_value(dupin_plugin_protocol::Outcome::Results { items, state: None })
+                .map(Output::Json)
+                .map_err(|_| "could not encode the answer".into())
+        }
+        "ext_test" => Ok(Output::Json(
+            crate::extensions::test(&package, false, &cancelled)
+                .map_err(diagnostic)?
+                .json,
+        )),
+        "ext_snap" => {
+            let fixture = inside(&package, arguments.get("fixture"), "fixture")?;
+            let step = match arguments.get("step") {
+                None => None,
+                Some(step) => Some(
+                    step.as_u64()
+                        .filter(|step| *step >= 1)
+                        .ok_or("step must be a step number, counting from 1")? as usize,
+                ),
+            };
+            let scratch = tempfile::Builder::new()
+                .prefix("dupin-mcp-snap-")
+                .tempdir()
+                .map_err(|error| format!("couldn't make a scratch folder: {error}"))?;
+            let output = scratch.path().join("panel.png");
+            let snapped =
+                crate::extensions::snap(&package, &fixture, step, &output, &cancelled).map_err(diagnostic)?;
+            let png = std::fs::read(&output).map_err(|error| format!("couldn't read the render: {error}"))?;
+            let mut described = crate::cli::snapped_json(&snapped);
+            if let Some(described) = described.as_object_mut() {
+                described.remove("png");
+            }
+            Ok(Output::Png(described, png))
+        }
+        _ => Err(format!("unknown tool: {name}")),
+    }
 }
 
 fn call_tool(
@@ -394,17 +576,26 @@ fn call_tool(
     name: &str,
     arguments: &Map<String, Value>,
     cancel: &Cancel,
-) -> Result<Value, String> {
+) -> Result<Output, String> {
     let allowed: &[&str] = match name {
         "validate_config" => &["source"],
         "open_panel" => &["query"],
         "pick" => &["values"],
+        "ext_check" | "ext_test" => &["package"],
+        "ext_run" => &["package", "query"],
+        "ext_snap" => &["package", "fixture", "step"],
         _ => &[],
     };
     if let Some(unexpected) = arguments.keys().find(|key| !allowed.contains(&key.as_str())) {
         return Err(format!("unexpected argument: {unexpected}"));
     }
-    match name {
+    if name.starts_with("ext_") {
+        let workspace = host
+            .workspace()
+            .ok_or("the extension tools need `dupin mcp --workspace DIR`")?;
+        return extension_tool(workspace, name, arguments, cancel);
+    }
+    let result = match name {
         "read_config" => host.config_file(),
         "validate_config" => {
             let Some(Value::String(source)) = arguments.get("source") else {
@@ -441,13 +632,22 @@ fn call_tool(
             Ok(json!({"value": value}))
         }
         _ => Err(format!("unknown tool: {name}")),
-    }
+    };
+    result.map(Output::Json)
 }
 
-fn tool_result(result: Result<Value, String>) -> Value {
+fn tool_result(result: Result<Output, String>) -> Value {
     match result {
-        Ok(value) => json!({
+        Ok(Output::Json(value)) => json!({
             "content": [{"type": "text", "text": value.to_string()}],
+            "structuredContent": value,
+            "isError": false,
+        }),
+        Ok(Output::Png(value, png)) => json!({
+            "content": [
+                {"type": "image", "data": base64(&png), "mimeType": "image/png"},
+                {"type": "text", "text": value.to_string()},
+            ],
             "structuredContent": value,
             "isError": false,
         }),
@@ -456,6 +656,25 @@ fn tool_result(result: Result<Value, String>) -> Value {
             "isError": true,
         }),
     }
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |n, (i, byte)| n | u32::from(*byte) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() {
+                ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char
+            } else {
+                '='
+            });
+        }
+    }
+    out
 }
 
 fn success(id: Value, result: Value) -> Value {
@@ -479,7 +698,7 @@ mod tests {
     use std::io::BufReader;
     use std::os::unix::net::UnixStream;
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// A launcher that records commands and answers from a script, and a config file that
     /// exists only in memory.
@@ -489,8 +708,12 @@ mod tests {
         reply: Option<Result<Value, String>>,
         /// For a pick: say it started, then block until cancelled and say that too.
         blocking: Option<Mutex<(mpsc::Sender<()>, mpsc::Sender<()>)>>,
+        workspace: Option<PathBuf>,
     }
     impl Host for Fake {
+        fn workspace(&self) -> Option<&Path> {
+            self.workspace.as_deref()
+        }
         fn control(&self, command: Command, cancel: &Cancel) -> Result<Value, String> {
             self.commands
                 .lock()
@@ -524,6 +747,25 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect()
+    }
+
+    /// Like [`exchange`], but keeps input open until `replies` have arrived, as a client waiting
+    /// on its calls does; closing input aborts the calls still running.
+    fn converse(host: &Fake, input: &str, replies: usize) -> Vec<Value> {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        let reader = server.try_clone().unwrap();
+        std::thread::scope(|scope| {
+            let serving = scope.spawn(move || serve(BufReader::new(reader), &mut server, host).unwrap());
+            client.write_all(input.as_bytes()).unwrap();
+            let received = BufReader::new(client.try_clone().unwrap())
+                .lines()
+                .take(replies)
+                .map(|line| serde_json::from_str(&line.unwrap()).unwrap())
+                .collect();
+            drop(client);
+            serving.join().unwrap();
+            received
+        })
     }
 
     fn call(id: u64, name: &str, arguments: Value) -> String {
@@ -754,6 +996,138 @@ mod tests {
         assert_eq!(replies[0]["error"]["code"], INVALID_REQUEST);
         assert_eq!(replies[1]["id"], 10);
         assert_eq!(replies[1]["result"]["isError"], true);
+    }
+
+    #[test]
+    fn extension_tools_need_a_workspace_and_stay_inside_it() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let replies = exchange(
+            &Fake::default(),
+            &call(1, "ext_check", json!({"package": "greeter"})),
+        );
+        assert_eq!(replies[0]["error"]["code"], INVALID_PARAMS);
+
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        dupin_ext_sdk::scaffold(&root.join("greeter"), dupin_ext_sdk::Template::JavaScript).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        dupin_ext_sdk::scaffold(
+            &outside.path().join("elsewhere"),
+            dupin_ext_sdk::Template::JavaScript,
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path().join("elsewhere"), root.join("linked")).unwrap();
+        let host = Fake {
+            workspace: Some(root.clone()),
+            ..Fake::default()
+        };
+        let fixture = root.join("greeter/fixtures/search.json");
+        let before = std::fs::read(&fixture).unwrap();
+        let mut replies = converse(
+            &host,
+            &[
+                r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#.to_owned() + "\n",
+                call(2, "ext_check", json!({"package": "greeter"})),
+                call(3, "ext_run", json!({"package": "greeter", "query": "Dupin"})),
+                call(4, "ext_test", json!({"package": "greeter"})),
+                call(5, "ext_check", json!({"package": "../"})),
+                call(6, "ext_check", json!({"package": "linked"})),
+                call(7, "ext_check", json!({"package": "/etc"})),
+                call(8, "ext_snap", json!({"package": "greeter", "fixture": "../../"})),
+                call(9, "ext_test", json!({"package": "greeter", "update": true})),
+                call(10, "ext_check", json!({"package": "greeter/fixtures"})),
+            ]
+            .concat(),
+            10,
+        );
+        replies.sort_by_key(|reply| reply["id"].as_u64());
+        let names: Vec<&str> = replies[0]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(&names[5..], ["ext_check", "ext_run", "ext_test", "ext_snap"]);
+        let result = |n: usize| &replies[n]["result"];
+        assert_eq!(result(1)["structuredContent"]["keyword"], "greeter");
+        assert_eq!(
+            result(2)["structuredContent"]["items"][0]["view"]["title"],
+            "Hello, Dupin!"
+        );
+        assert_eq!(result(3)["structuredContent"]["passed"], true);
+        for n in [4, 5, 7] {
+            assert_eq!(result(n)["isError"], true, "{}", replies[n]);
+            assert!(
+                result(n)["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("outside the workspace"),
+                "{}",
+                replies[n]
+            );
+        }
+        assert_eq!(
+            result(6)["content"][0]["text"],
+            "package must be a path relative to the workspace"
+        );
+        assert_eq!(result(8)["content"][0]["text"], "unexpected argument: update");
+        let missing: Value = serde_json::from_str(result(9)["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(missing["diagnostic"]["code"], "missing-manifest");
+        assert_eq!(std::fs::read(&fixture).unwrap(), before);
+    }
+
+    #[test]
+    fn closing_input_stops_an_extension_tool_whose_package_never_returns() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let package = root.join("spinner");
+        dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::JavaScript).unwrap();
+        std::fs::write(
+            package.join("main.js"),
+            "export function search() { return [{ title: 'Spin', actions: [{ title: 'Spin', run: 'spin' }] }]; }\n\
+             export const actions = { spin() { for (;;) {} } };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("fixtures/search.json"),
+            json!({ "fixture": 1, "steps": [{ "query": "x" }, { "activate": "Spin" }] }).to_string(),
+        )
+        .unwrap();
+        let host = Fake {
+            workspace: Some(root),
+            ..Fake::default()
+        };
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            let serving = scope.spawn(|| serve(BufReader::new(server), &mut Vec::new(), &host).unwrap());
+            client
+                .write_all(call(1, "ext_test", json!({"package": "spinner"})).as_bytes())
+                .unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            drop(client);
+            serving.join().unwrap();
+        });
+        assert!(
+            started.elapsed() < crate::extensions::ACTION_DEADLINE / 2,
+            "serve waited {:?} for the action",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn images_are_base64() {
+        for (bytes, encoded) in [
+            (&b""[..], ""),
+            (b"a", "YQ=="),
+            (b"ab", "YWI="),
+            (b"abc", "YWJj"),
+            (b"abcd", "YWJjZA=="),
+            (&[0xff, 0xee, 0x80][..], "/+6A"),
+        ] {
+            assert_eq!(base64(bytes), encoded);
+        }
     }
 
     #[test]

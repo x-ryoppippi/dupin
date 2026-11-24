@@ -97,7 +97,10 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 
 `dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the
 launcher does and print its answer; a failure exits non-zero with a diagnostic naming the
-code, file, field and a fix. They test a folder on its own; the launcher loads
+code, file, field and a fix. `dupin ext test DIR` replays the folder's fixtures and
+`dupin ext snap DIR FIXTURE OUTPUT.png` renders a fixture's panel (see
+[Testing and snapshots](docs/features/extensions.md#testing-and-snapshots)). They test a
+folder on its own; the launcher loads
 [extensions](docs/features/extensions.md) from the configuration folder. Headless rendering
 shows the given text/detail/pair view without executing actions or loading configuration,
 history or application providers.

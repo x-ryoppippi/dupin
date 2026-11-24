@@ -6,6 +6,7 @@
 //! types of TypeScript modules first, is the extension host's work.
 
 mod diagnostic;
+mod environment;
 mod host;
 mod output;
 mod package;
@@ -24,6 +25,7 @@ use rquickjs::promise::PromiseState;
 use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runtime, Value, WriteOptions};
 
 pub use diagnostic::Diagnostic;
+pub use environment::Environment;
 pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Reply, Unavailable};
 pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
@@ -74,6 +76,7 @@ pub fn engine_version() -> &'static str {
 pub struct Package {
     entry: String,
     modules: Arc<HashMap<String, Box<[u8]>>>,
+    environment: Option<Environment>,
 }
 
 impl std::fmt::Debug for Package {
@@ -95,6 +98,7 @@ impl Package {
         Ok(Self {
             entry,
             modules: Arc::new(modules),
+            environment: None,
         })
     }
 
@@ -108,6 +112,17 @@ impl Package {
         Self {
             entry,
             modules: Arc::new(modules),
+            environment: None,
+        }
+    }
+
+    /// The same package, whose calls see the clock and `Math.random` `environment` fixes, from
+    /// before its modules load.
+    pub fn with_environment(&self, environment: Option<Environment>) -> Self {
+        Self {
+            entry: self.entry.clone(),
+            modules: self.modules.clone(),
+            environment,
         }
     }
 
@@ -541,7 +556,13 @@ impl<'a> Sandbox<'a> {
         let context = Context::full(&runtime).map_err(|_| memory_limit())?;
         let calls = host::Shared::default();
         context
-            .with(|ctx| host::install(&ctx, &calls))
+            .with(|ctx| {
+                host::install(&ctx, &calls)?;
+                match &package.environment {
+                    Some(environment) => environment::install(&ctx, environment),
+                    None => Ok(()),
+                }
+            })
             .map_err(|_| memory_limit())?;
         Ok(Self {
             package,

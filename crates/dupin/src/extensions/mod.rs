@@ -6,6 +6,7 @@
 
 pub mod access;
 pub mod bundled;
+mod fixtures;
 mod manifest;
 pub mod packages;
 mod provider;
@@ -22,6 +23,7 @@ use dupin_extension_host::{ActionEffect, Compiled, Host, Services};
 use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::PluginItem;
 
+pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE};
 
@@ -115,7 +117,19 @@ impl Extension {
 /// The one extension host every JavaScript extension shares, started on the first query.
 fn host() -> &'static Host {
     static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(|| Host::new(Box::new(helper_command)))
+    HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
+}
+
+/// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
+/// launcher it starts. A launcher with a window never reads it.
+fn headless_environment() -> Option<dupin_js_runtime::Environment> {
+    if !rune::tooling::is_headless() {
+        return None;
+    }
+    let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+    serde_json::from_str::<dupin_js_runtime::Environment>(&value)
+        .ok()
+        .filter(dupin_js_runtime::Environment::is_valid)
 }
 
 /// Dupin's own executable as the extension host, with nothing inherited it doesn't need.

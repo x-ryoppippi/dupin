@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{ActionEffect, Diagnostic, RunError, Sources};
+use dupin_js_runtime::{ActionEffect, Diagnostic, Environment, RunError, Sources};
 use dupin_plugin_protocol::{self as protocol, PluginItem};
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -97,6 +97,7 @@ pub struct Host {
 
 struct Shared {
     launch: Launcher,
+    environment: Option<Environment>,
     state: Mutex<State>,
     released: Condvar,
     next_call: AtomicU64,
@@ -142,9 +143,16 @@ impl Work {
 
 impl Host {
     pub fn new(launch: Launcher) -> Self {
+        Self::fixed(launch, None)
+    }
+
+    /// A host whose guests see the clock and `Math.random` `environment` fixes, as a fixture
+    /// replays them; with none, the real ones.
+    pub fn fixed(launch: Launcher, environment: Option<Environment>) -> Self {
         Self {
             shared: Arc::new(Shared {
                 launch,
+                environment,
                 state: Mutex::default(),
                 released: Condvar::new(),
                 next_call: AtomicU64::new(1),
@@ -334,7 +342,14 @@ impl Host {
                 return Err(error);
             }
         }
-        let answer = helper.run(id, request, deadline, is_cancelled, services);
+        let answer = helper.run(
+            id,
+            request,
+            self.shared.environment,
+            deadline,
+            is_cancelled,
+            services,
+        );
         if answer.is_err() {
             lease.helper = None;
         }
@@ -359,7 +374,14 @@ impl Host {
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
         let deadline = deadline();
-        settle(helper.run(id, request, deadline, is_cancelled, services))
+        settle(helper.run(
+            id,
+            request,
+            self.shared.environment,
+            deadline,
+            is_cancelled,
+            services,
+        ))
     }
 
     /// Waits for the helper to be free, unless the caller gives up first.
@@ -624,6 +646,7 @@ impl Helper {
         &mut self,
         id: u64,
         request: Request<'_>,
+        environment: Option<Environment>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -635,6 +658,7 @@ impl Helper {
             entry: request.entry.into(),
             modules: request.modules,
             call: request.call,
+            environment,
         };
         self.send(&message, &request.tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
