@@ -26,7 +26,9 @@
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
 # its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it. Once a
 # port's native implementation is deleted, its scenarios are held to the native baseline recorded
-# in scripts/latency/native-baseline.json. An implementation with none of these fails `parity`.
+# in scripts/latency/native-baseline.json, scaled by the native `search` scenarios: every run
+# measures them, and the baseline records what its own runs measured of them. An implementation
+# with none of these fails `parity`.
 #
 # `prefix` is typed in one go and not measured; each character of `typed` is one measured
 # keypress.

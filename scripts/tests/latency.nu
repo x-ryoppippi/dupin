@@ -1,8 +1,10 @@
 use std/assert
 use ../latency.nu [
+    CONTROL
     PARITY_FLOOR
     parity-pairs
     stale
+    uncontrolled
     unheld
     unmeasured
     verdicts
@@ -143,6 +145,134 @@ def main [] {
         (result a extension 2.5)
     ] $recorded) [b]
 
+    # A recorded baseline is scaled to this run's machine by the control recorded with it: the
+    # median p95 of its scenarios this run, over theirs then. The tolerance applies to the scaled
+    # figure, unchanged.
+    let control = {
+        scenarios: [
+            {id: s1, benchmark: s1, p95_ms: 2.0}
+            {id: s2, benchmark: s2, p95_ms: 2.2}
+        ]
+        p95_ms: 2.0
+    }
+    let controlled = $recorded | update 0.p95_ms 2.0 | insert 0.benchmark $current | insert 0.control $control
+    let measured = {|s1: float, s2: float|
+        [
+            (result s1 native $s1 | insert benchmark s1)
+            (result s2 native $s2 | insert benchmark s2)
+        ]
+    }
+    let port = {|p95: float|
+        result b extension $p95 | insert benchmark $current
+    }
+    let slow = parity-pairs ([
+        (do $port 2.9)
+    ] ++ (do $measured 2.4 2.6)) $controlled
+    assert equal ($slow | get 0.control.scale) 1.25
+    assert equal (stale $slow) []
+    assert equal (uncontrolled $slow) []
+    let row = verdicts $slow 10.0 $PARITY_FLOOR | first
+    assert equal ($row | select baseline_p95_ms scale allowed_ms limit_ms verdict) {
+        baseline_p95_ms: 2.0
+        scale: 1.25
+        allowed_ms: 0.5
+        limit_ms: 3.0
+        verdict: ok
+    }
+    # Unscaled, a machine a quarter slower would fail that port against a 2.5 ms limit; and on a
+    # faster one, a port a third slower than native would pass it.
+    assert equal (
+        verdicts ($slow | each { reject control }) 10.0 $PARITY_FLOOR
+        | get 0.verdict
+    ) regressed
+    let fast = parity-pairs ([
+        (do $port 2.1)
+    ] ++ (do $measured 1.5 1.5)) $controlled
+    assert equal (verdicts $fast 10.0 $PARITY_FLOOR | get 0.limit_ms) 2.0
+    assert equal (verdicts $fast 10.0 $PARITY_FLOOR | get 0.verdict) regressed
+    # A pair held to the run's own native result is not scaled.
+    let same_run = parity-pairs [
+        (result b native 2.0)
+        (do $port 2.4)
+    ] $controlled
+    assert equal ($same_run | get 0.control) null
+    assert equal (uncontrolled $same_run) []
+    assert equal (verdicts $same_run 10.0 $PARITY_FLOOR | get 0.scale) null
+    # A recorded baseline without a control, or a run without one of its scenarios, can't be
+    # scaled, so it fails rather than being held to another machine's figure.
+    assert equal (
+        uncontrolled (
+            parity-pairs [
+                (do $port 2.4)
+            ] ($controlled | update 0 { reject control })
+        )
+    ) ["b [extension]"]
+    assert equal (
+        uncontrolled (
+            parity-pairs [
+                (do $port 2.4)
+                (result s1 native 2.0 | insert benchmark s1)
+            ] $controlled
+        )
+    ) ["b [extension]"]
+    assert equal (uncontrolled (parity-pairs [
+        (do $port 2.4)
+    ] $controlled)) ["b [extension]"]
+    # A control scenario measured by another benchmark than the recorded one is stale.
+    let other_control = [
+        (do $port 2.4)
+        (result s1 native 2.0 | insert benchmark earlier)
+        (result s2 native 2.0 | insert benchmark s2)
+    ]
+    assert equal (stale (parity-pairs $other_control $controlled)) ["b [extension]"]
+
+    # `baseline` records the control from the same results, and refuses results without it.
+    let tmp = mktemp --directory
+    let report = {|results: list<record>|
+        {schema: 1, commit: "abc1234", results: $results}
+    }
+    let stages = [dispatch_ms provider_ms merge_ms layout_ms] | each {|stage| {$stage: {p50: 0.1, p95: 0.2}} } | into record
+    let native = {|id: string, feature: string, p95: float|
+        {
+            id: $id
+            feature: $feature
+            implementation: native
+            benchmark: $id
+            p50_ms: 1.0
+            p95_ms: $p95
+            p99_ms: 3.0
+            stages: $stages
+        }
+    }
+    let first = do $report [
+        (do $native b b 1.5)
+        (do $native s1 $CONTROL 2.0)
+        (do $native s2 $CONTROL 2.4)
+    ]
+    let second = do $report [
+        (do $native b b 1.7)
+        (do $native s1 $CONTROL 2.2)
+        (do $native s2 $CONTROL 2.6)
+    ]
+    $first | to json | save ($tmp | path join first.json)
+    $second | to json | save ($tmp | path join second.json)
+    let script = $env.FILE_PWD | path dirname | path join latency.nu
+    let out = $tmp | path join baseline.json
+    ^$nu.current-exe $script baseline b ($tmp | path join first.json) ($tmp | path join second.json) --out $out
+    let entry = open $out | get results.0
+    assert equal $entry.p95_ms 1.6
+    assert equal $entry.control {
+        scenarios: [
+            {id: s1, benchmark: s1, p95_ms: 2.1}
+            {id: s2, benchmark: s2, p95_ms: 2.5}
+        ]
+        p95_ms: 2.3
+    }
+    $first | update results { where feature != $CONTROL } | to json | save ($tmp | path join bare.json)
+    let bare = do { ^$nu.current-exe $script baseline b ($tmp | path join bare.json) --out $out } | complete
+    assert not equal $bare.exit_code 0
+    rm --recursive $tmp
+
     # Every keypress must search the feature's provider; only a pass's last must show its rows.
     let pass = [
         {
@@ -254,13 +384,21 @@ def main [] {
     let baseline = open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
     | get results
     | get id
-    # Every recorded baseline says which benchmark measured it, or `parity` could never use it.
+    # Every recorded baseline says which benchmark measured it and what that run measured of the
+    # control, or `parity` could never use it.
     assert equal (
         open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
         | get results
-        | where benchmark? == null
+        | where {|entry| $entry.benchmark? == null or ($entry.control?.scenarios? | is-empty) }
         | get id
     ) []
+    let control_ids = $catalogue.scenarios | where feature == $CONTROL | get id | sort
+    assert equal (
+        open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
+        | get results
+        | where {|entry| ($entry.control?.scenarios? | default [] | get id | sort) != $control_ids }
+        | get id
+    ) [] "every recorded baseline's control is the catalogue's control scenarios"
     for feature in ($catalogue.features | transpose name implementations) {
         let has_native = "native" in ($feature.implementations | columns)
         let scenarios = $catalogue.scenarios | where feature == $feature.name | get id
