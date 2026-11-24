@@ -624,6 +624,37 @@ mod tests {
     }
 
     #[test]
+    fn the_dictionary_package_answers_the_dictionary_aliases_instead_of_its_own_keyword() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let config = Config {
+            dictionary_keywords: vec!["word".into(), "lookup".into()],
+            ..Config::default()
+        };
+        let mut configured = configured(&config).unwrap();
+        let dictionary = Arc::new(extension("Dictionary", "define"));
+        assert_eq!(dictionary.id, "dictionary");
+        let added = add_extensions(&mut configured, std::slice::from_ref(&dictionary));
+
+        assert!(added.problems.is_empty(), "{:?}", added.problems);
+        let [(command, extension, role)] = added.registered.as_slice() else {
+            panic!("{:?}", added.registered.len())
+        };
+        assert_eq!((command, *role), (&id(DICTIONARY), Role::Keyword));
+        assert!(Arc::ptr_eq(extension, &dictionary));
+        assert_eq!(configured.registry.keyword("word"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("lookup"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("define"), None);
+        assert!(
+            !configured
+                .registry
+                .ids()
+                .contains(&"extension.dictionary".to_owned())
+        );
+    }
+
+    #[test]
     fn the_calendar_extension_answers_calendar_search_only_while_it_is_on() {
         use crate::extensions::Role;
         use crate::extensions::tests::extension;

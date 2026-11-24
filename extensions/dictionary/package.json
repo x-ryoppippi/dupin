@@ -1,0 +1,15 @@
+{
+	"name": "dictionary",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Dictionary",
+		"keyword": "define",
+		"main": "main.ts",
+		"capabilities": {
+			"dictionary": [
+				"lookup"
+			]
+		}
+	}
+}

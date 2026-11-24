@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
 
-use dupin_js_runtime::row::{RowEffect, Source};
+use dupin_js_runtime::row::{RowEffect, Source, is_dictionary_url};
 use dupin_js_runtime::{
     Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row, RunError, Sources,
 };
@@ -1024,14 +1024,15 @@ fn validate(items: &[Row], limit: usize) -> Result<(), String> {
     Ok(())
 }
 
-/// Fails unless every link not on the web that `items` open came from one of the call's own
-/// replies, so only a package that read an event can show it in Calendar, and only that one.
+/// Fails unless every link that `items` open, other than a web URL or a Dictionary word, came
+/// from one of the call's own replies, so only a package that read an event can show it in
+/// Calendar, and only that one.
 fn issued(items: &[Row], services: &dyn Services, package: &Compiled) -> Result<(), RunError> {
     let stray = items
         .iter()
         .flat_map(|item| &item.actions)
         .any(|action| match &action.effect {
-            RowEffect::OpenUrl { url } => !is_web_url(url) && !services.opens(url),
+            RowEffect::OpenUrl { url } => !is_web_url(url) && !is_dictionary_url(url) && !services.opens(url),
             _ => false,
         });
     if !stray {

@@ -47,6 +47,7 @@ fn case(name: &str) -> Option<Override> {
             Some(Config::default()),
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        "dictionary" => Override::built_in("dictionary", Config::default(), None, Some(Use::Search)),
         "dupin" => Override::extension("dupin", None),
         "emoji" => Override::extension(
             "emoji",

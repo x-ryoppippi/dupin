@@ -20,7 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). **Window Management** (`window`): move and resize the focused window, off until you turn it on in Settings → Extensions ([Window management](./window-management.md)). Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md) and [Clipboard history](./clipboard.md): each keeps its own setting and keywords, and Settings → Extensions lists it as a built-in command. A feature's Settings rows reach its package as the package's [preferences](#preferences), and a package that watches on a feature's behalf watches only while the feature is on.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). **Window Management** (`window`): move and resize the focused window, off until you turn it on in Settings → Extensions ([Window management](./window-management.md)). Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md), [Clipboard history](./clipboard.md) and [Dictionary](./dictionary.md): each keeps its own settings and keywords, and Settings → Extensions lists it as a built-in command. A feature's Settings rows reach its package as the package's [preferences](#preferences), and a package that watches on a feature's behalf watches only while the feature is on.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,7 +121,7 @@ A package with both lists what `search` computes for the query first, then the c
 | `title`    | Required. One line, up to 512 bytes.                                                                                                                 |
 | `subtitle` | Optional, up to 2,048 bytes.                                                                                                                         |
 | `id`       | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                         |
-| `url`      | Optional. An `http` or `https` URL with a host, up to 2,048 bytes: **Open URL** opens it.                                                            |
+| `url`      | Optional. An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](#calendar), up to 2,048 bytes: **Open URL** opens it.            |
 | `text`     | Optional, up to 16 KiB: **Copy** copies it.                                                                                                          |
 | `icon`     | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file. |
 | `section`  | Optional. The heading the item is listed under, one line up to 128 bytes. Items of a list's `sections` get their section's title.                    |
@@ -224,7 +224,7 @@ An item's `actions` adds up to eight actions, counting the ones `url` and `text`
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `copy`   | Copies the text, 1 byte to 16 KiB.                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `paste`  | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Only a package that [declares](#clipboard) `"clipboard": ["paste"]`, and that you allow to, may paste; otherwise Dupin copies the text and says why.                                                                                                                                                                                             |
-| `open`   | Opens the `http` or `https` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                                                                                                                                                                                                                               |
+| `open`   | Opens the `http`, `https` or `dict://` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                                                                                                                                                                                                                    |
 | `reveal` | Shows the file at the absolute path selected in Finder; it opens nothing.                                                                                                                                                                                                                                                                                                                                                                 |
 | `run`    | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. `alternate: true` makes ⌘Enter run it, for one action of an item; `confirm` is a question Dupin asks first, with the action's title as the button and Cancel selected; in a catalogue, `needsFile: true` leaves it out while the item's `file` is gone. |
 
@@ -457,13 +457,15 @@ Record IDs and blob handles are opaque strings. IDs are random, so they don't so
 
 ### Dictionary
 
-`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. `dictionary.lookup(term)` takes a term of at most 200 characters and returns up to 8 entries, each with the structure Dupin's own `define` view lays out:
+`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. `dictionary.lookup(term)` takes a term of at most 200 characters and returns up to 8 entries, each as the dictionary wrote it (`text`), laid out as the bundled [Dictionary](./dictionary.md) shows it (`markdown`, ready for an item's `detail`), and as structure:
 
 ```json
 {
 	"headword": "run",
 	"dictionary": null,
 	"pronunciation": "rʌn",
+	"text": "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on foot faster than walking: she ran to the station. • (of a machine) operate: the engine runs on diesel. ORIGIN Old English rinnan.",
+	"markdown": "### Verb\n\n\\(runs\\, running\\; past ran\\; past participle run\\)\n\n1. \\[no object\\] move on foot faster than walking: *she ran to the station\\.*\n   - \\(of a machine\\) operate: *the engine runs on diesel\\.*\n\n## Origin\n\nOld English rinnan\\.",
 	"groups": [
 		{
 			"partOfSpeech": "Verb",
@@ -488,7 +490,7 @@ Record IDs and blob handles are opaque strings. IDs are random, so they don't so
 }
 ```
 
-Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, so nothing is lost. An entry keeps at most 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`.
+Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, and the Markdown as paragraphs, so nothing is lost. An entry keeps up to 16 KiB of `text`, 32 KiB of `markdown`, 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each structured text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`.
 
 ### Calendar
 
