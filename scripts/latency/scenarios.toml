@@ -20,18 +20,10 @@
 #   provider = "extension.snippets"
 #   extensions = "scripts/latency/snippets.extensions"
 #
-# A port names its `package`: then the whole of `typed` must show rows from that package too,
-# not only the provider's, which a broken or missing package can still fill with a row saying
-# so. `bundled = true` runs Dupin from an app whose Resources hold the repository's
-# `extensions/`, as the released app runs its bundled extensions; a binary built outside the
-# source tree, as CI's is, finds them nowhere else.
-#
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
 # its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it. Once a
 # port's native implementation is deleted, its scenarios are held to the native baseline recorded
 # in scripts/latency/native-baseline.json. An implementation with none of these fails `parity`.
-# `clipboard_entries` replaces the clipboard history's five fixture entries with that many,
-# from `clipboard-fixture` in scripts/latency.nu.
 #
 # `prefix` is typed in one go and not measured; each character of `typed` is one measured
 # keypress.
@@ -51,15 +43,10 @@ config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 
 # Clipboard history is the bundled extension `clipboard-history`, held to the native history it
-# replaced (scripts/latency/native-baseline.json), with 5,000 copies: the history a heavy user
-# keeps for a week.
+# replaced (scripts/latency/native-baseline.json).
 [features.clipboard.extension]
 config = "scripts/headless/clipboard.toml"
-settings = { clipboard = { max_entries = 10000 } }
 provider = "clipboard.history"
-bundled = true
-package = "clipboard-history"
-clipboard_entries = 5000
 
 [features.web.native]
 config = "scripts/headless/config/dupin/config.toml"

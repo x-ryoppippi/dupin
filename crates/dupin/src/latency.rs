@@ -36,9 +36,6 @@ struct Sample {
     /// Rows per provider in the finished results; with `pending`'s providers, what lets the
     /// driver tell which feature answered.
     shown: BTreeMap<String, usize>,
-    /// Rows per extension package in the finished results, so a feature an extension answers
-    /// is told apart from the rows its command shows when the package is broken or missing.
-    packages: BTreeMap<String, usize>,
 }
 
 thread_local! {
@@ -88,7 +85,6 @@ pub fn edit_started(t: f64, query: &str) {
             last_provider: None,
             done: None,
             shown: BTreeMap::new(),
-            packages: BTreeMap::new(),
         });
     });
 }
@@ -154,28 +150,14 @@ impl Sample {
     fn finish(&mut self, at: Instant, session: &Session) {
         self.done = Some(at);
         self.shown.clear();
-        for origin in session.origins() {
-            *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
-        }
-        let mut packages: Vec<(&str, usize)> = Vec::new();
-        for package in session.items().iter().filter_map(|item| package_of(&item.id)) {
-            match packages.iter_mut().find(|(seen, _)| *seen == package) {
-                Some((_, rows)) => *rows += 1,
-                None => packages.push((package, 1)),
+        // A row Dupin shows in place of a ported feature's package is cheap enough to pass any
+        // budget, so a scenario whose package is off, missing or failing must not count it.
+        for (origin, item) in session.origins().iter().zip(session.items()) {
+            if crate::features::answered_by_feature(origin.as_str(), &item.id) {
+                *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
             }
         }
-        self.packages = packages
-            .into_iter()
-            .map(|(package, rows)| (package.to_owned(), rows))
-            .collect();
     }
-}
-
-/// The extension package a row's ID says it came from, as its provider writes it; an
-/// extension's error row, or a feature's own, has none.
-fn package_of(id: &str) -> Option<&str> {
-    let (package, _) = id.strip_prefix("extension:")?.split_once('/')?;
-    Some(package)
 }
 
 /// `App::on_frame_encoded`.
@@ -211,7 +193,6 @@ impl Probe {
                     "providers": sample.providers,
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
                     "shown": sample.shown,
-                    "packages": sample.packages,
                 })
             }
             _ => serde_json::json!({
@@ -230,16 +211,20 @@ impl Probe {
 
 #[cfg(test)]
 mod tests {
-    use super::package_of;
+    use crate::features::answered_by_feature as answers;
 
     #[test]
-    fn only_a_package_row_names_its_package() {
-        assert_eq!(
-            package_of("extension:clipboard-history/0123abcd"),
-            Some("clipboard-history")
-        );
-        assert_eq!(package_of("extension:emoji/smile/1"), Some("emoji"));
-        assert_eq!(package_of("extension-error"), None);
-        assert_eq!(package_of("unavailable"), None);
+    fn a_ported_command_answers_only_with_its_package_rows() {
+        for command in ["clipboard.history", "calendar.events"] {
+            assert!(answers(command, "extension:clipboard-history/0123abcd"));
+            assert!(answers(command, "2026-11-24T09:00:00Z/standup"));
+            assert!(!answers(command, "unavailable"), "the package is off or missing");
+            assert!(!answers(command, "extension-error"), "the package failed");
+            assert!(
+                !answers(command, "consent:turn-on"),
+                "the package waits to be turned on"
+            );
+        }
+        assert!(answers("apps.search", "unavailable"));
     }
 }

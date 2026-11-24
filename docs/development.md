@@ -245,9 +245,9 @@ nu scripts/latency.nu compare main.json pr.json              # fails on a p95 re
 nu scripts/latency.nu parity target/latency/results.json     # extensions against native
 ```
 
-`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
+`nix build .#dupin-latency` builds the same binary, inside a `Dupin.app` whose Resources hold the repository's `extensions/`, so it runs the bundled extensions as the released app does; outside one, a binary built away from the source tree finds none. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
-Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A port also names its `package`, and those rows must then include the package's own: a feature's command can show a row of its own when its package is broken or missing, and that row is cheap enough to pass any budget. A port of a bundled extension sets `bundled = true`, which runs Dupin from a copy inside a `Dupin.app` whose Resources hold the repository's `extensions/`, as the released app runs them; a binary built outside the source tree, as `nix build .#dupin-latency` is, finds them nowhere else. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
 For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
 
@@ -288,23 +288,28 @@ extensions = "extensions"
 budget_ms = 5.0
 ```
 
-The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity, and both are held to a 5 ms budget. An implementation's `clipboard_entries` replaces the five clipboard fixture entries with that many generated ones; Clipboard history is measured with 5,000.
+The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity, and both are held to a 5 ms budget.
 
 ### Native baselines
 
 Once a port lands and its native implementation is deleted, CI has no native run to hold it to. `parity` then holds each scenario to the native results recorded in `scripts/latency/native-baseline.json`, which come from the last commit that had the native implementation, measured by the Latency workflow on the same runner class, with the same tolerance. A scenario recorded there that the run doesn't measure fails the check, so a port can't go unmeasured by dropping or renaming its scenario. Likewise an implementation besides native with no native result in the run, no recorded baseline and no `budget_ms` fails it, so deleting a native implementation without recording its baseline can't take the port out of the gate.
 
-Record a feature's baseline in the pull request that deletes its native implementation, and refresh it whenever the runner class, the benchmark (`scripts/latency.nu`, the scenarios or the headless fixtures) or what a fair comparison means changes:
+Each recorded result also carries the `benchmark` fingerprint of what measured it: `scripts/latency/measure.nu` (its code, not its comments), the shared clipboard fixture, the scenario's `prefix` and `typed`, and the run's settings. Every `run` result carries the fingerprint of the benchmark it ran, and `parity` refuses a recorded baseline whose fingerprint differs from the port's, so changing how scenarios are measured can't leave a port held to a figure the new benchmark would not reproduce. Each implementation's own config is not part of it, since that is what parity compares.
+
+Record a feature's baseline in the pull request that deletes its native implementation, and re-record it when `parity` reports it stale, or when the runner class or what a fair comparison means changes:
 
 ```sh
 # Measure the last commit with the native implementation; each run is the median of three.
+# `ref` may be a short SHA, a branch or a tag; each dispatch runs to completion on its own.
 gh workflow run latency.yml --ref <your branch> -f ref=<last native commit>
 gh run download <run id> --name latency --dir target/latency/native-1
 # Repeat for more runs if you like, then record the median of each figure:
 nu scripts/latency.nu baseline dictionary target/latency/native-*/results.json
 ```
 
-`baseline` replaces only that feature's entries and records the commit they came from, which `parity` names in its table. Commit the file with the change that needs it.
+`baseline` replaces only that feature's entries and records the commit and fingerprint they came from; `parity` names the commit in its table. It refuses results that carry no fingerprint, or more than one for a scenario. Commit the file with the change that needs it.
+
+A baseline goes stale when the benchmark changes after the native implementation is gone, so the last commit that had it measures with the old benchmark. Branch from that commit, check out `scripts/latency.nu`, `scripts/latency/measure.nu` and `scripts/fixtures/clipboard.json` from your branch, give the feature's scenarios your branch's `prefix` and `typed` while keeping its native implementation, then commit, push, and dispatch the workflow with that commit as `ref`.
 
 The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
 

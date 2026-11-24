@@ -31,8 +31,8 @@ use dupin_extension_host::{Compiled, Host, Services};
 use dupin_js_runtime::{Acted, Diagnostic, Exports, Handled, Row, RunError, Sources};
 
 pub use fixtures::{Snapped, snap, test};
-pub(crate) use provider::is_answered_consent_row;
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub(crate) use provider::{is_answered_consent_row, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 

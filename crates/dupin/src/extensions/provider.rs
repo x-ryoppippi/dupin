@@ -66,7 +66,7 @@ impl ExtensionProvider {
 
     fn problem(&self, message: String) -> Item {
         Item {
-            id: "extension-error".into(),
+            id: PROBLEM_ROW.into(),
             payload: Payload::default(),
             view: View::Text {
                 title: format!("{} failed", self.extension.name),
@@ -494,6 +494,13 @@ pub(crate) fn consent_row(extension: &Extension, request: &ConsentRequest) -> It
 
 const CONSENT_ROW: &str = "consent:";
 const TURN_ON_ROW: &str = "consent:turn-on";
+const PROBLEM_ROW: &str = "extension-error";
+
+/// Whether the row `id` is one Dupin shows in place of an extension's answer: the extension
+/// failed, or waits to be turned on or for consent.
+pub(crate) fn stands_in(id: &str) -> bool {
+    id == PROBLEM_ROW || id.starts_with(CONSENT_ROW)
+}
 
 /// Whether `row` asks the user something about `id` that the bridge no longer waits on, so the
 /// panel can drop it after an answer without running the guest again.

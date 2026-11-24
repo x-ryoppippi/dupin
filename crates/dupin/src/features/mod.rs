@@ -61,6 +61,20 @@ pub(crate) fn ported_enabled(package: &str, config: &Config) -> Option<bool> {
         .map(|bundled| (bundled.enabled)(config))
 }
 
+/// The row a built-in command that a bundled extension answers shows while the package is off
+/// or didn't load.
+pub(crate) const UNAVAILABLE_ROW: &str = "unavailable";
+
+/// Whether the row `id` that `command` shows is its feature's answer, not one Dupin shows in
+/// place of the bundled extension that answers the command.
+pub(crate) fn answered_by_feature(command: &str, id: &str) -> bool {
+    let ported = MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .any(|bundled| bundled.command == command);
+    !ported || (id != UNAVAILABLE_ROW && !crate::extensions::stands_in(id))
+}
+
 /// The built-in command the extension called `package` answers, if a feature ships as it.
 pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
     MANIFEST

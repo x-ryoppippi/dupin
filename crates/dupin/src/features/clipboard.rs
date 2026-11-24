@@ -121,7 +121,7 @@ impl Provider for ClipboardHistory {
 fn unavailable() -> Item {
     Item {
         payload: Payload::default(),
-        id: "unavailable".into(),
+        id: super::UNAVAILABLE_ROW.into(),
         view: View::Text {
             title: "Clipboard history isn't available".into(),
             subtitle: "Its extension is off or didn't load; Settings → Extensions says why.".into(),
