@@ -20,7 +20,9 @@ impl Services for Fixture {
             self.late.fetch_add(1, Ordering::Relaxed);
         }
         let reply = match op {
-            "storage.get" => serde_json::json!({ "ok": { "value": format!("stored {}", args["key"]) } }),
+            "storage.get" => {
+                serde_json::json!({ "ok": { "id": args["id"], "createdAt": 0, "data": format!("stored {}", args["id"]), "blobs": [] } })
+            }
             _ => {
                 serde_json::json!({ "error": { "code": "denied", "message": format!("{op} is not allowed") } })
             }
@@ -40,7 +42,7 @@ fn host_requests_cross_to_dupin_and_back_during_a_search() {
     let package = package(
         r#"import { storage, clipboard } from 'dupin';
            export async function search(query) {
-             const value = await storage.get(query);
+             const { data: value } = await storage.get(query);
              let denied = '';
              try { await clipboard.readText(); } catch (error) { denied = `${error.code}: ${error.message}`; }
              return [{ title: value, subtitle: denied }];
@@ -62,7 +64,7 @@ fn host_requests_cross_to_dupin_and_back_during_a_search() {
     assert_eq!(
         *fixture.seen.lock().unwrap(),
         [
-            ("storage.get".to_owned(), serde_json::json!({"key": "count"})),
+            ("storage.get".to_owned(), serde_json::json!({"id": "count"})),
             ("clipboard.read".to_owned(), serde_json::json!({})),
         ]
     );
@@ -75,7 +77,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
     let package = package(
         r#"import { storage } from 'dupin';
            export const search = () => [];
-           export const actions = { async show(data) { return { type: 'toast', text: `${await storage.get(data.key)}` }; } };
+           export const actions = { async show(data) { return { type: 'toast', text: `${(await storage.get(data.key)).data}` }; } };
            export const events = { async clipboard(change) { await storage.get(change.text); } };"#,
     );
     let fixture = Arc::new(Fixture::default());
@@ -106,7 +108,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
     .unwrap();
     assert_eq!(
         fixture.seen.lock().unwrap().last().unwrap(),
-        &("storage.get".to_owned(), serde_json::json!({"key": "copied"}))
+        &("storage.get".to_owned(), serde_json::json!({"id": "copied"}))
     );
     let missing = failed(host.action(
         &package,
@@ -124,7 +126,7 @@ fn a_service_slower_than_the_call_has_its_late_reply_dropped() {
     skip_inside_a_sandbox!();
     let host = host();
     let package = package(
-        "import { storage } from 'dupin'; export async function search() { return [{ title: await storage.get('x') }]; }",
+        "import { storage } from 'dupin'; export async function search() { return [{ title: (await storage.get('x')).data }]; }",
     );
     let fixture = Arc::new(Fixture {
         delay: Duration::from_millis(400),

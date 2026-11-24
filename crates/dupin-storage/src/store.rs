@@ -246,7 +246,8 @@ impl Record {
         self.stamp.device
     }
 
-    fn cursor(&self) -> Cursor {
+    /// Where [`Store::list`] continues after this record, for a caller that cuts a page short.
+    pub fn cursor(&self) -> Cursor {
         Cursor {
             stamp: self.stamp,
             id: self.id,
@@ -997,16 +998,24 @@ impl Store {
     /// namespace are shared, not written again. The plaintext buffers are zeroized before
     /// this returns.
     pub fn put(&self, record: NewRecord) -> Result<Record, Error> {
-        self.write(RecordId::random()?, record)
+        self.write(RecordId::random()?, record, false)
+    }
+
+    /// Like [`Store::put`], but refuses a record the namespace has no room for with
+    /// [`Error::QuotaExceeded`], instead of deleting its oldest records to make room. The
+    /// check and the write hold one lock, so concurrent writers can't overrun the limits
+    /// together. Records past `max_age` go first and don't count against the room.
+    pub fn put_within_limits(&self, record: NewRecord) -> Result<Record, Error> {
+        self.write(RecordId::random()?, record, true)
     }
 
     /// Stores `record` as the record for the owner's logical `key`, replacing the one stored
     /// before, which keeps its creation time. The key itself is never written.
     pub fn upsert(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
-        self.write(self.key_id(key), record)
+        self.write(self.key_id(key), record, false)
     }
 
-    fn write(&self, id: RecordId, record: NewRecord) -> Result<Record, Error> {
+    fn write(&self, id: RecordId, record: NewRecord, within_limits: bool) -> Result<Record, Error> {
         let NewRecord { data, blobs } = record;
         let blobs: Vec<Zeroizing<Vec<u8>>> = blobs.into_iter().map(Zeroizing::new).collect();
         if blobs.len() > MAX_BLOBS_PER_RECORD {
@@ -1023,11 +1032,29 @@ impl Store {
         if bytes > limit {
             return Err(Error::TooLarge { bytes, limit });
         }
+        let handles: Vec<BlobHandle> = blobs
+            .iter()
+            .map(|blob| BlobHandle(self.keys.blob_handle(blob)))
+            .collect();
+        if within_limits {
+            self.enforce(&mut state)?;
+            let mut new_blobs = HashSet::new();
+            let new_blob_bytes: u64 = handles
+                .iter()
+                .zip(&blobs)
+                .filter(|(handle, _)| !state.blobs.contains_key(handle) && new_blobs.insert(**handle))
+                .map(|(_, blob)| blob.len() as u64)
+                .sum();
+            let entries = state.records.len() + 1;
+            let bytes = state.total + body.len() as u64 + new_blob_bytes;
+            if entries > state.limits.max_entries || bytes > state.limits.max_total_bytes {
+                return Err(Error::QuotaExceeded { entries, bytes });
+            }
+        }
 
         let mut refs = Vec::with_capacity(blobs.len());
         let mut written = HashMap::new();
-        for blob in &blobs {
-            let handle = BlobHandle(self.keys.blob_handle(blob));
+        for (blob, &handle) in blobs.iter().zip(&handles) {
             let len = blob.len() as u64;
             if !state.blobs.contains_key(&handle) && !written.contains_key(&handle) {
                 let aad = self.keys.aad("blob", &[&handle.0]);

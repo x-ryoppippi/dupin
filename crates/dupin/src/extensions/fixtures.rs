@@ -232,8 +232,8 @@ fn replay(
         if !effects.clipboard.is_empty() {
             outcome.insert("clipboard".into(), effects.clipboard.into());
         }
-        if effects.storage_changed {
-            outcome.insert("storage".into(), world.storage());
+        if let Some(storage) = effects.storage {
+            outcome.insert("storage".into(), storage);
         }
         let differences = match (&problem, &step.expect) {
             (None, Some(expected)) => fixture::compare(expected, &outcome),

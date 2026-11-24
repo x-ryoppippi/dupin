@@ -44,7 +44,7 @@ Each queued save has a revision. Reads carry the last revision the worker proces
 
 ## Stored data
 
-Data that must survive a restart without sitting on disk in the clear goes through `dupin-storage`, which has no OS dependencies. It gives each owner a namespace of sealed JSON records and content-addressed blobs with its own retention limits, and takes its data key from a `KeyProvider`: `dupin-mac::keychain::KeychainKey` on macOS, a private key file elsewhere, an in-memory key in tests. The host owns the files and the key; an extension will reach its own namespace only through the broker's `storage` capability. See [Encrypted storage](./features/storage.md).
+Data that must survive a restart without sitting on disk in the clear goes through `dupin-storage`, which has no OS dependencies. It gives each owner a namespace of sealed JSON records and content-addressed blobs with its own retention limits, and takes its data key from a `KeyProvider`: `dupin-mac::keychain::KeychainKey` on macOS, a private key file elsewhere, an in-memory key in tests. The host owns the files and the key; an extension reaches its own namespace only through the broker's `storage` capability, which the bridge opens with the quota and retention its declaration names. See [Encrypted storage](./features/storage.md).
 
 ## The panel
 

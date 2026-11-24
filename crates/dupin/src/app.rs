@@ -206,7 +206,6 @@ pub(crate) fn run() {
             }
         })
         .on_ready(move |window| {
-            appear_instantly(window);
             let panel = window.clone();
             handle.update(move |ui, _| ui.set_panel_window(panel));
             install_quick_look(window, &handle, &quick_look);
@@ -279,23 +278,5 @@ fn install_quick_look(
         Ok(Some(previewer)) => *slot.borrow_mut() = Some(previewer),
         Ok(None) => crate::log::warn("couldn't attach the Quick Look responder"),
         Err(error) => crate::log::warn(&format!("couldn't access the panel's native view: {error}")),
-    }
-}
-
-/// Turn off AppKit's ordering animation on the panel. `on_ready` runs once the panel exists
-/// (Rune moves the content into its own NSPanel at creation), on the main thread.
-fn appear_instantly(window: &rune::WindowHandle) {
-    // A headless `--realtime` run calls `on_ready` too, with no native window to change.
-    if rune::tooling::headless_run().is_some() {
-        return;
-    }
-    use rune::raw_window_handle::RawWindowHandle;
-    let done = window.with_raw_handle(|handle| match handle.as_raw() {
-        // SAFETY: The handle is borrowed inside `with_raw_handle`, so its view is alive.
-        RawWindowHandle::AppKit(appkit) => unsafe { dupin_mac::window::appear_instantly(appkit.ns_view) },
-        _ => false,
-    });
-    if done != Ok(true) {
-        log::warn(&format!("couldn't turn off the panel's show animation: {done:?}"));
     }
 }

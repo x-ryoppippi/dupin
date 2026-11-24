@@ -39,6 +39,11 @@ pub enum Command {
         base: Box<dupin_core::Config>,
         desired: Box<dupin_core::Config>,
     },
+    /// Deletes the stored data of a package `dupin ext remove` removed, which the running
+    /// launcher may hold open.
+    ExtensionDataDelete {
+        package: String,
+    },
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -77,6 +82,7 @@ impl Call {
             Command::SnapshotsList {} => "snapshots list",
             Command::SnapshotsOpen { .. } => "snapshots open",
             Command::SnapshotsClose {} => "snapshots close",
+            Command::ExtensionDataDelete { .. } => "extension data delete",
         };
         crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {
@@ -126,6 +132,11 @@ pub fn validate(request: &Request) -> io::Result<()> {
         }
         Command::Pick { values } if values.is_empty() || values.len() > 1000 => {
             Err(io::Error::other("pick requires 1..1000 values"))
+        }
+        Command::ExtensionDataDelete { package }
+            if dupin_broker::PackageId::new(package.as_str()).is_err() =>
+        {
+            Err(io::Error::other("invalid package ID"))
         }
         _ => Ok(()),
     }

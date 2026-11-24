@@ -42,6 +42,17 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
             let change = installer.install(&spec, &cwd, &taken).map_err(diagnostic)?;
             if change.previous.is_none() {
                 forget_grants(&change.name)?;
+                if let Err(failure) = delete_data(&change.name) {
+                    installer.remove(&change.name).map_err(diagnostic)?;
+                    return Err(Diagnostic::new(
+                        "data-undeleted",
+                        format!(
+                            "Didn't install {}, because what an earlier package of that name \
+                             stored must be deleted first. {}",
+                            change.name, failure.message
+                        ),
+                    ));
+                }
             }
             (describe(&change, "Installed"), change_json(&change))
         }
@@ -53,8 +64,12 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         Command::Remove(name) => {
             let entry = installer.remove(&name).map_err(diagnostic)?;
             forget_grants(&name)?;
+            delete_data(&name)?;
             (
-                vec![format!("Removed {name} {} and its grants.", entry.version)],
+                vec![format!(
+                    "Removed {name} {}, its grants and its stored data.",
+                    entry.version
+                )],
                 json!({"removed": name}),
             )
         }
@@ -140,6 +155,31 @@ fn forget_grants(name: &str) -> Result<(), Diagnostic> {
     broker.save(&path).map_err(|error| {
         Diagnostic::new("grants-unsaved", error.to_string()).file(crate::extensions::access::LOCAL_FILE)
     })
+}
+
+/// Uninstalling deletes what the package stored, and so does installing a name afresh, since a
+/// package's namespace is named after its package name; revoking its `storage` in Settings
+/// keeps it. A running Dupin that has the package's data open deletes it itself.
+fn delete_data(name: &str) -> Result<(), Diagnostic> {
+    let Ok(id) = PackageId::new(name) else {
+        return Ok(());
+    };
+    let Some(storage) = crate::extensions::access::storage() else {
+        return Ok(());
+    };
+    let namespace = dupin_extension_bridge::storage::namespace(&id, dupin_extension_bridge::Origin::User);
+    let unsaved = |message: String| Diagnostic::new("data-undeleted", message);
+    match storage.discard(&namespace) {
+        Ok(()) => Ok(()),
+        Err(dupin_storage::Error::Busy) => {
+            crate::control::exchange(crate::control::Command::ExtensionDataDelete {
+                package: name.to_owned(),
+            })
+            .map(|_| ())
+            .map_err(|error| unsaved(format!("Dupin couldn't delete {name}'s stored data: {error}")))
+        }
+        Err(error) => Err(unsaved(format!("Couldn't delete {name}'s stored data: {error}"))),
+    }
 }
 
 /// Who already answers a keyword in the launcher: a bundled extension, or a command of the

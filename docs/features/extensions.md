@@ -196,17 +196,16 @@ An item's `actions` adds up to eight actions, counting the ones `url` and `text`
 import { items as catalogue, storage } from 'dupin';
 
 export async function search(query) {
-	const saved = (await storage.get('notes')) ?? [];
+	const { records } = await storage.list({ limit: 20 });
 	return [
 		{ title: `Save “${query}”`, actions: [{ title: 'Save', run: 'save', data: { text: query } }] },
-		...saved.map((text) => ({ title: text, text })),
+		...records.map((note) => ({ title: note.data, text: note.data })),
 	];
 }
 
 export const actions = {
 	async save({ text }) {
-		const saved = (await storage.get('notes')) ?? [];
-		await storage.set('notes', [text, ...saved].slice(0, 20));
+		await storage.put(text);
 		return { type: 'toast', text: 'Saved' };
 	},
 	forget(data) {
@@ -234,8 +233,7 @@ import { storage } from 'dupin';
 export const events = {
 	async clipboard(change) {
 		if (change.type !== 'text') return;
-		const recent = (await storage.get('recent')) ?? [];
-		await storage.set('recent', [change.text, ...recent].slice(0, 50));
+		await storage.put({ text: change.text });
 	},
 };
 ```
@@ -366,7 +364,31 @@ Programs and scripts run with your own access, without a shell, as the [exec cap
 
 ### Storage
 
-`"storage": { "quotaBytes": 1048576, "retentionDays": 30 }` gives the package a key-value store of its own, up to the quota counted as each key and its value as JSON. `storage.get(key)`, `set(key, value)`, `delete(key)` and `keys()` work while you type, in actions and in event handlers; a write past the quota fails with `quota-exceeded`. Keys are 1–256 bytes and a value at most 1 MiB of JSON. The data is meant to be kept encrypted at rest, but this build has no storage service yet, so every request fails with `unavailable`.
+`"storage": { "quotaBytes": 1048576, "retentionDays": 30 }` gives the package an encrypted store of its own: records of JSON, each with the blobs (byte strings, such as an image) it carries. It works while you type, in actions and in event handlers, once you allow it.
+
+```js
+import { storage } from 'dupin';
+
+const thumbnail = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+const record = await storage.put({ title: 'Cover' }, { blobs: [thumbnail] });
+const { records, next } = await storage.list({ limit: 20 });
+const bytes = await storage.readBlob(record.blobs[0].handle);
+```
+
+| Function                  | What it does                                                                                                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(data, { blobs })`    | Stores a record and returns it: `{ id, createdAt, data, blobs: [{ handle, size }] }`. Blobs are typed arrays or `ArrayBuffer`s.                                                                      |
+| `get(id)`                 | The record, or `undefined`.                                                                                                                                                                          |
+| `list({ before, limit })` | Up to `limit` records (50 by default, 200 at most) older than the record `before` names, newest first, and `next` to pass as `before` for the following page. A page also ends before 2 MiB of JSON. |
+| `readBlob(handle)`        | The blob's bytes as a `Uint8Array`, while a record still carries it.                                                                                                                                 |
+| `delete(id)`, `clear()`   | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                 |
+| `usage()`                 | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                     |
+
+Record IDs and blob handles are opaque strings; IDs sort by when the record was stored. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
+
+- **Limits.** A record's JSON and its blobs are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
+- **Where it lives.** Each package has a [`dupin-storage`](./storage.md) namespace of its own, named by a hash of its package ID and where it was installed from, so no package reads another's data, a native feature's, or that of a bundled package it copies. Everything is sealed with the data key in your Keychain.
+- **Revoking keeps the data, removing deletes it.** Revoking `storage` in Settings or the panel stops every request at once and keeps what the package stored, so allowing it again finds it; Settings → Extensions offers **Delete Data** beside the scope. `dupin ext remove` deletes the package's data with it, asking the running Dupin to if it has the data open. The namespace follows the package name, so `dupin ext install` of a name that isn't installed also deletes what an earlier package of that name left behind, and doesn't install while that data can't be deleted.
 
 ### Dictionary
 
@@ -633,7 +655,7 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`.                               |
 | `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                      | `error` when the handler failed.                                            |
 
-Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy` and `open` for a row's first Copy and Open URL, and `action-<index>` for the others. A query step calls `search`; an `items()` catalogue isn't replayed yet. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
+Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy` and `open` for a row's first Copy and Open URL, and `action-<index>` for the others. A query step calls `search`; an `items()` catalogue isn't replayed yet. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
 
 `replies` answers host requests in place of this Mac. Every request still goes through the broker, against the scopes `package.json` declares, so an undeclared origin, a method or path out of scope, or a clipboard read while typing fails exactly as in the launcher, before any reply is looked up. A request the fixture has no reply for fails rather than reaching the network, a program or a file of yours.
 
@@ -642,7 +664,7 @@ Any step's outcome also has `clipboard`, the texts the package wrote to the clip
 | `http`        | `[{ "request": { "method", "url" }, "response": { "status", "headers", "body" or "json" } }]`. `method` defaults to `GET` and `status` to `200`; the URL must match exactly. Any other request fails with `network`.                                                       |
 | `files`       | Each declared `files` scope's contents by name: a string for a `file` scope, or an object of relative paths and texts for a `directory` scope. Each scope is bound to a scratch folder holding exactly these files, empty when left out.                                   |
 | `exec`        | `[{ "profile", "args", "status", "stdout", "stderr" }]`. `profile` is the declared name, `@script:` included; `args`, if given, must equal the arguments after the inputs fill the template. Nothing is run.                                                               |
-| `storage`     | The package's storage when the fixture starts, key by key.                                                                                                                                                                                                                 |
+| `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                               |
 | `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                          |
 | `dictionary`  | Each term's entries, in the [dictionary](#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                                    |
 | `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range. Whole days are counted from `now` in UTC.                                                                                                                     |
