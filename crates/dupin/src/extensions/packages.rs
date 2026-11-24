@@ -74,8 +74,9 @@ impl Packages {
             Origin::User => self.user = extensions,
         }
         for extension in self.bundled.iter().flatten() {
+            let on = !super::bundled::OFF_UNTIL_TURNED_ON.contains(&extension.id.as_str());
             self.bridge
-                .set_bundled(&extension.package, extension.revision.clone());
+                .set_bundled(&extension.package, extension.revision.clone(), on);
         }
         let fixture = super::fixtures::headless();
         for (_, extension) in self.present() {

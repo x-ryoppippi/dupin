@@ -237,6 +237,12 @@ impl fmt::Display for Denial {
     }
 }
 
+/// A revision that ships inside Dupin, and whether it is on before anyone chooses.
+struct Bundled {
+    revision: Revision,
+    on: bool,
+}
+
 struct Installed {
     revision: Revision,
     capabilities: Capabilities,
@@ -264,7 +270,7 @@ pub struct Broker {
     // grants nothing new until the next launch, as a reload must never grant.
     ceiling: Base,
     local: Local,
-    bundled: BTreeMap<PackageId, Revision>,
+    bundled: BTreeMap<PackageId, Bundled>,
     installed: BTreeMap<PackageId, Installed>,
     os: BTreeMap<OsPermission, OsAccess>,
     sequence: u64,
@@ -296,10 +302,11 @@ impl Broker {
     }
 
     /// Records a first-party package that ships inside Dupin. While the installed revision of
-    /// `id` is exactly this one, the package is on by default and its scopes are pre-granted;
-    /// a modified copy is any other revision and gets neither.
-    pub fn set_bundled(&mut self, id: PackageId, revision: Revision) {
-        self.bundled.insert(id, revision);
+    /// `id` is exactly this one, its scopes are pre-granted and it is on unless `on` is false,
+    /// in which case it stays off until someone turns it on; a modified copy is any other
+    /// revision and gets neither.
+    pub fn set_bundled(&mut self, id: PackageId, revision: Revision, on: bool) {
+        self.bundled.insert(id, Bundled { revision, on });
     }
 
     /// Loads or updates a package's declaration. Scopes it no longer declares lose their
@@ -418,12 +425,13 @@ impl Broker {
         match (local, base) {
             (Some(false), _) | (_, Some(false)) => false,
             (Some(true), _) | (_, Some(true)) => true,
-            (None, None) => self.pristine(id, &installed.revision),
+            (None, None) => self.pristine(id, &installed.revision) && !self.off_until_chosen(id),
         }
     }
 
-    /// Whether the user or the base turned the package off, rather than never turning it on.
-    /// Unreadable grants count as off, since a choice they hold can't be known.
+    /// Whether the user or the base turned the package off, or it ships off and nobody has
+    /// turned it on, rather than never turning it on. Unreadable grants count as off, since a
+    /// choice they hold can't be known.
     pub fn is_turned_off(&self, id: &PackageId) -> bool {
         let Some(installed) = self.installed.get(id) else {
             return true;
@@ -431,8 +439,13 @@ impl Broker {
         let Some(packages) = &self.local.packages else {
             return true;
         };
-        packages.get(id).and_then(|package| package.enabled) == Some(false)
-            || self.base_enabled(id, &installed.revision) == Some(false)
+        let local = packages.get(id).and_then(|package| package.enabled);
+        let base = self.base_enabled(id, &installed.revision);
+        match (local, base) {
+            (Some(false), _) | (_, Some(false)) => true,
+            (Some(true), _) | (_, Some(true)) => false,
+            (None, None) => self.pristine(id, &installed.revision) && self.off_until_chosen(id),
+        }
     }
 
     /// The installed revision, for a host that lists [`Broker::consents`] and later passes
@@ -767,7 +780,13 @@ impl Broker {
     }
 
     fn pristine(&self, id: &PackageId, revision: &Revision) -> bool {
-        self.bundled.get(id) == Some(revision)
+        self.bundled
+            .get(id)
+            .is_some_and(|bundled| bundled.revision == *revision)
+    }
+
+    fn off_until_chosen(&self, id: &PackageId) -> bool {
+        self.bundled.get(id).is_some_and(|bundled| !bundled.on)
     }
 
     fn base_packages<'a>(&'a self, id: &'a PackageId) -> impl Iterator<Item = &'a BasePackage> + 'a {

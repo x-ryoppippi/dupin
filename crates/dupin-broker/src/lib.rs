@@ -28,6 +28,6 @@ pub use manifest::{Capabilities, Diagnostic};
 pub use request::Request;
 pub use scope::{
     ClipboardAccess, FilesAccess, FilesKind, Method, Origin, OsPermission, PackageId, Revision, Scope,
-    ScopeKey, ScopeName, StorageOp,
+    ScopeKey, ScopeName, StorageOp, WindowsAccess,
 };
 pub use store::{Base, Local, StoreError};

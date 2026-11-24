@@ -25,7 +25,7 @@ use std::time::{Instant, SystemTime};
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Permit, Reconciliation,
-    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
+    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger, WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
@@ -313,9 +313,10 @@ impl Bridge {
     }
 
     /// Records a package that ships inside Dupin at `revision`: while that revision is the one
-    /// installed, the package is on and its scopes are pre-granted. Call it before installing.
-    pub fn set_bundled(&self, id: &PackageId, revision: Revision) {
-        self.inner.lock().broker.set_bundled(id.clone(), revision);
+    /// installed, its scopes are pre-granted and it is on, or waits for the user to turn it on
+    /// when `on` is false. Call it before installing.
+    pub fn set_bundled(&self, id: &PackageId, revision: Revision, on: bool) {
+        self.inner.lock().broker.set_bundled(id.clone(), revision, on);
     }
 
     /// Loads or updates a package's declaration at `revision`. It never grants anything; what
@@ -334,7 +335,10 @@ impl Bridge {
         revision: Revision,
         capabilities: Capabilities,
     ) -> Reconciliation {
-        self.inner.lock().broker.set_bundled(id.clone(), revision.clone());
+        self.inner
+            .lock()
+            .broker
+            .set_bundled(id.clone(), revision.clone(), true);
         self.load(id, revision, capabilities, Origin::Bundled)
     }
 

@@ -67,7 +67,8 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     ));
     rows.push(note(
         k,
-        "Bundled extensions ship with Dupin and are on until you turn them off. \
+        "Bundled extensions ship with Dupin and are on until you turn them off, except Window \
+         Management, which waits for you to turn it on. \
          One that answers a built-in command needs both that command's setting and its switch \
          here on. Run dupin ext eject NAME to copy one into the extensions folder and edit it \
          there; delete the copy to go back to the bundled one.",
@@ -347,6 +348,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Clipboard { .. } => &icons::CLIPBOARD,
         Scope::Dictionary => &icons::LANGUAGES,
         Scope::Calendar { .. } => &icons::CALENDAR,
+        Scope::Windows { .. } => &icons::PANEL,
     }
 }
 
@@ -451,12 +453,19 @@ impl Prefs {
         });
     }
 
+    /// Turning a package on is the deliberate choice that may ask macOS for what the scopes it
+    /// already holds need, as turning on a built-in feature does.
     fn set_extension_enabled(&mut self, id: &PackageId, enabled: bool) {
         let Some(bridge) = self.access.clone() else { return };
         self.extension_problem = bridge
             .set_enabled(id, enabled)
             .err()
             .map(|error| error.to_string());
+        if enabled && self.extension_problem.is_none() {
+            for permission in os_access_to_request(&bridge, id) {
+                self.request_os_access(permission);
+            }
+        }
     }
 
     /// The deliberate press that may ask macOS, never anything Settings does on its own.
@@ -473,6 +482,20 @@ impl Prefs {
         }
         self.refresh_permissions();
     }
+}
+
+/// The macOS access `id`'s granted scopes need that macOS hasn't been asked for yet.
+fn os_access_to_request(bridge: &Bridge, id: &PackageId) -> Vec<OsPermission> {
+    let mut permissions: Vec<_> = bridge
+        .scopes(id)
+        .into_iter()
+        .filter(|entry| matches!(entry.state, ConsentState::Granted(_)))
+        .filter_map(|entry| entry.permission)
+        .filter(|permission| bridge.os_access(*permission) == OsAccess::NotDetermined)
+        .collect();
+    permissions.sort();
+    permissions.dedup();
+    permissions
 }
 
 fn pick(kind: dupin_mac::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
@@ -523,6 +546,43 @@ mod tests {
         assert_eq!(
             status(&listed(false), false, false),
             "From the extensions folder. Off."
+        );
+    }
+
+    #[test]
+    fn turning_on_asks_macos_only_for_what_granted_scopes_still_need() {
+        let bridge = Bridge::new(
+            dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+            None,
+            dupin_extension_bridge::Services::none(),
+        );
+        let capabilities = |value| dupin_extension_bridge::Capabilities::parse(&value).unwrap();
+        let revision = dupin_extension_bridge::Revision::new("blake3:fixture").unwrap();
+        let bundled = PackageId::new("bundled:window-management").unwrap();
+        bridge.set_bundled(&bundled, revision.clone(), false);
+        bridge.install(
+            &bundled,
+            revision.clone(),
+            capabilities(serde_json::json!({ "windows": ["read", "arrange"], "dictionary": ["lookup"] })),
+        );
+        let user = PackageId::new("arranger").unwrap();
+        bridge.install(
+            &user,
+            revision,
+            capabilities(serde_json::json!({ "windows": ["arrange"] })),
+        );
+        assert_eq!(
+            os_access_to_request(&bridge, &bundled),
+            [OsPermission::Accessibility]
+        );
+        assert!(
+            os_access_to_request(&bridge, &user).is_empty(),
+            "an extension that holds no grant asks for nothing"
+        );
+        bridge.set_os_access(OsPermission::Accessibility, OsAccess::Denied);
+        assert!(
+            os_access_to_request(&bridge, &bundled).is_empty(),
+            "a decision macOS already holds is changed in System Settings"
         );
     }
 

@@ -631,7 +631,7 @@ mod tests {
             PackageId::new("words").unwrap(),
         );
         let revision = Revision::new("blake3:fixture").unwrap();
-        bridge.set_bundled(&dupin, revision.clone());
+        bridge.set_bundled(&dupin, revision.clone(), true);
         bridge.install(&dupin, revision.clone(), Capabilities::default());
         bridge.install(&words, revision, Capabilities::default());
         bridge.set_enabled(&words, false).unwrap();
