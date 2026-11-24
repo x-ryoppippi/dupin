@@ -30,7 +30,7 @@ Some extensions ship inside Dupin and run whether or not the extensions folder i
 
 Each build of Dupin records a hash of every file in each bundled package folder, and loads a folder there only while its files still match: a package added to the folder, or a file changed in it, stays off and is listed as skipped. A build from the source tree records the repository's `extensions/` as it was when it was built, so rebuild after editing one.
 
-A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, which stays off, answering nothing, until you turn it on there. Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs you pick, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
+A bundled extension is on until you turn it off in Settings → Extensions, except Window Management, which stays off, answering nothing, until you turn it on there or [with Nix](#declaring-them-with-nix). Dupin knows it by its `name` and a hash of its `package.json` and modules: while it runs exactly the copy that shipped, the [capability broker](../capability-broker.md) grants what it declares in advance, except files and programs you pick, and macOS still asks for its own permissions on first use ([Permissions](./permissions.md#extensions)). The broker keeps its grants and its switch under `bundled:<name>`, apart from any package in the extensions folder.
 
 To change one, copy it into the extensions folder:
 
@@ -902,6 +902,33 @@ bindings = { "files:notes" = "/Users/me/Notes" }
 | `enable`   | `true` by default. `false` keeps the package off whatever you choose in Dupin.                                        |
 
 A grant applies only to the `revision` it names: `dupin ext revision DIR` prints it, and Home Manager runs it on `src` when the configuration builds, so changing `src` needs the new revision and nothing in an edited copy is granted. Choices made in Dupin, in `grants.toml`, can take a declared grant away but never widen it, and a denied scope can't be allowed. The base applies to each package by its `package.json` name, whatever `name` calls its folder, and two packages of one name fail the build. Dupin reads the base again as soon as it changes, so a denial, `enable = false` or a grant taken away applies at once, but a new grant waits until Dupin restarts. macOS still asks for its own permissions only when you choose Request Access. These packages are pinned by Nix, so they aren't in `extensions.lock`, and `dupin ext update` and `remove` leave them to Home Manager.
+
+`bundledExtensions` does the same for the [bundled extensions](#bundled-extensions), by their `package.json` name:
+
+```nix
+programs.dupin.bundledExtensions = {
+  window-management.enable = true;
+  calendar.deny = [ "calendar" ];
+  clipboard-history.enable = false;
+};
+```
+
+They go to the same `extension-grants.toml`, under `bundled:<name>` and without a revision, since a bundled package only ever runs as the sealed copy that shipped:
+
+```toml
+[packages."bundled:window-management"]
+enabled = true
+
+[packages."bundled:calendar"]
+deny = ["calendar"]
+```
+
+| Option   | Meaning                                                                                                                                                                                                                               |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable` | `null` by default, which leaves the switch to Dupin. `true` turns the package on, Window Management included, though Settings can still turn it off. `false` keeps it off, and a built-in command it answers says it isn't available. |
+| `deny`   | Scopes the package may never use, though it ships with them granted, such as `calendar`, `clipboard:watch` or `windows:arrange`.                                                                                                      |
+
+A bundled package has no grants or bindings to declare: Dupin grants what it declares in advance, and none of them declares files or programs. A name the configured `package` doesn't bundle fails evaluation. A built-in command still needs its own setting, such as `calendar.enabled`, to register it. A changed copy in the extensions folder is a package of its own, so none of this applies to it.
 
 ## Wasm extensions
 

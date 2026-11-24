@@ -33,6 +33,10 @@ let
     (root + /assets/logo/dupin.svg)
     (root + /extensions)
   ];
+  # What the broker knows each bundled package by, after `bundled:`: `name` in its package.json.
+  bundledExtensions = lib.mapAttrsToList (
+    folder: _: (lib.importJSON (root + "/extensions/${folder}/package.json")).name
+  ) (lib.filterAttrs (_: type: type == "directory") (builtins.readDir (root + /extensions)));
   cargoSrc = lib.fileset.toSource {
     inherit root;
     fileset = cargoFiles;
@@ -141,6 +145,7 @@ rustPlatform.buildRustPackage (
         cargoVendorDir
         cargoSrc
         bundleSrc
+        bundledExtensions
         ;
     };
   }

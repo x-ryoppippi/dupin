@@ -50,6 +50,7 @@ in
         home-manager-module = import ./tests/home-manager-module.nix {
           inherit lib pkgs;
           module = self.homeManagerModules.default;
+          inherit (dupin) bundledExtensions;
         };
         treefmt-typos-report-only =
           pkgs.runCommand "dupin-treefmt-typos-report-only"

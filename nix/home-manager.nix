@@ -10,6 +10,19 @@
     let
       cfg = config.programs.dupin;
       toml = pkgs.formats.toml { };
+      # A bundled package runs only as the sealed copy that shipped, so its entry needs no
+      # revision, and it has nothing to grant: Dupin pre-grants everything it declares.
+      bundledPackages = lib.filterAttrs (_: package: package != { }) (
+        lib.mapAttrs' (
+          name: extension:
+          lib.nameValuePair "bundled:${name}" (
+            lib.optionalAttrs (extension.enable != null) { enabled = extension.enable; }
+            // lib.optionalAttrs (extension.deny != [ ]) { inherit (extension) deny; }
+          )
+        ) cfg.bundledExtensions
+      );
+      bundledNames = cfg.package.bundledExtensions or [ ];
+      unknownBundled = lib.subtractLists bundledNames (lib.attrNames cfg.bundledExtensions);
       # The capability broker's declarative base. Dupin knows a package by `name` in its
       # package.json, whatever its folder is called, and its grants name the revision Dupin
       # computes from the package. Only Dupin computes both, so they are filled in when the file
@@ -21,6 +34,7 @@
               pkgs.jq
               pkgs.remarshal
             ];
+            bundled = builtins.toJSON bundledPackages;
             packages = builtins.toJSON (
               map (extension: {
                 inherit (extension)
@@ -32,7 +46,10 @@
                 enabled = extension.enable;
               }) cfg.extensions
             );
-            passAsFile = [ "packages" ];
+            passAsFile = [
+              "packages"
+              "bundled"
+            ];
           }
           ''
             jq -c '.[]' "$packagesPath" | while read -r package; do
@@ -40,11 +57,11 @@
               declared=$(${lib.getExe' cfg.package "dupin"} ext revision "$src" --json)
               jq --argjson declared "$declared" \
                 '{($declared.package): {revision: $declared.revision, enabled, grant: .grants, deny, bindings}}' <<<"$package"
-            done | jq -s '
+            done | jq -s --slurpfile bundled "$bundledPath" '
               (map(keys[0]) | group_by(.) | map(select(length > 1) | .[0])) as $twice
               | if $twice != [] then
                   error("programs.dupin.extensions: more than one package is named \($twice | join(", ")) in package.json")
-                else {version: 1, packages: (add // {})} end
+                else {version: 1, packages: ((add // {}) + $bundled[0])} end
             ' > grants.json
             json2toml grants.json "$out"
           '';
@@ -122,6 +139,30 @@
           };
         }
       );
+      bundledExtension = lib.types.submodule {
+        options = {
+          enable = lib.mkOption {
+            type = lib.types.nullOr lib.types.bool;
+            default = null;
+            description = ''
+              `true` turns the package on, even one that ships off such as Window Management;
+              Dupin's own switch can still turn it off. `false` keeps it off whatever Dupin's
+              switch says, so a built-in command it answers says it isn't available. `null`
+              leaves it to Dupin.
+            '';
+          };
+          deny = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            example = [ "calendar" ];
+            description = ''
+              Scopes the package may never use, although it ships with them granted, named as
+              the capability broker names them, such as `calendar`, `clipboard:watch` or
+              `windows:arrange`.
+            '';
+          };
+        };
+      };
     in
     {
       options.programs.dupin = {
@@ -165,6 +206,25 @@
           '';
         };
 
+        bundledExtensions = lib.mkOption {
+          type = lib.types.attrsOf bundledExtension;
+          default = { };
+          example = lib.literalExpression ''
+            {
+              window-management.enable = true;
+              calendar.deny = [ "calendar" ];
+              clipboard-history.enable = false;
+            }
+          '';
+          description = ''
+            Switches and denials for the extensions that ship inside Dupin, by their
+            `package.json` name, written with the grants of {option}`programs.dupin.extensions`
+            to {file}`$XDG_CONFIG_HOME/dupin/extension-grants.toml`. Bundled extensions run
+            without `extensions = true`. See
+            <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md>.
+          '';
+        };
+
         launchd.enable = lib.mkEnableOption "starting Dupin at login with a launchd agent";
       };
 
@@ -173,6 +233,10 @@
           {
             assertion = lib.allUnique (map (extension: extension.name) cfg.extensions);
             message = "programs.dupin.extensions: two packages have the same name.";
+          }
+          {
+            assertion = unknownBundled == [ ];
+            message = "programs.dupin.bundledExtensions: programs.dupin.package bundles no ${lib.concatStringsSep ", " unknownBundled}; it bundles ${lib.concatStringsSep ", " bundledNames}.";
           }
         ];
 
@@ -183,7 +247,7 @@
             "dupin/config.toml" = lib.mkIf (cfg.settings != { }) {
               source = toml.generate "dupin-config.toml" cfg.settings;
             };
-            "dupin/extension-grants.toml" = lib.mkIf (cfg.extensions != [ ]) {
+            "dupin/extension-grants.toml" = lib.mkIf (cfg.extensions != [ ] || bundledPackages != { }) {
               source = grantsFile;
             };
           }

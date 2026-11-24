@@ -189,6 +189,7 @@ pkgs.stdenv.mkDerivation (
         latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
+      inherit (native) bundledExtensions;
       baseline = native;
     };
   }
