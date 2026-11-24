@@ -19,6 +19,7 @@ use dupin_extension_host::{ActionEffect, Compiled, Host, Services};
 use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::PluginItem;
 
+pub(crate) use provider::is_answered_consent_row;
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE};
 
 pub(crate) use crate::catalog_watch::Watch;

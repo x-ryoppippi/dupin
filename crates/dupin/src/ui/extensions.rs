@@ -179,18 +179,24 @@ impl Ui {
         }
     }
 
-    /// Called from the bridge's listener: refresh what shows a package's access.
-    pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
-        let (Notice::ConsentNeeded(id) | Notice::Changed(id)) = &notice;
-        let active = self.session.command_id().clone();
-        let showing = self
-            .extensions
-            .registered
-            .get(&active)
-            .is_some_and(|extension| extension.package == *id);
-        if showing && matches!(notice, Notice::Changed(_)) {
-            let effects = self.session.refresh();
-            self.apply(effects, tx);
+    /// Called from the bridge's listener: refresh what shows a package's access. An answer
+    /// takes its question off the panel but never searches again, since granting runs
+    /// nothing the extension asked for before.
+    pub(crate) fn extension_access_changed(&mut self, notice: Notice) {
+        if let Notice::Changed(id) = &notice {
+            let bridge = &self.extensions.bridge;
+            let commands: Vec<_> = self
+                .extensions
+                .registered
+                .iter()
+                .filter(|(_, extension)| extension.package == *id)
+                .map(|(command, _)| command.clone())
+                .collect();
+            for command in commands {
+                self.session.forget_rows(&command, |row| {
+                    crate::extensions::is_answered_consent_row(row, bridge, id)
+                });
+            }
         }
         self.prefs.update(|prefs, _| prefs.refresh_permissions());
     }

@@ -210,7 +210,7 @@ impl Ui {
         });
         bridge.set_listener({
             let me = me.clone();
-            move |notice| me.update(move |ui, tx| ui.extension_access_changed(notice, tx))
+            move |notice| me.update(move |ui, _| ui.extension_access_changed(notice))
         });
         crate::extensions::access::refresh_os_access(&bridge, &calendar_access);
         let apps_watcher = apps_provider.watch({

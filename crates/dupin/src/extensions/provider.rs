@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use dupin_core::{
     Action, ExtensionRequest, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View,
 };
-use dupin_extension_bridge::{Bridge, ConsentReason, ConsentRequest, Trigger};
+use dupin_extension_bridge::{Bridge, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_extension_host::{NoServices, Services};
 use dupin_js_runtime::RunError;
 use dupin_plugin_protocol as protocol;
@@ -268,12 +268,30 @@ pub(crate) fn consent_row(extension: &Extension, request: &ConsentRequest) -> It
             ExtensionRequest::Deny { scope: key.clone() },
         ));
     }
-    notice_row(format!("consent:{key}"), title, subtitle, actions)
+    notice_row(format!("{CONSENT_ROW}{key}"), title, subtitle, actions)
+}
+
+const CONSENT_ROW: &str = "consent:";
+const TURN_ON_ROW: &str = "consent:turn-on";
+
+/// Whether `row` asks the user something about `id` that the bridge no longer waits on, so the
+/// panel can drop it after an answer without running the guest again.
+pub(crate) fn is_answered_consent_row(row: &Item, bridge: &Bridge, id: &PackageId) -> bool {
+    let Some(asked) = row.id.strip_prefix(CONSENT_ROW) else {
+        return false;
+    };
+    if row.id == TURN_ON_ROW {
+        return !bridge.asked_while_off(id);
+    }
+    !bridge
+        .pending(Some(id))
+        .iter()
+        .any(|request| request.key().to_string() == asked)
 }
 
 fn turn_on_row(extension: &Extension) -> Item {
     notice_row(
-        "consent:turn-on".into(),
+        TURN_ON_ROW.into(),
         format!("Turn on {}?", extension.name),
         "It asked to use something while it's off. Turning it on lets it ask for each thing it declares."
             .into(),
@@ -490,7 +508,13 @@ mod tests {
         assert_eq!(rows[1].display_title(), "disabled");
 
         let id = provider.extension.package.clone();
+        assert!(!is_answered_consent_row(&rows[0], &bridge, &id));
         bridge.set_enabled(&id, true).unwrap();
+        assert!(is_answered_consent_row(&rows[0], &bridge, &id));
+        assert!(
+            !is_answered_consent_row(&rows[1], &bridge, &id),
+            "only questions go"
+        );
         let rows = search(&provider, "x");
         assert_eq!(rows[0].id, "consent:storage");
         assert_eq!(rows[0].primary, None, "Enter shows the choices, never grants");
@@ -511,9 +535,14 @@ mod tests {
         assert_eq!(rows[1].display_title(), "needs-consent");
 
         let request = bridge.pending(Some(&id)).remove(0);
+        assert!(!is_answered_consent_row(&rows[0], &bridge, &id));
         bridge
             .allow(&id, &request.revision, &request.scope, None)
             .unwrap();
+        assert!(
+            is_answered_consent_row(&rows[0], &bridge, &id),
+            "the panel drops the answered row without searching again"
+        );
         let rows = search(&provider, "x");
         assert_eq!(rows.len(), 1, "the request is answered");
         // The in-memory bridge reaches no service, so the granted request now fails there.
