@@ -1,7 +1,8 @@
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::Deref;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Messages and hints can carry text a guest chose, such as what it threw. Dupin shows them as
 /// one subtitle line and writes them to its log on every failed query.
@@ -10,14 +11,15 @@ const MAX_LABEL_BYTES: usize = 256;
 
 /// A problem with an extension package or one of its answers, precise enough for an author (or
 /// an agent) to fix without reading Dupin's source.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Diagnostic(Box<Details>);
+pub struct Diagnostic(#[serde(deserialize_with = "Details::bounded")] Box<Details>);
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Details {
     /// A stable, kebab-case name for the kind of problem.
-    pub code: &'static str,
+    pub code: Cow<'static, str>,
     pub message: String,
     /// The package file at fault, relative to the package folder.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,9 +44,9 @@ impl Deref for Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Self {
         Self(Box::new(Details {
-            code,
+            code: code.into(),
             message: one_line(message.into(), MAX_TEXT_BYTES),
             file: None,
             field: None,
@@ -74,6 +76,40 @@ impl Diagnostic {
         self.0.hint = Some(one_line(hint.into(), MAX_TEXT_BYTES));
         self
     }
+}
+
+impl Details {
+    /// A diagnostic read from elsewhere, such as the extension host process, is held to the
+    /// same bounds as one made here.
+    fn bounded<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Box<Details>, D::Error> {
+        let details = Details::deserialize(deserializer)?;
+        let code = if is_code(&details.code) {
+            details.code
+        } else {
+            Cow::Borrowed("invalid-diagnostic")
+        };
+        let mut diagnostic = Diagnostic::new(code, details.message);
+        if let Some(file) = details.file {
+            diagnostic = diagnostic.file(file);
+        }
+        if let Some(field) = details.field {
+            diagnostic = diagnostic.field(field);
+        }
+        diagnostic.0.line = details.line;
+        diagnostic.0.column = details.column;
+        if let Some(hint) = details.hint {
+            diagnostic = diagnostic.hint(hint);
+        }
+        Ok(diagnostic.0)
+    }
+}
+
+fn is_code(code: &str) -> bool {
+    !code.is_empty()
+        && code.len() <= 64
+        && code
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 /// `text` with control characters escaped, cut to at most `max` bytes with an ellipsis.
