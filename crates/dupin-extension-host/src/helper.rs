@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{ActionEffect, Bridge, Control, Diagnostic, Package, Reply, RunError, Sources};
+use dupin_js_runtime::{
+    ActionEffect, Bridge, Control, Diagnostic, Environment, Package, Reply, RunError, Sources,
+};
 use dupin_plugin_protocol::PluginItem;
 
 use crate::sandbox;
@@ -67,6 +69,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             entry,
             modules,
             call,
+            environment,
         } = message
         else {
             continue;
@@ -82,7 +85,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             writer: &mut writer,
             replies: &answered,
         };
-        let answer = match execute(entry, modules, call, control, &mut bridge) {
+        let answer = match execute(entry, modules, call, environment, control, &mut bridge) {
             Ok(Outcome::Compiled(package)) => {
                 let (modules, tail) = wire::spans(package.modules());
                 let bytes: usize = tail.iter().map(|part| part.len()).sum();
@@ -191,6 +194,7 @@ fn execute(
     entry: String,
     modules: Vec<(String, &[u8])>,
     call: Call,
+    environment: Option<Environment>,
     control: Control,
     bridge: &mut dyn Bridge,
 ) -> Result<Outcome, RunError> {
@@ -212,7 +216,7 @@ fn execute(
     // compile this package alone, so these are bytes `Package::compile` wrote from this
     // package's source, or ones that source subverted its own compile into writing, which can
     // do no more than running the source could.
-    let package = unsafe { Package::from_compiled(entry, bytecode) };
+    let package = unsafe { Package::from_compiled(entry, bytecode) }.with_environment(environment);
     match call {
         Call::Compile => unreachable!("compiled above"),
         Call::Check => package.check(control).map(|()| Outcome::Checked),

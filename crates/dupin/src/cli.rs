@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -18,6 +18,10 @@ enum Action {
     ExtCheck(String),
     /// Ask an extension folder for a query.
     ExtRun(String, String),
+    /// Replay an extension folder's fixtures, rewriting their expectations with `true`.
+    ExtTest(String, bool),
+    /// Render a fixture's step: the folder, the fixture, the PNG and the step.
+    ExtSnap(String, String, String, Option<usize>),
     /// Print the revision declared grants name for an extension folder.
     ExtRevision(String),
     /// Install, list, update, remove or restore packages in the extensions folder.
@@ -25,7 +29,7 @@ enum Action {
     ExtNew(String, dupin_ext_sdk::Template),
     ExtBuild(String, dupin_ext_sdk::BuildOptions),
     ExtDev(String, dupin_ext_sdk::BuildOptions),
-    Mcp,
+    Mcp(Option<String>),
 }
 
 /// Why a command failed: a plain message, or a diagnostic about an extension package.
@@ -33,6 +37,8 @@ enum Action {
 enum Failure {
     Message(String),
     Diagnostic(dupin_js_runtime::Diagnostic),
+    /// Fixtures that didn't pass: the report as JSON and as text.
+    Report(Value, String),
 }
 
 impl From<String> for Failure {
@@ -70,13 +76,23 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let options = dupin_ext_sdk::BuildOptions {
         sourcemap: parser.contains("--sourcemap"),
     };
+    let update = parser.contains("--update");
+    let step: Option<usize> = parser
+        .opt_value_from_str("--step")
+        .map_err(|_| "--step takes a step number, counting from 1".to_owned())?;
+    let workspace: Option<String> = parser
+        .opt_value_from_str("--workspace")
+        .map_err(|_| "--workspace takes a folder".to_owned())?;
+    let build_flags = typescript || bundled || options.sourcemap;
+    let other_flags = update || step.is_some() || workspace.is_some();
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
         .map(|s| s.to_str().ok_or_else(|| "arguments must be UTF-8".to_owned()))
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
-        ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap => {
+        _ if build_flags && other_flags => Err("invalid arguments; use dupin --help".into()),
+        ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap && !other_flags => {
             let template = match (typescript, bundled) {
                 (_, true) => dupin_ext_sdk::Template::Bundled,
                 (true, false) => dupin_ext_sdk::Template::TypeScript,
@@ -84,18 +100,37 @@ fn parse(args: &[String]) -> Result<Action, String> {
             };
             Ok(Action::ExtNew(folder.to_string(), template))
         }
-        ["ext", "build", folder] if !folder.starts_with('-') && !typescript && !bundled => {
+        ["ext", "build", folder] if !folder.starts_with('-') && !typescript && !bundled && !other_flags => {
             Ok(Action::ExtBuild(folder.to_string(), options))
         }
-        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript && !bundled => {
+        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript && !bundled && !other_flags => {
             Ok(Action::ExtDev(folder.to_string(), options))
         }
-        _ if typescript || bundled || options.sourcemap => Err("invalid arguments; use dupin --help".into()),
+        ["ext", "test", folder]
+            if !folder.starts_with('-') && !build_flags && step.is_none() && workspace.is_none() =>
+        {
+            Ok(Action::ExtTest(folder.to_string(), update))
+        }
+        ["ext", "snap", folder, fixture, output]
+            if [folder, fixture, output].iter().all(|arg| !arg.starts_with('-'))
+                && step.is_none_or(|step| step > 0)
+                && !update
+                && !build_flags
+                && workspace.is_none() =>
+        {
+            Ok(Action::ExtSnap(
+                folder.to_string(),
+                fixture.to_string(),
+                output.to_string(),
+                step,
+            ))
+        }
+        ["mcp"] if !json && !build_flags && !update && step.is_none() => Ok(Action::Mcp(workspace)),
+        _ if build_flags || other_flags => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
-        ["mcp"] if !json => Ok(Action::Mcp),
         ["pick"] => Ok(Action::Pick(false)),
         ["pick", "--input-json"] => Ok(Action::Pick(true)),
         ["snapshots", "list"] => Ok(Action::SnapshotsList),
@@ -212,6 +247,14 @@ pub fn run() -> bool {
                 println!("{}", serde_json::json!({"error": error}));
             } else {
                 eprintln!("dupin: {error}");
+            }
+            std::process::exit(1)
+        }
+        Err(Failure::Report(report, text)) => {
+            if json {
+                println!("{report}");
+            } else {
+                print!("{text}");
             }
             std::process::exit(1)
         }
@@ -376,6 +419,34 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             print!("{}", describe_rows(&items));
             Ok(Value::Null)
         }
+        Action::ExtTest(folder, update) => {
+            let report = crate::extensions::test(std::path::Path::new(&folder), update, &|| false)?;
+            if !report.passed {
+                return Err(Failure::Report(report.json, report.text));
+            }
+            if json {
+                return Ok(report.json);
+            }
+            print!("{}", report.text);
+            Ok(Value::Null)
+        }
+        Action::ExtSnap(folder, fixture, output, step) => {
+            let snapped = crate::extensions::snap(
+                std::path::Path::new(&folder),
+                std::path::Path::new(&fixture),
+                step,
+                std::path::Path::new(&output),
+                &|| false,
+            )?;
+            if json {
+                return Ok(snapped_json(&snapped));
+            }
+            println!(
+                "Rendered step {} of {fixture} to {output}: {}×{} points at {}×",
+                snapped.step, snapped.width, snapped.height, snapped.scale
+            );
+            Ok(Value::Null)
+        }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
         Action::ExtNew(folder, template) => {
             let files = dupin_ext_sdk::scaffold(std::path::Path::new(&folder), template)?;
@@ -435,10 +506,20 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             });
             Ok(Value::Null)
         }
-        Action::Mcp => crate::mcp::run()
+        Action::Mcp(workspace) => crate::mcp::run(workspace.map(std::path::PathBuf::from))
             .map(|()| Value::Null)
             .map_err(|e| e.to_string().into()),
     }
+}
+
+pub(crate) fn snapped_json(snapped: &crate::extensions::Snapped) -> Value {
+    serde_json::json!({
+        "png": snapped.png,
+        "step": snapped.step,
+        "width": snapped.width,
+        "height": snapped.height,
+        "scale": snapped.scale,
+    })
 }
 
 fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagnostic> {
@@ -865,7 +946,6 @@ mod tests {
             &["ext", "dev", "greeter", "--bundle"],
             &["ext", "dev"],
             &["ext", "check", "guest.wasm", "request.json"],
-            &["ext", "snap", "guest.wasm", "request.json", "view.png"],
         ] {
             assert!(parse(&args(invalid)).is_err(), "{invalid:?}");
         }
@@ -886,7 +966,75 @@ mod tests {
             );
             assert!(parse(&args(&["ext", "install", "--upload-pack=x"])).is_err());
         }
-        assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
+        assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp(None));
+        assert_eq!(
+            parse(&args(&["mcp", "--workspace", "packages"])).unwrap(),
+            Action::Mcp(Some("packages".into()))
+        );
+        assert_eq!(
+            parse(&args(&["ext", "test", "greeter", "--update", "--json"])).unwrap(),
+            Action::ExtTest("greeter".into(), true)
+        );
+        assert_eq!(
+            parse(&args(&["ext", "test", "greeter"])).unwrap(),
+            Action::ExtTest("greeter".into(), false)
+        );
+        assert_eq!(
+            parse(&args(&[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "2"
+            ]))
+            .unwrap(),
+            Action::ExtSnap(
+                "greeter".into(),
+                "fixtures/search.json".into(),
+                "out.png".into(),
+                Some(2)
+            )
+        );
+        for invalid in [
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "0",
+            ][..],
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "x",
+            ],
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--update",
+            ],
+            &["ext", "snap", "greeter", "fixtures/search.json"],
+            &["ext", "test", "greeter", "--step", "1"],
+            &["ext", "run", "greeter", "--query", "x", "--update"],
+            &["ext", "check", "greeter", "--workspace", "x"],
+            &["mcp", "--update"],
+            &["mcp", "--ts"],
+            &["ext", "test", "greeter", "--ts"],
+            &["ext", "new", "greeter", "--update"],
+        ] {
+            assert!(parse(&args(invalid)).is_err(), "{invalid:?}");
+        }
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(
             parse(&["open".into(), "--query".into(), "日本語".into()]).unwrap(),

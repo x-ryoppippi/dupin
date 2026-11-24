@@ -70,7 +70,7 @@ pub struct Namespace {
 
 impl Namespace {
     /// Runs `op` on the store; a deletion waits until it returns.
-    pub(crate) fn with<R>(&self, op: impl FnOnce(&Store) -> Result<R, Error>) -> Result<R, Failure> {
+    pub fn with<R>(&self, op: impl FnOnce(&Store) -> Result<R, Error>) -> Result<R, Failure> {
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         let store = store
             .as_ref()
@@ -172,7 +172,7 @@ fn failure(error: Error) -> Failure {
         Error::QuotaExceeded { .. } | Error::TooLarge { .. } => "quota-exceeded",
         Error::TooManyBlobs { .. } => "too-large",
         Error::NotFound | Error::Corrupt(_) => "not-found",
-        Error::Key(_) | Error::WrongKey | Error::Busy => "unavailable",
+        Error::Key(_) | Error::WrongKey | Error::NewerFormat | Error::Busy => "unavailable",
         Error::Io(_) | Error::InvalidNamespace(_) | Error::InvalidLimits(_) | Error::Json(_) => "failed",
     };
     Failure::new(code, error.to_string())

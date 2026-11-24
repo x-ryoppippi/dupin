@@ -479,7 +479,7 @@ fn records_and_blobs_round_trip_newest_first_sealed_on_disk() {
                const two = await storage.list({ before: one.next, limit: 2 });
                const blob = await storage.readBlob(first.blobs[0].handle);
                const got = await storage.get(second.id);
-               const missing = await storage.get('000000000000000000000000');
+               const missing = await storage.get('00000000000000000000000000000001');
                const deleted = [await storage.delete(first.id), await storage.delete(first.id)];
                const kept = await storage.readBlob(second.blobs[0].handle);
                const usage = await storage.usage();

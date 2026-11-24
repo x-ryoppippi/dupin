@@ -1,0 +1,624 @@
+//! `dupin ext test` and `dupin ext snap`: a package's fixtures replayed through the same
+//! extension host, bytecode and checks the launcher uses, with the fixture's clock, seed and time
+//! zone instead of the machine's. `snap` renders a step's panel with the launcher itself,
+//! headless, in a scratch home that holds only the package.
+
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
+use dupin_extension_bridge::Trigger;
+use dupin_extension_host::{ActionEffect, Host};
+use dupin_js_runtime::{Diagnostic, RunError};
+use dupin_plugin_protocol::{Effect, PluginItem};
+use serde_json::{Map, Value, json};
+
+use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
+
+mod services;
+
+/// Passes a fixture's clock and seed to the headless launcher `snap` starts.
+pub(super) const HEADLESS_ENVIRONMENT: &str = "DUPIN_HEADLESS_EXTENSION_ENVIRONMENT";
+const ZONEINFO: &str = "/usr/share/zoneinfo";
+/// Each headless run's own limit; a realtime run of the longest fixture takes about a minute.
+const RENDER_DEADLINE: Duration = Duration::from_secs(120);
+/// Realtime seconds before the first key, for the launcher to load the package.
+const FIRST_KEY: f64 = 1.0;
+const STEP_SECONDS: f64 = 0.75;
+
+/// What `dupin ext test` found: every fixture and step, as JSON and as text.
+pub struct Report {
+    pub passed: bool,
+    pub json: Value,
+    pub text: String,
+}
+
+/// Replays every fixture in `folder/fixtures`. With `update`, a fixture whose steps all ran is
+/// rewritten to expect what they answered. Once `cancelled` answers true, the running call is
+/// stopped and no further fixture starts.
+pub fn test(folder: &Path, update: bool, cancelled: &dyn Fn() -> bool) -> Result<Report, Diagnostic> {
+    let extension = load_folder(folder)?;
+    let found = fixture::discover(folder)?;
+    let mut fixtures = Vec::new();
+    let mut text = String::new();
+    let mut failed = 0;
+    for (name, path) in &found {
+        if cancelled() {
+            return Err(Diagnostic::new("cancelled", "the run was cancelled"));
+        }
+        let result = fixture::read(name, path).and_then(|parsed| {
+            let replayed = replay(&extension, name, &parsed, cancelled)?;
+            Ok(replayed.finish(parsed, name, path, update))
+        });
+        let outcome = result.unwrap_or_else(|diagnostic| FixtureResult::invalid(name, diagnostic));
+        if !outcome.passed {
+            failed += 1;
+        }
+        outcome.describe(&mut text);
+        fixtures.push(outcome.json);
+    }
+    let passed = failed == 0;
+    text.push_str(&format!(
+        "{} {}: {} passed, {failed} failed\n",
+        found.len(),
+        if found.len() == 1 { "fixture" } else { "fixtures" },
+        found.len() - failed,
+    ));
+    Ok(Report {
+        passed,
+        json: json!({ "package": extension.id, "passed": passed, "fixtures": fixtures }),
+        text,
+    })
+}
+
+/// A host of the fixture's own, whose helper runs in its time zone, which must be one this Mac
+/// has, and whose guests see its clock and seed.
+fn fixture_host(name: &str, fixture: &Fixture) -> Result<Host, Diagnostic> {
+    let zone = fixture.environment.time_zone.clone();
+    if !Path::new(ZONEINFO).join(&zone).is_file() {
+        return Err(
+            Diagnostic::new("invalid-fixture", format!("this Mac has no time zone {zone:?}"))
+                .file(name)
+                .field("environment.timeZone")
+                .hint("Use a name from the tz database, such as `UTC` or `Europe/London`."),
+        );
+    }
+    let launch = Box::new(move || {
+        let mut command = helper_command()?;
+        command.env("TZ", &zone);
+        Ok(command)
+    });
+    Ok(Host::fixed(launch, Some(guest_environment(fixture))))
+}
+
+fn guest_environment(fixture: &Fixture) -> dupin_js_runtime::Environment {
+    dupin_js_runtime::Environment {
+        now: fixture::parse_time(&fixture.environment.now).expect("validated by `fixture::parse`"),
+        seed: fixture.environment.seed,
+    }
+}
+
+struct Replay {
+    steps: Vec<StepResult>,
+}
+
+struct StepResult {
+    action: String,
+    outcome: Map<String, Value>,
+    differences: Vec<Difference>,
+    /// Why the step couldn't run, such as selecting a row the answer doesn't have.
+    problem: Option<String>,
+}
+
+/// Runs the steps in order through the fixture's host and broker bridge, stopping at the first
+/// that can't run.
+fn replay(
+    extension: &Extension,
+    name: &str,
+    fixture: &Fixture,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Replay, Diagnostic> {
+    let host = fixture_host(name, fixture)?;
+    let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
+    let call = |trigger| world.bridge.call(&extension.package, trigger).services;
+    let mut rows: Vec<PluginItem> = Vec::new();
+    let mut selected: Option<usize> = None;
+    let mut steps = Vec::new();
+    for step in &fixture.steps {
+        let action = step.action();
+        let mut outcome = Map::new();
+        let mut problem = None;
+        match action {
+            Action::Query(query) => {
+                let answer = host.search(
+                    &extension.compiled,
+                    query,
+                    dupin_js_runtime::MAX_ROWS,
+                    Instant::now() + QUERY_DEADLINE,
+                    cancelled,
+                    &call(Trigger::Query),
+                );
+                rows = match answer {
+                    Ok(items) => items,
+                    Err(error) => {
+                        problem = record(error, &mut outcome);
+                        Vec::new()
+                    }
+                };
+                selected = (!rows.is_empty()).then_some(0);
+                outcome.insert("rows".into(), fixture::rows(&rows));
+                if let Some(index) = selected {
+                    outcome.insert("selected".into(), index.into());
+                }
+            }
+            Action::Select(index) if index < rows.len() => {
+                selected = Some(index);
+                outcome.insert("selected".into(), index.into());
+            }
+            Action::Select(index) => {
+                problem = Some(format!(
+                    "there is no row {index} to select; the answer has {} {}",
+                    rows.len(),
+                    if rows.len() == 1 { "row" } else { "rows" }
+                ));
+            }
+            Action::Activate(name) => {
+                let row = selected.and_then(|index| rows.get(index));
+                let chosen = row.and_then(|row| {
+                    row.actions
+                        .iter()
+                        .find(|action| action.title == name || action.id == name)
+                });
+                match chosen {
+                    Some(action) => {
+                        outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        if let Effect::Run { action, data } = &action.effect {
+                            let acted = host.action(
+                                &extension.compiled,
+                                action,
+                                data.as_ref().unwrap_or(&Value::Null),
+                                Instant::now() + ACTION_DEADLINE,
+                                cancelled,
+                                &call(Trigger::Activation),
+                            );
+                            match acted {
+                                Ok(Some(ActionEffect::Toast { text })) => {
+                                    outcome.insert("toasts".into(), json!([text]));
+                                }
+                                Ok(None) => {}
+                                Err(error) => problem = record(error, &mut outcome),
+                            }
+                        }
+                    }
+                    None => {
+                        let offered: Vec<&str> = row
+                            .map(|row| row.actions.iter().map(|action| action.title.as_str()).collect())
+                            .unwrap_or_default();
+                        problem = Some(if offered.is_empty() {
+                            format!("the selected row has no action {}", Value::from(name))
+                        } else {
+                            format!(
+                                "the selected row has no action {}; it offers {}",
+                                Value::from(name),
+                                offered.join(", ")
+                            )
+                        });
+                    }
+                }
+            }
+            Action::Event(event, data) => {
+                let handled = host.event(
+                    &extension.compiled,
+                    event,
+                    data,
+                    Instant::now() + ACTION_DEADLINE,
+                    cancelled,
+                    &call(Trigger::Background),
+                );
+                if let Err(error) = handled {
+                    problem = record(error, &mut outcome);
+                }
+            }
+        }
+        let effects = world.take_effects();
+        if !effects.clipboard.is_empty() {
+            outcome.insert("clipboard".into(), effects.clipboard.into());
+        }
+        if let Some(storage) = effects.storage {
+            outcome.insert("storage".into(), storage);
+        }
+        let differences = match (&problem, &step.expect) {
+            (None, Some(expected)) => fixture::compare(expected, &outcome),
+            _ => Vec::new(),
+        };
+        let stop = problem.is_some();
+        steps.push(StepResult {
+            action: action.describe(),
+            outcome,
+            differences,
+            problem,
+        });
+        if stop {
+            break;
+        }
+    }
+    Ok(Replay { steps })
+}
+
+/// A failed call is the step's outcome; a cancelled one means the step never ran.
+fn record(error: RunError, outcome: &mut Map<String, Value>) -> Option<String> {
+    match error {
+        RunError::Failed(diagnostic) => {
+            outcome.insert("error".into(), fixture::error(&diagnostic));
+            None
+        }
+        RunError::Cancelled => Some("the call was cancelled".into()),
+    }
+}
+
+struct FixtureResult {
+    passed: bool,
+    json: Value,
+    name: String,
+    lines: Vec<String>,
+    updated: bool,
+}
+
+impl Replay {
+    fn finish(self, mut parsed: Fixture, name: &str, path: &Path, update: bool) -> FixtureResult {
+        let complete =
+            self.steps.len() == parsed.steps.len() && self.steps.iter().all(|step| step.problem.is_none());
+        let mut updated = false;
+        if update && complete {
+            for (step, result) in parsed.steps.iter_mut().zip(&self.steps) {
+                step.expect = Some(result.outcome.clone());
+            }
+            let rewritten = fixture::to_json(&parsed);
+            if std::fs::read_to_string(path).ok().as_deref() != Some(rewritten.as_str()) {
+                if let Err(error) = std::fs::write(path, rewritten) {
+                    return FixtureResult::invalid(
+                        name,
+                        Diagnostic::new("unwritable", format!("Couldn't write it: {error}")).file(name),
+                    );
+                }
+                updated = true;
+            }
+        }
+        let passed = complete && (update || self.steps.iter().all(|step| step.differences.is_empty()));
+        let mut lines = Vec::new();
+        let steps: Vec<Value> = self
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(index, step)| {
+                let step_passed = step.problem.is_none() && (update || step.differences.is_empty());
+                if !step_passed {
+                    lines.push(format!("  step {}, {}:", index + 1, step.action));
+                    lines.extend(step.problem.iter().map(|problem| format!("    {problem}")));
+                    if !update {
+                        lines.extend(
+                            step.differences
+                                .iter()
+                                .map(|difference| format!("    {difference}")),
+                        );
+                    }
+                }
+                let mut entry = json!({
+                    "step": index + 1,
+                    "action": step.action,
+                    "passed": step_passed,
+                    "outcome": step.outcome,
+                });
+                if !update && !step.differences.is_empty() {
+                    entry["differences"] =
+                        serde_json::to_value(&step.differences).expect("differences serialize");
+                }
+                if let Some(problem) = &step.problem {
+                    entry["problem"] = problem.clone().into();
+                }
+                entry
+            })
+            .collect();
+        FixtureResult {
+            passed,
+            json: json!({ "file": name, "passed": passed, "updated": updated, "steps": steps }),
+            name: name.to_owned(),
+            lines,
+            updated,
+        }
+    }
+}
+
+impl FixtureResult {
+    fn invalid(name: &str, diagnostic: Diagnostic) -> Self {
+        let mut lines = vec![format!("  {diagnostic}")];
+        lines.extend(diagnostic.hint.as_ref().map(|hint| format!("  hint: {hint}")));
+        Self {
+            passed: false,
+            json: json!({ "file": name, "passed": false, "error": diagnostic.to_string(), "diagnostic": diagnostic }),
+            name: name.to_owned(),
+            lines,
+            updated: false,
+        }
+    }
+
+    fn describe(&self, out: &mut String) {
+        let status = match (self.passed, self.updated) {
+            (false, _) => "FAIL",
+            (true, true) => "updated",
+            (true, false) => "ok",
+        };
+        out.push_str(&format!("{status} {}\n", self.name));
+        for line in &self.lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+}
+
+/// What `dupin ext snap` rendered.
+pub struct Snapped {
+    pub png: PathBuf,
+    pub step: usize,
+    pub width: u16,
+    pub height: u32,
+    pub scale: u8,
+}
+
+/// Renders the panel after step `step` (counting from 1; the last by default) of the fixture at
+/// `fixture_path`, with the launcher's own view in a headless run of this executable, to
+/// `output`. Activations aren't replayed: their effects never show in the panel, and the panel
+/// stays as it was when the action was chosen. Once `cancelled` answers true, the headless run
+/// is stopped.
+pub fn snap(
+    folder: &Path,
+    fixture_path: &Path,
+    step: Option<usize>,
+    output: &Path,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Snapped, Diagnostic> {
+    let extension = load_folder(folder)?;
+    let name = fixture_path.display().to_string();
+    let parsed = fixture::read(&name, fixture_path)?;
+    let last = step.unwrap_or(parsed.steps.len());
+    if !(1..=parsed.steps.len()).contains(&last) {
+        return Err(Diagnostic::new(
+            "invalid-step",
+            format!("has {} steps, so there is no step {last}", parsed.steps.len()),
+        )
+        .file(name)
+        .hint("Name a step from 1 to the fixture's number of steps."));
+    }
+    let environment = &parsed.environment;
+    if !Path::new(ZONEINFO).join(&environment.time_zone).is_file() {
+        return Err(Diagnostic::new(
+            "invalid-fixture",
+            format!("this Mac has no time zone {:?}", environment.time_zone),
+        )
+        .file(name)
+        .field("environment.timeZone"));
+    }
+    // The headless launcher runs in the scratch home, so a relative path would land there.
+    let output = &std::path::absolute(output).map_err(|error| {
+        Diagnostic::new(
+            "render-failed",
+            format!("couldn't resolve the output path: {error}"),
+        )
+    })?;
+    let render_failed = |message: String| {
+        Diagnostic::new("render-failed", message).hint(
+            "`snap` runs Dupin headless, which a debug build or one with Rune's `tooling` feature can do.",
+        )
+    };
+    let scratch = tempfile::Builder::new()
+        .prefix("dupin-snap-")
+        .tempdir()
+        .map_err(|error| render_failed(format!("couldn't make a scratch folder: {error}")))?;
+    let root = scratch.path();
+    let config = root.join("config/dupin");
+    let extensions = config.join("extensions");
+    std::fs::create_dir_all(&extensions)
+        .and_then(|()| {
+            std::fs::write(
+                config.join("config.toml"),
+                format!(
+                    "hotkey = \"\"\nauto_update = false\ninput_source = \"keep\"\nweb_searches = {{}}\nextensions = true\n\n[theme]\npanel_width = {}\n",
+                    environment.window.width
+                ),
+            )
+        })
+        .and_then(|()| std::fs::create_dir_all(root.join("data")))
+        .and_then(|()| std::fs::create_dir_all(root.join("tmp")))
+        .map_err(|error| render_failed(format!("couldn't prepare the scratch home: {error}")))?;
+    copy_package(folder, &extensions.join(&extension.id))?;
+    let script = root.join("script.json");
+    std::fs::write(&script, script_for(&extension.keyword, &parsed, last).to_string())
+        .map_err(|error| render_failed(format!("couldn't write the input script: {error}")))?;
+
+    let exe =
+        std::env::current_exe().map_err(|error| render_failed(format!("couldn't find Dupin: {error}")))?;
+    let launcher = |args: &[&OsStr]| {
+        let mut command = Command::new(&exe);
+        let lang = format!("{}.UTF-8", environment.locale.replacen('-', "_", 1));
+        command
+            .env_clear()
+            .current_dir(root)
+            .env("HOME", root)
+            .env("TMPDIR", root.join("tmp"))
+            .env("XDG_CONFIG_HOME", root.join("config"))
+            .env("XDG_DATA_HOME", root.join("data"))
+            .env("PATH", "/usr/bin:/bin")
+            .env("TZ", &environment.time_zone)
+            .env("LANG", &lang)
+            .env("LC_ALL", &lang)
+            .env(
+                HEADLESS_ENVIRONMENT,
+                serde_json::to_string(&guest_environment(&parsed)).unwrap_or_default(),
+            )
+            .arg("--script")
+            .arg(&script)
+            .args([
+                "--realtime",
+                "--at",
+                "mark:end",
+                "--theme",
+                environment.theme.as_str(),
+            ])
+            .args(args);
+        run_bounded(command, cancelled).map_err(render_failed)
+    };
+    let height = match environment.window.height {
+        Some(height) => u32::from(height),
+        None => {
+            let tree = root.join("tree.json");
+            launcher(&[OsStr::new("--tree"), tree.as_os_str()])?;
+            panel_height(&tree).map_err(render_failed)?
+        }
+    };
+    let size = format!("{}x{height}", environment.window.width);
+    let scale = environment.window.scale.to_string();
+    launcher(&[
+        OsStr::new("--snap"),
+        output.as_os_str(),
+        OsStr::new("--size"),
+        OsStr::new(&size),
+        OsStr::new("--scale"),
+        OsStr::new(&scale),
+    ])?;
+    if !output.is_file() {
+        return Err(render_failed("the headless run wrote no PNG".into()));
+    }
+    Ok(Snapped {
+        png: output.to_owned(),
+        step: last,
+        width: environment.window.width,
+        height,
+        scale: environment.window.scale,
+    })
+}
+
+/// The package's manifest and modules, which are all the launcher reads, copied so the render
+/// never sees the author's other files.
+fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
+    let entry = manifest::read(&manifest::Stamps::read(folder)?)?.entry;
+    let unwritable = |error: std::io::Error| {
+        Diagnostic::new("render-failed", format!("couldn't copy the package: {error}"))
+    };
+    std::fs::create_dir_all(into).map_err(unwritable)?;
+    std::fs::copy(
+        folder.join(manifest::PACKAGE_JSON),
+        into.join(manifest::PACKAGE_JSON),
+    )
+    .map_err(unwritable)?;
+    for (name, path) in dupin_js_runtime::source_files(folder, &entry)? {
+        let target = into.join(&name);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(unwritable)?;
+        }
+        std::fs::copy(path, target).map_err(unwritable)?;
+    }
+    Ok(())
+}
+
+/// The keys a person would press for steps `1..=last`: the keyword and each query, replacing
+/// the field, and arrow keys to each selected row.
+fn script_for(keyword: &str, fixture: &Fixture, last: usize) -> Value {
+    let mut events = Vec::new();
+    let mut at = FIRST_KEY;
+    let mut selected = 0;
+    for step in &fixture.steps[..last] {
+        match step.action() {
+            Action::Query(query) => {
+                if !events.is_empty() {
+                    events.push(json!({ "t": at, "type": "key", "name": "a", "cmd": true }));
+                    at += 0.05;
+                }
+                events.push(json!({ "t": at, "type": "type", "text": format!("{keyword} {query}") }));
+                selected = 0;
+            }
+            Action::Select(index) => {
+                let (key, presses) = if index >= selected {
+                    ("Down", index - selected)
+                } else {
+                    ("Up", selected - index)
+                };
+                for _ in 0..presses {
+                    events.push(json!({ "t": at, "type": "key", "name": key }));
+                    at += 0.05;
+                }
+                selected = index;
+            }
+            Action::Activate(_) | Action::Event(..) => continue,
+        }
+        at += STEP_SECONDS;
+    }
+    events.push(json!({ "t": at + STEP_SECONDS, "type": "mark", "name": "end" }));
+    json!({ "events": events })
+}
+
+/// Runs `command` to completion within [`RENDER_DEADLINE`] unless `cancelled`, with the last
+/// line it wrote to stderr as the error when it fails.
+fn run_bounded(mut command: Command, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("couldn't start Dupin headless: {error}"))?;
+    let stderr = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(mut stderr) = stderr {
+            let _ =
+                std::io::Read::read_to_string(&mut std::io::Read::take(&mut stderr, 64 * 1024), &mut text);
+        }
+        text
+    });
+    let deadline = Instant::now() + RENDER_DEADLINE;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err("the headless run was cancelled".to_owned());
+            }
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err("the headless run passed its deadline".to_owned());
+            }
+            Err(error) => break Err(format!("couldn't wait for the headless run: {error}")),
+        }
+    }?;
+    let stderr = reader.join().unwrap_or_default();
+    if status.success() {
+        return Ok(());
+    }
+    let last = stderr
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("no output");
+    Err(format!("the headless run failed ({status}): {last}"))
+}
+
+/// The panel's laid-out height in points, rounded up, from a `--tree` dump.
+fn panel_height(tree: &Path) -> Result<u32, String> {
+    let bytes = std::fs::read(tree).map_err(|error| format!("couldn't read the element tree: {error}"))?;
+    let tree: Value = serde_json::from_slice(&bytes).map_err(|_| "the element tree isn't JSON".to_owned())?;
+    tree["elements"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|element| element["key"] == "panel" && element["rect"].is_array())
+        .and_then(|panel| panel["rect"][3].as_f64())
+        .map(|height| height.ceil() as u32)
+        .ok_or_else(|| "the element tree has no laid-out panel".to_owned())
+}
+
+#[cfg(test)]
+mod tests;

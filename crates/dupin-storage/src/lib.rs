@@ -6,6 +6,7 @@
 //! `docs/features/storage.md` for the on-disk format and the threat model.
 
 mod crypto;
+mod device;
 mod error;
 mod fs;
 mod key;
@@ -13,11 +14,12 @@ mod secret;
 mod store;
 mod sweeper;
 
+pub use device::DeviceId;
 pub use error::Error;
 pub use key::{DataKey, FileKey, KeyProvider, MemoryKey};
 pub use store::{
-    BlobHandle, BlobRef, Clock, Limits, NewRecord, OpenReport, Page, Record, RecordId, Storage, Store,
-    SystemClock, Usage,
+    BlobHandle, BlobRef, Clock, Cursor, Limits, NewRecord, OpenReport, Page, Record, RecordId, Storage,
+    Store, SystemClock, Usage,
 };
 pub use sweeper::Sweeper;
 

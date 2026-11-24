@@ -173,7 +173,7 @@ impl Session {
             }
             "storage.list" => {
                 let ListArgs { before, limit } = decode(args)?;
-                let before = before.as_deref().map(record_id).transpose()?;
+                let before = before.as_deref().map(cursor).transpose()?;
                 let limit = limit.map_or(DEFAULT_PAGE, |limit| (limit as usize).clamp(1, MAX_PAGE));
                 let (permit, namespace) = self.storage(StorageOp::Read)?;
                 let page = namespace.with(|store| store.list(before.as_ref(), limit))?;
@@ -620,6 +620,10 @@ fn record_id(id: &str) -> Result<dupin_storage::RecordId, Failure> {
     id.parse().map_err(|_| Failure::invalid("not a record ID"))
 }
 
+fn cursor(text: &str) -> Result<dupin_storage::Cursor, Failure> {
+    text.parse().map_err(|_| Failure::invalid("not a page cursor"))
+}
+
 /// A record as the guest receives it: its ID and handles are opaque, and `createdAt` is
 /// milliseconds since the epoch.
 fn record_json(record: dupin_storage::Record) -> Value {
@@ -655,11 +659,11 @@ fn page_json(page: dupin_storage::Page) -> Value {
         records.push(record);
     }
     if records.len() < total {
-        next = records.last().map(|record| record.id);
+        next = records.last().map(dupin_storage::Record::cursor);
     }
     json!({
         "records": records.into_iter().map(record_json).collect::<Vec<_>>(),
-        "next": next.map(|id| id.to_string()),
+        "next": next.map(|cursor| cursor.to_string()),
     })
 }
 

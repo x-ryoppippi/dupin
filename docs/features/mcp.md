@@ -37,6 +37,30 @@ With the Nix package or the home-manager module, `dupin` is on `PATH`, so `"comm
 
 No tool writes configuration, runs a script or opens a file. Those have effects outside Dupin, and will ask for confirmation in the panel before they run ([#34](https://github.com/x-ryoppippi/dupin/issues/34)).
 
+## Extension tools
+
+Started with `--workspace DIR`, the server also offers four tools for extension packages inside that folder, so an agent can write a package and check it without the launcher:
+
+```json
+{
+	"mcpServers": {
+		"dupin": {
+			"command": "dupin",
+			"args": ["mcp", "--workspace", "extensions-src"]
+		}
+	}
+}
+```
+
+| Tool        | Arguments                    | What it does                                                                                                                                                                                  |
+| ----------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ext_check` | `package`                    | Loads and compiles the package as `dupin ext check` does and returns its `id`, `name`, `version` and `keyword`.                                                                               |
+| `ext_run`   | `package`, `query`           | Asks it one query as `dupin ext run --json` does. Its host requests fail as `unavailable`.                                                                                                    |
+| `ext_test`  | `package`                    | Replays its fixtures as `dupin ext test --json` does and returns the report. It never rewrites them.                                                                                          |
+| `ext_snap`  | `package`, `fixture`, `step` | Renders the panel after a fixture's step as `dupin ext snap` does and returns the PNG as image content, with its `step`, `width`, `height` and `scale`. `fixture` is relative to the package. |
+
+`package` is a folder relative to the workspace; a path that leads outside it, by `..`, an absolute path or a symbolic link, is refused. The tools take prebuilt packages: no build, package manager or script runs, and nothing is written to the workspace. Guest code runs only in the sandboxed extension host. Host requests are answered from the fixture or not at all: the grants you made in Dupin don't apply, and nothing asks macOS for access. A failure is a tool error whose text is the diagnostic as JSON, with its `code`, `file`, `field`, position and `hint`. Without `--workspace`, these tools aren't listed and calling one is an unknown tool. See [Testing and snapshots](./extensions.md#testing-and-snapshots).
+
 ## Errors
 
 A tool that fails, such as `open_panel` while Dupin isn't running ("Dupin is not running"), a `pick` the user dismisses ("Cancelled") or an argument it doesn't accept, returns a result with `isError: true` and the reason as text, so the agent can correct itself. Protocol mistakes are JSON-RPC errors: invalid JSON (`-32700`), a malformed request, a batch or a message over 512 KiB (`-32600`), an unknown method (`-32601`), and an unknown tool or malformed `tools/call` parameters (`-32602`).
