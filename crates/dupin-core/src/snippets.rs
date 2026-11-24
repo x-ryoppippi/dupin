@@ -9,6 +9,9 @@ use crate::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request,
 const MAX_KEYWORD_BYTES: usize = 32;
 const MAX_NAME_CHARS: usize = 80;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
+/// Every snippet's text together: the package gets them all with each catalogue it is asked
+/// for, and Dupin holds each text once for copying and again for pasting.
+const MAX_TOTAL_TEXT_BYTES: usize = 1024 * 1024;
 const PREVIEW_CHARS: usize = 80;
 
 /// The wall-clock time where the user is, as placeholders show it.
@@ -81,6 +84,43 @@ pub fn expand(text: &str, now: LocalTime, clipboard: &str) -> String {
     }
     out.push_str(&text[from..]);
     out
+}
+
+/// What the bundled `snippets` extension reads as `ctx.preferences`: the usable snippets in
+/// keyword order, and whether Enter pastes them. Dupin hands over the settings rather than the
+/// package reading config.toml, so it checks them here and the package lists what it gets.
+pub fn preferences(config: &Config) -> (serde_json::Map<String, serde_json::Value>, Option<String>) {
+    let mut listed = Vec::new();
+    let (mut invalid, mut over) = (false, false);
+    let mut total = 0;
+    for (keyword, snippet) in &config.snippets {
+        let name = snippet.name.as_deref();
+        if !valid_keyword(keyword) || !name.is_none_or(valid_name) || !valid_text(&snippet.text) {
+            invalid = true;
+            continue;
+        }
+        if total + snippet.text.len() > MAX_TOTAL_TEXT_BYTES {
+            over = true;
+            continue;
+        }
+        total += snippet.text.len();
+        listed.push(serde_json::json!({ "keyword": keyword, "name": name, "text": snippet.text }));
+    }
+    let notice = match (invalid, over) {
+        (false, false) => None,
+        (true, _) => Some(
+            "Some snippets were ignored because a keyword, name or text is invalid. Review snippets in config.toml."
+                .to_owned(),
+        ),
+        (false, true) => Some(
+            "Some snippets were ignored because together they hold more than 1 MiB of text. Review snippets in config.toml."
+                .to_owned(),
+        ),
+    };
+    let mut preferences = serde_json::Map::new();
+    preferences.insert("snippets".into(), listed.into());
+    preferences.insert("paste".into(), config.snippet_paste.into());
+    (preferences, notice)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -428,5 +468,46 @@ mod tests {
         assert_eq!(collect("").len(), 3);
         *catalog.write().unwrap() = SnippetCatalog::compile(&Config::default()).0;
         assert!(collect("").is_empty());
+    }
+
+    #[test]
+    fn preferences_hand_over_the_valid_snippets_in_keyword_order() {
+        let mut config = config(true);
+        config.snippets.insert("two words".into(), snippet(None, "x"));
+        let (preferences, notice) = preferences(&config);
+        assert!(notice.unwrap().contains("invalid"));
+        assert_eq!(
+            serde_json::Value::Object(preferences),
+            serde_json::json!({
+                "snippets": [
+                    { "keyword": "addr", "name": "Home address", "text": "1 Baker Street" },
+                    { "keyword": "sig", "name": "Email signature", "text": "Best wishes,\n  Dupin" },
+                    { "keyword": "today", "name": null, "text": "{date}" },
+                ],
+                "paste": true,
+            })
+        );
+        assert_eq!(
+            serde_json::Value::Object(super::preferences(&Config::default()).0),
+            serde_json::json!({ "snippets": [], "paste": false })
+        );
+    }
+
+    #[test]
+    fn preferences_leave_out_what_goes_past_the_text_budget() {
+        let big = "x".repeat(MAX_TEXT_BYTES);
+        let mut config = Config::default();
+        for index in 0..MAX_TOTAL_TEXT_BYTES / MAX_TEXT_BYTES + 1 {
+            config
+                .snippets
+                .insert(format!("big{index:02}"), snippet(None, &big));
+        }
+        config.snippets.insert("small".into(), snippet(None, "fits"));
+        let (preferences, notice) = preferences(&config);
+        assert!(notice.unwrap().contains("1 MiB"));
+        let listed = preferences["snippets"].as_array().unwrap();
+        assert_eq!(listed.len(), MAX_TOTAL_TEXT_BYTES / MAX_TEXT_BYTES);
+        assert_eq!(listed.last().unwrap()["keyword"], "big15");
+        assert!(listed.iter().all(|snippet| snippet["keyword"] != "small"));
     }
 }
