@@ -138,6 +138,58 @@ pub enum Answer {
     Missing,
 }
 
+/// The packages a helper holds, by the name Dupin gives each compile, least recently run first.
+/// The helper keeps its packages in one, and Dupin keeps one of its own with nothing in it, fed
+/// the same runs, so it sends a package's bytecode exactly when the helper doesn't hold it.
+pub struct Held<T> {
+    packages: Vec<(u64, T, usize)>,
+    bytes: usize,
+}
+
+impl<T> Default for Held<T> {
+    fn default() -> Self {
+        Self {
+            packages: Vec::new(),
+            bytes: 0,
+        }
+    }
+}
+
+impl<T> Held<T> {
+    /// The package held under `name`, which is now the most recently run.
+    pub fn run(&mut self, name: u64) -> Option<&T> {
+        let at = self.packages.iter().position(|(held, ..)| *held == name)?;
+        let held = self.packages.remove(at);
+        self.packages.push(held);
+        self.packages.last().map(|(_, package, _)| package)
+    }
+
+    /// Holds `package`, of `bytes` of bytecode, under `name`, letting the least recently run go
+    /// until it fits. One larger than [`MAX_HELD_BYTES`] is never held.
+    pub fn hold(&mut self, name: u64, package: T, bytes: usize) {
+        self.forget(name);
+        if bytes > MAX_HELD_BYTES {
+            return;
+        }
+        while self.bytes + bytes > MAX_HELD_BYTES {
+            let (_, _, freed) = self.packages.remove(0);
+            self.bytes -= freed;
+        }
+        self.packages.push((name, package, bytes));
+        self.bytes += bytes;
+    }
+
+    /// Lets go of the package held under `name`; false if none was.
+    pub fn forget(&mut self, name: u64) -> bool {
+        let Some(at) = self.packages.iter().position(|(held, ..)| *held == name) else {
+            return false;
+        };
+        let (_, _, freed) = self.packages.remove(at);
+        self.bytes -= freed;
+        true
+    }
+}
+
 /// The spans of `modules`, and the parts of a tail that carries them.
 pub fn spans<'a>(modules: impl Iterator<Item = (&'a str, &'a [u8])>) -> (Vec<ModuleSpan>, Vec<&'a [u8]>) {
     modules
@@ -503,6 +555,36 @@ mod tests {
         r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"missing"}}"#,
     ];
+
+    #[test]
+    fn a_package_too_large_to_hold_or_let_go_since_is_not_held() {
+        const MIB: usize = 1024 * 1024;
+        let mut held = Held::default();
+        held.hold(1, (), MAX_HELD_BYTES + 1);
+        assert!(held.run(1).is_none());
+        for name in [2, 3, 4] {
+            held.hold(name, (), 3 * MIB);
+        }
+        assert!(
+            held.run(2).is_none(),
+            "three packages of 3 MiB don't fit in 8 MiB"
+        );
+        assert!(held.run(3).is_some());
+        held.hold(2, (), 3 * MIB);
+        assert!(held.run(4).is_none(), "4 was the least recently run");
+        assert!(held.run(3).is_some() && held.run(2).is_some());
+    }
+
+    #[test]
+    fn holding_a_package_again_counts_its_bytes_once() {
+        let mut held = Held::default();
+        for _ in 0..3 {
+            held.hold(1, (), MAX_HELD_BYTES / 2);
+        }
+        held.hold(2, (), MAX_HELD_BYTES / 2);
+        assert!(held.run(1).is_some() && held.run(2).is_some());
+        assert!(held.forget(1) && !held.forget(1));
+    }
 
     #[test]
     fn spans_must_cover_the_tail_exactly() {

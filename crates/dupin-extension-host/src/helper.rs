@@ -150,15 +150,11 @@ fn run(socket: UnixStream) -> io::Result<()> {
 /// only Dupin chooses, and they go with this process, so holding them lets no guest reach
 /// anything it couldn't already reach here. Each run still loads them into an engine of its own.
 #[derive(Default)]
-struct Held {
-    /// The least recently run first.
-    packages: Vec<(u64, Package, usize)>,
-    bytes: usize,
-}
+struct Held(wire::Held<Package>);
 
 impl Held {
-    /// The package a run names: the one it carries, which is then held if it is named and fits,
-    /// or the one held under its name.
+    /// The package a run names: the one it carries, which is then held if it is named, or the
+    /// one held under its name.
     fn package(
         &mut self,
         name: Option<u64>,
@@ -166,11 +162,7 @@ impl Held {
         modules: Option<Vec<(String, &[u8])>>,
     ) -> Option<Package> {
         let Some(modules) = modules else {
-            let at = self.packages.iter().position(|(held, ..)| Some(*held) == name)?;
-            let held = self.packages.remove(at);
-            let package = held.1.with_environment(None);
-            self.packages.push(held);
-            return Some(package);
+            return Some(self.0.run(name?)?.with_environment(None));
         };
         let bytes = modules.iter().map(|(_, bytecode)| bytecode.len()).sum();
         let bytecode = modules
@@ -185,15 +177,7 @@ impl Held {
         // do no more than running the source could.
         let package = unsafe { Package::from_compiled(entry, bytecode) };
         if let Some(name) = name {
-            self.packages.retain(|(held, ..)| *held != name);
-            if bytes <= wire::MAX_HELD_BYTES {
-                while self.bytes + bytes > wire::MAX_HELD_BYTES {
-                    let (_, _, freed) = self.packages.remove(0);
-                    self.bytes -= freed;
-                }
-                self.packages.push((name, package.with_environment(None), bytes));
-                self.bytes += bytes;
-            }
+            self.0.hold(name, package.with_environment(None), bytes);
         }
         Some(package)
     }

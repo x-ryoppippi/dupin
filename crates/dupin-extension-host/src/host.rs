@@ -550,8 +550,8 @@ struct Helper {
     replies: mpsc::Receiver<(FromHelper, Vec<u8>)>,
     started: Instant,
     greeted: bool,
-    /// The compiles whose bytecode this helper was sent, which it may still hold.
-    sent: HashSet<u64>,
+    /// What this helper holds of the compiles it was sent: it holds them by the same rules.
+    held: wire::Held<()>,
 }
 
 impl Drop for Helper {
@@ -598,7 +598,7 @@ impl Helper {
             replies: received,
             started: Instant::now(),
             greeted: false,
-            sent: HashSet::new(),
+            held: wire::Held::default(),
         })
     }
 
@@ -687,8 +687,7 @@ impl Helper {
         })
     }
 
-    /// Runs `request`, sending its package's bytecode only if this helper wasn't sent it before
-    /// or has let it go since.
+    /// Runs `request`, sending its package's bytecode unless this helper holds it.
     fn run(
         &mut self,
         id: u64,
@@ -699,14 +698,12 @@ impl Helper {
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let mut answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
-        if matches!(answer.0, Answer::Missing) && request.package.is_some_and(|name| self.sent.remove(&name))
-        {
+        if matches!(answer.0, Answer::Missing) && request.package.is_some_and(|name| self.held.forget(name)) {
             answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
         }
         if matches!(answer.0, Answer::Missing) {
             return Err(mismatch());
         }
-        self.sent.extend(request.package);
         Ok(answer)
     }
 
@@ -719,7 +716,11 @@ impl Helper {
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
-        let held = request.package.is_some_and(|name| self.sent.contains(&name));
+        let held = request.package.is_some_and(|name| self.held.run(name).is_some());
+        if let Some(name) = request.package.filter(|_| !held) {
+            let bytes = request.tail.iter().map(|part| part.len()).sum();
+            self.held.hold(name, (), bytes);
+        }
         let remaining = deadline.saturating_duration_since(Instant::now());
         let (modules, tail): (_, &[&[u8]]) = if held {
             (None, &[])
