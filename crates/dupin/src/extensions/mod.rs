@@ -1,11 +1,14 @@
-//! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
-//! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process.
-//! Guests get the query and return rows. They reach host services only through the broker
-//! bridge, which checks each request against the scopes a package declares and the user granted.
+//! Extensions, each routed by one keyword: those bundled with Dupin and the user's own in
+//! `extensions/<name>/` beside config.toml. Each is a JavaScript package compiled and run by
+//! QuickJS-ng in the sandboxed extension host process. Guests get the query and return rows.
+//! They reach host services only through the broker bridge, which checks each request against
+//! the scopes a package declares and the user granted.
 
 pub mod access;
+pub mod bundled;
 mod fixtures;
 mod manifest;
+pub mod packages;
 mod provider;
 
 use std::collections::HashMap;
@@ -34,7 +37,8 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// What the broker knows the package by.
+    /// What the broker knows the package by: its `name`, or `bundled:<name>` for one that
+    /// ships with Dupin.
     pub package: PackageId,
     /// The revision grants are for: package.json and every module Dupin runs.
     pub revision: Revision,
@@ -42,6 +46,13 @@ pub struct Extension {
     pub capabilities: Capabilities,
     /// The bytecode the extension host compiled, which only the host ever loads.
     compiled: Compiled,
+}
+
+/// Where an extension was found. A user extension with a bundled one's `name` replaces it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    Bundled,
+    User,
 }
 
 impl std::fmt::Debug for Extension {
@@ -155,12 +166,17 @@ pub fn directory() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join("extensions"))
 }
 
+/// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled package
+/// this build sealed.
+type Integrity = Box<dyn FnMut(&Path) -> Option<String> + Send>;
+
 #[derive(Default)]
 struct Scanner {
     loaded: HashMap<PathBuf, LoadedExtension>,
     previous: Option<Catalog>,
-    /// Keeps a folder off when it no longer matches extensions.lock.
-    integrity: Option<dupin_extension_install::Integrity>,
+    integrity: Option<Integrity>,
+    /// Whether the folder holds the packages that ship with Dupin.
+    bundled: bool,
 }
 
 impl Scanner {
@@ -209,17 +225,13 @@ impl Scanner {
             folders.truncate(MAX_EXTENSIONS);
         }
         for folder in folders {
-            if let Some(problem) = self
-                .integrity
-                .as_mut()
-                .and_then(|integrity| integrity.check(&folder))
-            {
+            if let Some(problem) = self.integrity.as_mut().and_then(|integrity| integrity(&folder)) {
                 catalog
                     .problems
                     .push(format!("{}: {problem}", folder_name(&folder)));
                 continue;
             }
-            match load(&folder, previous.remove(&folder)) {
+            match load(&folder, previous.remove(&folder), self.bundled) {
                 Ok(loaded) => {
                     let extension = &loaded.extension;
                     if catalog.extensions.iter().any(|e| e.id == extension.id) {
@@ -275,7 +287,7 @@ impl FileStamp {
 
 /// Reads the extension in `folder` as the scanner does, for `dupin ext` to check or run.
 pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
-    load(folder, None).map(|loaded| loaded.extension)
+    load(folder, None, false).map(|loaded| loaded.extension)
 }
 
 /// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
@@ -291,8 +303,12 @@ pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     Ok(extension)
 }
 
-fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
-    load_with(folder, previous, compile)
+fn load(
+    folder: &Path,
+    previous: Option<LoadedExtension>,
+    bundled: bool,
+) -> Result<LoadedExtension, Diagnostic> {
+    load_with(folder, previous, bundled, compile)
 }
 
 /// `compile` reads the package's files only after they are stamped, so an edit that lands while
@@ -300,6 +316,7 @@ fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtens
 fn load_with(
     folder: &Path,
     previous: Option<LoadedExtension>,
+    bundled: bool,
     compile: impl FnOnce(&Path, &str, Option<&LoadedExtension>) -> Result<(Compiled, blake3::Hash), Diagnostic>,
 ) -> Result<LoadedExtension, Diagnostic> {
     let manifests = manifest::Stamps::read(folder)?;
@@ -316,7 +333,7 @@ fn load_with(
     let manifest = manifest::read(&manifests)?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
-    let package = package_id(&manifest)?;
+    let package = package_id(&manifest, bundled)?;
     let revision = package_revision(folder, &content)?;
     Ok(LoadedExtension {
         manifests,
@@ -353,8 +370,11 @@ fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, D
 }
 
 /// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
-fn package_id(manifest: &manifest::Manifest) -> Result<PackageId, Diagnostic> {
-    PackageId::new(manifest.id.clone()).map_err(|error| {
+/// A bundled package is `bundled:<name>`, which no package.json name can be, so grants and
+/// choices never pass between it and a package in the extensions folder that reuses its name.
+fn package_id(manifest: &manifest::Manifest, bundled: bool) -> Result<PackageId, Diagnostic> {
+    let prefix = if bundled { "bundled:" } else { "" };
+    PackageId::new(format!("{prefix}{}", manifest.id)).map_err(|error| {
         Diagnostic::new("invalid-manifest", error)
             .file(manifest::PACKAGE_JSON)
             .field("name")
@@ -368,7 +388,7 @@ pub fn declaration_of(folder: &Path) -> Result<(PackageId, Revision, Capabilitie
     let manifest = manifest::read(&manifests)?;
     let sources = Sources::read(folder, &manifest.entry)?;
     Ok((
-        package_id(&manifest)?,
+        package_id(&manifest, false)?,
         package_revision(folder, &content_hash(&sources))?,
         manifest.capabilities,
     ))
@@ -433,12 +453,40 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Scans now and after changes under `directory`, delivering changed catalogues in order.
-pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
-    let mut scanner = Scanner {
-        integrity: crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new),
-        ..Scanner::default()
+/// Scans now and after changes under `directory`, delivering changed catalogues in order. The
+/// user's folder holds packages extensions.lock pins; the bundled folder only the packages
+/// this build sealed.
+pub fn watch(
+    directory: PathBuf,
+    origin: Origin,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
+    let integrity: Option<Integrity> = match origin {
+        Origin::User => crate::extension_install::lock_path().map(|lock| {
+            let mut integrity = dupin_extension_install::Integrity::new(lock);
+            Box::new(move |folder: &Path| integrity.check(folder)) as _
+        }),
+        Origin::Bundled => {
+            let seals = bundled::Seals::shipped();
+            Some(Box::new(move |folder: &Path| seals.check(folder)))
+        }
     };
+    watch_with(
+        directory,
+        Scanner {
+            integrity,
+            bundled: origin == Origin::Bundled,
+            ..Scanner::default()
+        },
+        deliver,
+    )
+}
+
+fn watch_with(
+    directory: PathBuf,
+    mut scanner: Scanner,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
@@ -472,11 +520,11 @@ pub(crate) mod tests {
         let id = name.to_lowercase().replace(' ', "-");
         Extension {
             folder_name: format!("{id}-folder"),
+            package: PackageId::new(id.clone()).unwrap(),
             id,
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
-            package: PackageId::new("fixture").unwrap(),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
             compiled: Compiled::empty(),
@@ -523,7 +571,7 @@ pub(crate) mod tests {
 
     fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
         let (updates, received) = mpsc::channel();
-        let watcher = watch(directory.to_owned(), move |catalog| {
+        let watcher = watch_with(directory.to_owned(), Scanner::default(), move |catalog| {
             let _ = updates.send(catalog);
         })
         .unwrap();
@@ -824,8 +872,9 @@ pub(crate) mod tests {
             },
         );
         lock.write(&lock_path).unwrap();
+        let mut integrity = dupin_extension_install::Integrity::new(lock_path);
         let mut scanner = Scanner {
-            integrity: Some(dupin_extension_install::Integrity::new(lock_path)),
+            integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
         };
         assert_eq!(scanner.scan(&root).extensions.len(), 1);
@@ -843,6 +892,62 @@ pub(crate) mod tests {
             "{:?}",
             catalog.problems
         );
+    }
+
+    #[test]
+    fn the_bundled_folder_loads_only_what_the_build_sealed() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let root = fixture.path();
+        install(root, "words", &package_json("words", "wc", None), Some(SEARCH));
+        let seals = bundled::Seals::of(&[&root.join("words")]);
+        install(root, "added", &package_json("added", "add", None), Some(SEARCH));
+        let mut scanner = Scanner {
+            integrity: Some(Box::new(move |folder: &Path| seals.check(folder))),
+            ..Scanner::default()
+        };
+        let catalog = scanner.scan(root);
+        assert_eq!(catalog.extensions.len(), 1);
+        assert_eq!(catalog.extensions[0].id, "words");
+        assert!(
+            catalog.problems[0].starts_with("added: isn't"),
+            "{:?}",
+            catalog.problems
+        );
+
+        fs::write(
+            root.join("words/main.js"),
+            "export const search = () => [{ title: 'tampered' }];",
+        )
+        .unwrap();
+        assert!(scanner.scan(root).extensions.is_empty());
+    }
+
+    #[test]
+    fn a_revision_covers_the_manifest_and_the_code() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let words = fixture.path().join("words");
+        let revision = || load_folder(&words).unwrap().revision.clone();
+        install(
+            fixture.path(),
+            "words",
+            &package_json("words", "wc", None),
+            Some(SEARCH),
+        );
+        let first = revision();
+        assert_eq!(revision(), first);
+
+        fs::write(words.join(PACKAGE_JSON), package_json("words", "words", None)).unwrap();
+        assert_ne!(revision(), first);
+        fs::write(words.join(PACKAGE_JSON), package_json("words", "wc", None)).unwrap();
+        assert_eq!(revision(), first);
+        fs::write(
+            words.join("main.js"),
+            "export const search = () => [{ title: 'x' }];",
+        )
+        .unwrap();
+        assert_ne!(revision(), first);
     }
 
     #[test]
@@ -983,17 +1088,17 @@ pub(crate) mod tests {
         );
         let folder = root.join("js");
         let edited = folder.join("main.js");
-        let loaded = load_with(&folder, None, |folder, entry, previous| {
+        let loaded = load_with(&folder, None, false, |folder, entry, previous| {
             let compiled = compile(folder, entry, previous);
             fs::write(&edited, "export const search = () => [{ title: 'new edit' }];").unwrap();
             compiled
         })
         .unwrap();
         let before = Arc::clone(&loaded.extension);
-        let reloaded = load(&folder, Some(loaded)).unwrap();
+        let reloaded = load(&folder, Some(loaded), false).unwrap();
         assert!(!Arc::ptr_eq(&before, &reloaded.extension));
         let current = Arc::clone(&reloaded.extension);
-        let unchanged = load(&folder, Some(reloaded)).unwrap();
+        let unchanged = load(&folder, Some(reloaded), false).unwrap();
         assert!(Arc::ptr_eq(&current, &unchanged.extension));
     }
 }

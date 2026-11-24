@@ -23,6 +23,9 @@ pub fn lock_path() -> Option<PathBuf> {
 }
 
 pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
+    let bundled = crate::extensions::bundled::directory()
+        .map(|directory| crate::extensions::bundled::packages(&directory))
+        .unwrap_or_default();
     let installer = Installer {
         extensions: crate::extensions::directory()
             .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_CONFIG_HOME nor HOME is set"))?,
@@ -30,8 +33,9 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
             .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_DATA_HOME nor HOME is set"))?,
         git: Git::default(),
         github: GitHub::default(),
+        bundled: bundled.iter().map(|(_, name, _)| name.clone()).collect(),
     };
-    let taken = routed_keywords();
+    let taken = routed_keywords(bundled);
     let cwd = std::env::current_dir().map_err(|error| Diagnostic::new("io-error", error.to_string()))?;
     let (lines, value) = match command {
         Command::Install(spec) => {
@@ -178,11 +182,15 @@ fn delete_data(name: &str) -> Result<(), Diagnostic> {
     }
 }
 
-/// Who already answers a keyword in the launcher, from the effective configuration.
-fn routed_keywords() -> impl Fn(&str) -> Option<String> {
+/// Who already answers a keyword in the launcher: a bundled extension, or a command of the
+/// effective configuration.
+fn routed_keywords(bundled: Vec<(PathBuf, String, String)>) -> impl Fn(&str) -> Option<String> {
     let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
     let commands = crate::commands::configured(&config).ok();
     move |keyword| {
+        if let Some((_, name, _)) = bundled.iter().find(|(.., bundled)| bundled == keyword) {
+            return Some(format!("the bundled `{name}` extension"));
+        }
         let commands = commands.as_ref()?;
         if let Some(command) = commands.registry.keyword(keyword) {
             return Some(format!("the `{command}` command"));

@@ -1077,3 +1077,60 @@ fn denials_explain_themselves() {
         "`files:notes` needs a file, folder or program you pick"
     );
 }
+
+#[test]
+fn only_a_choice_to_turn_a_package_off_counts_as_turned_off() {
+    let (mut broker, package) = installed(github());
+    assert!(!broker.is_enabled(&package));
+    assert!(!broker.is_turned_off(&package));
+    broker.set_enabled(&package, false).unwrap();
+    assert!(broker.is_turned_off(&package));
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.is_turned_off(&package));
+    assert!(broker.is_turned_off(&id("missing")));
+
+    let base = Base::parse("version = 1\n[packages.bookmarks]\nenabled = false\n").unwrap();
+    let mut locked = Broker::new(base, Local::default());
+    let _ = locked.install(package.clone(), rev(R1), github());
+    assert!(locked.is_turned_off(&package));
+
+    let mut unreadable = Broker::new(Base::default(), Local::unreadable());
+    let _ = unreadable.install(package.clone(), rev(R1), github());
+    assert!(unreadable.is_turned_off(&package));
+}
+
+#[test]
+fn a_change_that_cannot_be_saved_is_undone() {
+    let (mut broker, package) = enabled(github());
+    let dir = tempfile::tempdir().unwrap();
+    let blocked = dir.path().join("file");
+    std::fs::write(&blocked, "").unwrap();
+    let unwritable = blocked.join("grants.toml");
+
+    let failed = broker.change_saved(&unwritable, |broker| broker.set_enabled(&package, false));
+    assert!(
+        matches!(failed, Err(SaveError::Store(StoreError::Io(_)))),
+        "{failed:?}"
+    );
+    assert!(broker.is_enabled(&package));
+    assert!(!broker.is_turned_off(&package));
+
+    let refused = broker.change_saved(&dir.path().join("grants.toml"), |broker| {
+        broker.set_enabled(&id("missing"), false)
+    });
+    assert!(matches!(
+        refused,
+        Err(SaveError::Refused(BrokerError::NotInstalled))
+    ));
+    assert!(!dir.path().join("grants.toml").exists());
+
+    let path = dir.path().join("grants.toml");
+    broker
+        .change_saved(&path, |broker| broker.set_enabled(&package, false))
+        .unwrap();
+    assert!(broker.is_turned_off(&package));
+    let saved = Local::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let mut relaunched = Broker::new(Base::default(), saved);
+    let _ = relaunched.install(package.clone(), rev(R1), github());
+    assert!(relaunched.is_turned_off(&package));
+}
