@@ -64,7 +64,6 @@
 							"笑顔",
 							"顔"
 						],
-						"section": "Smileys & Emotion",
 						"title": "😀 Grinning face"
 					},
 					{
@@ -116,7 +115,6 @@
 							"笑顔",
 							"顔"
 						],
-						"section": "Smileys & Emotion",
 						"title": "😙 Kissing face with smiling eyes"
 					},
 					{
@@ -169,7 +167,6 @@
 							"笑顔",
 							"顔"
 						],
-						"section": "Smileys & Emotion",
 						"title": "😺 Grinning cat"
 					}
 				],
@@ -217,7 +214,6 @@
 						},
 						"id": "1f5fe",
 						"keywords": ["map of Japan", "Japan", "map", "地図", "日本", "日本地図"],
-						"section": "Travel & Places",
 						"title": "🗾 Map of Japan"
 					},
 					{
@@ -257,7 +253,6 @@
 						},
 						"id": "1f3ef",
 						"keywords": ["Japanese castle", "castle", "Japanese", "城", "建物", "日本"],
-						"section": "Travel & Places",
 						"title": "🏯 Japanese castle"
 					},
 					{
@@ -307,7 +302,6 @@
 							"日本",
 							"短冊"
 						],
-						"section": "Activities",
 						"title": "🎋 Tanabata tree"
 					},
 					{
@@ -359,7 +353,6 @@
 							"竹",
 							"門松"
 						],
-						"section": "Activities",
 						"title": "🎍 Pine decoration"
 					},
 					{
@@ -412,7 +405,6 @@
 							"和",
 							"日本"
 						],
-						"section": "Activities",
 						"title": "🎎 Japanese dolls"
 					},
 					{
@@ -452,7 +444,6 @@
 						},
 						"id": "1f1ef-1f1f5",
 						"keywords": ["flag: Japan", "flag", "旗", "旗: 日本", "日本"],
-						"section": "Flags",
 						"title": "🇯🇵 Flag: Japan"
 					},
 					{
@@ -502,7 +493,6 @@
 							"日本酒",
 							"酒"
 						],
-						"section": "Food & Drink",
 						"title": "🍶 Sake"
 					},
 					{
@@ -542,7 +532,6 @@
 						},
 						"id": "00a5",
 						"keywords": ["yen", "CNY", "currency", "JPY", "yuan", "中国元", "円", "日本円", "通貨"],
-						"section": "Text Symbols",
 						"title": "¥ Yen"
 					}
 				],

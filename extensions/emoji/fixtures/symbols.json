@@ -68,7 +68,6 @@
 							"札束",
 							"通貨"
 						],
-						"section": "Objects",
 						"title": "💶 Euro banknote"
 					},
 					{
@@ -108,7 +107,6 @@
 						},
 						"id": "20ac",
 						"keywords": ["euro", "currency", "EUR", "ユーロ", "通貨"],
-						"section": "Text Symbols",
 						"title": "€ Euro"
 					},
 					{
@@ -159,7 +157,6 @@
 							"地球",
 							"地球（ヨーロッパとアフリカ）"
 						],
-						"section": "Travel & Places",
 						"title": "🌍 Globe showing Europe-Africa"
 					},
 					{
@@ -199,7 +196,6 @@
 						},
 						"id": "1f3e4",
 						"keywords": ["post office", "European", "post", "建物", "西洋の郵便局", "郵便"],
-						"section": "Travel & Places",
 						"title": "🏤 Post office"
 					},
 					{
@@ -239,7 +235,6 @@
 						},
 						"id": "1f3f0",
 						"keywords": ["castle", "European", "キャッスル", "城", "建物", "西洋の城"],
-						"section": "Travel & Places",
 						"title": "🏰 Castle"
 					},
 					{
@@ -279,7 +274,6 @@
 						},
 						"id": "1f1ea-1f1fa",
 						"keywords": ["flag: European Union", "flag", "旗", "旗: 欧州連合", "欧州連合"],
-						"section": "Flags",
 						"title": "🇪🇺 Flag: European Union"
 					},
 					{
@@ -351,7 +345,6 @@
 							"丸",
 							"男性"
 						],
-						"section": "People & Body",
 						"title": "🙆‍♂️ Man gesturing OK"
 					},
 					{
@@ -421,7 +414,6 @@
 							"丸",
 							"人"
 						],
-						"section": "People & Body",
 						"title": "🙆 Person gesturing OK"
 					},
 					{
@@ -493,7 +485,6 @@
 							"丸",
 							"女性"
 						],
-						"section": "People & Body",
 						"title": "🙆‍♀️ Woman gesturing OK"
 					},
 					{
@@ -533,7 +524,6 @@
 						},
 						"id": "20b6",
 						"keywords": ["livre tournois", "currency", "トゥールリーブル", "通貨"],
-						"section": "Text Symbols",
 						"title": "₶ Livre tournois"
 					},
 					{
@@ -580,7 +570,6 @@
 							"数学記号",
 							"集合演算子"
 						],
-						"section": "Text Symbols",
 						"title": "⊰ Precedes under relation"
 					},
 					{
@@ -620,7 +609,6 @@
 						},
 						"id": "21d7",
 						"keywords": ["north east double arrow", "北東二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇗ North east double arrow"
 					},
 					{
@@ -660,7 +648,6 @@
 						},
 						"id": "21d8",
 						"keywords": ["south east double arrow", "南東二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇘ South east double arrow"
 					},
 					{
@@ -707,7 +694,6 @@
 							"数学記号",
 							"集合演算子"
 						],
-						"section": "Text Symbols",
 						"title": "⊱ Succeeds under relation"
 					},
 					{
@@ -757,7 +743,6 @@
 							"記号",
 							"輪っか"
 						],
-						"section": "Symbols",
 						"title": "➿ Double curly loop"
 					},
 					{
@@ -797,7 +782,6 @@
 						},
 						"id": "25a8",
 						"keywords": ["square upper right lower left fill", "右上左下斜め縞線入りの四角"],
-						"section": "Text Symbols",
 						"title": "▨ Square upper right lower left fill"
 					},
 					{
@@ -870,7 +854,6 @@
 							"男",
 							"男性"
 						],
-						"section": "People & Body",
 						"title": "🙅‍♂️ Man gesturing NO"
 					},
 					{
@@ -942,7 +925,6 @@
 							"バツ",
 							"人"
 						],
-						"section": "People & Body",
 						"title": "🙅 Person gesturing NO"
 					},
 					{
@@ -1015,7 +997,6 @@
 							"女",
 							"女性"
 						],
-						"section": "People & Body",
 						"title": "🙅‍♀️ Woman gesturing NO"
 					},
 					{
@@ -1055,7 +1036,6 @@
 						},
 						"id": "21d6",
 						"keywords": ["north west double arrow", "北西二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇖ North west double arrow"
 					},
 					{
@@ -1095,7 +1075,6 @@
 						},
 						"id": "21d9",
 						"keywords": ["south west double arrow", "南西二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇙ South west double arrow"
 					},
 					{
@@ -1135,7 +1114,6 @@
 						},
 						"id": "21f5",
 						"keywords": ["downwards arrow leftwards upwards arrow", "下矢印上矢印"],
-						"section": "Text Symbols",
 						"title": "⇵ Downwards arrow leftwards upwards arrow"
 					},
 					{
@@ -1175,7 +1153,6 @@
 						},
 						"id": "25a7",
 						"keywords": ["square upper left lower right fill", "左上右下斜め縞線入りの四角"],
-						"section": "Text Symbols",
 						"title": "▧ Square upper left lower right fill"
 					},
 					{
@@ -1215,7 +1192,6 @@
 						},
 						"id": "21d0",
 						"keywords": ["leftwards double arrow", "左向き二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇐ Leftwards double arrow"
 					},
 					{
@@ -1255,7 +1231,6 @@
 						},
 						"id": "21d4",
 						"keywords": ["left right double arrow", "二重両矢印"],
-						"section": "Text Symbols",
 						"title": "⇔ Left right double arrow"
 					},
 					{
@@ -1295,7 +1270,6 @@
 						},
 						"id": "21cd",
 						"keywords": ["leftwards double arrow stroke", "斜線付き左向き二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇍ Leftwards double arrow stroke"
 					},
 					{
@@ -1335,7 +1309,6 @@
 						},
 						"id": "21dc",
 						"keywords": ["leftwards squiggle arrow", "左向きよじれ矢印"],
-						"section": "Text Symbols",
 						"title": "⇜ Leftwards squiggle arrow"
 					},
 					{
@@ -1375,7 +1348,6 @@
 						},
 						"id": "21ce",
 						"keywords": ["left right double arrow stroke", "斜線付き二重両矢印"],
-						"section": "Text Symbols",
 						"title": "⇎ Left right double arrow stroke"
 					},
 					{
@@ -1425,7 +1397,6 @@
 							"正方形",
 							"白枠四角"
 						],
-						"section": "Symbols",
 						"title": "🔳 White square button"
 					},
 					{
@@ -1496,7 +1467,6 @@
 							"指をクロス",
 							"親指と人差し指をクロス"
 						],
-						"section": "People & Body",
 						"title": "🫰 Hand with index finger and thumb crossed"
 					},
 					{
@@ -1540,7 +1510,6 @@
 							"inverse hollow circle",
 							"黒四角の中に白丸"
 						],
-						"section": "Text Symbols",
 						"title": "◙ Filled square containing hollow circle"
 					},
 					{
@@ -1586,7 +1555,6 @@
 							"旗: 仏領極南諸島",
 							"仏領極南諸島"
 						],
-						"section": "Flags",
 						"title": "🇹🇫 Flag: French Southern Territories"
 					},
 					{
@@ -1633,7 +1601,6 @@
 							"正規部分群（逆方向）又は等しいの否定",
 							"群論"
 						],
-						"section": "Text Symbols",
 						"title": "⋭ Does not contain as normal subgroup equal"
 					}
 				],
@@ -1689,7 +1656,6 @@
 						},
 						"id": "21e5",
 						"keywords": ["rightwards arrow bar", "右縦棒付き右矢印"],
-						"section": "Text Symbols",
 						"title": "⇥ Rightwards arrow bar"
 					},
 					{
@@ -1729,7 +1695,6 @@
 						},
 						"id": "21a3",
 						"keywords": ["rightwards arrow tail", "尾付き右向き矢印"],
-						"section": "Text Symbols",
 						"title": "↣ Rightwards arrow tail"
 					},
 					{
@@ -1769,7 +1734,6 @@
 						},
 						"id": "21ac",
 						"keywords": ["rightwards arrow loop", "ループ付き右向き矢印"],
-						"section": "Text Symbols",
 						"title": "↬ Rightwards arrow loop"
 					},
 					{
@@ -1809,7 +1773,6 @@
 						},
 						"id": "219b",
 						"keywords": ["rightwards arrow stroke", "斜線付き右向き矢印"],
-						"section": "Text Symbols",
 						"title": "↛ Rightwards arrow stroke"
 					},
 					{
@@ -1849,7 +1812,6 @@
 						},
 						"id": "21a6",
 						"keywords": ["rightwards arrow from bar", "棒からの右向き矢印"],
-						"section": "Text Symbols",
 						"title": "↦ Rightwards arrow from bar"
 					},
 					{
@@ -1889,7 +1851,6 @@
 						},
 						"id": "21b4",
 						"keywords": ["rightwards arrow corner downwards", "右向き下曲がり矢印"],
-						"section": "Text Symbols",
 						"title": "↴ Rightwards arrow corner downwards"
 					},
 					{
@@ -1929,7 +1890,6 @@
 						},
 						"id": "219d",
 						"keywords": ["rightwards wave arrow", "右向き波線矢印"],
-						"section": "Text Symbols",
 						"title": "↝ Rightwards wave arrow"
 					},
 					{
@@ -1969,7 +1929,6 @@
 						},
 						"id": "21c4",
 						"keywords": ["rightwards arrow over leftwards arrow", "右矢印左矢印"],
-						"section": "Text Symbols",
 						"title": "⇄ Rightwards arrow over leftwards arrow"
 					},
 					{
@@ -2009,7 +1968,6 @@
 						},
 						"id": "21d2",
 						"keywords": ["rightwards double arrow", "右向き二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇒ Rightwards double arrow"
 					},
 					{
@@ -2049,7 +2007,6 @@
 						},
 						"id": "21db",
 						"keywords": ["rightwards triple arrow", "右向き三重矢印"],
-						"section": "Text Symbols",
 						"title": "⇛ Rightwards triple arrow"
 					},
 					{
@@ -2089,7 +2046,6 @@
 						},
 						"id": "21e2",
 						"keywords": ["rightwards dashed arrow", "右向き破線矢印"],
-						"section": "Text Symbols",
 						"title": "⇢ Rightwards dashed arrow"
 					},
 					{
@@ -2129,7 +2085,6 @@
 						},
 						"id": "21e8",
 						"keywords": ["rightwards hollow arrow", "右向き白矢印"],
-						"section": "Text Symbols",
 						"title": "⇨ Rightwards hollow arrow"
 					},
 					{
@@ -2169,7 +2124,6 @@
 						},
 						"id": "21c9",
 						"keywords": ["rightwards paired arrows", "右向きペア矢印"],
-						"section": "Text Symbols",
 						"title": "⇉ Rightwards paired arrows"
 					},
 					{
@@ -2209,7 +2163,6 @@
 						},
 						"id": "21dd",
 						"keywords": ["rightwards squiggle arrow", "右向きよじれ矢印"],
-						"section": "Text Symbols",
 						"title": "⇝ Rightwards squiggle arrow"
 					},
 					{
@@ -2249,7 +2202,6 @@
 						},
 						"id": "21cf",
 						"keywords": ["rightwards double arrow stroke", "斜線付き右向き二重矢印"],
-						"section": "Text Symbols",
 						"title": "⇏ Rightwards double arrow stroke"
 					},
 					{
@@ -2289,7 +2241,6 @@
 						},
 						"id": "21a0",
 						"keywords": ["rightwards two headed arrow", "右向き二重鏃矢印"],
-						"section": "Text Symbols",
 						"title": "↠ Rightwards two headed arrow"
 					},
 					{
@@ -2336,7 +2287,6 @@
 							"rightwards",
 							"右縦棒付き右矢印の上に左縦棒付き左矢印"
 						],
-						"section": "Text Symbols",
 						"title": "↹ Leftwards over rightwards arrow bars"
 					},
 					{
@@ -2380,7 +2330,6 @@
 							"barb",
 							"とげが下向きの右向き銛型矢印"
 						],
-						"section": "Text Symbols",
 						"title": "⇁ Rightwards harpoon barb downwards"
 					}
 				],
