@@ -24,6 +24,8 @@ const MAX_API_BYTES: u64 = 8 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How many annotated tags may point at each other before a commit.
 const MAX_TAG_DEPTH: usize = 8;
+/// The most tags GitHub lists in one page.
+const TAGS_PER_PAGE: usize = 100;
 
 /// How Dupin talks to GitHub.
 #[derive(Clone)]
@@ -93,6 +95,12 @@ struct Comparison {
     status: String,
 }
 
+/// One entry of the tag list, which names the commit each tag peels to.
+#[derive(Deserialize)]
+struct Tag {
+    commit: Object,
+}
+
 #[derive(Deserialize)]
 struct Tree {
     tree: Vec<TreeEntry>,
@@ -129,9 +137,15 @@ impl Repo<'_> {
 
 impl GitHub {
     /// The commit `rev` names: a tag, branch or full commit SHA, or, with none, the newest version
-    /// tag, or the default branch when there is no version tag. It answers as Git would.
-    pub(crate) fn resolve(&self, repo: &Repo<'_>, rev: Option<&str>) -> Result<Fetched, Error> {
-        if rev.is_some_and(|rev| !valid_rev(rev)) {
+    /// tag, or the default branch when there is no version tag. It answers as Git would. `on` is
+    /// the branch or tag a pinned commit was installed from, as extensions.lock records it.
+    pub(crate) fn resolve(
+        &self,
+        repo: &Repo<'_>,
+        rev: Option<&str>,
+        on: Option<&str>,
+    ) -> Result<Fetched, Error> {
+        if rev.into_iter().chain(on).any(|rev| !valid_rev(rev)) {
             return Err(Error::new(
                 "invalid-source",
                 "is not a GitHub source Dupin can fetch",
@@ -154,13 +168,14 @@ impl GitHub {
                         ));
                     }
                 };
-                if !self.publishes(repo, &repository.default_branch, &commit)? {
+                if !self.publishes(repo, on, &repository.default_branch, &commit)? {
+                    let refs = match on {
+                        Some(on) => format!("`{on}`, the default branch or a tag"),
+                        None => "the default branch or a tag".to_owned(),
+                    };
                     return Err(Error::new(
                         "unknown-ref",
-                        format!(
-                            "commit {commit} isn't on {}'s default branch or a tag of it",
-                            repo.locator()
-                        ),
+                        format!("commit {commit} isn't on {refs} of {}", repo.locator()),
                     )
                     .hint("Install the branch or tag the commit is on by name."));
                 }
@@ -279,23 +294,45 @@ impl GitHub {
         tarball::extract(std::io::BufReader::new(file), &expected, stage)
     }
 
-    /// Whether the repository's own history holds `commit`: its default branch reaches it, or a
-    /// tag names it. GitHub serves every commit of a fork network through each repository in
-    /// it, so a commit pushed only to a fork would otherwise install as this repository's.
-    fn publishes(&self, repo: &Repo<'_>, branch: &str, commit: &str) -> Result<bool, Error> {
-        let compared: Option<Comparison> = self.api(
-            repo,
-            &format!("{}/compare/{}...{commit}", repo.path(), escape(branch)),
-        )?;
-        if compared.is_some_and(|compared| matches!(compared.status.as_str(), "identical" | "behind")) {
-            return Ok(true);
-        }
-        for (name, object) in self.tags(repo)? {
-            if self
-                .peel(repo, object, &format!("tags/{name}"))
-                .is_ok_and(|tagged| tagged.eq_ignore_ascii_case(commit))
-            {
+    /// Whether the repository's own history holds `commit`: the branch or tag `on`, or the
+    /// default branch, reaches it, or a tag names it. GitHub serves every commit of a fork
+    /// network through each repository in it, so a commit pushed only to a fork would otherwise
+    /// install as this repository's.
+    fn publishes(
+        &self,
+        repo: &Repo<'_>,
+        on: Option<&str>,
+        default_branch: &str,
+        commit: &str,
+    ) -> Result<bool, Error> {
+        let on = on.map(|name| {
+            name.strip_prefix("refs/heads/")
+                .or_else(|| name.strip_prefix("refs/tags/"))
+                .unwrap_or(name)
+        });
+        for base in on.into_iter().chain([default_branch]) {
+            let compared: Option<Comparison> = self.api(
+                repo,
+                &format!("{}/compare/{}...{commit}", repo.path(), escape(base)),
+            )?;
+            if compared.is_some_and(|compared| matches!(compared.status.as_str(), "identical" | "behind")) {
                 return Ok(true);
+            }
+        }
+        // The tag list names the commit behind each tag, where the ref listing would take a
+        // request per annotated tag to peel.
+        for page in 1.. {
+            let tags: Vec<Tag> = self
+                .api(
+                    repo,
+                    &format!("{}/tags?per_page={TAGS_PER_PAGE}&page={page}", repo.path()),
+                )?
+                .unwrap_or_default();
+            if tags.iter().any(|tag| tag.commit.sha.eq_ignore_ascii_case(commit)) {
+                return Ok(true);
+            }
+            if tags.len() < TAGS_PER_PAGE {
+                break;
             }
         }
         Ok(false)

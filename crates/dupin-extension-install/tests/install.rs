@@ -356,6 +356,58 @@ fn a_pinned_commit_or_ref_must_be_a_branch_or_tag_of_the_repository() {
 }
 
 #[test]
+fn sync_fetches_the_whole_repository_only_once_the_installed_ref_moved_on() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::new();
+    let logged = tempfile::tempdir().unwrap();
+    let log = logged.path().join("args");
+    let program = logged.path().join("git");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexec git \"$@\"\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fixture.installer.git.program = program;
+    let whole_fetches = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains("refs/heads/*"))
+            .count()
+    };
+
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [];\n");
+    let dev = fixture.commit("on dev only");
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    let installed = fixture.install(&format!("{}@dev", fixture.url())).unwrap();
+    assert_eq!(installed.entry.commit.as_deref(), Some(dev.as_str()));
+
+    let folder = fixture.installed("word-count");
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = fixture.installer.sync(&|_| None).unwrap();
+    assert!(synced[0].1.is_ok(), "{synced:?}");
+    assert_eq!(fixture.lock().packages["word-count"].rev.as_deref(), Some("dev"));
+    assert_eq!(whole_fetches(), 0);
+
+    git(&fixture.repo, &["switch", "--quiet", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [1];\n");
+    fixture.commit("dev moves on");
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = fixture.installer.sync(&|_| None).unwrap();
+    let restored = synced[0].1.as_ref().unwrap();
+    assert_eq!(restored.entry.commit.as_deref(), Some(dev.as_str()));
+    assert_eq!(restored.entry.content_hash, installed.entry.content_hash);
+    assert_eq!(whole_fetches(), 1);
+}
+
+#[test]
 fn a_package_cannot_take_a_bundled_name() {
     let mut fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");

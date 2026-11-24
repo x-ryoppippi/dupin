@@ -265,6 +265,10 @@ impl Git {
         command.args(["fetch", "--quiet", "--no-tags", "--no-recurse-submodules"]);
         if shallow {
             command.arg("--depth=1");
+        } else if repo.join("shallow").exists() {
+            // A whole-history fetch into a repository an earlier shallow fetch cut short would
+            // keep that cut, hiding the history behind it.
+            command.arg("--unshallow");
         }
         command.arg(url).args(refspecs);
         let limits = Limits {
@@ -286,9 +290,16 @@ impl Git {
     }
 
     /// Fetches `rev` from `url` into the bare `repo`: a tag, branch or full commit SHA, or, with
-    /// none, the newest version tag, or the default branch when there is no version tag.
-    pub(crate) fn resolve(&self, repo: &Path, url: &str, rev: Option<&str>) -> Result<Fetched, Error> {
-        if url.starts_with('-') || rev.is_some_and(|rev| !valid_rev(rev)) {
+    /// none, the newest version tag, or the default branch when there is no version tag. `on` is
+    /// the branch or tag a pinned commit was installed from, as extensions.lock records it.
+    pub(crate) fn resolve(
+        &self,
+        repo: &Path,
+        url: &str,
+        rev: Option<&str>,
+        on: Option<&str>,
+    ) -> Result<Fetched, Error> {
+        if url.starts_with('-') || rev.into_iter().chain(on).any(|rev| !valid_rev(rev)) {
             return Err(Error::new(
                 "invalid-source",
                 "is not a Git source Dupin can fetch",
@@ -304,7 +315,24 @@ impl Git {
             Some(commit) if is_full_commit(commit) => {
                 // Only what the repository's branches and tags reach, never the commit by SHA:
                 // a server may hold commits no ref of its own reaches, as GitHub holds every
-                // fork's in the repository it was forked from.
+                // fork's in the repository it was forked from. The ref it was installed from, or
+                // the default branch, usually still points at it, which the tip alone shows.
+                let tips = match on {
+                    Some(name) => branch_or_tag(name),
+                    None => vec!["HEAD".to_owned()],
+                };
+                for tip in &tips {
+                    if self.fetch(repo, url, &[tip], true).is_ok() {
+                        let fetched = self.commit_of(repo, "FETCH_HEAD")?;
+                        if fetched.eq_ignore_ascii_case(commit) {
+                            return Ok(Fetched {
+                                commit: fetched,
+                                rev: None,
+                            });
+                        }
+                        break;
+                    }
+                }
                 self.fetch(
                     repo,
                     url,
@@ -340,12 +368,8 @@ impl Git {
             Some(name) => {
                 // A branch or tag only, as GitHub sources take them: Git would also fetch a name
                 // such as `pull/1/head`, a commit someone else proposed.
-                let candidates = match name.strip_prefix("refs/") {
-                    Some(_) => vec![name.to_owned()],
-                    None => vec![format!("refs/tags/{name}"), format!("refs/heads/{name}")],
-                };
                 let mut failure = None;
-                for candidate in &candidates {
+                for candidate in &branch_or_tag(name) {
                     match self.fetch(repo, url, &[candidate], true) {
                         Ok(()) => {
                             return Ok(Fetched {
@@ -479,6 +503,14 @@ impl Git {
     }
 }
 
+/// The refs a branch or tag `name` may be, tags first, as Git looks them up.
+fn branch_or_tag(name: &str) -> Vec<String> {
+    match name.strip_prefix("refs/") {
+        Some(_) => vec![name.to_owned()],
+        None => vec![format!("refs/tags/{name}"), format!("refs/heads/{name}")],
+    }
+}
+
 const GIT_HINT: &str = "Install from `github:owner/repo` or a folder, which need no Git, or install Git (for example with `xcode-select --install`).";
 
 /// Where `PATH` finds `program`, as the shell would; a path with a `/` is taken as it is.
@@ -583,7 +615,7 @@ mod tests {
             ..git
         };
         let error = missing
-            .resolve(&dir.path().join("repo.git"), "file:///x", None)
+            .resolve(&dir.path().join("repo.git"), "file:///x", None, None)
             .unwrap_err();
         assert_eq!(error.code, "git-unavailable", "{error}");
         assert!(!dir.path().join("repo.git").exists());
