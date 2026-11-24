@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn catalogues_that_ask_for_it_join_the_main_search_after_apps_in_folder_order() {
         use crate::extensions::Role;
-        use crate::extensions::tests::{extension, module};
+        use crate::extensions::tests::extension;
         use dupin_core::Effect;
 
         let mut configured = configured(&Config::default()).unwrap();
@@ -652,7 +652,7 @@ mod tests {
         ]
         .into_iter()
         .map(|(name, keyword, default_search)| {
-            let mut extension = extension(name, keyword, module("{}"));
+            let mut extension = extension(name, keyword);
             extension.default_search = default_search;
             Arc::new(extension)
         })

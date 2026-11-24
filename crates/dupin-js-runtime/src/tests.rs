@@ -219,7 +219,7 @@ fn deep_recursion_hits_the_stack_limit() {
 fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
     let looping = load(&fixture("startup-loop")).unwrap();
     for result in [
-        looping.check(timeout(Duration::from_millis(100))),
+        looping.check(timeout(Duration::from_millis(100))).map(drop),
         looping
             .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
             .map(drop),
@@ -228,7 +228,7 @@ fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
         assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
     }
     let allocating = load(&fixture("startup-allocation")).unwrap();
-    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|()| Vec::new()));
+    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|_| Vec::new()));
     assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
