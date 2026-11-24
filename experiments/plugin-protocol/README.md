@@ -1,6 +1,6 @@
 # Calculator query protocol fixture
 
-> **Historical.** Dupin no longer runs Wasm guests: `dupin-plugin-runtime` and wasmi were removed once JavaScript extensions ran in the sandboxed extension host ([rollout](../../docs/design/extension-platform.md#rollout)). The host here depends on that crate, so it builds only from a checkout of commit `e58e3b8` or earlier. It stays as the record of the Wasm protocol work.
+> **Historical.** Dupin no longer runs Wasm guests: `dupin-plugin-runtime` and wasmi were removed once JavaScript extensions ran in the sandboxed extension host ([rollout](../../docs/design/extension-platform.md#rollout)). The host here depends on that crate, so it builds only from a checkout of commit `7f74a07` or earlier. It stays as the record of the Wasm protocol work.
 
 This separate workspace exercises the [experimental query protocol](../../docs/plugin-protocol.md)
 with a real calculator Wasm guest. The protocol and bounded Wasm host live in

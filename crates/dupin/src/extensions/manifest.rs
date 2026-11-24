@@ -57,16 +57,18 @@ impl Stamps {
 
 /// A package.json with a `dupin` key makes an extension. A folder that holds a Wasm guest's
 /// extension.toml and no such key is told that Wasm extensions are gone, not that package.json
-/// is missing, since a folder of that shape once loaded.
+/// is missing, since a folder of that shape once loaded. A package.json that can't be read is
+/// reported before that: it may be the port in progress, and its own error locates the fix.
 pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
     let package = stamps
         .package
         .as_ref()
-        .map(|package| parse_package(&package.path));
-    let declares_dupin = matches!(
-        &package,
-        Some(Ok(package)) if package.get("dupin").is_some_and(|dupin| !dupin.is_null())
-    );
+        .map(|package| parse_package(&package.path))
+        .transpose()?;
+    let declares_dupin = package
+        .as_ref()
+        .and_then(|package| package.get("dupin"))
+        .is_some_and(|dupin| !dupin.is_null());
     if stamps.wasm_leftover && !declares_dupin {
         return Err(Diagnostic::new(
             "wasm-removed",
@@ -84,7 +86,6 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
                 "Create package.json with `name`, `version` and a `dupin` key holding `title` and `keyword`.",
             ));
     };
-    let package = package?;
     match package.get("dupin") {
         Some(dupin) => javascript(&package, dupin),
         None => Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
@@ -424,17 +425,10 @@ mod tests {
 
     #[test]
     fn a_leftover_wasm_manifest_says_wasm_was_removed() {
-        let tooling = format!(
-            r#"{{"name": "tooling", "x": "{}"}}"#,
-            " ".repeat(MAX_PACKAGE_JSON_BYTES)
-        );
         for package in [
             None,
             Some(r#"{"name": "tooling"}"#),
-            Some(r#"{ "name": "tooling", }"#),
-            Some("[]"),
             Some(r#"{"name": "tooling", "dupin": null}"#),
-            Some(&tooling),
         ] {
             let mut files = vec![(WASM_MANIFEST, WASM)];
             files.extend(package.map(|package| (PACKAGE_JSON, package)));
@@ -457,6 +451,30 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(ported.entry, "main.js");
+    }
+
+    #[test]
+    fn a_broken_package_json_beside_a_leftover_wasm_manifest_reports_itself() {
+        let oversized = format!(
+            r#"{{"name": "w", "dupin": {{}}, "x": "{}"}}"#,
+            " ".repeat(MAX_PACKAGE_JSON_BYTES)
+        );
+        for (package, message) in [
+            (
+                r#"{"name": "w", "dupin": {"title": "W", "keyword": "wc"},}"#,
+                "trailing comma",
+            ),
+            ("[]", "must be a JSON object"),
+            (oversized.as_str(), "larger than 64 KiB"),
+        ] {
+            let broken = problem(&[(WASM_MANIFEST, WASM), (PACKAGE_JSON, package)]);
+            assert_eq!(
+                (broken.code.as_ref(), broken.file.as_deref()),
+                ("invalid-manifest", Some(PACKAGE_JSON)),
+                "{package:.40?}"
+            );
+            assert!(broken.message.contains(message), "{broken}");
+        }
     }
 
     #[test]

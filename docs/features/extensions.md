@@ -292,7 +292,7 @@ Each package links read-only into the extensions folder under `name`, which defa
 
 ## Wasm extensions
 
-Dupin no longer runs WebAssembly extensions. A folder that still holds an `extension.toml`, and no `package.json` with a `dupin` key, is skipped, and Settings → Search and `dupin ext check` say `extension.toml: Wasm extensions were removed; port to JavaScript`. To port one, write its `search` in JavaScript as [above](#a-javascript-extension), or start from `dupin ext new`; once `package.json` has a `dupin` key, a leftover `extension.toml` is ignored. Pushed views have no JavaScript equivalent yet.
+Dupin no longer runs WebAssembly extensions. A folder that still holds an `extension.toml`, and no `package.json` with a `dupin` key, is skipped, and Settings → Search and `dupin ext check` say `extension.toml: Wasm extensions were removed; port to JavaScript`. A `package.json` that isn't valid JSON or passes 64 KiB reports its own error instead, so a port in progress points at the line to fix. To port one, write its `search` in JavaScript as [above](#a-javascript-extension), or start from `dupin ext new`; once `package.json` has a `dupin` key, a leftover `extension.toml` is ignored. Pushed views have no JavaScript equivalent yet.
 
 ## Cost
 
