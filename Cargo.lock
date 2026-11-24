@@ -835,7 +835,6 @@ name = "dupin-ext-sdk"
 version = "0.0.0"
 dependencies = [
  "dupin-js-runtime",
- "dupin-plugin-protocol",
  "serde_json",
  "tempfile",
 ]
@@ -900,6 +899,7 @@ dependencies = [
  "oxc_span",
  "rquickjs",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 

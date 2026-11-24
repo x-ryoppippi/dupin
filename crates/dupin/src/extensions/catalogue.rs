@@ -100,9 +100,11 @@ impl Cached {
         Ok(batches)
     }
 
+    /// How many rows the catalogue holds.
     #[cfg(test)]
     pub fn len(&self) -> usize {
-        self.shared.lock().catalogue.len()
+        let listed = self.shared.lock().catalogue.search("", usize::MAX);
+        listed.iter().map(|batch| batch.items.len()).sum()
     }
 
     /// Drops the least recently used other catalogues while all of them hold more than the

@@ -131,20 +131,12 @@ impl Row {
 }
 
 impl Catalogue {
-    pub fn len(&self) -> usize {
-        self.rows.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
-    }
-
     /// Bytes of text the catalogue holds.
     pub fn bytes(&self) -> usize {
         self.bytes
     }
 
-    pub fn contains(&self, id: &str) -> bool {
+    fn contains(&self, id: &str) -> bool {
         self.index.contains_key(id)
     }
 

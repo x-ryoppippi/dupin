@@ -4,35 +4,35 @@
 use dupin_plugin_protocol::{MAX_URL_BYTES, is_web_url};
 use serde::{Deserialize, Serialize};
 
-pub const MAX_TITLE_BYTES: usize = 512;
-pub const MAX_SUBTITLE_BYTES: usize = 2048;
-pub const MAX_ID_BYTES: usize = 128;
-pub const MAX_TEXT_BYTES: usize = 16 * 1024;
-pub const MAX_KEYWORDS: usize = 16;
-pub const MAX_KEYWORD_BYTES: usize = 64;
-pub const MAX_SECTION_BYTES: usize = 128;
-pub const MAX_ICON_BYTES: usize = 256;
+pub(crate) const MAX_TITLE_BYTES: usize = 512;
+pub(crate) const MAX_SUBTITLE_BYTES: usize = 2048;
+pub(crate) const MAX_ID_BYTES: usize = 128;
+pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_KEYWORDS: usize = 16;
+pub(crate) const MAX_KEYWORD_BYTES: usize = 64;
+pub(crate) const MAX_SECTION_BYTES: usize = 128;
+pub(crate) const MAX_ICON_BYTES: usize = 256;
 /// Image formats the launcher draws as a row's icon.
-pub const ICON_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "svg", "pdf", "icns"];
+const ICON_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "svg", "pdf", "icns"];
 /// What the launcher's Markdown renderer reads before it cuts the rest.
-pub const MAX_MARKDOWN_BYTES: usize = 32 * 1024;
-pub const MAX_METADATA: usize = 12;
-pub const MAX_LABEL_BYTES: usize = 64;
-pub const MAX_METADATA_TEXT_BYTES: usize = 512;
+pub(crate) const MAX_MARKDOWN_BYTES: usize = 32 * 1024;
+pub(crate) const MAX_METADATA: usize = 12;
+pub(crate) const MAX_LABEL_BYTES: usize = 64;
+pub(crate) const MAX_METADATA_TEXT_BYTES: usize = 512;
 /// Every action of a row, counting the Open URL and Copy that `url` and `text` add.
-pub const MAX_ACTIONS: usize = 8;
-pub const MAX_ACTION_TITLE_BYTES: usize = 128;
-pub const MAX_HANDLER_BYTES: usize = 64;
-pub const MAX_DATA_BYTES: usize = 4096;
-pub const MAX_DATA_DEPTH: usize = 16;
+pub(crate) const MAX_ACTIONS: usize = 8;
+pub(crate) const MAX_ACTION_TITLE_BYTES: usize = 128;
+pub(crate) const MAX_HANDLER_BYTES: usize = 64;
+const MAX_DATA_BYTES: usize = 4096;
+const MAX_DATA_DEPTH: usize = 16;
 
 /// Rows one `items()` answer may add or replace, and IDs it may remove.
 pub const MAX_PAGE_ROWS: usize = 500;
 /// Text in one `items()` answer.
-pub const MAX_PAGE_BYTES: usize = 1024 * 1024;
-pub const MAX_CURSOR_BYTES: usize = 256;
+pub(crate) const MAX_PAGE_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_CURSOR_BYTES: usize = 256;
 /// A day: a catalogue that changes less often can wait for an action to invalidate it.
-pub const MAX_TTL_SECONDS: u32 = 24 * 60 * 60;
+pub(crate) const MAX_TTL_SECONDS: u32 = 24 * 60 * 60;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -138,7 +138,7 @@ pub enum Reason {
 }
 
 impl Reason {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Reason::Load => "load",
             Reason::More => "more",
@@ -298,7 +298,7 @@ impl CataloguePage {
 }
 
 /// A path inside the package, to an image format the launcher draws.
-pub fn check_icon(icon: &str) -> Result<(), String> {
+pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
     let invalid = || {
         Err(format!(
             "`icon` must be a path inside the package to a {} file",
@@ -326,7 +326,7 @@ pub fn check_icon(icon: &str) -> Result<(), String> {
 }
 
 /// The name of an export in the package's `actions` object.
-pub fn check_handler(handler: &str) -> Result<(), String> {
+pub(crate) fn check_handler(handler: &str) -> Result<(), String> {
     let valid = !handler.is_empty()
         && handler.len() <= MAX_HANDLER_BYTES
         && !handler.starts_with(|c: char| c.is_ascii_digit())
@@ -342,7 +342,7 @@ pub fn check_handler(handler: &str) -> Result<(), String> {
     }
 }
 
-pub fn check_data(data: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn check_data(data: &serde_json::Value) -> Result<(), String> {
     fn depth(value: &serde_json::Value) -> usize {
         match value {
             serde_json::Value::Array(values) => 1 + values.iter().map(depth).max().unwrap_or(0),

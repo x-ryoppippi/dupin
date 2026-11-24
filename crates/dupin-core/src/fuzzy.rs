@@ -27,11 +27,11 @@ pub fn score(query: &str, name: &str) -> Option<Match> {
 
 /// A query folded once, to match against many names.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Query(Vec<char>);
+pub(crate) struct Query(Vec<char>);
 
 impl Query {
     /// None for a query of only whitespace, which matches nothing.
-    pub fn new(query: &str) -> Option<Self> {
+    pub(crate) fn new(query: &str) -> Option<Self> {
         let chars: Vec<char> = query
             .chars()
             .filter(|c| !c.is_whitespace())
@@ -43,13 +43,13 @@ impl Query {
 
 /// A name folded once, for a catalogue that is matched on every keystroke.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Name {
+pub(crate) struct Name {
     chars: Vec<char>,
     lower: Vec<char>,
 }
 
 impl Name {
-    pub fn new(name: &str) -> Self {
+    pub(crate) fn new(name: &str) -> Self {
         let chars: Vec<char> = name.chars().collect();
         let lower = chars
             .iter()
@@ -60,7 +60,7 @@ impl Name {
 }
 
 /// [`score`] for a query and name folded beforehand.
-pub fn score_prepared(query: &Query, name: &Name) -> Option<Match> {
+pub(crate) fn score_prepared(query: &Query, name: &Name) -> Option<Match> {
     let mut from = Vec::with_capacity(query.0.len());
     let (mut j, score) = search(query, name, &mut Scratch::default(), Some(&mut from))?;
     let mut positions = vec![0; query.0.len()];
@@ -76,7 +76,7 @@ pub fn score_prepared(query: &Query, name: &Name) -> Option<Match> {
 /// Buffers reused from one name to the next, so ranking a long list allocates nothing per
 /// name.
 #[derive(Debug, Default)]
-pub struct Scratch {
+pub(crate) struct Scratch {
     best: Vec<Option<i32>>,
     next: Vec<Option<i32>>,
     back: Vec<usize>,
@@ -84,7 +84,7 @@ pub struct Scratch {
 
 /// The score [`score_prepared`] gives, without the positions it matched, which a long list
 /// only needs for the rows it shows.
-pub fn score_only(query: &Query, name: &Name, scratch: &mut Scratch) -> Option<i32> {
+pub(crate) fn score_only(query: &Query, name: &Name, scratch: &mut Scratch) -> Option<i32> {
     search(query, name, scratch, None).map(|(_, score)| score)
 }
 
