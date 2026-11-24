@@ -5,7 +5,8 @@ use std::sync::Arc;
 use rune::{App, AppSpec, WindowOptions, WindowSpec};
 
 use crate::{
-    backdrop, control, hotkey, log, prefs, scripts, settings, snapshots, store, trace, ui, update, view,
+    backdrop, control, hotkey, latency, log, prefs, scripts, settings, snapshots, store, trace, ui, update,
+    view,
 };
 
 /// The panel with nothing below the field: the window's first size, before it fits its content.
@@ -216,7 +217,10 @@ pub(crate) fn run() {
                 settings.activate();
             }
         })
-        .on_frame_encoded(trace::frame)
+        .on_frame_encoded(|frame| {
+            trace::frame(frame);
+            latency::frame(frame);
+        })
         .on_quit(ui::Ui::stop_child_processes)
         .on_close(ui::Ui::closed)
         .on_focus(ui::Ui::focus_changed);
