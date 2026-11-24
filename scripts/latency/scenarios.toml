@@ -31,16 +31,11 @@ provider = "apps.search"
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
 
-[features.dictionary.native]
+# The bundled Dictionary extension answers Dictionary's own command. The native feature it
+# replaced is gone, so there is nothing left to hold it to parity with.
+[features.dictionary.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
-
-# The bundled Dictionary extension, under its own keyword while the native feature gives up
-# its aliases. Both look words up in the same fixed definitions.
-[features.dictionary.extension]
-extends = "native"
-settings = { dictionary_keywords = [] }
-provider = "extension.dictionary"
 
 [features.clipboard.native]
 config = "scripts/headless/clipboard.toml"

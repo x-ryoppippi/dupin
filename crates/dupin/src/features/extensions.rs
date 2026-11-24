@@ -61,7 +61,16 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
     };
     // Extensions join the main search after apps, in the order of their folders.
     let mut after = id(APPS);
+    let commands = configured.registry.ids();
     for extension in extensions {
+        if let Some(port) = super::ports().find(|port| port.package == extension.id) {
+            if commands.iter().any(|command| command == port.command) {
+                added
+                    .registered
+                    .push((id(port.command), extension.clone(), Role::Keyword));
+            }
+            continue;
+        }
         let keyword = &extension.keyword;
         if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
             added.problems.push(format!(

@@ -20,7 +20,14 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. The first is **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on:
+
+| Extension                                        | Answers                                                                                                   |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **Dupin** (`dupin`)                              | `help` and Space, then a word: Dupin's documentation, issue tracker, source and website.                  |
+| [**Dictionary**](./dictionary.md) (`dictionary`) | `define` or `d` and Space, then a word: its definition from the dictionaries turned on in Dictionary.app. |
+
+Some built-in features are bundled extensions. Such a package answers the feature's own command, under the keywords its setting gives, such as `dictionary_keywords`, and only while the feature is on; the `keyword` in its `package.json` isn't used. Turned off in Settings → Extensions, or when it can't load, its keywords say so instead of searching.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

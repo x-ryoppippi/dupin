@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -9,7 +9,7 @@ use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
 use crate::extensions::packages::Packages;
-use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
+use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, PortOff, Role, Watch};
 
 /// The bundled extensions, always, and the extensions folder while `extensions = true`; which
 /// of them run; and which own a command and searcher now.
@@ -21,6 +21,8 @@ pub(super) struct Extensions {
     /// change of the user's choices needs another.
     active: Vec<Arc<Extension>>,
     registered: HashMap<CommandId, (Arc<Extension>, Role)>,
+    /// Built-in commands whose bundled package isn't on, answered by a [`PortOff`].
+    off: HashSet<CommandId>,
     /// Every guest call's host requests go through it.
     pub(super) bridge: Bridge,
 }
@@ -41,6 +43,7 @@ impl Extensions {
             packages: Packages::new(bridge.clone()),
             active: Vec::new(),
             registered: HashMap::new(),
+            off: HashSet::new(),
             bridge,
         }
     }
@@ -137,12 +140,14 @@ impl Ui {
             .into_iter()
             .map(|(id, extension, role)| (id, (extension, role)))
             .collect();
-        let current = self.session.command_id();
-        let active_changed = registered.get(current).is_some_and(|(next, _)| {
+        let current = self.session.command_id().clone();
+        // A ported built-in's command is registered before its package loads, so a query typed
+        // meanwhile is searched again once a provider answers it.
+        let mut active_changed = registered.get(&current).is_some_and(|(next, _)| {
             self.extensions
                 .registered
-                .get(current)
-                .is_some_and(|(current, _)| !Arc::ptr_eq(next, current))
+                .get(&current)
+                .is_none_or(|(current, _)| !Arc::ptr_eq(next, current))
         });
         self.extensions.registered.retain(|id, (extension, _)| {
             let keep = registered
@@ -165,7 +170,29 @@ impl Ui {
             );
             let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
             self.searchers.insert(id.clone(), searcher);
+            self.extensions.off.remove(&id);
             self.extensions.registered.insert(id, (extension, role));
+        }
+        let commands = registration.registry.ids();
+        for port in crate::features::ports() {
+            let command = CommandId::new(port.command).expect("built-in command IDs are valid");
+            if !commands.iter().any(|id| id == port.command) {
+                if self.extensions.off.remove(&command) {
+                    self.searchers.remove(&command);
+                }
+                continue;
+            }
+            if self.extensions.registered.contains_key(&command) || self.extensions.off.contains(&command) {
+                continue;
+            }
+            let searcher = spawn_searcher(
+                self.me.clone(),
+                command.clone(),
+                Arc::new(PortOff::new(port.title)),
+            );
+            self.searchers.insert(command.clone(), searcher);
+            active_changed |= command == current;
+            self.extensions.off.insert(command);
         }
         let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
         let listing = self.extensions.packages.listing(|extension| {

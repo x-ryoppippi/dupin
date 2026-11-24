@@ -97,7 +97,7 @@ pub fn open(platform: Platform) -> Bridge {
             service: OnceLock::new(),
         }),
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
-            dupin_mac::DictionaryProvider::default(),
+            dupin_mac::SystemDictionary::default(),
         ))),
         calendar: Box::new(Calendars(calendar::Calendar::new(
             dupin_mac::CalendarProvider::new(platform.calendar_access),
@@ -193,13 +193,13 @@ impl services::Clipboard for Pasteboard {
     }
 }
 
-struct Dictionaries(dictionary::Dictionary<dupin_mac::DictionaryProvider>);
+struct Dictionaries(dictionary::Dictionary<dupin_mac::SystemDictionary>);
 
 /// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
 /// depend on the dictionaries this Mac has.
 pub(crate) fn fixed_dictionary() -> Box<dyn services::Dictionary> {
     Box::new(Dictionaries(dictionary::Dictionary::new(
-        dupin_mac::DictionaryProvider::fixtures(),
+        dupin_mac::SystemDictionary::fixtures(),
     )))
 }
 

@@ -373,6 +373,32 @@ fn notice_row(id: String, title: String, subtitle: String, actions: Vec<ItemActi
     }
 }
 
+/// Answers a built-in's command while the bundled package that serves it is off or didn't
+/// load, so the keyword says why instead of searching for ever.
+pub struct PortOff {
+    title: &'static str,
+}
+
+impl PortOff {
+    pub fn new(title: &'static str) -> Self {
+        Self { title }
+    }
+}
+
+impl Provider for PortOff {
+    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        if request.limit > 0 {
+            emit(vec![notice_row(
+                "port-off".into(),
+                format!("{} isn't on", self.title),
+                "Turn it on, or see why it didn't load, in Settings → Extensions.".into(),
+                Vec::new(),
+            )]);
+        }
+        Ok(())
+    }
+}
+
 /// What the panel shows when the extension asked for a scope the user hasn't decided on: the
 /// scope as the broker describes it, and Allow and Deny. Nothing runs until the user chooses,
 /// and choosing runs nothing the extension asked for before.
@@ -702,5 +728,20 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn a_built_in_whose_package_is_off_says_so() {
+        let mut rows = Vec::new();
+        PortOff::new("Dictionary")
+            .search(&Request::detached("serendipity", 1), &mut |items| {
+                rows.extend(items)
+            })
+            .unwrap();
+        let [row] = rows.as_slice() else {
+            panic!("{rows:?}")
+        };
+        assert_eq!(row.display_title(), "Dictionary isn't on");
+        assert_eq!(row.primary, None);
     }
 }

@@ -29,7 +29,7 @@ use dupin_js_runtime::{Acted, Diagnostic, Exports, Row, RunError, Sources};
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
-pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, PortOff, QUERY_DEADLINE, Role, answer};
 
 pub(crate) use crate::catalog_watch::Watch;
 

@@ -4,7 +4,6 @@ import type { DictionaryEntry, Item, SearchContext } from 'dupin';
 // What Dupin accepts of a row, in UTF-8 bytes.
 const MAX_ID_BYTES = 128;
 const MAX_TITLE_BYTES = 512;
-const MAX_SUBTITLE_BYTES = 2048;
 const MAX_METADATA_BYTES = 512;
 const MAX_URL_BYTES = 2048;
 
@@ -26,12 +25,10 @@ export async function search(query: string, ctx: SearchContext): Promise<Item[]>
 
 function row(term: string, entry: DictionaryEntry, index: number): Item {
 	const id = `dictionary:${cut(term, MAX_ID_BYTES - 16)}`;
-	const first = entry.groups.flatMap((group) => group.senses)[0];
 	const url = `dict://${encode(term)}`;
 	return {
 		id: index === 0 ? id : `${id}#${index}`,
 		title: oneLine(entry.headword, MAX_TITLE_BYTES) || term,
-		subtitle: cut(first?.definition ?? '', MAX_SUBTITLE_BYTES),
 		detail: {
 			markdown: entry.markdown,
 			metadata: entry.pronunciation

@@ -26,6 +26,7 @@ pub(super) struct Feature {
     pub start: fn(&mut Providers),
     pub reload: fn(&mut Ui, &Config, &mut ConfiguredCommands) -> bool,
     permissions: &'static [PermissionUse],
+    port: Option<Port>,
 }
 
 impl Feature {
@@ -35,7 +36,23 @@ impl Feature {
         start: |_| {},
         reload: |_, _, _| false,
         permissions: &[],
+        port: None,
     };
+}
+
+/// A built-in that a bundled extension answers. The package called `package` serves the
+/// feature's `command`, under the keywords the feature registers from config.toml and only
+/// while the feature registers it, so the feature's switches and aliases keep working and the
+/// package's own keyword is never used. `title` names the feature when its package isn't on.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Port {
+    pub package: &'static str,
+    pub command: &'static str,
+    pub title: &'static str,
+}
+
+pub(crate) fn ports() -> impl Iterator<Item = &'static Port> {
+    MANIFEST.iter().filter_map(|feature| feature.port.as_ref())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
