@@ -17,6 +17,8 @@ pub(crate) const MAX_FILE_BYTES: usize = 4096;
 pub(crate) const MAX_TIME_MS: u64 = 8_640_000_000_000_000;
 pub(crate) const MAX_SECTION_BYTES: usize = 128;
 pub(crate) const MAX_ICON_BYTES: usize = 256;
+/// Above the handles storage and the clipboard watch hand out, which are 64 hex digits.
+pub(crate) const MAX_IMAGE_HANDLE_BYTES: usize = 128;
 /// Image formats the launcher draws as a row's icon.
 const ICON_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "svg", "pdf", "icns"];
 /// What the launcher's Markdown renderer reads before it cuts the rest.
@@ -60,6 +62,9 @@ pub struct Row {
     /// A package-relative image path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// An image the package keeps, drawn scaled down in place of `icon` and `file`'s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<RowImage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -71,10 +76,40 @@ pub struct Row {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RowDetail {
+    /// Shown large above the metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<RowImage>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub markdown: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub metadata: Vec<Metadata>,
+}
+
+/// An image a row names by an opaque handle, never by its bytes. Dupin resolves it only within
+/// the package's own storage, when it draws the row.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RowImage {
+    /// A blob stored with one of the package's records.
+    Blob(String),
+    /// A file a clipboard watch delivered to the package, with the handle it came with.
+    File(CopiedFileImage),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CopiedFileImage {
+    pub path: String,
+    pub handle: String,
+}
+
+impl RowImage {
+    fn text_bytes(&self) -> usize {
+        match self {
+            RowImage::Blob(handle) => handle.len(),
+            RowImage::File(file) => file.path.len() + file.handle.len(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,10 +291,16 @@ impl Row {
         if let Some(icon) = &self.icon {
             check_icon(icon)?;
         }
+        if let Some(image) = &self.image {
+            check_image(image).map_err(|message| format!("`image` {message}"))?;
+        }
         if let Some(section) = &self.section {
             line("section", section, MAX_SECTION_BYTES)?;
         }
         if let Some(detail) = &self.detail {
+            if let Some(image) = &detail.image {
+                check_image(image).map_err(|message| format!("`detail.image` {message}"))?;
+            }
             if detail.markdown.len() > MAX_MARKDOWN_BYTES {
                 return Err("`detail.markdown` is too long".into());
             }
@@ -319,7 +360,8 @@ impl Row {
     /// The text the row carries, counted toward an answer's limit.
     pub fn text_bytes(&self) -> usize {
         let detail = self.detail.as_ref().map_or(0, |detail| {
-            detail.markdown.len()
+            detail.image.as_ref().map_or(0, RowImage::text_bytes)
+                + detail.markdown.len()
                 + detail
                     .metadata
                     .iter()
@@ -349,6 +391,7 @@ impl Row {
             + self.match_text.as_ref().map_or(0, String::len)
             + self.file.as_ref().map_or(0, String::len)
             + self.icon.as_ref().map_or(0, String::len)
+            + self.image.as_ref().map_or(0, RowImage::text_bytes)
             + self.section.as_ref().map_or(0, String::len)
             + detail
             + actions
@@ -423,6 +466,32 @@ pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
         return invalid();
     }
     Ok(())
+}
+
+/// A handle shaped as storage and the clipboard watch hand them out, and for a copied file, an
+/// absolute path. Whether the package may draw it is decided when Dupin draws it.
+pub(crate) fn check_image(image: &RowImage) -> Result<(), String> {
+    let handle = |handle: &str| {
+        if handle.is_empty()
+            || handle.len() > MAX_IMAGE_HANDLE_BYTES
+            || !handle.bytes().all(|byte| byte.is_ascii_graphic())
+        {
+            Err(format!(
+                "must be a handle of 1 to {MAX_IMAGE_HANDLE_BYTES} printable ASCII characters"
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    match image {
+        RowImage::Blob(blob) => handle(blob),
+        RowImage::File(file) => {
+            check_file(&file.path).map_err(|_| {
+                format!("must name its file by an absolute path of at most {MAX_FILE_BYTES} bytes")
+            })?;
+            handle(&file.handle)
+        }
+    }
 }
 
 /// An absolute path to show the Finder icon of. The row only names it; nothing reads it.

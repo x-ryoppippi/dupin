@@ -63,6 +63,23 @@ impl ConsentRequest {
     }
 }
 
+/// An image a package's row names by a handle it was given, never by its bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageRef<'a> {
+    /// The handle of a blob one of the package's records carries.
+    Blob(&'a str),
+    /// A file the package's clipboard watch delivered, by its path and the handle it came with.
+    File { path: &'a str, handle: &'a str },
+}
+
+/// The image an [`ImageRef`] names, once the bridge has checked that it is the package's own.
+#[derive(Clone, Copy, Debug)]
+pub enum ImageData<'a> {
+    /// A stored blob's bytes, which are wiped once the reader returns.
+    Bytes(&'a [u8]),
+    File(&'a Path),
+}
+
 /// One declared scope of a package, for Settings → Extensions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopeEntry {
@@ -394,6 +411,21 @@ impl Bridge {
             .session(id, trigger)
             .ok_or_else(|| failure_for(&Denial::NotInstalled))?;
         session.permit(request)
+    }
+
+    /// Hands `read` the image a row of `id` names, resolved in `id`'s own storage namespace
+    /// alone, so no package can draw another's data. It reads storage and decides as typing
+    /// does, but a refusal records no consent request: drawing a row is not the package asking.
+    /// Call it off the panel's thread; storage blocks on file IO.
+    pub fn read_image<R>(
+        &self,
+        id: &PackageId,
+        image: &ImageRef<'_>,
+        read: impl FnOnce(ImageData<'_>) -> R,
+    ) -> Result<R, Failure> {
+        self.session(id, Trigger::Query)
+            .ok_or_else(|| failure_for(&Denial::NotInstalled))?
+            .read_image(image, read)
     }
 
     /// Whether a permit from [`Bridge::authorize`] still holds.

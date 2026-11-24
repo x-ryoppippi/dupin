@@ -311,6 +311,7 @@ mod tests {
             time: None,
             file: None,
             icon: None,
+            image: None,
             section: None,
             detail: None,
             actions: Vec::new(),

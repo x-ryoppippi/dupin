@@ -324,6 +324,8 @@ impl Ui {
     /// extension asked for before.
     pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
         if let Notice::Changed(id) = &notice {
+            // Images refused before may be drawn now.
+            self.thumbnails.retry_failed();
             // A grant changes what the catalogue may read even when no authority was lost, so
             // it is asked for again from the start on its next use.
             for (extension, _) in self.extensions.registered.values() {
@@ -374,6 +376,16 @@ impl Ui {
             .values()
             .find(|(extension, _)| extension.id == id)
             .map(|(extension, _)| extension.clone())
+    }
+
+    /// The package of the extension whose rows name images by `id`, whose storage alone they
+    /// are read from.
+    pub(super) fn extension_package(&self, id: &str) -> Option<PackageId> {
+        self.extensions
+            .registered
+            .values()
+            .find(|(extension, _)| extension.id == id)
+            .map(|(extension, _)| extension.package.clone())
     }
 
     /// Runs a row's extension action, which the user chose: the only calls that carry an

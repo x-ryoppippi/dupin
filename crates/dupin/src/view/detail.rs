@@ -22,6 +22,18 @@ pub(super) fn detail_card(
 ) -> El {
     let key = row_key(&s.session.layout_key(index));
     let mut content = col().key(format!("{key}-detail")).w_full().gap(14.0);
+    if let Some(image) = &detail.image {
+        // The space is kept while the preview loads, so the card doesn't jump when it lands.
+        let slot = el()
+            .key(format!("{key}-image"))
+            .w_full()
+            .h(crate::ui::PREVIEW_HEIGHT)
+            .radius(6.0);
+        content = content.child(match s.thumbnails.preview(image) {
+            Some(preview) => slot.pixels_fit(preview.pixels(), rune::SurfaceFit::Fit),
+            None => slot,
+        });
+    }
     if !detail.metadata.is_empty() {
         content = content.child(
             col()

@@ -5,7 +5,7 @@
 //! notification for pasteboard changes. Concealed copies and ignored apps must be identified
 //! before reading the contents, and background reads must never raise the macOS paste prompt.
 
-mod image;
+pub(crate) mod image;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};

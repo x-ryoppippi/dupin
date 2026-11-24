@@ -8,11 +8,11 @@ use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::row::{
-    self, CataloguePage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_FILE_BYTES, MAX_ID_BYTES,
-    MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA,
-    MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES, MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES,
-    MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction,
-    RowDetail, RowEffect, Source,
+    self, CataloguePage, CopiedFileImage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES,
+    MAX_FILE_BYTES, MAX_ID_BYTES, MAX_IMAGE_HANDLE_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES,
+    MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA, MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES,
+    MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES,
+    MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, RowImage, Source,
 };
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
@@ -82,12 +82,12 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
     Ok(Some(ActionEffect::Toast { text }))
 }
 
-const ITEM_FIELDS: [&str; 9] = [
-    "id", "title", "subtitle", "text", "url", "icon", "section", "detail", "actions",
+const ITEM_FIELDS: [&str; 10] = [
+    "id", "title", "subtitle", "text", "url", "icon", "image", "section", "detail", "actions",
 ];
-const ITEM_FIELDS_HINT: &str =
-    "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
-const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
+const ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `image`, `section`, `detail` and `actions`.";
+const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `image`, `section`, `detail` and `actions`.";
+const IMAGE_HINT: &str = "Give a stored blob's `handle`, or a copied file's `{ path, handle }` as the clipboard watch delivered it.";
 /// Fields only an `items()` catalogue's items take.
 const CATALOGUE_ONLY_FIELDS: [&str; 4] = ["keywords", "matchText", "time", "file"];
 
@@ -616,6 +616,7 @@ impl<'a> Reader<'a> {
                     .hint("Ship the image in the package and name it relative to `package.json`, such as `assets/icon.png`.")
             })?;
         }
+        let image = self.image(&item, &field("image"))?;
         let section = self.line(&item, &field("section"), "section", MAX_SECTION_BYTES)?;
         let detail = self.detail(&item, &field("detail"))?;
         let mut actions = Vec::new();
@@ -636,10 +637,58 @@ impl<'a> Reader<'a> {
             time,
             file,
             icon,
+            image,
             section,
             detail,
             actions,
         })
+    }
+
+    /// A stored blob's handle, or a copied file's `{ path, handle }`. Only their shape is
+    /// checked here: Dupin resolves them within the package's own storage when it draws them.
+    fn image(&mut self, object: &Object<'_>, field: &str) -> Result<Option<RowImage>, Failure> {
+        let value: Value = object.get("image")?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let image = if value.is_string() {
+            let handle = self
+                .string(object, field, "image", MAX_IMAGE_HANDLE_BYTES)?
+                .unwrap_or_default();
+            RowImage::Blob(handle)
+        } else if let Some(file) = plain_object(&value) {
+            self.only_keys(&file, &["path", "handle"], IMAGE_HINT)
+                .map_err(|failure| self.nested(failure, field))?;
+            let path = self.string(&file, &format!("{field}.path"), "path", MAX_FILE_BYTES)?;
+            let handle = self.string(
+                &file,
+                &format!("{field}.handle"),
+                "handle",
+                MAX_IMAGE_HANDLE_BYTES,
+            )?;
+            let (Some(path), Some(handle)) = (path, handle) else {
+                return Err(self
+                    .invalid("missing-field", field, "needs both `path` and `handle`")
+                    .hint(IMAGE_HINT)
+                    .into());
+            };
+            RowImage::File(CopiedFileImage { path, handle })
+        } else {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    field,
+                    format!(
+                        "must be a handle or `{{ path, handle }}`, not {}",
+                        describe(&value)
+                    ),
+                )
+                .hint(IMAGE_HINT)
+                .into());
+        };
+        row::check_image(&image)
+            .map_err(|message| self.invalid("invalid-field", field, message).hint(IMAGE_HINT))?;
+        Ok(Some(image))
     }
 
     /// Milliseconds since the epoch, as `Date.now()` gives them.
@@ -746,10 +795,11 @@ impl<'a> Reader<'a> {
         };
         self.only_keys(
             &detail,
-            &["markdown", "metadata"],
-            "A detail takes `markdown` and `metadata`.",
+            &["image", "markdown", "metadata"],
+            "A detail takes `image`, `markdown` and `metadata`.",
         )
         .map_err(|failure| self.nested(failure, field))?;
+        let image = self.image(&detail, &format!("{field}.image"))?;
         let markdown = self
             .string(
                 &detail,
@@ -804,7 +854,11 @@ impl<'a> Reader<'a> {
                 metadata.push(Metadata { label, text });
             }
         }
-        Ok(Some(RowDetail { markdown, metadata }))
+        Ok(Some(RowDetail {
+            image,
+            markdown,
+            metadata,
+        }))
     }
 
     /// Reads the item's own `actions` after the ones `url` and `text` made.

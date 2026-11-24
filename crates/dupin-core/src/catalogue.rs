@@ -503,6 +503,10 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
         + entry.match_text.as_ref().map_or(0, String::len)
         + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
+        + match &item.icon {
+            Some(crate::Icon::Host(image)) => image.text_bytes(),
+            _ => 0,
+        }
 }
 
 /// Every action names each of its variants, so one added later must say what it holds.

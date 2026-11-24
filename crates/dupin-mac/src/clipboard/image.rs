@@ -75,7 +75,7 @@ pub(crate) fn to_png(data: &[u8], max_pixels: u32, max_bytes: usize) -> Option<I
     }
 }
 
-fn dimension(properties: &CFDictionary<CFString, CFType>, key: &CFString) -> Option<u32> {
+pub(crate) fn dimension(properties: &CFDictionary<CFString, CFType>, key: &CFString) -> Option<u32> {
     let value = properties.get(key)?;
     let number = value.downcast_ref::<CFNumber>()?;
     u32::try_from(number.as_i64()?).ok().filter(|&pixels| pixels > 0)

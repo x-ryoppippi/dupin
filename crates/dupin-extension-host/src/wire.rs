@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -349,8 +349,10 @@ mod tests {
                 time: None,
                 file: None,
                 icon: Some("a.png".into()),
+                image: None,
                 section: Some("a".into()),
                 detail: Some(RowDetail {
+                    image: None,
                     markdown: String::new(),
                     metadata: vec![
                         Metadata {
@@ -403,7 +405,7 @@ mod tests {
     /// [`VERSION`] being raised with it.
     #[test]
     fn every_message_keeps_the_shape_its_version_names() {
-        use dupin_js_runtime::row::PageChange;
+        use dupin_js_runtime::row::{PageChange, RowImage};
 
         let row = Row {
             id: "a".into(),
@@ -414,6 +416,7 @@ mod tests {
             time: None,
             file: None,
             icon: None,
+            image: Some(RowImage::Blob("h".into())),
             section: None,
             detail: None,
             actions: Vec::new(),
@@ -535,7 +538,7 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (8, SHAPES.map(str::to_owned).to_vec()),
+            (9, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
@@ -555,8 +558,8 @@ mod tests {
         r#"{"kind":"host","id":1,"call":2,"op":"storage"}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A"}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A"}],"replace":[{"id":"a","title":"A"}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A","image":"h"}]}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A","image":"h"}],"replace":[{"id":"a","title":"A","image":"h"}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
