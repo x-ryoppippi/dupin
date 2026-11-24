@@ -2,26 +2,17 @@ use driver.nu [
     ad
     log-count
     poll
+    press
     snap
+    type-text
     wait-condition
     wait-for-log
 ]
 use ../e2e-script-fixtures.nu script-processes-stopped
 use ../e2e-state.nu [has-match is-focused-query]
 
-def type-script-text [value: string] {
-    ^osascript -e 'on run argv
-        tell application "System Events"
-            repeat with typedKey in characters of (item 1 of argv)
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell
-    end run' $value
-}
-
 def script-query [out: path, title: string] {
-    ad $out $'($title)-summon' press alt+space | ignore
+    press $out $'($title)-summon' alt+space | ignore
     (poll
         $out
         $'($title)-empty'
@@ -48,7 +39,7 @@ def script-query [out: path, title: string] {
         --first
     )
     if $stale.data?.match? != null { error make {msg: 'Launcher reopened with an old script card'} }
-    type-script-text $title
+    type-text $out $'($title)-type' $title | ignore
     (poll
         $out
         $'($title)-query'
@@ -98,7 +89,7 @@ export def scripts-stage [out: path] {
             Dupin
         ) | ignore
         script-query $out 'E2E script echo'
-        ad $out scripts-arguments press tab | ignore
+        press $out scripts-arguments tab | ignore
         (poll
             $out
             scripts-argument-field
@@ -114,7 +105,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         let arguments = "first '$HOME' '*.rs'"
-        type-script-text $arguments
+        type-text $out scripts-type-arguments $arguments | ignore
         wait-for-log $log $echo_searched
         let before_argument_refresh = log-count $log $echo_searched
         cp ($scripts | path join failure) $extra
@@ -135,7 +126,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         snap $out scripts-arguments
-        ad $out scripts-submit press return | ignore
+        press $out scripts-submit return | ignore
         (poll
             $out
             scripts-inline
@@ -169,14 +160,14 @@ export def scripts-stage [out: path] {
         snap $out scripts-inline
         let closed = log-count $log 'dupin-trace: panel closed '
         'Dupin E2E clipboard baseline' | ^pbcopy
-        ad $out scripts-inline-copy press return | ignore
+        press $out scripts-inline-copy return | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
         let copied = ^pbpaste
         $copied | save ($out | path join scripts-inline-copied.txt)
         if $copied != 'first | $HOME | *.rs' { error make {msg: 'Inline Enter did not copy the script result'} }
 
         script-query $out 'E2E script stream'
-        ad $out scripts-stream-start press return | ignore
+        press $out scripts-stream-start return | ignore
         (poll
             $out
             scripts-output-window
@@ -210,7 +201,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         snap $out scripts-streaming
-        ad $out scripts-cancel press cmd+. | ignore
+        press $out scripts-cancel cmd+. | ignore
         (poll
             $out
             scripts-cancelled
@@ -232,14 +223,14 @@ export def scripts-stage [out: path] {
             find --app Dupin --role button --name 'E2E script echo Finished' --exact --first
         )
         ad $out scripts-select-echo click $echo.data.match.ref_id | ignore
-        ad $out scripts-repeat-echo press cmd+r | ignore
+        press $out scripts-repeat-echo cmd+r | ignore
         (poll
             $out
             scripts-repeated-echo-selected
             $found
             find --app Dupin --name 'Repeated echo' --exact --first
         ) | ignore
-        ad $out scripts-output-close press cmd+w | ignore
+        press $out scripts-output-close cmd+w | ignore
         (poll
             $out
             scripts-output-closed
@@ -250,7 +241,7 @@ export def scripts-stage [out: path] {
         ) | ignore
 
         script-query $out 'E2E script failure'
-        ad $out scripts-failure-start press return | ignore
+        press $out scripts-failure-start return | ignore
         (poll
             $out
             scripts-failure-window
@@ -284,7 +275,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         snap $out scripts-failure
-        ad $out scripts-failure-close press cmd+w | ignore
+        press $out scripts-failure-close cmd+w | ignore
     } catch {|failure|
         try { snap $out scripts-failure-evidence }
         error make $failure

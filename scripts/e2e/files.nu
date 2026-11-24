@@ -3,7 +3,9 @@ use driver.nu [
     log-count
     mentions
     poll
+    press
     snap
+    type-text
     wait-condition
     wait-for-log
 ]
@@ -75,15 +77,15 @@ export def file-actions-stage [out: path] {
         ) | ignore
         snap $out file-actions-trash-confirm
         let list = log-count $log 'dupin-trace: action-screen list'
-        ad $out file-actions-trash-cancel press return | ignore
+        press $out file-actions-trash-cancel return | ignore
         wait-for-log --after $list $log 'dupin-trace: action-screen list'
         let confirm = log-count $log 'dupin-trace: action-screen confirm'
         open-trash-confirmation $out file-actions-trash-review-again
         wait-for-log --after $confirm $log 'dupin-trace: action-screen confirm'
         if not ($trash_path | path exists) { error make {msg: 'Enter on Cancel removed the fixture'} }
         snap $out file-actions-trash-cancelled
-        ad $out file-actions-trash-select press down | ignore
-        ad $out file-actions-trash-confirm press return | ignore
+        press $out file-actions-trash-select down | ignore
+        press $out file-actions-trash-confirm return | ignore
         wait-condition 'fixture moving to the Trash' {
             not ($trash_path | path exists) and (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | length) == 1
         }
@@ -114,7 +116,7 @@ export def file-actions-stage [out: path] {
             --first
         ) | ignore
         snap $out file-actions-trash-finished
-        ad $out file-actions-close press escape | ignore
+        press $out file-actions-close escape | ignore
     } catch {|failure|
         try { snap $out file-actions-failure }
         try { cp $log ($out | path join file-actions-failure.log) }
@@ -135,12 +137,10 @@ def open-trash-confirmation [out: path, name: string] {
         )
         $selected = $row.data.match.name
         if $selected == 'Move to Trash ↩' {
-            let opened = ad $out $name press return
-            if not $opened.ok { error make {msg: 'Could not open the Trash confirmation'} }
+            press $out $name return | ignore
             return
         }
-        let pressed = ad $out $'($name)-down-($step)' press down
-        if not $pressed.ok { error make {msg: 'Could not select the next file action'} }
+        press $out $'($name)-down-($step)' down | ignore
     }
     error make {msg: 'Could not select Move to Trash'}
 }
@@ -186,7 +186,7 @@ def file-search [out: path, query: string, found: closure] {
         {|r| $r.ok and not (mentions $r 'System Settings') }
         list-apps
     ) | ignore
-    ad $out $'file-actions-($query)-summon' press alt+space | ignore
+    press $out $'file-actions-($query)-summon' alt+space | ignore
     (poll
         $out
         $'file-actions-($query)-panel'
@@ -198,7 +198,7 @@ def file-search [out: path, query: string, found: closure] {
         textfield
         --first
     ) | ignore
-    ^osascript -e 'tell application "System Events" to keystroke " "'
+    press $out $'file-actions-($query)-space' space | ignore
     (poll
         $out
         $'file-actions-($query)-mode'
@@ -213,14 +213,7 @@ def file-search [out: path, query: string, found: closure] {
         --exact
         --first
     ) | ignore
-    ^osascript -e 'on run argv
-        tell application "System Events"
-            repeat with typedKey in characters of (item 1 of argv)
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell
-    end run' $file
+    type-text $out $'file-actions-($query)-type' $file | ignore
     (poll
         $out
         $'file-actions-($query)-query'
@@ -248,7 +241,7 @@ def file-search [out: path, query: string, found: closure] {
         --first
     ) | ignore
     let right = log-count $log 'dupin-trace: key Right '
-    ad $out $'file-actions-($query)-actions' press right | ignore
+    press $out $'file-actions-($query)-actions' right | ignore
     wait-for-log --after $right $log 'dupin-trace: key Right '
     (poll
         $out

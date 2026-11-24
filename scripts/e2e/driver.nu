@@ -1,6 +1,7 @@
 use ../e2e-recording.nu record
 use ../e2e-script-fixtures.nu [prepare-scripts cleanup-scripts]
 use ../e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
+use keys.nu key-script
 
 export def run-suite [
     app: path
@@ -160,6 +161,50 @@ export def --wrapped ad [out: path, name: string, ...args: string]: nothing -> r
     } catch {
         {ok: false}
     }
+}
+
+# Press chords such as `cmd+shift+s`, `alt+space` or `down` in turn through System Events, keeping
+# its reply in <out>/<name>.json. `agent-desktop press` posts a lone key event carrying the modifier flags from
+# a process that exits straight after, and on the runner such a press sometimes never reached
+# Dupin: not as a key, and not as the hotkey.
+export def press [out: path, name: string, ...chords: string]: nothing -> record {
+    let result = ^osascript -e (key-script ...$chords) | complete
+    system-events-reply $out $name {chords: $chords} $result
+}
+
+# Type `text` one character at a time through System Events, as `press` does, keeping its reply
+# in <out>/<name>.json. Characters go through the keyboard layout, as a person's typing does.
+export def type-text [out: path, name: string, text: string]: nothing -> record {
+    let result = (
+        ^osascript -e 'on run argv
+            tell application "System Events"
+                repeat with typedKey in characters of (item 1 of argv)
+                    keystroke (typedKey as text)
+                    delay 0.12
+                end repeat
+            end tell
+        end run' $text
+        | complete
+    )
+    system-events-reply $out $name {text: $text} $result
+}
+
+def system-events-reply [
+    out: path
+    name: string
+    sent: record
+    result: record
+]: nothing -> record {
+    let reply = {
+        ok: ($result.exit_code == 0)
+        ...$sent
+        stderr: $result.stderr
+    }
+    $reply | to json | save --force ($out | path join $'($name).json')
+    if not $reply.ok {
+        error make {msg: $'System Events could not send ($name): ($result.stderr)'}
+    }
+    $reply
 }
 
 # Retry an agent-desktop command once a second until `done` accepts its reply.

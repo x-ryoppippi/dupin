@@ -3,7 +3,9 @@ use driver.nu [
     file-proof
     log-count
     poll
+    press
     snap
+    type-text
     wait-for-log
 ]
 use ../e2e-state.nu [has-match is-focused-query]
@@ -18,12 +20,7 @@ export def snapshot-stage [out: path] {
     if ($archive | path exists) { error make {msg: 'Snapshot archive was not isolated'} }
     try {
         let done = log-count $log 'dupin-trace: results done query="calculator"'
-        ^osascript -e 'tell application "System Events"
-            repeat with typedKey in characters of "calculator"
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell'
+        type-text $out snapshots-type-calculator calculator | ignore
         (poll
             $out
             snapshots-query
@@ -48,7 +45,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        ad $out snapshots-save press cmd+shift+s | ignore
+        press $out snapshots-save cmd+shift+s | ignore
         wait-for-log $log 'dupin-trace: snapshot capture accepted'
         wait-for-log $log 'dupin-trace: snapshot saved'
         let saved = open $archive
@@ -60,7 +57,7 @@ export def snapshot-stage [out: path] {
         snap $out snapshots-saved
 
         let closed = log-count $log 'dupin-trace: panel closed '
-        ad $out snapshots-open press cmd+shift+o | ignore
+        press $out snapshots-open cmd+shift+o | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
         poll $out snapshots-window {|r| $r.ok and (
             $r.data?
@@ -95,7 +92,7 @@ export def snapshot-stage [out: path] {
         ) | ignore
         snap $out snapshots-opened
 
-        ^osascript -e 'tell application "System Events" to keystroke "zzz"'
+        type-text $out snapshots-type-filter zzz | ignore
         (poll
             $out
             snapshots-filter
@@ -123,7 +120,7 @@ export def snapshot-stage [out: path] {
             --first
         ) | ignore
         snap $out snapshots-filtered
-        ^osascript -e 'tell application "System Events" to key code 51 using command down'
+        press $out snapshots-clear-filter cmd+backspace | ignore
         (poll
             $out
             snapshots-cleared
@@ -234,7 +231,7 @@ export def snapshot-stage [out: path] {
                 error make {msg: $'Unexpected snapshot ($event)'}
             }
         }
-        ad $out snapshots-close press cmd+w | ignore
+        press $out snapshots-close cmd+w | ignore
         (poll
             $out
             snapshots-closed
@@ -243,7 +240,7 @@ export def snapshot-stage [out: path] {
             --app
             Dupin
         ) | ignore
-        ad $out snapshots-summon press alt+space | ignore
+        press $out snapshots-summon alt+space | ignore
         (poll
             $out
             snapshots-panel

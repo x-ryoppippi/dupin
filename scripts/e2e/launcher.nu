@@ -1,9 +1,9 @@
-use driver.nu [ad poll snap]
+use driver.nu [ad poll press snap]
 use ../e2e-state.nu is-focused-match
 
 export def launcher-stage [out: path] {
     close-startup-welcome $out
-    ad $out press-hotkey press alt+space | ignore
+    press $out press-hotkey alt+space | ignore
     let focused = {|r| is-focused-match $r }
     poll $out field $focused find --app Dupin --role textfield --first
     # Past the backdrop's fade-in, so the screenshot shows the shader.

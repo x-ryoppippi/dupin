@@ -1,4 +1,12 @@
-use driver.nu [ad mentions poll snap wait-frontmost]
+use driver.nu [
+    ad
+    mentions
+    poll
+    press
+    snap
+    type-text
+    wait-frontmost
+]
 use ../e2e-state.nu [has-match is-focused-match]
 
 export def system-pane [out: path] {
@@ -10,8 +18,8 @@ export def system-pane [out: path] {
             msg: 'System Settings was already running; a stale pane could falsely pass'
         }
     }
-    ad $out bluetooth-evidence-close-preferences press cmd+w | ignore
-    ad $out bluetooth-evidence-hotkey press alt+space | ignore
+    press $out bluetooth-evidence-close-preferences cmd+w | ignore
+    press $out bluetooth-evidence-hotkey alt+space | ignore
     (poll
         $out
         bluetooth-evidence-field
@@ -23,12 +31,7 @@ export def system-pane [out: path] {
         textfield
         --first
     )
-    ^osascript -e 'tell application "System Events"
-        repeat with typedKey in characters of "bluetooth"
-            keystroke (typedKey as text)
-            delay 0.12
-        end repeat
-    end tell'
+    type-text $out bluetooth-evidence-type bluetooth | ignore
     (poll
         $out bluetooth-evidence-query
         {|r| $r.ok and $r.data?.match?.value? == 'bluetooth' }

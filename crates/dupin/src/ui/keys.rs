@@ -34,6 +34,9 @@ impl Ui {
 
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if !self.session.command().private_results {
+            crate::trace::key(ev);
+        }
         if self.picker.is_some() {
             return self.picker_key(ev, tx);
         }
@@ -53,9 +56,6 @@ impl Ui {
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
             self.show_snapshots(tx);
             return true;
-        }
-        if !self.session.command().private_results {
-            crate::trace::key(ev);
         }
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
