@@ -28,6 +28,7 @@ pub mod sharing;
 pub mod spotlight;
 pub mod system_commands;
 pub mod system_hotkey;
+pub mod thumbnail;
 pub mod watcher;
 pub mod window;
 pub mod window_management;

@@ -349,8 +349,10 @@ mod tests {
                 time: None,
                 file: None,
                 icon: Some("a.png".into()),
+                image: None,
                 section: Some("a".into()),
                 detail: Some(RowDetail {
+                    image: None,
                     markdown: String::new(),
                     metadata: vec![
                         Metadata {
@@ -404,7 +406,7 @@ mod tests {
     /// [`VERSION`] being raised with it.
     #[test]
     fn every_message_keeps_the_shape_its_version_names() {
-        use dupin_js_runtime::row::PageChange;
+        use dupin_js_runtime::row::{PageChange, RowImage};
 
         let row = Row {
             id: "a".into(),
@@ -415,6 +417,7 @@ mod tests {
             time: None,
             file: None,
             icon: None,
+            image: Some(RowImage::Blob("h".into())),
             section: None,
             detail: None,
             actions: Vec::new(),
@@ -566,8 +569,8 @@ mod tests {
         r#"{"kind":"host","id":1,"call":2,"op":"storage"}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A"}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A"}],"replace":[{"id":"a","title":"A","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A","image":"h"}]}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A","image":"h"}],"replace":[{"id":"a","title":"A","image":"h","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,

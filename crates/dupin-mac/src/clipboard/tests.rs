@@ -203,6 +203,13 @@ fn images_are_kept_as_png_from_every_pasteboard_type() {
 }
 
 #[test]
+fn a_copy_offered_as_an_image_type_is_decoded_only_when_it_is_that_kind_of_image() {
+    let gif = encoded(8, 8, "com.compuserve.gif");
+    let board = Fixture::new(&["public.png"]).bytes("public.png", gif);
+    assert_eq!(read_content(&board, &LIMITS), None);
+}
+
+#[test]
 fn large_images_are_scaled_down_and_ones_still_too_large_are_skipped() {
     let tiff = encoded(64, 16, "public.tiff");
     let image = image::to_png(&tiff, 16, usize::MAX).unwrap();

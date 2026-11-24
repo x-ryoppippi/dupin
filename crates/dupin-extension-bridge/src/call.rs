@@ -482,6 +482,65 @@ impl Session {
         namespace.with(|store| Ok(handle_for(store, path))).ok()
     }
 
+    /// Hands `read` the image a row of the package names, from the package's own namespace
+    /// alone: a blob one of its records carries, or a file its clipboard watch delivered with
+    /// that handle. Drawing a row is no request of the package's, so a refusal records no
+    /// consent request; the row is drawn without its image.
+    pub(crate) fn read_image<R>(
+        &self,
+        image: &crate::ImageRef<'_>,
+        read: impl FnOnce(crate::ImageData<'_>) -> R,
+    ) -> Result<R, Failure> {
+        let permit = {
+            let state = self.bridge.lock();
+            if state.broker.generation(&self.package) != Some(self.generation) {
+                return Err(revoked());
+            }
+            match state.broker.check(
+                &self.package,
+                &self.revision,
+                &Request::Storage { op: StorageOp::Read },
+                self.trigger,
+            ) {
+                dupin_broker::Decision::Allow(permit) => permit,
+                dupin_broker::Decision::Deny(denial) => return Err(failure_for(&denial)),
+                dupin_broker::Decision::NeedsConsent(_) => {
+                    return Err(
+                        Failure::new("needs-consent", "the package may not read its storage yet")
+                            .scope("storage"),
+                    );
+                }
+            }
+        };
+        let namespace = self
+            .bridge
+            .services
+            .storage
+            .open(&self.namespace, storage_limits(&permit)?)?;
+        let result = match image {
+            crate::ImageRef::Blob(handle) => {
+                let handle: dupin_storage::BlobHandle = handle
+                    .parse()
+                    .map_err(|_| Failure::invalid("not a blob handle"))?;
+                let bytes = namespace.with(|store| store.read_blob(&handle))?;
+                self.release(&permit, &AtomicBool::new(false))?;
+                read(crate::ImageData::Bytes(&bytes))
+            }
+            crate::ImageRef::File { path, handle } => {
+                let expected = namespace.with(|store| Ok(handle_for(store, path)))?;
+                if expected != *handle {
+                    return Err(Failure::new(
+                        "out-of-scope",
+                        "only files a clipboard watch delivered, with their handles, can be drawn",
+                    ));
+                }
+                self.release(&permit, &AtomicBool::new(false))?;
+                read(crate::ImageData::File(std::path::Path::new(path)))
+            }
+        };
+        Ok(result)
+    }
+
     fn fetch(&self, args: Fetch, deadline: Instant, cancelled: &AtomicBool) -> Result<Value, Failure> {
         bounded(&args.url, "url", MAX_URL_BYTES)?;
         let method = match args.method.to_ascii_uppercase().as_str() {

@@ -479,6 +479,7 @@ fn item_row(extension: &Extension, item: &dupin_core::Item) -> Row {
         time: None,
         file: None,
         icon: None,
+        image: None,
         section: None,
         detail: None,
         actions,

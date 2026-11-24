@@ -22,15 +22,99 @@ pub(super) const LIST_PAD: f32 = 6.0;
 /// The height of a section's heading row.
 pub(super) const SECTION_H: f32 = 30.0;
 
+/// The height of a long list whose selected row shows its detail, as tall as a list of cards.
+const CARDS_MAX_H: f32 = 440.0;
+
+/// How the result list lays out its rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layout {
+    /// One row per result, only those in view laid out.
+    Windowed,
+    /// One row per result, every one laid out: headings break the uniform row height that
+    /// windowing needs, and sectioned lists are short (a provider's own results).
+    Sectioned,
+    /// Cards and rows, every one laid out.
+    Cards,
+    /// A long list of rows, only those in view laid out, whose selected row shows its detail.
+    WindowedCard,
+}
+
+fn layout(s: &Ui, items: &[Item]) -> Layout {
+    let text_only = items.iter().all(|item| matches!(item.view, View::Text { .. }));
+    let cards = !text_only || (0..items.len()).any(|index| s.session.detail(index).is_some());
+    let headings = (0..items.len()).any(|index| s.session.section_start(index).is_some());
+    let long = items.len() > 2 * visible_rows(s.theme.row_height as f32);
+    match (cards, headings) {
+        (false, false) => Layout::Windowed,
+        (false, true) => Layout::Sectioned,
+        // Only the selected row of a long list of text rows shows a card: the rest stay rows,
+        // so the list can still lay out only what is in view, however many rows it holds.
+        (true, false) if text_only && long && only_selected_shows_detail(s, items) => Layout::WindowedCard,
+        (true, _) => Layout::Cards,
+    }
+}
+
+fn only_selected_shows_detail(s: &Ui, items: &[Item]) -> bool {
+    let selected = s.session.selected();
+    (0..items.len()).all(|index| index == selected || s.session.detail(index).is_none())
+}
+
+/// The rows to load icons for: those in view and a screenful either side, and the selected
+/// row's, while the list lays out only what is in view; otherwise, every row. `in_view` is the
+/// range the windowed list last reported.
+pub fn wanted_rows(s: &Ui, in_view: std::ops::Range<usize>) -> Vec<usize> {
+    let items = s.session.items();
+    if !matches!(layout(s, items), Layout::Windowed | Layout::WindowedCard) {
+        return (0..items.len()).collect();
+    }
+    let screen = visible_rows(s.theme.row_height as f32);
+    let around = |range: std::ops::Range<usize>| {
+        range.start.saturating_sub(screen)..range.end.saturating_add(screen).min(items.len())
+    };
+    let selected = s.session.selected();
+    let mut rows: Vec<usize> = around(in_view).chain(around(selected..selected + 1)).collect();
+    rows.sort_unstable();
+    rows.dedup();
+    rows
+}
+
 pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
     // Rows without icons only keep the icon column when another row in the list has one, so
     // titles still line up.
     let gutter = items.iter().any(|item| item.icon.is_some());
-    let plain_rows = items
-        .iter()
-        .enumerate()
-        .all(|(index, item)| matches!(item.view, View::Text { .. }) && s.session.detail(index).is_none());
-    if !plain_rows {
+    let layout = layout(s, items);
+    if layout == Layout::WindowedCard {
+        let selected = s.session.selected();
+        let rows: Vec<El> = items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let on = index == selected;
+                let row = match s.session.detail(index) {
+                    Some(detail) => super::detail::detail_card(s, item, detail, index, on, t, accent),
+                    None => result_row(s, item, index, on, gutter, t, accent),
+                };
+                row.key(row_key(&s.session.layout_key(index)))
+            })
+            .collect();
+        let list = col()
+            .key("rows")
+            .w_full()
+            .growth(GrowthSpec::default())
+            .virtualize(s.theme.row_height as f32)
+            .on_visible_rows(Ui::rows_in_view)
+            .children(rows);
+        return col().key("results").w_full().py(LIST_PAD).child(
+            col()
+                .key("scroll")
+                .w_full()
+                .h(CARDS_MAX_H)
+                .scroll(ScrollSpec { stick_bottom: false })
+                .instant_changes()
+                .child(list),
+        );
+    }
+    if layout == Layout::Cards {
         let rows = items
             .iter()
             .enumerate()
@@ -74,11 +158,12 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
         .filter(|&index| s.session.section_start(index).is_some())
         .count();
     let list = col().key("rows").w_full().growth(GrowthSpec::default());
-    // Headings break the uniform row height that virtualisation needs; sectioned lists are
-    // short (a provider's own results), so they lay out every row instead.
-    let (height, list) = if headings == 0 {
+    let (height, list) = if layout == Layout::Windowed {
         let shown = items.len().min(visible_rows(row_height)) as f32;
-        (shown * row_height, list.virtualize(row_height))
+        (
+            shown * row_height,
+            list.virtualize(row_height).on_visible_rows(Ui::rows_in_view),
+        )
     } else {
         let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
         (full.min(visible_rows(row_height) as f32 * row_height), list)
@@ -306,9 +391,13 @@ pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool) -
         return None;
     }
     let slot = el().size(ICON_SIZE, ICON_SIZE);
-    Some(match icon.and_then(|icon| s.icons.get(icon)) {
-        Some(image) => slot.pixels(image.pixels()),
-        None => slot,
+    Some(match (icon, icon.and_then(|icon| s.icons.get(icon))) {
+        // A picture keeps its own shape inside the icon's square, as Finder's thumbnails do.
+        (Some(dupin_core::Icon::Host(_)), Some(image)) => {
+            slot.radius(4.0).pixels_fit(image.pixels(), rune::SurfaceFit::Fit)
+        }
+        (_, Some(image)) => slot.pixels(image.pixels()),
+        (_, None) => slot,
     })
 }
 

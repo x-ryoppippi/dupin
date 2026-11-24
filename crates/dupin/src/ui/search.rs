@@ -129,27 +129,92 @@ impl Ui {
         changed
     }
 
-    /// Ask for the icons of the rows on screen. Handles live in `icons`, which the cache
-    /// needs to keep them, and which is trimmed to the current rows when it grows too big.
-    pub(super) fn fetch_icons(&mut self) {
-        let Some(cache) = &self.icon_cache else { return };
+    /// Ask for the icons of the rows on screen or near it, and the selected row's preview.
+    /// Handles live in `icons`, which the cache needs to keep them, and which is trimmed to
+    /// those rows when it grows too big. Returns whether it asked for anything.
+    pub(super) fn fetch_icons(&mut self) -> bool {
+        let Some(cache) = &self.icon_cache else {
+            return false;
+        };
+        let items = self.session.items();
+        let wanted = crate::view::wanted_rows(self, self.visible_rows.clone());
         if self.icons.len() > ICON_CAP {
-            let current: std::collections::HashSet<_> = self
-                .session
-                .items()
+            let current: std::collections::HashSet<_> = wanted
                 .iter()
-                .filter_map(|item| item.icon.as_ref())
+                .filter_map(|&index| items[index].icon.as_ref())
                 .collect();
             self.icons.retain(|path, _| current.contains(path));
         }
-        for icon in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
-            if !self.icons.contains_key(icon) {
-                let image = match icon {
-                    dupin_core::Icon::File(path) => cache.app_icon(path, ICON_SIZE),
-                    dupin_core::Icon::Image(path) => cache.file(path, ICON_SIZE, 2.0),
-                };
-                self.icons.insert(icon.clone(), image);
+        let mut asked = false;
+        let mut jobs = Vec::new();
+        let selected = self.session.selected();
+        if let Some(image) = self
+            .session
+            .detail(selected)
+            .and_then(|detail| detail.image.as_ref())
+            .filter(|image| !self.thumbnails.has_preview(image))
+            && let Some(package) = self.extension_package(&image.extension)
+        {
+            jobs.push(super::thumbnails::Job {
+                image: image.clone(),
+                size: super::thumbnails::Size::Preview,
+                package,
+            });
+        }
+        for index in wanted {
+            let Some(icon) = items[index].icon.as_ref() else {
+                continue;
+            };
+            if self.icons.contains_key(icon) {
+                continue;
             }
+            let image = match icon {
+                dupin_core::Icon::File(path) => cache.app_icon(path, ICON_SIZE),
+                dupin_core::Icon::Image(path) => cache.file(path, ICON_SIZE, 2.0),
+                dupin_core::Icon::Host(image) => {
+                    if let Some(package) = self.extension_package(&image.extension) {
+                        jobs.push(super::thumbnails::Job {
+                            image: image.clone(),
+                            size: super::thumbnails::Size::Row,
+                            package,
+                        });
+                    }
+                    continue;
+                }
+            };
+            self.icons.insert(icon.clone(), image);
+            asked = true;
+        }
+        self.thumbnails.want(jobs, &self.extensions.bridge, &self.me);
+        asked
+    }
+
+    /// The rows the list shows now changed, by scrolling or a new answer.
+    pub(crate) fn rows_in_view(&mut self, rows: std::ops::Range<usize>) -> bool {
+        if self.visible_rows == rows {
+            return false;
+        }
+        self.visible_rows = rows;
+        self.fetch_icons()
+    }
+
+    /// A thumbnail the worker made, or failed to.
+    pub(super) fn thumbnail_made(
+        &mut self,
+        image: dupin_core::HostImage,
+        size: super::thumbnails::Size,
+        png: Option<Vec<u8>>,
+    ) {
+        let (Some(png), Some(cache)) = (png, &self.icon_cache) else {
+            self.thumbnails.failed(image, size);
+            return;
+        };
+        let decoded = cache.load(png);
+        match size {
+            super::thumbnails::Size::Row => {
+                self.icons.insert(dupin_core::Icon::Host(image), decoded);
+            }
+            super::thumbnails::Size::Preview => self.thumbnails.keep_preview(image, decoded),
         }
     }
 }

@@ -617,6 +617,12 @@ pub fn rows(rows: &[Row]) -> Value {
             if let Some(icon) = &row.icon {
                 out.insert("icon".into(), icon.clone().into());
             }
+            if let Some(image) = &row.image {
+                out.insert(
+                    "image".into(),
+                    serde_json::to_value(image).expect("an image always serializes"),
+                );
+            }
             if let Some(section) = &row.section {
                 out.insert("section".into(), section.clone().into());
             }

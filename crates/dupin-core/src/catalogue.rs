@@ -33,7 +33,7 @@ pub struct Entry {
     /// Unix seconds the row is from; its subtitle starts with how long ago that was.
     pub time: Option<u64>,
     /// The file the row stands for. While it is gone, the row shows as unavailable, without
-    /// its icon and the actions in `file_actions`.
+    /// its icon, its detail's image and the actions in `file_actions`.
     pub file: Option<std::path::PathBuf>,
     pub file_actions: Vec<String>,
 }
@@ -324,14 +324,14 @@ impl Catalogue {
                 .flatten()
                 .map(|found| found.positions)
                 .unwrap_or_default();
-            let entry = &row.entry;
-            if let Some(detail) = &entry.detail {
-                batch.details.insert(entry.item.id.clone(), detail.clone());
+            let (item, detail) = shown(&row.entry, now);
+            if let Some(detail) = detail {
+                batch.details.insert(item.id.clone(), detail);
             }
             batch.items.push(Item {
                 score: Some(score),
                 matched: positions,
-                ..shown(entry, now)
+                ..item
             });
         }
         if batch.items.is_empty() {
@@ -363,14 +363,14 @@ impl Catalogue {
             .filter(|row| words.iter().all(|word| row.folded.contains(word.as_str())))
             .take(limit);
         for row in hits {
-            let entry = &row.entry;
-            if let Some(detail) = &entry.detail {
-                batch.details.insert(entry.item.id.clone(), detail.clone());
+            let (item, detail) = shown(&row.entry, now);
+            if let Some(detail) = detail {
+                batch.details.insert(item.id.clone(), detail);
             }
             batch.items.push(Item {
                 score: None,
-                matched: highlights(entry.item.display_title(), &words),
-                ..shown(entry, now)
+                matched: highlights(row.entry.item.display_title(), &words),
+                ..item
             });
         }
         if batch.items.is_empty() {
@@ -396,26 +396,35 @@ impl Catalogue {
                     batches.last_mut().expect("just pushed")
                 }
             };
-            if let Some(detail) = &entry.detail {
-                batch.details.insert(entry.item.id.clone(), detail.clone());
+            let (item, detail) = shown(entry, now);
+            if let Some(detail) = detail {
+                batch.details.insert(item.id.clone(), detail);
             }
             batch.items.push(Item {
                 score: None,
                 matched: Vec::new(),
-                ..shown(entry, now)
+                ..item
             });
         }
         batches
     }
 }
 
-/// The row's item as it shows at `now`: with a time, its subtitle starts with how long ago
-/// that was, and a row whose file is gone says so and offers only what needs no file.
-fn shown(entry: &Entry, now: u64) -> Item {
+/// The row's item and detail as they show at `now`: with a time, its subtitle starts with how
+/// long ago that was, and a row whose file is gone says so, offers only what needs no file, and
+/// draws no image from it.
+fn shown(entry: &Entry, now: u64) -> (Item, Option<Arc<Detail>>) {
     let mut item = entry.item.clone();
     let gone = entry.file.as_deref().is_some_and(|file| !file.exists());
+    let detail = match &entry.detail {
+        Some(detail) if gone && detail.image.is_some() => Some(Arc::new(Detail {
+            image: None,
+            ..Detail::clone(detail)
+        })),
+        detail => detail.clone(),
+    };
     let crate::View::Text { subtitle, .. } = &mut item.view else {
-        return item;
+        return (item, detail);
     };
     let parts = [
         entry.time.map(|time| ago(now, time)),
@@ -435,7 +444,7 @@ fn shown(entry: &Entry, now: u64) -> Item {
         item.primary = offered(&item.primary);
         item.alternate = offered(&item.alternate);
     }
-    item
+    (item, detail)
 }
 
 /// How long before `now` the Unix second `then` was.
@@ -518,6 +527,10 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.web_search.as_ref().map_or(0, WebSearch::text_bytes)
         + entry.match_text.as_ref().map_or(0, String::len)
         + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
+        + match &item.icon {
+            Some(crate::Icon::Host(image)) => image.text_bytes(),
+            _ => 0,
+        }
 }
 
 /// Every action names each of its variants, so one added later must say what it holds.
@@ -756,6 +769,39 @@ mod tests {
             .unwrap();
         assert!(aliases(&catalogue).is_empty());
         assert_eq!(titles(&catalogue.search("", 10, 0)), ["Plain", "Safari"]);
+    }
+
+    #[test]
+    fn a_row_whose_file_is_gone_draws_neither_its_icon_nor_its_detail_image() {
+        let picture = |id: &str, file: &str| {
+            let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+            let image = crate::HostImage {
+                extension: "clipboard-history".into(),
+                source: crate::HostImageSource::File {
+                    path: file.clone(),
+                    handle: "handle".into(),
+                },
+            };
+            let mut row = entry(id, id);
+            row.item.icon = Some(crate::Icon::Host(image.clone()));
+            row.detail = Some(Arc::new(Detail {
+                image: Some(image),
+                ..Detail::new(id, "")
+            }));
+            row.file = Some(file);
+            row
+        };
+        let batches = catalogue(vec![
+            picture("kept", "Cargo.toml"),
+            picture("gone", "no-such-picture.png"),
+        ])
+        .search("", 10, 0);
+        let shown = |id: &str| {
+            let item = batches[0].items.iter().find(|item| item.id == id).unwrap();
+            (item.icon.is_some(), batches[0].details[id].image.is_some())
+        };
+        assert_eq!(shown("kept"), (true, true));
+        assert_eq!(shown("gone"), (false, false));
     }
 
     #[test]

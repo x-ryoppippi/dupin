@@ -210,6 +210,37 @@ pub enum Icon {
     File(PathBuf),
     /// An image file drawn as it is, such as an extension's or a script's own icon.
     Image(PathBuf),
+    /// An image an extension keeps, drawn scaled down.
+    Host(HostImage),
+}
+
+/// An image an extension's row names by a handle only Dupin resolves, within that package's
+/// own storage, so its bytes never travel with the row.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HostImage {
+    /// The extension whose storage the handle belongs to, as [`Action::Extension`] names it.
+    pub extension: String,
+    pub source: HostImageSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HostImageSource {
+    /// A blob stored with one of the package's records, by its handle.
+    Blob(String),
+    /// A file a clipboard watch delivered to the package, by its path and the handle it came
+    /// with.
+    File { path: PathBuf, handle: String },
+}
+
+impl HostImage {
+    /// The bytes of text it carries, for budgets on what is kept in memory.
+    pub(crate) fn text_bytes(&self) -> usize {
+        self.extension.len()
+            + match &self.source {
+                HostImageSource::Blob(handle) => handle.len(),
+                HostImageSource::File { path, handle } => path.as_os_str().len() + handle.len(),
+            }
+    }
 }
 
 impl Icon {
@@ -228,9 +259,11 @@ impl Icon {
         }
     }
 
-    pub fn path(&self) -> &Path {
+    /// The file the icon is drawn from, unless it is an extension's stored image.
+    pub fn path(&self) -> Option<&Path> {
         match self {
-            Self::File(path) | Self::Image(path) => path,
+            Self::File(path) | Self::Image(path) => Some(path),
+            Self::Host(_) => None,
         }
     }
 }
