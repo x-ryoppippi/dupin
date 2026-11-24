@@ -201,20 +201,12 @@ impl WebSearches {
         Some(self.usable(held.into_iter().flatten()))
     }
 
-    /// The package whose held catalogue answers the alias `raw` starts with, as
-    /// [`WebSearches::searches`] would pick it; None while Dupin holds no current catalogue
-    /// that lists it.
-    pub fn held_package(&self, raw: &str) -> Option<&PackageId> {
-        let (alias, _) = split_alias(raw)?;
-        if self.reserved.contains(alias) {
-            return None;
-        }
-        self.sources.iter().find_map(|extension| {
-            let held = extension.held_web_searches()?;
-            held.iter()
-                .any(|(_, search)| search.alias == alias)
-                .then_some(&extension.package)
-        })
+    /// The package whose catalogue listed the web search a row `id` shows.
+    pub fn package_of(&self, id: &str) -> Option<&PackageId> {
+        self.sources
+            .iter()
+            .find(|extension| extension.owns_row(id))
+            .map(|extension| &extension.package)
     }
 
     fn usable(&self, searches: impl Iterator<Item = (Item, WebSearch)>) -> Vec<(Item, WebSearch)> {
@@ -273,16 +265,14 @@ pub(crate) fn item(shown: &Item, search: &WebSearch, query: &str, complete: bool
     })
 }
 
-/// The alias `raw` starts with and the query typed after it.
-fn split_alias(raw: &str) -> Option<(&str, &str)> {
+fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
     let raw = raw.trim_start();
     let boundary = raw.find(char::is_whitespace).unwrap_or(raw.len());
     let alias = &raw[..boundary];
-    (!alias.is_empty()).then(|| (alias, raw[boundary..].trim()))
-}
-
-fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
-    let (alias, query) = split_alias(raw)?;
+    if alias.is_empty() {
+        return None;
+    }
+    let query = raw[boundary..].trim();
     searches
         .searches(deadline)
         .into_iter()
@@ -671,18 +661,13 @@ mod tests {
         let second = package("second", &search("second"));
         let searchless = package("searchless", "export function search() { return []; }");
         let sources = vec![searchless, first.clone(), second.clone()];
-        let held = WebSearches::new(sources.clone(), HashSet::new());
-        assert_eq!(
-            held.held_package("g x"),
-            None,
-            "no catalogue is held before typing"
-        );
         let web = provider(sources.clone(), &[], false);
-        assert_eq!(url(&collect(&web, "g x", 5)[0]), "https://first.example/?q=x");
-        assert_eq!(held.held_package("  g x"), Some(&first.package));
-        assert_eq!(held.held_package("gh x"), None);
-        let reserved = WebSearches::new(sources, ["g".to_owned()].into());
-        assert_eq!(reserved.held_package("g x"), None);
+        let row = collect(&web, "g x", 5).remove(0);
+        assert_eq!(url(&row), "https://first.example/?q=x");
+        let searches = WebSearches::new(sources, HashSet::new());
+        assert_eq!(searches.package_of(&row.id), Some(&first.package));
+        assert_eq!(searches.package_of("extension:firstly/g"), None);
+        assert_eq!(searches.package_of("unavailable"), None);
         let fallbacks = provider(vec![second], &[], true);
         assert_eq!(collect(&fallbacks, "x", 5).len(), 1);
     }

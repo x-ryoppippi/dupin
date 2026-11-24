@@ -217,6 +217,11 @@ impl Extension {
         self.catalogue.held_web_searches(&Arc::new(self.preferences()))
     }
 
+    /// Whether the row `id` is one of this package's.
+    pub fn owns_row(&self, id: &str) -> bool {
+        id.starts_with(&catalogue::Convert::entry_id(self, ""))
+    }
+
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
     pub fn forget_catalogue(&self) {
         self.catalogue.forget();

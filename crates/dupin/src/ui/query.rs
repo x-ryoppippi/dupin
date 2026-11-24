@@ -33,7 +33,7 @@ impl Ui {
             crate::trace::edited(&self.query.text);
         }
         self.apply(effects, tx);
-        crate::latency::edit_applied(&self.session);
+        crate::latency::edit_applied(&self.session, &|origin, item| self.row_package(origin, item));
     }
 }
 

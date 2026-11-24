@@ -14,8 +14,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use dupin_core::CommandId;
 use dupin_core::session::{Results, Session};
+use dupin_core::{CommandId, Item};
 
 struct Probe {
     out: BufWriter<File>,
@@ -30,9 +30,9 @@ struct Sample {
     edited: Instant,
     dispatched: Option<Instant>,
     pending: BTreeMap<CommandId, u64>,
-    /// The extension package behind each searched provider an extension answers, since a
-    /// built-in's command ID stays the same whether its port answers it or the feature says
-    /// the port hasn't loaded.
+    /// The extension package behind each searched provider an extension answers, or whose
+    /// rows came from a package's catalogue, since a built-in's command ID stays the same
+    /// whether its port answers it or the feature says the port hasn't loaded.
     packages: BTreeMap<String, String>,
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,
@@ -94,8 +94,12 @@ pub fn edit_started(t: f64, query: &str) {
     });
 }
 
+/// The extension package a provider's row came from, for a provider that shows rows from
+/// packages' catalogues without a package answering it.
+pub type RowPackage<'a> = &'a dyn Fn(&CommandId, &Item) -> Option<String>;
+
 /// The session took the edit and its searches have started.
-pub fn edit_applied(session: &Session) {
+pub fn edit_applied(session: &Session, row_package: RowPackage<'_>) {
     with(|probe| {
         let Some(sample) = &mut probe.sample else { return };
         let now = Instant::now();
@@ -103,21 +107,22 @@ pub fn edit_applied(session: &Session) {
         sample.dispatched = Some(now);
         let settled = !matches!(session.results(), Results::Searching { .. });
         if settled || sample.pending.is_empty() {
-            sample.finish(now, session);
+            sample.finish(now, session, row_package);
         }
     });
 }
 
-/// `package` finds the extension package that answers `provider`, if one does; only a
-/// headless run with the probe on asks it.
-pub fn search_started(provider: &CommandId, generation: u64, package: impl FnOnce() -> Option<String>) {
+/// `package` is the extension package that answers `provider`, if one does.
+pub fn search_started(provider: &CommandId, generation: u64, package: Option<&str>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_none()
         {
             sample.pending.insert(provider.clone(), generation);
-            if let Some(package) = package() {
-                sample.packages.insert(provider.as_str().to_owned(), package);
+            if let Some(package) = package {
+                sample
+                    .packages
+                    .insert(provider.as_str().to_owned(), package.to_owned());
             }
         }
     });
@@ -145,19 +150,19 @@ pub fn delivered(provider: &CommandId, sent: Instant, pending: impl Fn(u64) -> b
 }
 
 /// Every provider for the current query has finished and the session has merged them.
-pub fn results_done(session: &Session) {
+pub fn results_done(session: &Session, row_package: RowPackage<'_>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_some()
             && sample.done.is_none()
         {
-            sample.finish(Instant::now(), session);
+            sample.finish(Instant::now(), session, row_package);
         }
     });
 }
 
 impl Sample {
-    fn finish(&mut self, at: Instant, session: &Session) {
+    fn finish(&mut self, at: Instant, session: &Session, row_package: RowPackage<'_>) {
         self.done = Some(at);
         self.shown.clear();
         // A row Dupin shows in place of a ported feature's package is cheap enough to pass any
@@ -165,6 +170,11 @@ impl Sample {
         for (origin, item) in session.origins().iter().zip(session.items()) {
             if crate::features::answered_by_feature(origin.as_str(), &item.id) {
                 *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
+            }
+            if !self.packages.contains_key(origin.as_str())
+                && let Some(package) = row_package(origin, item)
+            {
+                self.packages.insert(origin.as_str().to_owned(), package);
             }
         }
     }

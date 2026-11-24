@@ -24,7 +24,7 @@ impl Ui {
                 self.session.pending(&origin, generation)
             });
             if self.session.results() == dupin_core::session::Results::Done {
-                crate::latency::results_done(&self.session);
+                crate::latency::results_done(&self.session, &|origin, item| self.row_package(origin, item));
                 if !self.session.command().private_results {
                     crate::trace::results_done(&self.query.text, self.session.items().len());
                 }
@@ -80,24 +80,22 @@ impl Ui {
             }
         }
         if let Some(searcher) = self.searchers.get(&command) {
-            crate::latency::search_started(&command, generation, || self.answering_package(&command, &query));
+            crate::latency::search_started(&command, generation, self.extensions.package(&command));
             searcher.search(generation, query, folder, page, limit);
             self.deadlines.insert(command, (generation, due));
             tx.wake_at(due);
         }
     }
 
-    /// The extension package that answers `command` for `query`: the one that registers it,
-    /// or, for a web alias, the one whose catalogue lists that alias.
-    fn answering_package(&self, command: &CommandId, query: &str) -> Option<String> {
-        if let Some(package) = self.extensions.package(command) {
-            return Some(package.to_owned());
-        }
-        if command.as_str() != crate::features::web::WEB_KEYWORDS {
+    /// The package whose catalogue a web alias row came from; Dupin's own provider shows it,
+    /// so no package answers the command itself.
+    pub(super) fn row_package(&self, origin: &CommandId, item: &dupin_core::Item) -> Option<String> {
+        if origin.as_str() != crate::features::web::WEB_KEYWORDS {
             return None;
         }
         let web = self.web.read().ok()?;
-        web.held_package(query).map(|package| package.as_str().to_owned())
+        web.package_of(&item.id)
+            .map(|package| package.as_str().to_owned())
     }
 
     pub(super) fn cancel_search(&mut self) {
@@ -124,7 +122,9 @@ impl Ui {
                     });
                 }
                 if delivered && self.session.results() == dupin_core::session::Results::Done {
-                    crate::latency::results_done(&self.session);
+                    crate::latency::results_done(&self.session, &|origin, item| {
+                        self.row_package(origin, item)
+                    });
                     if !self.session.command().private_results {
                         crate::trace::results_done(&self.query.text, self.session.items().len());
                     }
