@@ -8,6 +8,10 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[features]
+# Rune's headless runs outside a debug build, for the latency benchmark (scripts/latency.nu).
+tooling = ["rune/tooling"]
+
 [dependencies]
 blake3 = "1.8.7"
 fend-core = "1.5.9"

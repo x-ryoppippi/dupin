@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 
 use dupin_core::{CommandId, Delivery, Page, Provider, Searcher};
 use rune::{AppHandle, ImageCache, Tx, Waker};
@@ -17,12 +18,16 @@ impl Ui {
         s.icon_cache = Some(ImageCache::new(waker));
     }
 
-    fn deliver(&mut self, origin: CommandId, delivery: Delivery) {
+    fn deliver(&mut self, origin: CommandId, delivery: Delivery, sent: Instant) {
         if self.session.deliver_from(origin.clone(), delivery) {
-            if self.session.results() == dupin_core::session::Results::Done
-                && !self.session.command().private_results
-            {
-                crate::trace::results_done(&self.query.text, self.session.items().len());
+            crate::latency::delivered(&origin, sent, |generation| {
+                self.session.pending(&origin, generation)
+            });
+            if self.session.results() == dupin_core::session::Results::Done {
+                crate::latency::results_done(self.session.origins());
+                if !self.session.command().private_results {
+                    crate::trace::results_done(&self.query.text, self.session.items().len());
+                }
             }
             if self
                 .deadlines
@@ -75,6 +80,7 @@ impl Ui {
             }
         }
         if let Some(searcher) = self.searchers.get(&command) {
+            crate::latency::search_started(&command, generation);
             searcher.search(generation, query, folder, page, limit);
             self.deadlines.insert(command, (generation, due));
             tx.wake_at(due);
@@ -95,13 +101,20 @@ impl Ui {
                 if let Some(worker) = self.searchers.get(&id) {
                     worker.cancel();
                 }
-                let delivered = self.session.deliver_from(id, Delivery::Expired { generation });
+                let delivered = self
+                    .session
+                    .deliver_from(id.clone(), Delivery::Expired { generation });
                 changed |= delivered;
-                if delivered
-                    && self.session.results() == dupin_core::session::Results::Done
-                    && !self.session.command().private_results
-                {
-                    crate::trace::results_done(&self.query.text, self.session.items().len());
+                if delivered {
+                    crate::latency::delivered(&id, Instant::now(), |generation| {
+                        self.session.pending(&id, generation)
+                    });
+                }
+                if delivered && self.session.results() == dupin_core::session::Results::Done {
+                    crate::latency::results_done(self.session.origins());
+                    if !self.session.command().private_results {
+                        crate::trace::results_done(&self.query.text, self.session.items().len());
+                    }
                 }
             }
         }
@@ -141,9 +154,10 @@ pub(super) fn spawn_searcher(me: AppHandle<Ui>, origin: CommandId, provider: Arc
     let name = origin.as_str().replace('.', "-");
     Searcher::spawn(&name, provider, move |d| {
         let origin = origin.clone();
+        let sent = Instant::now();
         me.update(move |s, tx| {
             s.poll(tx.clock(), tx);
-            s.deliver(origin, d);
+            s.deliver(origin, d, sent);
         });
     })
 }

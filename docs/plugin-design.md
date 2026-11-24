@@ -112,9 +112,9 @@ have no host imports, so they need no grants. Plugin grants, capability
 brokerage, state and transport streaming still need implementation and review
 before guests get host access.
 
-The [in-memory permission policy](plugin-permissions.md) implements separate
-plugin grants, OS consent and revocable operation permits. It is not yet wired
-to a broker or the launcher.
+The [capability broker](capability-broker.md) validates declared capabilities,
+keeps per-revision grants over a declarative base, and issues revocable
+operation permits. It is not yet wired to the extension runtime or the launcher.
 
 ## Views, actions and saved state
 

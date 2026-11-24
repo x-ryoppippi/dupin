@@ -6,6 +6,7 @@
 - [Development](./development.md): building, dependency builds, formatting, headless renders, peak memory
 - [Extensions](./features/extensions.md): writing and installing JavaScript and Wasm extensions, and their limits
 - [Extension capabilities](./extension-capabilities.md): the host side of the `files` and `exec` capabilities
+- [The `http` capability](./extension-http.md): the host service that will fetch for extensions, its scope checks and limits
 - [Architecture](./architecture.md): crates, providers, the session and the panel
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI

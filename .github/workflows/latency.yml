@@ -1,0 +1,86 @@
+name: Latency
+
+# Keypress-to-results latency (scripts/latency.nu). Main's runs are the baseline pull requests
+# are compared with; a pull request only reports against it, because a shared runner's noise
+# is larger than many real changes. A feature whose bundled extension is declared beside its
+# native implementation must match it, so that comparison fails the job.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'extensions/**'
+      - 'scripts/latency.nu'
+      - 'scripts/latency/**'
+      - 'scripts/headless/**'
+      - 'scripts/fixtures/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'nix/cargo-artifacts.nix'
+      - '.github/workflows/latency.yml'
+  pull_request:
+    paths:
+      - 'crates/**'
+      - 'extensions/**'
+      - 'scripts/latency.nu'
+      - 'scripts/latency/**'
+      - 'scripts/headless/**'
+      - 'scripts/fixtures/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'nix/cargo-artifacts.nix'
+      - '.github/workflows/latency.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # setup-nix's Hestia cache checks for evicted packs up front; the baseline is main's artifact.
+  actions: read
+
+jobs:
+  latency:
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+
+      - run: nix build .#dupin-latency --out-link result-latency
+
+      - name: Measure
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu scripts/latency.nu run --bin result-latency/bin/dupin --out "$RUNNER_TEMP/latency/results.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: latency
+          path: ${{ runner.temp }}/latency/results.json
+          if-no-files-found: error
+
+      - name: Compare with main
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow latency.yml --branch main --event push \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "$run" ] || ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --name latency --dir "$RUNNER_TEMP/main"; then
+            echo "No latency baseline from main yet." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          nix shell --inputs-from . nixpkgs#nushell --command nu scripts/latency.nu compare \
+            "$RUNNER_TEMP/main/results.json" "$RUNNER_TEMP/latency/results.json" \
+            --report --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Hold extensions to native parity
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu scripts/latency.nu parity "$RUNNER_TEMP/latency/results.json" --summary "$GITHUB_STEP_SUMMARY"

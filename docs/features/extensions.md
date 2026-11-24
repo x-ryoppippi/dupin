@@ -84,6 +84,29 @@ The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io
 
 There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, so module-level variables never carry from one query to the next. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
+### Asking for more
+
+Host services aren't connected yet. When they are, an extension will ask for them by declaring `capabilities` in the `dupin` field of its `package.json`, and Dupin will check every call against that declaration and your grants:
+
+```json
+"capabilities": {
+	"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }],
+	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
+	"exec": { "@script:open-in-zed": {} },
+	"storage": { "quotaBytes": 1048576 },
+	"clipboard": ["write"],
+	"dictionary": ["lookup"],
+	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 }
+}
+```
+
+- A declaration is the most an extension can get. Anything malformed, unknown or out of range rejects it with a diagnostic naming the field.
+- You grant each item separately, such as one origin or one named folder, and can revoke it at any time. Your grants belong to the version you approved: an update that asks for more asks again.
+- Searching may use granted reads. Sending anything but GET or HEAD, running a program or script, and reading or writing the clipboard need you to choose the action.
+- Calendar and clipboard reads also need macOS access, requested when you turn the extension on or first use it.
+
+[Permissions](./permissions.md#extensions) has the rest, and [Capability broker](../capability-broker.md) the full rules.
+
 TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=dist/main.js`), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                        | Value                                                                                         |
