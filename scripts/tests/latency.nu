@@ -110,6 +110,34 @@ def main [] {
     ]
     assert equal (unanswered $typed_over web.keywords 2) 0
 
+    # A port's package must answer too: its command's own row about a broken or missing package
+    # doesn't count.
+    let ported = [
+        {
+            searched: [clipboard.history]
+            shown: {clipboard.history: 1}
+            packages: {}
+        }
+        {
+            searched: [clipboard.history]
+            shown: {clipboard.history: 40}
+            packages: {clipboard-history: 40}
+        }
+    ]
+    assert equal (unanswered $ported clipboard.history 2 --package clipboard-history) 0
+    assert equal (
+        unanswered ($ported | reverse) clipboard.history 2 --package clipboard-history
+    ) 1
+    assert equal (unanswered $ported clipboard.history 2 --package emoji) 1
+    let broken = [
+        {
+            searched: [clipboard.history]
+            shown: {clipboard.history: 1}
+        }
+    ]
+    assert equal (unanswered $broken clipboard.history 1) 0
+    assert equal (unanswered $broken clipboard.history 1 --package clipboard-history) 1
+
     let ms = 1..100 | each { into float }
     assert equal ($ms | percentiles) {p50: 50.0, p95: 95.0, p99: 99.0}
     assert equal ([7.0] | percentiles) {p50: 7.0, p95: 7.0, p99: 7.0}

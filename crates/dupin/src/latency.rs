@@ -15,6 +15,7 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use dupin_core::CommandId;
+use dupin_core::session::{Results, Session};
 
 struct Probe {
     out: BufWriter<File>,
@@ -35,6 +36,9 @@ struct Sample {
     /// Rows per provider in the finished results; with `pending`'s providers, what lets the
     /// driver tell which feature answered.
     shown: BTreeMap<String, usize>,
+    /// Rows per extension package in the finished results, so a feature an extension answers
+    /// is told apart from the rows its command shows when the package is broken or missing.
+    packages: BTreeMap<String, usize>,
 }
 
 thread_local! {
@@ -84,20 +88,21 @@ pub fn edit_started(t: f64, query: &str) {
             last_provider: None,
             done: None,
             shown: BTreeMap::new(),
+            packages: BTreeMap::new(),
         });
     });
 }
 
-/// The session took the edit and its searches have started. `settled` is true when nothing
-/// is left to wait for, and `origins` are then the providers of the rows it shows.
-pub fn edit_applied(command: &CommandId, settled: bool, origins: &[CommandId]) {
+/// The session took the edit and its searches have started.
+pub fn edit_applied(session: &Session) {
     with(|probe| {
         let Some(sample) = &mut probe.sample else { return };
         let now = Instant::now();
-        sample.command = command.as_str().to_owned();
+        sample.command = session.command_id().as_str().to_owned();
         sample.dispatched = Some(now);
+        let settled = !matches!(session.results(), Results::Searching { .. });
         if settled || sample.pending.is_empty() {
-            sample.finish(now, origins);
+            sample.finish(now, session);
         }
     });
 }
@@ -133,27 +138,44 @@ pub fn delivered(provider: &CommandId, sent: Instant, pending: impl Fn(u64) -> b
     });
 }
 
-/// Every provider for the current query has finished and the session has merged them into
-/// rows from `origins`.
-pub fn results_done(origins: &[CommandId]) {
+/// Every provider for the current query has finished and the session has merged them.
+pub fn results_done(session: &Session) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_some()
             && sample.done.is_none()
         {
-            sample.finish(Instant::now(), origins);
+            sample.finish(Instant::now(), session);
         }
     });
 }
 
 impl Sample {
-    fn finish(&mut self, at: Instant, origins: &[CommandId]) {
+    fn finish(&mut self, at: Instant, session: &Session) {
         self.done = Some(at);
         self.shown.clear();
-        for origin in origins {
+        for origin in session.origins() {
             *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
         }
+        let mut packages: Vec<(&str, usize)> = Vec::new();
+        for package in session.items().iter().filter_map(|item| package_of(&item.id)) {
+            match packages.iter_mut().find(|(seen, _)| *seen == package) {
+                Some((_, rows)) => *rows += 1,
+                None => packages.push((package, 1)),
+            }
+        }
+        self.packages = packages
+            .into_iter()
+            .map(|(package, rows)| (package.to_owned(), rows))
+            .collect();
     }
+}
+
+/// The extension package a row's ID says it came from, as its provider writes it; an
+/// extension's error row, or a feature's own, has none.
+fn package_of(id: &str) -> Option<&str> {
+    let (package, _) = id.strip_prefix("extension:")?.split_once('/')?;
+    Some(package)
 }
 
 /// `App::on_frame_encoded`.
@@ -189,6 +211,7 @@ impl Probe {
                     "providers": sample.providers,
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
                     "shown": sample.shown,
+                    "packages": sample.packages,
                 })
             }
             _ => serde_json::json!({
@@ -202,5 +225,21 @@ impl Probe {
         if let Err(error) = written {
             crate::log::warn(&format!("couldn't write a latency sample: {error}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::package_of;
+
+    #[test]
+    fn only_a_package_row_names_its_package() {
+        assert_eq!(
+            package_of("extension:clipboard-history/0123abcd"),
+            Some("clipboard-history")
+        );
+        assert_eq!(package_of("extension:emoji/smile/1"), Some("emoji"));
+        assert_eq!(package_of("extension-error"), None);
+        assert_eq!(package_of("unavailable"), None);
     }
 }

@@ -290,6 +290,7 @@ def measure [
         DUPIN_LATENCY: $log
         DUPIN_HEADLESS_CLIPBOARD: $clipboard
     }
+    let bin = if $job.setup.bundled? == true { app-with-bundled $bin $dir } else { $bin }
     let result = with-env $env_vars {
         ^$bin --script $script_path --realtime --fps $settings.fps --tree ($dir | path join tree.json) --at mark:end
         | complete
@@ -317,10 +318,12 @@ def measure [
         }
     }
     let provider = $job.setup.provider
-    let missed = unanswered $matched $provider $per_pass
+    let package = $job.setup.package?
+    let missed = unanswered $matched $provider $per_pass --package $package
     if $missed > 0 {
+        let rows = if $package == null { "its rows" } else { $"its rows from the package ($package)" }
         error make {
-            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without its rows; the scenario does not reach its feature"
+            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without ($rows); the scenario does not reach its feature"
         }
     }
     let samples = $matched | where superseded? != true
@@ -335,6 +338,18 @@ def measure [
             | into record
         )
     }
+}
+
+# A copy of `bin` inside a Dupin.app in `dir` whose Resources hold the repository's
+# `extensions/`, the one place a binary built outside the source tree finds bundled extensions,
+# as the released app finds its own.
+def app-with-bundled [bin: path, dir: path]: nothing -> string {
+    let contents = $dir | path join Dupin.app Contents
+    mkdir ($contents | path join MacOS) ($contents | path join Resources)
+    let app_bin = $contents | path join MacOS dupin
+    cp $bin $app_bin
+    cp --recursive extensions ($contents | path join Resources extensions)
+    $app_bin
 }
 
 # `count` clipboard history entries, oldest first, as DUPIN_HEADLESS_CLIPBOARD lists them: text of
@@ -383,18 +398,26 @@ export def clipboard-fixture [count: int]: nothing -> list<record> {
 
 # How many drawn keypresses, `per_pass` to a pass, did not search `provider`, or ended a pass
 # without a row from it. Only the whole of `typed` must show the feature's rows: a shorter
-# query may rightly have none.
-export def unanswered [samples: list<record>, provider: string, per_pass: int]: nothing -> int {
+# query may rightly have none. With `package`, those rows must include the package's own, so a
+# feature an extension answers can't pass on the rows its command shows when the package is
+# broken or missing.
+export def unanswered [
+    samples: list<record>
+    provider: string
+    per_pass: int
+    --package: string
+]: nothing -> int {
+    let has_rows = {|counts: any, name: string|
+        $counts | default {} | transpose name rows | where name == $name and rows > 0 | is-not-empty
+    }
     $samples
     | enumerate
     | where {|it| $it.item.superseded? != true }
     | where {|it|
         let searched = $provider in ($it.item.searched? | default [])
-        let shown = $it.item.shown?
-        | default {}
-        | transpose name rows
-        | where name == $provider and rows > 0
-        | is-not-empty
+        let shown = (do $has_rows $it.item.shown? $provider) and (
+            $package == null or (do $has_rows $it.item.packages? $package)
+        )
         let ends_pass = ($it.index + 1) mod $per_pass == 0
         not $searched or ($ends_pass and not $shown)
     }

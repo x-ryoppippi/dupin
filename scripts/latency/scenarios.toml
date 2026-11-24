@@ -20,6 +20,12 @@
 #   provider = "extension.snippets"
 #   extensions = "scripts/latency/snippets.extensions"
 #
+# A port names its `package`: then the whole of `typed` must show rows from that package too,
+# not only the provider's, which a broken or missing package can still fill with a row saying
+# so. `bundled = true` runs Dupin from an app whose Resources hold the repository's
+# `extensions/`, as the released app runs its bundled extensions; a binary built outside the
+# source tree, as CI's is, finds them nowhere else.
+#
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
 # its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it.
 # `clipboard_entries` replaces the clipboard history's five fixture entries with that many,
@@ -49,6 +55,8 @@ provider = "dictionary.lookup"
 config = "scripts/headless/clipboard.toml"
 settings = { clipboard = { max_entries = 10000 } }
 provider = "clipboard.history"
+bundled = true
+package = "clipboard-history"
 clipboard_entries = 5000
 
 [features.web.native]
