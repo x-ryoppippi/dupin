@@ -136,8 +136,12 @@ fn location(source: &str, offset: usize) -> (usize, usize) {
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
-/// config.toml is written where it points, so the link, and whoever manages it, stays.
+/// config.toml is written where it points, so the link, and whoever manages it, stays. That
+/// folder may be one other users can write, so the new file takes a name no one can have
+/// put a link at.
 fn write(path: &Path, toml: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
     if !writable(path) {
         return Err(std::io::Error::other(format!("{} is read-only", path.display())));
     }
@@ -146,9 +150,15 @@ fn write(path: &Path, toml: &str) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::other("no parent directory"))?;
     std::fs::create_dir_all(dir)?;
-    let tmp = target.with_extension("toml.tmp");
-    std::fs::write(&tmp, toml)?;
-    std::fs::rename(tmp, target)
+    let mut staged = tempfile::Builder::new()
+        .prefix(&format!(
+            ".{}.",
+            target.file_name().unwrap_or_default().to_string_lossy()
+        ))
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    staged.write_all(toml.as_bytes())?;
+    staged.persist(target).map(drop).map_err(|error| error.error)
 }
 
 #[cfg(test)]
@@ -249,6 +259,26 @@ script = "missing.sh"
         write(&path, "a = 2\n").unwrap();
 
         assert!(std::fs::symlink_metadata(&path).unwrap().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
+    }
+
+    #[test]
+    fn never_writes_through_a_link_beside_the_target() {
+        let dir = scratch("planted-link");
+        let real = dir.join("dotfiles.toml");
+        std::fs::write(&real, "a = 1\n").unwrap();
+        let path = dir.join("config.toml");
+        symlink(&real, &path).unwrap();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        let planted = real.with_extension("toml.tmp");
+        symlink(&victim, &planted).unwrap();
+
+        write(&path, "a = 2\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(&planted).unwrap().is_symlink());
+        assert!(std::fs::symlink_metadata(&real).unwrap().is_file());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
     }
 
