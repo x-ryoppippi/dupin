@@ -92,18 +92,14 @@ printf '%s' '{"kind":"text","title":"Hello","subtitle":"Headless fixture"}' > /t
 dupin snap /tmp/dupin-view.json /tmp/dupin-view.png --json
 dupin ext check examples/extensions/word-count-js --json
 dupin ext run examples/extensions/word-count-js --query 'two words' --json
-dupin ext check fixture.wasm request.json --json
-dupin ext snap fixture.wasm request.json /tmp/dupin-extension.png --json
 ```
 
 `dupin ext check DIR` and `dupin ext run DIR --query QUERY` load an extension folder as the
 launcher does and print its answer; a failure exits non-zero with a diagnostic naming the
-code, file, field and a fix. The Wasm forms accept the bounded
-versioned guest request contract, execute a
-module through the existing fuel/deadline-limited runtime, and validate its response.
-Imports (including OS/WASI imports) are forbidden. They test a module on its own; the
-launcher loads [extensions](docs/features/extensions.md) from the configuration folder. Headless rendering shows the returned text/detail/pair views without
-executing actions or loading configuration, history or application providers.
+code, file, field and a fix. They test a folder on its own; the launcher loads
+[extensions](docs/features/extensions.md) from the configuration folder. Headless rendering
+shows the given text/detail/pair view without executing actions or loading configuration,
+history or application providers.
 
 Local control uses length-prefixed JSON, one correlated request/reply per connection,
 a 512 KiB frame cap, at most eight live connections and a five-minute request deadline.
