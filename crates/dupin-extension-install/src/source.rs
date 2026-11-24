@@ -99,21 +99,6 @@ impl Source {
         }
     }
 
-    pub(crate) fn rev(&self) -> Option<&str> {
-        match self {
-            Self::GitHub { rev, .. } | Self::Git { rev, .. } => rev.as_deref(),
-            Self::Path(_) => None,
-        }
-    }
-
-    pub(crate) fn git_url(&self) -> Option<String> {
-        match self {
-            Self::GitHub { owner, repo, .. } => Some(format!("https://github.com/{owner}/{repo}.git")),
-            Self::Git { url, .. } => Some(url.clone()),
-            Self::Path(_) => None,
-        }
-    }
-
     pub(crate) fn with_rev(&self, rev: Option<String>) -> Self {
         match self.clone() {
             Self::GitHub { owner, repo, .. } => Self::GitHub { owner, repo, rev },
@@ -191,11 +176,7 @@ mod tests {
         );
         let plain = parse("github:ryo/word-count.git").unwrap();
         assert_eq!(plain.locator(), "github:ryo/word-count");
-        assert_eq!(plain.rev(), None);
-        assert_eq!(
-            plain.git_url().as_deref(),
-            Some("https://github.com/ryo/word-count.git")
-        );
+        assert!(matches!(plain, Source::GitHub { rev: None, .. }));
         for bad in [
             "github:ryo",
             "github:../x",
@@ -223,7 +204,10 @@ mod tests {
                 rev: None
             }
         );
-        assert_eq!(parse("git@github.com:ryo/ext.git@v1").unwrap().rev(), Some("v1"));
+        assert!(matches!(
+            parse("git@github.com:ryo/ext.git@v1").unwrap(),
+            Source::Git { rev: Some(rev), .. } if rev == "v1"
+        ));
         assert!(parse("http://example.com/x.git").is_err());
         assert!(matches!(parse("ext::sh -c touch").unwrap(), Source::Path(_)));
         assert!(parse("https://example.com/a b.git").is_err());

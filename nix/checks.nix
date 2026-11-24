@@ -1,4 +1,9 @@
-{ lib, self, ... }:
+{
+  lib,
+  self,
+  inputs,
+  ...
+}:
 let
   root = ./..;
 in
@@ -30,29 +35,16 @@ in
               nu scripts/tests/e2e-script-fixtures.nu
               nu scripts/tests/latency.nu
             '';
-        hawk = pkgs.rustPlatform.buildRustPackage (
-          dupin.passthru.commonArgs
-          // {
-            pname = "dupin-hawk";
-            nativeBuildInputs = [
-              pkgs.nushell
-              config.packages.cargo-hawk
-            ];
-            postPatch = ''
-              cp ${../hawk.toml} hawk.toml
-            '';
-            buildPhase = ''
-              runHook preBuild
-              nu ${../scripts/hawk.nu}
-              runHook postBuild
-            '';
-            doCheck = false;
-            installPhase = "touch $out";
-          }
-        );
+        inherit (dupin) hawk;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = dupin.lintAndTest;
+        dependency-cache-keys = import ./tests/dependency-cache-keys.nix {
+          inherit pkgs;
+          inherit (inputs) crane;
+          native = dupin.baseline;
+          inherit (config.packages) cargo-hawk;
+        };
         home-manager-module = import ./tests/home-manager-module.nix {
           inherit lib pkgs;
           module = self.homeManagerModules.default;

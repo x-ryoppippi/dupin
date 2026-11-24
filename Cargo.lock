@@ -744,8 +744,10 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 name = "dupin"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "dupin-core",
  "dupin-ext-sdk",
+ "dupin-extension-host",
  "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
@@ -805,6 +807,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-extension-host"
+version = "0.0.0"
+dependencies = [
+ "dupin-js-runtime",
+ "dupin-plugin-protocol",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dupin-extension-http"
 version = "0.0.0"
 dependencies = [
@@ -819,9 +833,11 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "dupin-broker",
+ "flate2",
  "libc",
  "serde",
  "serde_json",
+ "sha1_smol",
  "tempfile",
  "toml",
 ]
@@ -3194,6 +3210,12 @@ checksum = "9c187e0a369471c550af028cba56d4f4fa2a489ad28151ae95a4d340a2a8b782"
 dependencies = [
  "serde_core",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "shlex"

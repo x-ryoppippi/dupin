@@ -1,0 +1,174 @@
+{
+	"commit": "5f1ea197e2df4bd097e1300dfd5ae88e71b5009a",
+	"dirty": true,
+	"script_sha256": "0fd5fe32378e6d00d6fe47204d08ff460d3f3b3bd37a51aad03e2f6cc0699363",
+	"cargo_lock_sha256": "a35983daceb8e5c817bf019369dbeea3496eb854e413f7e97f110f9fb644139c",
+	"rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (built from a source tarball)",
+	"host": {
+		"name": "Darwin",
+		"os_version": "26.3",
+		"kernel_version": "25.3.0"
+	},
+	"cpus": 6,
+	"repeat": 1,
+	"cargo_incremental": "0",
+	"alternation": [
+		{
+			"command": "build",
+			"seconds": 0.190323167,
+			"rebuilt": []
+		},
+		{
+			"command": "test",
+			"seconds": 0.145366375,
+			"rebuilt": []
+		},
+		{
+			"command": "clippy",
+			"seconds": 0.194575042,
+			"rebuilt": []
+		}
+	],
+	"measurements": [
+		{
+			"command": "build",
+			"edit": "dupin UI, function body",
+			"file": "crates/dupin/src/ui/keys.rs",
+			"seconds": [4.250811],
+			"median_seconds": 4.250811,
+			"rebuilt": ["dupin (bin)"],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "build",
+			"edit": "dupin-core session, function body",
+			"file": "crates/dupin-core/src/session/search.rs",
+			"seconds": [5.862154542],
+			"median_seconds": 5.862154542,
+			"rebuilt": ["dupin_core (lib)", "dupin_mac (lib)", "dupin (bin)"],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "build",
+			"edit": "dupin-mac, function body",
+			"file": "crates/dupin-mac/src/apps.rs",
+			"seconds": [6.835937584],
+			"median_seconds": 6.835937584,
+			"rebuilt": ["dupin_mac (lib)", "dupin (bin)"],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "build",
+			"edit": "docs only",
+			"file": "docs/development.md",
+			"seconds": [0.181191583],
+			"median_seconds": 0.181191583,
+			"rebuilt": [],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "test",
+			"edit": "dupin UI, function body",
+			"file": "crates/dupin/src/ui/keys.rs",
+			"seconds": [6.226671458],
+			"median_seconds": 6.226671458,
+			"rebuilt": ["dupin (bin)"],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "test",
+			"edit": "dupin-core session, function body",
+			"file": "crates/dupin-core/src/session/search.rs",
+			"seconds": [7.580873208],
+			"median_seconds": 7.580873208,
+			"rebuilt": [
+				"dupin_core (lib)",
+				"config (test)",
+				"dupin_mac (lib)",
+				"input_source (example)",
+				"dupin_core (lib)",
+				"search (example)",
+				"dupin_mac (lib)",
+				"dupin (bin)"
+			],
+			"rebuilt_dependencies": ["config (test)", "input_source (example)", "search (example)"]
+		},
+		{
+			"command": "test",
+			"edit": "dupin-mac, function body",
+			"file": "crates/dupin-mac/src/apps.rs",
+			"seconds": [6.725579],
+			"median_seconds": 6.725579,
+			"rebuilt": [
+				"dupin_mac (lib)",
+				"dupin_mac (lib)",
+				"input_source (example)",
+				"search (example)",
+				"dupin (bin)"
+			],
+			"rebuilt_dependencies": ["input_source (example)", "search (example)"]
+		},
+		{
+			"command": "test",
+			"edit": "docs only",
+			"file": "docs/development.md",
+			"seconds": [0.180871292],
+			"median_seconds": 0.180871292,
+			"rebuilt": [],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "clippy",
+			"edit": "dupin UI, function body",
+			"file": "crates/dupin/src/ui/keys.rs",
+			"seconds": [1.631673291],
+			"median_seconds": 1.631673291,
+			"rebuilt": ["dupin (bin)", "dupin (bin)"],
+			"rebuilt_dependencies": []
+		},
+		{
+			"command": "clippy",
+			"edit": "dupin-core session, function body",
+			"file": "crates/dupin-core/src/session/search.rs",
+			"seconds": [2.962354291],
+			"median_seconds": 2.962354291,
+			"rebuilt": [
+				"dupin_core (lib)",
+				"config (test)",
+				"dupin_core (lib)",
+				"dupin_mac (lib)",
+				"dupin_mac (lib)",
+				"input_source (example)",
+				"search (example)",
+				"dupin (bin)",
+				"dupin (bin)"
+			],
+			"rebuilt_dependencies": ["config (test)", "input_source (example)", "search (example)"]
+		},
+		{
+			"command": "clippy",
+			"edit": "dupin-mac, function body",
+			"file": "crates/dupin-mac/src/apps.rs",
+			"seconds": [2.760187625],
+			"median_seconds": 2.760187625,
+			"rebuilt": [
+				"dupin_mac (lib)",
+				"dupin_mac (lib)",
+				"input_source (example)",
+				"search (example)",
+				"dupin (bin)",
+				"dupin (bin)"
+			],
+			"rebuilt_dependencies": ["input_source (example)", "search (example)"]
+		},
+		{
+			"command": "clippy",
+			"edit": "docs only",
+			"file": "docs/development.md",
+			"seconds": [0.222084375],
+			"median_seconds": 0.222084375,
+			"rebuilt": [],
+			"rebuilt_dependencies": []
+		}
+	]
+}

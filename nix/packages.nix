@@ -1,7 +1,7 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { config, pkgs, ... }:
     let
       native = pkgs.callPackage ../package.nix {
         cargoVendorDir = import ./cargo-vendor.nix { craneLib = inputs.crane.mkLib pkgs; };
@@ -10,6 +10,7 @@
         inherit pkgs;
         inherit (inputs) crane;
         inherit native;
+        inherit (config.packages) cargo-hawk;
       };
       blacksmith = pkgs.callPackage ./blacksmith.nix { };
       # scripts/package-app.nu lays out Dupin.dmg over this.

@@ -82,7 +82,7 @@ Enter runs the first action: **Open URL** when the item has a `url`, otherwise *
 
 The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), and the host module `dupin`, which for now exports only `apiVersion`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, on the extension's own thread, so module-level variables never carry from one query to the next.
+There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, so module-level variables never carry from one query to the next. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
 ### Asking for more
 
@@ -109,17 +109,28 @@ Host services aren't connected yet. When they are, an extension will ask for the
 
 TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=dist/main.js`), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
 
-| Limit                        | Value          |
-| ---------------------------- | -------------- |
-| JavaScript files             | 256 and 4 MiB  |
-| Heap                         | 16 MiB         |
-| Stack                        | 512 KiB        |
-| Time per query               | 2 seconds      |
-| Promise jobs per query       | 10,000         |
-| Items and text in one answer | 50 and 256 KiB |
-| Extensions read              | 64 folders     |
+| Limit                        | Value                                                                                         |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| JavaScript files             | 256 and 4 MiB                                                                                 |
+| Heap                         | 16 MiB, or 64 MiB while compiling                                                             |
+| Stack                        | 512 KiB                                                                                       |
+| Time per query or compile    | 2 seconds                                                                                     |
+| Promise jobs per query       | 10,000                                                                                        |
+| Items and text in one answer | 50 and 256 KiB                                                                                |
+| Extensions read              | 64 folders                                                                                    |
+| Extension host memory        | 64 MiB plus twice the bytecode, or the compile heap and four times the source while compiling |
 
-Typing again cancels the running query. A thrown error, a rejected or never-settling promise, an exhausted limit or an invalid answer becomes a "_Name_ failed" row with the file, line or field at fault; it never affects Dupin or other extensions. Dupin compiles every JavaScript file when it loads the folder, so a syntax error or a broken import is reported in Settings before the first query.
+Typing again cancels the running query. A thrown error, a rejected or never-settling promise, an exhausted limit or an invalid answer becomes a "_Name_ failed" row with the file, line or field at fault; it never affects Dupin or other extensions. When Dupin loads or reloads the folder, the extension host compiles every JavaScript file, so a syntax error or a broken import is reported in Settings, with its file and line, before the first query.
+
+### Security model
+
+Dupin never parses, compiles or runs extension JavaScript itself. The extension host is Dupin's own executable run with `--extension-host`. One host, started on the first query, runs every JavaScript extension's queries, and each package is compiled in a host started for that compile alone. Before it touches any extension code, the host confines itself with a deny-by-default macOS sandbox: it cannot open or list files, use the network, connect to other processes or system services, or start programs. Its resource limits allow no new files, child processes or core dumps. Dupin reads each package's files within the limits above and sends their text over a private socket; that host compiles them under the same deadline, limits and watchdog as a query, counted from when it is ready, returns bytecode or a diagnostic and exits. A compile never waits for another extension's query, and a host one package has subverted never compiles another. Dupin keeps the bytecode as opaque bytes, reuses it while the files' content is unchanged and sends it back with every query, so the host never reads the extensions folder and a package can never supply bytecode of its own. Dupin checks every answer again before showing it. The host keeps the time zone it starts with, so `Date` reports local time.
+
+The sandbox contains an extension that breaks out of the engine through a flaw in QuickJS-ng, but because every JavaScript extension shares the host, such an extension could see the other extensions' code and queries and change their answers until the host is replaced. Install only extensions you trust. A host that sends anything Dupin didn't ask for is stopped.
+
+The engine stops a query that runs past its deadline or is cancelled, but a few built-in operations, such as `indexOf` on very long strings, can't be interrupted, and the engine's heap limit doesn't bound the whole process. Dupin therefore watches the host from outside. It stops a host when a compile or query runs 150 ms past its deadline, ignores a cancellation for 150 ms or grows past its memory allowance, and when the host dies, the query becomes a "_Name_ failed" row. The next query starts a new host. One query runs at a time; the others wait in a bounded queue, and a query that typing replaces leaves it. The host exits when Dupin quits and after two minutes without queries, and bytecode Dupin kept is sent to the next host, so a restart doesn't recompile anything.
+
+The sandbox exists on macOS only. On other platforms the host refuses to compile or run extensions, and Settings lists each JavaScript extension as failing with `sandbox-unavailable`; Linux needs its own confinement first. The host refuses for the same reason when Dupin itself already runs inside another sandbox.
 
 ### Testing one
 
@@ -131,7 +142,7 @@ dupin ext run examples/extensions/word-count-js --query 'two words'
 dupin ext run examples/extensions/word-count-js --query 'two words' --json
 ```
 
-`check` loads the folder as the launcher does, runs the module's top-level code and confirms it exports `search`. `run` asks it one query and prints the rows and their actions, or with `--json` the answer in the [protocol](../plugin-protocol.md)'s `results` shape. Both exit non-zero on failure. With `--json`, a failure carries a diagnostic an agent can act on:
+`check` loads the folder as the launcher does, has the extension host compile it, runs the module's top-level code and confirms it exports `search`. Both compile and run the module in the sandboxed extension host, as the launcher does, so a package behaves the same and is just as contained when you or an agent test it. `run` asks it one query and prints the rows and their actions, or with `--json` the answer in the [protocol](../plugin-protocol.md)'s `results` shape. Both exit non-zero on failure. With `--json`, a failure carries a diagnostic an agent can act on:
 
 ```json
 {
@@ -204,12 +215,18 @@ Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pr
 
 The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
 
-Installing never runs anything from the package. Dupin runs `git` to fetch the one commit into a scratch repository and reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run, and there is no package manager, install script or build. Git sources need Git (`xcode-select --install`); a folder source doesn't. Before placing anything, Dupin checks that:
+Installing never runs anything from the package, and there is no package manager, install script or build. How Dupin fetches depends on the source:
+
+- **`github:`** needs no developer tools. Dupin asks GitHub's REST API which commit the ref names, downloads GitHub's tarball of exactly that commit with the macOS system curl (`/usr/bin/curl`, ignoring `~/.curlrc`), and unpacks it itself. Every file must match the commit's tree, read from the API first: the same path, mode, size and Git blob id, so a package locks the same as it would from Git. A file that `.gitattributes` drops from archives (`export-ignore`) or rewrites in them (`export-subst`, line endings) fails the install, as does a Git LFS file when the repository's "Include Git LFS objects in archives" setting is on, because the archive then holds the object where the commit holds its pointer. If `GITHUB_TOKEN` is set, Dupin sends it to the API, for a private repository or a higher rate limit than GitHub's 60 requests an hour; it is never required, and never sent to the host the archive comes from.
+- **A Git URL** runs `git` to fetch the one commit into a scratch repository, and Dupin reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run. It needs Git. Without it, the install fails with a message instead of running `/usr/bin/git`, which on a Mac without the Command Line Tools only opens their installer.
+- **A folder** needs neither.
+
+`dupin ext update` and `dupin ext sync` fetch the same way. Before placing anything, Dupin checks that:
 
 - `package.json` has a valid `dupin` key and `name`;
 - `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
-- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch that writes more than 64 MiB is stopped before it finishes;
+- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch or download of more than 64 MiB is stopped before it finishes, and a tarball whose entries aren't plain files and folders inside its one top-level folder is refused;
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
 
@@ -380,6 +397,6 @@ The `command` field carries the extension's `id`. `request_id` and `generation` 
 
 ## Cost
 
-The JavaScript engine ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/) through [`rquickjs`](https://github.com/DelSkayn/rquickjs)) is compiled into Dupin; standalone size-optimized builds put it at about 0.6 MiB. Dupin compiles a package to bytecode when it loads the folder, so a query starts a fresh engine from bytecode and pays only for execution.
+The JavaScript engine ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/) through [`rquickjs`](https://github.com/DelSkayn/rquickjs)) is compiled into Dupin at `-O3`, which adds about 1 MiB to the signed app; the extension host is the same executable, so it adds no file. The extension host compiles a package to bytecode when Dupin loads the folder, so a query starts a fresh engine from bytecode and pays only for execution. On a Blacksmith M4 runner, a 400-candidate search returning 50 rows took 1.4 ms at the median and 1.8 ms at p95 over 2,000 queries to a running host, bytecode included. Compiling that package, which starts a host for the compile, took 11.7 ms at the median and 12.0 ms at p95; a first query from kept bytecode took 10.3 ms and 12.0 ms. Most of a start is the cost of starting Dupin's executable. The host's footprint after the warm queries was about 6.2 MiB. `cargo test --release -p dupin --test extension_host -- --ignored --nocapture` repeats the measurement.
 
 The Wasm runtime ([Wasmi](https://github.com/wasmi-labs/wasmi), an interpreter) adds about 1.2 MiB (6%) to Dupin's stripped release binary. Dupin compiles a module when it loads the folder, so a query pays only for execution. On an M5 Max, the word counter loads in about 1 ms and answers in about 0.1 ms; the calculator fixture from `experiments/plugin-protocol`, an 840 KiB module, loads in about 6.5 ms and answers in 0.2–1.2 ms.

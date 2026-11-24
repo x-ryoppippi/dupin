@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use dupin_extension_install::{Change, Error, Git, Installer, Integrity, LOCK_FILE, Lock, State};
+use dupin_extension_install::{Change, Error, Git, GitHub, Installer, Integrity, LOCK_FILE, Lock, State};
 
 /// Keeps the developer's own Git configuration out of the fixtures and the installer.
 const ISOLATION: [(&str, &str); 7] = [
@@ -60,6 +60,10 @@ impl Fixture {
                     .map(|(key, value)| ((*key).into(), (*value).into()))
                     .collect(),
                 ..Git::default()
+            },
+            github: GitHub {
+                token: None,
+                ..GitHub::default()
             },
         };
         Self {
