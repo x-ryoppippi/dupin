@@ -14,8 +14,11 @@ const TS_MAIN_DIR: &str = "dist";
 pub enum Template {
     /// `main.js`, run as written.
     JavaScript,
-    /// `src/main.ts`, bundled into `dist/main.js`, with a workflow that commits the bundle.
+    /// `src/main.ts`, run as written once Dupin erases its types.
     TypeScript,
+    /// `src/main.ts` and its npm dependencies, bundled into `dist/main.js`, with a workflow that
+    /// commits the bundle.
+    Bundled,
 }
 
 /// Creates a package in `dir`, which must not exist or be empty. Its name is the folder's name.
@@ -68,7 +71,8 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
     let string = |value: &str| Value::from(value).to_string();
     let (source, main) = match template {
         Template::JavaScript => (String::new(), String::new()),
-        Template::TypeScript => (
+        Template::TypeScript => (String::new(), format!(",\n\t\t\"main\": {}", string(TS_SOURCE))),
+        Template::Bundled => (
             format!("\n\t\"source\": {},", string(TS_SOURCE)),
             format!(",\n\t\t\"main\": {}", string(TS_MAIN)),
         ),
@@ -82,6 +86,13 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
     let (build_note, build_command, build_section) = match template {
         Template::JavaScript => ("", "", String::new()),
         Template::TypeScript => (
+            "",
+            "",
+            format!(
+                "\n## TypeScript\n\nDupin runs `{TS_SOURCE}` as written: it erases the types and never type-checks, so run `tsc --noEmit` for that. Syntax that needs compiling, such as `enum`, `namespace`, parameter properties, decorators and JSX, is reported by `dupin ext check`; `tsconfig.json` sets `erasableSyntaxOnly` so the editor flags it too. Import other files with their extension, such as `./util.ts`.\n\nTo use npm packages, bundle the extension: add `\"source\": \"{TS_SOURCE}\"` to package.json, point `dupin.main` at `{TS_MAIN}`, then run `dupin ext build .` and commit `{TS_MAIN}`. `dupin ext new --bundle` starts a package set up that way, with a workflow that rebuilds the bundle.\n"
+            ),
+        ),
+        Template::Bundled => (
             "bundles `src/main.ts` with Bun or esbuild, ",
             "dupin ext build .\n",
             format!(
@@ -111,18 +122,20 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
     ];
     match template {
         Template::JavaScript => files.push(("main.js", include_str!("../templates/main.js").to_owned())),
-        Template::TypeScript => files.extend([
+        Template::TypeScript | Template::Bundled => files.extend([
             (TS_SOURCE, include_str!("../templates/main.ts").to_owned()),
             (
                 "tsconfig.json",
                 include_str!("../templates/tsconfig.json").to_owned(),
             ),
             (".gitignore", include_str!("../templates/gitignore").to_owned()),
-            (
-                ".github/workflows/build.yml",
-                fill(include_str!("../templates/build.yml")),
-            ),
         ]),
+    }
+    if template == Template::Bundled {
+        files.push((
+            ".github/workflows/build.yml",
+            fill(include_str!("../templates/build.yml")),
+        ));
     }
     files
 }
