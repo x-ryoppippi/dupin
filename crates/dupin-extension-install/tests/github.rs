@@ -249,12 +249,45 @@ impl Fixture {
         format!("/repos/{OWNER}/{REPO}")
     }
 
+    /// Answers for every ref and commit of the repository as it is now, with `padding` more
+    /// lightweight tags on its first commit.
+    fn publish_with_tags(&self, padding: usize) {
+        self.publish();
+        let first = git(&self.repo, &["rev-list", "--max-parents=0", "HEAD"]);
+        let mut refs = self.tag_refs();
+        refs.extend((0..padding).map(
+            |n| json!({"ref": format!("refs/tags/v0.0.{n}"), "object": {"type": "commit", "sha": first}}),
+        ));
+        self.server.set(
+            format!("{}/git/matching-refs/tags", self.repo_path()),
+            json_response(&Value::Array(refs)),
+        );
+    }
+
+    fn tag_refs(&self) -> Vec<Value> {
+        let refs = git(
+            &self.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objecttype) %(objectname)",
+                "refs/tags",
+            ],
+        );
+        refs.lines()
+            .map(|line| {
+                let [name, kind, object] = line.split(' ').collect::<Vec<_>>()[..] else {
+                    panic!("{line}");
+                };
+                json!({"ref": name, "object": {"type": kind, "sha": object}})
+            })
+            .collect()
+    }
+
     /// Answers for every ref and commit of the repository as it is now.
     fn publish(&self) {
         let base = self.repo_path();
         self.server
             .set(base.clone(), json_response(&json!({"default_branch": "main"})));
-        let mut tags = Vec::new();
         let refs = git(
             &self.repo,
             &["for-each-ref", "--format=%(refname) %(objecttype) %(objectname)"],
@@ -268,20 +301,17 @@ impl Fixture {
                 format!("{base}/git/ref/{short}"),
                 json_response(&json!({"ref": name, "object": {"type": kind, "sha": object}})),
             );
-            if let Some(tag) = short.strip_prefix("tags/") {
+            if kind == "tag" {
                 let commit = git(&self.repo, &["rev-parse", &format!("{name}^{{commit}}")]);
-                if kind == "tag" {
-                    self.server.set(
-                        format!("{base}/git/tags/{object}"),
-                        json_response(&json!({"sha": object, "object": {"type": "commit", "sha": commit}})),
-                    );
-                }
-                tags.push(json!({"name": tag, "commit": {"sha": commit}}));
+                self.server.set(
+                    format!("{base}/git/tags/{object}"),
+                    json_response(&json!({"sha": object, "object": {"type": "commit", "sha": commit}})),
+                );
             }
         }
         self.server.set(
-            format!("{base}/tags?per_page=100&page=1"),
-            json_response(&Value::Array(tags)),
+            format!("{base}/git/matching-refs/tags"),
+            json_response(&Value::Array(self.tag_refs())),
         );
         let commits = git(&self.repo, &["rev-list", "--all"]);
         for commit in commits.lines() {
@@ -822,4 +852,86 @@ fn rate_limits_and_bad_tokens_say_what_to_do() {
         ..fixture.without_git("unreachable")
     };
     assert_eq!(install(&unreachable, SPEC).unwrap_err().code, "download-failed");
+}
+
+#[test]
+fn the_newest_version_is_found_among_more_tags_than_a_page_holds() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    let first = fixture.commit("one");
+    fixture.tag("v1.0.0");
+    fixture.publish_with_tags(999);
+    let installer = fixture.without_git("github");
+    let installed = install(&installer, SPEC).unwrap();
+    assert_eq!(installed.entry.rev.as_deref(), Some("v1.0.0"));
+    assert_eq!(installed.entry.commit.as_deref(), Some(first.as_str()));
+
+    fixture.write("lib/rows.js", "export const rows = [];\n");
+    let second = fixture.commit("two");
+    fixture.tag("v1.1.0");
+    fixture.publish_with_tags(1500);
+    let updated = installer.update(None, &|_| None).unwrap();
+    let updated = updated[0].1.as_ref().unwrap();
+    assert_eq!(updated.entry.rev.as_deref(), Some("v1.1.0"));
+    assert_eq!(updated.entry.commit.as_deref(), Some(second.as_str()));
+}
+
+#[test]
+fn an_lfs_object_in_the_archive_is_explained() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    let commit = fixture.commit("one");
+    let pointer = b"version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 12345\n";
+    fixture.serve_tree(
+        &commit,
+        json!([
+            blob("package.json", MANIFEST),
+            blob("main.js", MAIN),
+            blob("icon.png", pointer)
+        ]),
+    );
+    fixture.serve_archive(
+        &commit,
+        tarball(&[
+            file("top/icon.png", b"\x89PNG the real image"),
+            file("top/main.js", MAIN),
+            file("top/package.json", MANIFEST),
+        ]),
+    );
+    let installer = fixture.without_git("github");
+    let error = install(&installer, SPEC).unwrap_err();
+    assert_eq!(error.code, "invalid-archive", "{error}");
+    assert_eq!(error.file.as_deref(), Some("icon.png"));
+    assert!(error.hint.unwrap().contains("LFS"));
+}
+
+#[test]
+fn a_connection_timeout_is_told_apart_from_a_slow_download() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    fixture.commit("one");
+
+    let stub = fixture.root.path().join("curl-connect-timeout");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\ncat >/dev/null\necho 'curl: (28) Connection timed out after 30001 milliseconds' >&2\nexit 28\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut installer = fixture.without_git("connect");
+    installer.github.curl = stub;
+    let error = install(&installer, SPEC).unwrap_err();
+    assert_eq!(error.code, "download-failed");
+    assert!(error.message.contains("couldn't connect"), "{error}");
+    assert!(error.hint.is_some());
+
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut installer = fixture.without_git("slow");
+    installer.github.api = format!("http://{}", silent.local_addr().unwrap());
+    installer.github.timeout = Duration::from_secs(1);
+    let error = install(&installer, SPEC).unwrap_err();
+    assert_eq!(error.code, "download-failed");
+    assert!(error.message.contains("took longer than 1 seconds"), "{error}");
+    drop(silent);
 }

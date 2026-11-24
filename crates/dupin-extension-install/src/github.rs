@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -21,8 +21,7 @@ use crate::version::newest_version;
 /// The largest API response Dupin reads; a recursive tree of a package within the file limit is
 /// far smaller.
 const MAX_API_BYTES: u64 = 8 * 1024 * 1024;
-const TAGS_PER_PAGE: usize = 100;
-const MAX_TAG_PAGES: usize = 10;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How many annotated tags may point at each other before a commit.
 const MAX_TAG_DEPTH: usize = 8;
 
@@ -71,9 +70,10 @@ struct Repository {
 }
 
 #[derive(Deserialize)]
-struct Tag {
+struct NamedReference {
+    #[serde(rename = "ref")]
     name: String,
-    commit: Object,
+    object: Object,
 }
 
 #[derive(Deserialize)]
@@ -175,13 +175,13 @@ impl GitHub {
             }
             None => {
                 let tags = self.tags(repo)?;
-                let names: Vec<String> = tags.iter().map(|tag| tag.name.clone()).collect();
+                let names: Vec<String> = tags.iter().map(|(name, _)| name.clone()).collect();
                 if let Some(newest) = newest_version(&names)
-                    && let Some(tag) = tags.iter().find(|tag| tag.name == newest)
+                    && let Some((name, object)) = tags.into_iter().find(|(name, _)| name == newest)
                 {
                     return Ok(Fetched {
-                        commit: full_commit(&tag.commit.sha)?,
-                        rev: Some(tag.name.clone()),
+                        commit: self.peel(repo, object, &format!("tags/{name}"))?,
+                        rev: Some(name),
                     });
                 }
                 let branch = &repository.default_branch;
@@ -264,33 +264,19 @@ impl GitHub {
         tarball::extract(std::io::BufReader::new(file), &expected, stage)
     }
 
-    fn tags(&self, repo: &Repo<'_>) -> Result<Vec<Tag>, Error> {
-        let mut tags = Vec::new();
-        for page in 1..=MAX_TAG_PAGES {
-            let batch: Vec<Tag> = self
-                .api(
-                    repo,
-                    &format!("{}/tags?per_page={TAGS_PER_PAGE}&page={page}", repo.path()),
-                )?
-                .unwrap_or_default();
-            let full = batch.len() == TAGS_PER_PAGE;
-            tags.extend(batch);
-            if !full {
-                return Ok(tags);
-            }
-        }
-        Err(Error::new(
-            "too-many-tags",
-            format!(
-                "{} has more than {} tags, too many to find its newest version",
-                repo.locator(),
-                TAGS_PER_PAGE * MAX_TAG_PAGES
-            ),
-        )
-        .hint(format!(
-            "Name the version to install, as `{}@v1.2.3`.",
-            repo.locator()
-        )))
+    /// Every tag of the repository, as `ls-remote --tags` lists them: GitHub answers this listing
+    /// whole, where its tag list would take a request per hundred tags.
+    fn tags(&self, repo: &Repo<'_>) -> Result<Vec<(String, Object)>, Error> {
+        let refs: Vec<NamedReference> = self
+            .api(repo, &format!("{}/git/matching-refs/tags", repo.path()))?
+            .unwrap_or_default();
+        Ok(refs
+            .into_iter()
+            .filter_map(|reference| {
+                let name = reference.name.strip_prefix("refs/tags/")?.to_owned();
+                Some((name, reference.object))
+            })
+            .collect())
     }
 
     /// The commit a ref such as `tags/v1.0.0` points at, through any annotated tags, or `None`
@@ -301,10 +287,14 @@ impl GitHub {
         else {
             return Ok(None);
         };
-        let mut object = reference.object;
+        self.peel(repo, reference.object, name).map(Some)
+    }
+
+    /// The commit `object`, the target of ref `name`, points at through any annotated tags.
+    fn peel(&self, repo: &Repo<'_>, mut object: Object, name: &str) -> Result<String, Error> {
         for _ in 0..MAX_TAG_DEPTH {
             match object.kind.as_deref() {
-                Some("commit") => return full_commit(&object.sha).map(Some),
+                Some("commit") => return full_commit(&object.sha),
                 Some("tag") => {
                     let tag: Reference = self
                         .api(repo, &format!("{}/git/tags/{}", repo.path(), object.sha))?
@@ -380,8 +370,9 @@ impl GitHub {
         config.option("proto", &format!("={scheme}"));
         config.option("proto-redir", &format!("={scheme}"));
         config.option("max-redirs", "5");
-        config.option("connect-timeout", "30");
-        config.option("max-time", &self.timeout.as_secs().max(1).to_string());
+        let max_time = Duration::from_secs(self.timeout.as_secs().max(1));
+        config.option("connect-timeout", &CONNECT_TIMEOUT.as_secs().to_string());
+        config.option("max-time", &max_time.as_secs().to_string());
         config.option("max-filesize", &max_bytes.to_string());
         config.option("user-agent", "Dupin");
         config.option("header", "Accept: application/vnd.github+json");
@@ -396,6 +387,7 @@ impl GitHub {
         config.option("write-out", "%{http_code}");
         let _ = std::fs::remove_file(out);
 
+        let started = Instant::now();
         let mut child = Command::new(&self.curl)
             .args(["--disable", "--config", "-"])
             .stdin(Stdio::piped())
@@ -425,10 +417,21 @@ impl GitHub {
         match output.status.code() {
             Some(0) => {}
             Some(63) => return Err(too_large()),
+            // curl exits 28 for both limits; only the whole-transfer one can take `max_time`.
+            Some(28) if started.elapsed() < max_time => {
+                return Err(Error::new(
+                    "download-failed",
+                    format!(
+                        "couldn't connect to GitHub within {} seconds",
+                        CONNECT_TIMEOUT.as_secs()
+                    ),
+                )
+                .hint("Check the network: a firewall, VPN or captive portal may be blocking GitHub."));
+            }
             Some(28) => {
                 return Err(Error::new(
                     "download-failed",
-                    format!("GitHub took longer than {} seconds", self.timeout.as_secs()),
+                    format!("GitHub took longer than {} seconds", max_time.as_secs()),
                 ));
             }
             _ => {

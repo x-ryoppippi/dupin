@@ -96,7 +96,7 @@ pub(crate) fn extract(
             return Err(differs());
         }
         let rewritten = || {
-            differs().hint("GitHub's archive applies `export-subst` and line-ending attributes from .gitattributes; drop them for the package's files.")
+            differs().hint("GitHub's archive rewrites files that `export-subst` or line-ending attributes in .gitattributes touch, and puts the object in place of a Git LFS pointer when the repository includes LFS objects in archives. Drop those attributes or LFS for the package's files, or turn that setting off.")
         };
         if blob.size != size {
             return Err(rewritten());
