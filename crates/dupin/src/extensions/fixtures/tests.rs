@@ -628,13 +628,13 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         "fixtures/x.json",
         json!({
             "fixture": 1,
-            "steps": [{ "query": "a" }, { "select": 2 }, { "activate": "Copy" }, { "query": "b c" }, { "select": 1 }, { "select": 0 }],
+            "steps": [{ "query": "a" }, { "select": 2 }, { "activate": "Copy" }, { "query": "b c" }, { "select": 1 }, { "select": 0 }, { "query": "" }, { "query": "d" }],
         })
         .to_string()
         .as_bytes(),
     )
     .unwrap();
-    let events = script_for("kw", &fixture, 6)["events"].clone();
+    let events = script_for("kw", &fixture, 8)["events"].clone();
     let kinds: Vec<String> = events
         .as_array()
         .unwrap()
@@ -653,9 +653,13 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
             "Down",
             "Down",
             "cmd+a",
-            "type kw b c",
+            "Backspace",
+            "type b c",
             "Down",
             "Up",
+            "cmd+a",
+            "Backspace",
+            "type d",
             "mark"
         ]
     );

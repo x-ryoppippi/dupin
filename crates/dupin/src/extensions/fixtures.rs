@@ -657,20 +657,35 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-/// The keys a person would press for steps `1..=last`: the keyword and each query, replacing
-/// the field, and arrow keys to each selected row.
+/// The keys a person would press for steps `1..=last`: the keyword and the first query, then
+/// each later query in place of the last, and arrow keys to each selected row. The keyword
+/// becomes a chip once typed, so a later query replaces only the text after it; an empty field
+/// is left alone, since ⌫ there would leave the keyword.
 fn script_for(keyword: &str, fixture: &Fixture, last: usize) -> Value {
     let mut events = Vec::new();
     let mut at = FIRST_KEY;
     let mut selected = 0;
+    let mut typed: Option<&str> = None;
     for step in &fixture.steps[..last] {
         match step.action() {
             Action::Query(query) => {
-                if !events.is_empty() {
-                    events.push(json!({ "t": at, "type": "key", "name": "a", "cmd": true }));
-                    at += 0.05;
+                match typed {
+                    None => {
+                        events.push(json!({ "t": at, "type": "type", "text": format!("{keyword} {query}") }));
+                    }
+                    Some(before) => {
+                        if !before.is_empty() {
+                            events.push(json!({ "t": at, "type": "key", "name": "a", "cmd": true }));
+                            at += 0.05;
+                            events.push(json!({ "t": at, "type": "key", "name": "Backspace" }));
+                            at += 0.05;
+                        }
+                        if !query.is_empty() {
+                            events.push(json!({ "t": at, "type": "type", "text": query }));
+                        }
+                    }
                 }
-                events.push(json!({ "t": at, "type": "type", "text": format!("{keyword} {query}") }));
+                typed = Some(query);
                 selected = 0;
             }
             Action::Select(index) => {
