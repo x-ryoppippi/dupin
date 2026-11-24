@@ -12,6 +12,7 @@ let
     cargoSrc
     bundleSrc
     ;
+  vendored = native.passthru.cargoVendorDir;
   craneLib = (crane.mkLib pkgs).overrideScope (
     _: prev: {
       # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
@@ -30,15 +31,15 @@ let
   cargoVendorDir = pkgs.runCommand "dupin-cargo-vendor-config" { } ''
     mkdir -p "$out"
     # Per-crate links let Crane remove references to the original source store path.
-    for source in ${commonArgs.cargoDeps}/source-*; do
+    for source in ${vendored}/*/; do
       index="$out/$(basename "$source")"
       mkdir -p "$index"
-      for crate in "$source"/*; do
-        ln -s "$crate" "$index/"
+      for crate in "$source"*; do
+        ln -s "$(readlink -f "$crate")" "$index/"
       done
     done
-    substitute ${commonArgs.cargoDeps}/.cargo/config.toml "$out/config.toml" \
-      --replace-fail '@vendor@' "$out"
+    substitute ${vendored}/config.toml "$out/config.toml" \
+      --replace-fail ${vendored} "$out"
     cat >> "$out/config.toml" <<'EOF'
 
     [build]

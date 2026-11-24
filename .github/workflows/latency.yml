@@ -17,6 +17,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'nix/cargo-artifacts.nix'
+      - 'nix/cargo-vendor.nix'
       - '.github/workflows/latency.yml'
   pull_request:
     paths:
@@ -29,6 +30,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'nix/cargo-artifacts.nix'
+      - 'nix/cargo-vendor.nix'
       - '.github/workflows/latency.yml'
   workflow_dispatch:
 

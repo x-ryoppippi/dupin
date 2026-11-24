@@ -3,7 +3,9 @@
   perSystem =
     { config, pkgs, ... }:
     let
-      native = pkgs.callPackage ../package.nix { };
+      native = pkgs.callPackage ../package.nix {
+        cargoVendorDir = import ./cargo-vendor.nix { craneLib = inputs.crane.mkLib pkgs; };
+      };
       rolldown = pkgs.callPackage ./rolldown.nix { };
       dupin = import ./cargo-artifacts.nix {
         inherit pkgs;
