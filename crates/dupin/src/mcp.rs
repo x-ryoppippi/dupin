@@ -131,6 +131,10 @@ impl Cancel {
             abort();
         }
     }
+    /// Whether the call was aborted, for work that polls instead of registering an abort.
+    fn is_aborted(&self) -> bool {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).aborted
+    }
     /// A call the client cancelled gets no response, as MCP asks.
     fn by_client(&self) -> bool {
         self.0.lock().unwrap_or_else(PoisonError::into_inner).by_client
@@ -488,7 +492,16 @@ fn diagnostic(diagnostic: dupin_js_runtime::Diagnostic) -> String {
     json!({"error": diagnostic.to_string(), "diagnostic": diagnostic}).to_string()
 }
 
-fn extension_tool(workspace: &Path, name: &str, arguments: &Map<String, Value>) -> Result<Output, String> {
+fn extension_tool(
+    workspace: &Path,
+    name: &str,
+    arguments: &Map<String, Value>,
+    cancel: &Cancel,
+) -> Result<Output, String> {
+    let cancelled = {
+        let cancel = cancel.clone();
+        move || cancel.is_aborted()
+    };
     let package = inside(workspace, arguments.get("package"), "package")?;
     match name {
         "ext_check" => {
@@ -514,7 +527,7 @@ fn extension_tool(workspace: &Path, name: &str, arguments: &Map<String, Value>) 
                     None,
                     dupin_js_runtime::MAX_ROWS,
                     std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
-                    || false,
+                    cancelled.clone(),
                     &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
                 )
                 .map_err(|error| match error {
@@ -526,7 +539,9 @@ fn extension_tool(workspace: &Path, name: &str, arguments: &Map<String, Value>) 
                 .map_err(|_| "could not encode the answer".into())
         }
         "ext_test" => Ok(Output::Json(
-            crate::extensions::test(&package, false).map_err(diagnostic)?.json,
+            crate::extensions::test(&package, false, &cancelled)
+                .map_err(diagnostic)?
+                .json,
         )),
         "ext_snap" => {
             let fixture = inside(&package, arguments.get("fixture"), "fixture")?;
@@ -543,7 +558,8 @@ fn extension_tool(workspace: &Path, name: &str, arguments: &Map<String, Value>) 
                 .tempdir()
                 .map_err(|error| format!("couldn't make a scratch folder: {error}"))?;
             let output = scratch.path().join("panel.png");
-            let snapped = crate::extensions::snap(&package, &fixture, step, &output).map_err(diagnostic)?;
+            let snapped =
+                crate::extensions::snap(&package, &fixture, step, &output, &cancelled).map_err(diagnostic)?;
             let png = std::fs::read(&output).map_err(|error| format!("couldn't read the render: {error}"))?;
             let mut described = crate::cli::snapped_json(&snapped);
             if let Some(described) = described.as_object_mut() {
@@ -577,7 +593,7 @@ fn call_tool(
         let workspace = host
             .workspace()
             .ok_or("the extension tools need `dupin mcp --workspace DIR`")?;
-        return extension_tool(workspace, name, arguments);
+        return extension_tool(workspace, name, arguments, cancel);
     }
     let result = match name {
         "read_config" => host.config_file(),
@@ -682,7 +698,7 @@ mod tests {
     use std::io::BufReader;
     use std::os::unix::net::UnixStream;
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// A launcher that records commands and answers from a script, and a config file that
     /// exists only in memory.
@@ -1038,6 +1054,46 @@ mod tests {
         let missing: Value = serde_json::from_str(result(9)["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(missing["diagnostic"]["code"], "missing-manifest");
         assert_eq!(std::fs::read(&fixture).unwrap(), before);
+    }
+
+    #[test]
+    fn closing_input_stops_an_extension_tool_whose_package_never_returns() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().canonicalize().unwrap();
+        let package = root.join("spinner");
+        dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::JavaScript).unwrap();
+        std::fs::write(
+            package.join("main.js"),
+            "export function search() { return [{ title: 'Spin', actions: [{ title: 'Spin', run: 'spin' }] }]; }\n\
+             export const actions = { spin() { for (;;) {} } };\n",
+        )
+        .unwrap();
+        std::fs::write(
+            package.join("fixtures/search.json"),
+            json!({ "fixture": 1, "steps": [{ "query": "x" }, { "activate": "Spin" }] }).to_string(),
+        )
+        .unwrap();
+        let host = Fake {
+            workspace: Some(root),
+            ..Fake::default()
+        };
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            let serving = scope.spawn(|| serve(BufReader::new(server), &mut Vec::new(), &host).unwrap());
+            client
+                .write_all(call(1, "ext_test", json!({"package": "spinner"})).as_bytes())
+                .unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            drop(client);
+            serving.join().unwrap();
+        });
+        assert!(
+            started.elapsed() < crate::extensions::ACTION_DEADLINE / 2,
+            "serve waited {:?} for the action",
+            started.elapsed()
+        );
     }
 
     #[test]

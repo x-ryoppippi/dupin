@@ -27,7 +27,7 @@ fn a_scaffolded_package_passes_its_own_fixture() {
         dupin_ext_sdk::Template::TypeScript,
     ] {
         let (_root, package) = scaffolded(template);
-        let report = test(&package, false).unwrap();
+        let report = test(&package, false, &|| false).unwrap();
         assert!(report.passed, "{}", report.text);
         assert_eq!(report.json["package"], "greeter");
         assert_eq!(
@@ -51,7 +51,7 @@ fn a_mismatch_fails_with_the_path_and_both_values_and_update_rewrites_it() {
     let source = fs::read_to_string(&main).unwrap();
     fs::write(&main, source.replace("`Hello, ${name}!`", "`Hi, ${name}!`")).unwrap();
 
-    let report = test(&package, false).unwrap();
+    let report = test(&package, false, &|| false).unwrap();
     assert!(!report.passed);
     assert_eq!(
         report.text,
@@ -71,12 +71,12 @@ fn a_mismatch_fails_with_the_path_and_both_values_and_update_rewrites_it() {
     );
 
     let fixture = package.join("fixtures/search.json");
-    let updated = test(&package, true).unwrap();
+    let updated = test(&package, true, &|| false).unwrap();
     assert!(updated.passed, "{}", updated.text);
     assert_eq!(updated.json["fixtures"][0]["updated"], true);
     assert!(fs::read_to_string(&fixture).unwrap().contains("\"Hi, Dupin!\""));
-    assert!(test(&package, false).unwrap().passed);
-    let again = test(&package, true).unwrap();
+    assert!(test(&package, false, &|| false).unwrap().passed);
+    let again = test(&package, true, &|| false).unwrap();
     assert_eq!(again.json["fixtures"][0]["updated"], false);
 }
 
@@ -110,7 +110,7 @@ fn errors_steps_that_cannot_run_and_broken_fixtures_are_reported_apart() {
         json!({ "fixture": 1, "steps": [{ "type": "x" }] }),
     );
 
-    let report = test(&package, true).unwrap();
+    let report = test(&package, true, &|| false).unwrap();
     assert!(!report.passed);
     let fixtures = report.json["fixtures"].as_array().unwrap();
     let names: Vec<&str> = fixtures.iter().map(|f| f["file"].as_str().unwrap()).collect();
@@ -179,18 +179,18 @@ fn the_fixture_fixes_the_clock_seed_and_time_zone() {
             .to_owned()
     };
     write_fixture(&package, "clock.json", fixture("Asia/Tokyo", 1));
-    let tokyo = title(&test(&package, false).unwrap());
+    let tokyo = title(&test(&package, false, &|| false).unwrap());
     assert!(tokyo.starts_with("2026-06-01T12:30:00.000Z 21:30 0."), "{tokyo}");
-    assert_eq!(tokyo, title(&test(&package, false).unwrap()));
+    assert_eq!(tokyo, title(&test(&package, false, &|| false).unwrap()));
     write_fixture(&package, "clock.json", fixture("Europe/London", 1));
-    let london = title(&test(&package, false).unwrap());
+    let london = title(&test(&package, false, &|| false).unwrap());
     assert!(london.starts_with("2026-06-01T12:30:00.000Z 13:30 "), "{london}");
     assert_eq!(tokyo.rsplit(' ').next(), london.rsplit(' ').next());
     write_fixture(&package, "clock.json", fixture("Europe/London", 2));
-    assert_ne!(london, title(&test(&package, false).unwrap()));
+    assert_ne!(london, title(&test(&package, false, &|| false).unwrap()));
 
     write_fixture(&package, "clock.json", fixture("Nowhere/Atlantis", 1));
-    let report = test(&package, false).unwrap();
+    let report = test(&package, false, &|| false).unwrap();
     assert_eq!(
         report.json["fixtures"][0]["diagnostic"]["field"],
         "environment.timeZone"
@@ -267,7 +267,7 @@ fn host_requests_are_answered_from_the_fixture_through_the_broker() {
             "steps": [{ "query": "x" }],
         }),
     );
-    let title = only_title(&test(&package, false).unwrap());
+    let title = only_title(&test(&package, false, &|| false).unwrap());
     // The fixture answers what it has a reply for and the package declared; a URL it has no
     // reply for fails instead of reaching the network, and reading the clipboard needs the user
     // to choose an action, so typing never reads it.
@@ -297,7 +297,7 @@ fn host_requests_are_answered_from_the_fixture_through_the_broker() {
             "steps": [{ "query": "x" }],
         }),
     );
-    let denied = only_title(&test(&package, false).unwrap());
+    let denied = only_title(&test(&package, false, &|| false).unwrap());
     assert_eq!(
         denied.split(" | ").collect::<Vec<_>>(),
         [
@@ -320,7 +320,7 @@ fn host_requests_are_answered_from_the_fixture_through_the_broker() {
         "services.json",
         json!({ "fixture": 1, "replies": { "consent": { "exec:anything": "allow" } }, "steps": [{ "query": "x" }] }),
     );
-    let report = test(&package, false).unwrap();
+    let report = test(&package, false, &|| false).unwrap();
     assert_eq!(
         report.json["fixtures"][0]["diagnostic"]["field"],
         "replies.consent.exec:anything"
@@ -366,7 +366,7 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
             ],
         }),
     );
-    let report = test(&package, false).unwrap();
+    let report = test(&package, false, &|| false).unwrap();
     assert!(report.passed, "{}", report.text);
     let steps = steps(&report, 0);
     assert_eq!(steps[0]["outcome"]["rows"][0]["title"], "count 1, last none");
@@ -415,7 +415,7 @@ fn an_empty_clipboard_reply_reads_as_empty_and_a_missing_one_fails() {
             "paste.json",
             json!({ "fixture": 1, "replies": replies, "steps": [{ "query": "x" }, { "activate": "Paste" }] }),
         );
-        let report = test(&package, false).unwrap();
+        let report = test(&package, false, &|| false).unwrap();
         assert_eq!(
             steps(&report, 0)[1]["outcome"]["toasts"],
             json!([toast]),
@@ -426,13 +426,51 @@ fn an_empty_clipboard_reply_reads_as_empty_and_a_missing_one_fails() {
 }
 
 #[test]
+fn cancelling_stops_the_running_step_and_every_fixture_after_it() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({}),
+        "export function search() { return [{ title: 'Spin', actions: [{ title: 'Spin', run: 'spin' }] }]; }\n\
+         export const actions = { spin() { for (;;) {} } };\n",
+    );
+    for name in ["a.json", "b.json"] {
+        write_fixture(
+            &package,
+            name,
+            json!({ "fixture": 1, "steps": [{ "query": "x" }, { "activate": "Spin" }] }),
+        );
+    }
+    let started = Instant::now();
+    let cancelled = || started.elapsed() > Duration::from_secs(1);
+    let diagnostic = test(&package, false, &cancelled)
+        .map(|report| report.text)
+        .unwrap_err();
+    assert_eq!(diagnostic.code, "cancelled");
+    assert!(
+        started.elapsed() < ACTION_DEADLINE / 2,
+        "cancelling took {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
+fn a_cancelled_headless_run_is_stopped() {
+    let mut command = Command::new("/bin/sleep");
+    command.arg("60");
+    let started = Instant::now();
+    let error = run_bounded(command, &|| started.elapsed() > Duration::from_millis(100)).unwrap_err();
+    assert_eq!(error, "the headless run was cancelled");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
 fn a_linked_fixture_is_refused() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
     let outside = tempfile::NamedTempFile::new().unwrap();
     fs::write(outside.path(), r#"{ "fixture": 1, "steps": [{ "query": "x" }] }"#).unwrap();
     std::os::unix::fs::symlink(outside.path(), package.join("fixtures/linked.json")).unwrap();
-    match test(&package, false) {
+    match test(&package, false, &|| false) {
         Err(diagnostic) => assert_eq!(
             (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
             ("invalid-fixture", Some("fixtures/linked.json"))

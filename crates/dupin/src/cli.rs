@@ -420,7 +420,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtTest(folder, update) => {
-            let report = crate::extensions::test(std::path::Path::new(&folder), update)?;
+            let report = crate::extensions::test(std::path::Path::new(&folder), update, &|| false)?;
             if !report.passed {
                 return Err(Failure::Report(report.json, report.text));
             }
@@ -436,6 +436,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 std::path::Path::new(&fixture),
                 step,
                 std::path::Path::new(&output),
+                &|| false,
             )?;
             if json {
                 return Ok(snapped_json(&snapped));

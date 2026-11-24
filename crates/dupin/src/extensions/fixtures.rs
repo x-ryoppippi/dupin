@@ -36,16 +36,20 @@ pub struct Report {
 }
 
 /// Replays every fixture in `folder/fixtures`. With `update`, a fixture whose steps all ran is
-/// rewritten to expect what they answered.
-pub fn test(folder: &Path, update: bool) -> Result<Report, Diagnostic> {
+/// rewritten to expect what they answered. Once `cancelled` answers true, the running call is
+/// stopped and no further fixture starts.
+pub fn test(folder: &Path, update: bool, cancelled: &dyn Fn() -> bool) -> Result<Report, Diagnostic> {
     let extension = load_folder(folder)?;
     let found = fixture::discover(folder)?;
     let mut fixtures = Vec::new();
     let mut text = String::new();
     let mut failed = 0;
     for (name, path) in &found {
+        if cancelled() {
+            return Err(Diagnostic::new("cancelled", "the run was cancelled"));
+        }
         let result = fixture::read(name, path).and_then(|parsed| {
-            let replayed = replay(&extension, name, &parsed)?;
+            let replayed = replay(&extension, name, &parsed, cancelled)?;
             Ok(replayed.finish(parsed, name, path, update))
         });
         let outcome = result.unwrap_or_else(|diagnostic| FixtureResult::invalid(name, diagnostic));
@@ -110,7 +114,12 @@ struct StepResult {
 
 /// Runs the steps in order through the fixture's host and broker bridge, stopping at the first
 /// that can't run.
-fn replay(extension: &Extension, name: &str, fixture: &Fixture) -> Result<Replay, Diagnostic> {
+fn replay(
+    extension: &Extension,
+    name: &str,
+    fixture: &Fixture,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Replay, Diagnostic> {
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger).services;
@@ -128,7 +137,7 @@ fn replay(extension: &Extension, name: &str, fixture: &Fixture) -> Result<Replay
                     query,
                     dupin_js_runtime::MAX_ROWS,
                     Instant::now() + QUERY_DEADLINE,
-                    &|| false,
+                    cancelled,
                     &call(Trigger::Query),
                 );
                 rows = match answer {
@@ -171,7 +180,7 @@ fn replay(extension: &Extension, name: &str, fixture: &Fixture) -> Result<Replay
                                 action,
                                 data.as_ref().unwrap_or(&Value::Null),
                                 Instant::now() + ACTION_DEADLINE,
-                                &|| false,
+                                cancelled,
                                 &call(Trigger::Activation),
                             );
                             match acted {
@@ -205,7 +214,7 @@ fn replay(extension: &Extension, name: &str, fixture: &Fixture) -> Result<Replay
                     event,
                     data,
                     Instant::now() + ACTION_DEADLINE,
-                    &|| false,
+                    cancelled,
                     &call(Trigger::Background),
                 );
                 if let Err(error) = handled {
@@ -361,12 +370,14 @@ pub struct Snapped {
 /// Renders the panel after step `step` (counting from 1; the last by default) of the fixture at
 /// `fixture_path`, with the launcher's own view in a headless run of this executable, to
 /// `output`. Activations aren't replayed: their effects never show in the panel, and the panel
-/// stays as it was when the action was chosen.
+/// stays as it was when the action was chosen. Once `cancelled` answers true, the headless run
+/// is stopped.
 pub fn snap(
     folder: &Path,
     fixture_path: &Path,
     step: Option<usize>,
     output: &Path,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<Snapped, Diagnostic> {
     let extension = load_folder(folder)?;
     let name = fixture_path.display().to_string();
@@ -456,7 +467,7 @@ pub fn snap(
                 environment.theme.as_str(),
             ])
             .args(args);
-        run_bounded(command).map_err(render_failed)
+        run_bounded(command, cancelled).map_err(render_failed)
     };
     let height = match environment.window.height {
         Some(height) => u32::from(height),
@@ -547,9 +558,9 @@ fn script_for(keyword: &str, fixture: &Fixture, last: usize) -> Value {
     json!({ "events": events })
 }
 
-/// Runs `command` to completion within [`RENDER_DEADLINE`], with the last line it wrote to
-/// stderr as the error when it fails.
-fn run_bounded(mut command: Command) -> Result<(), String> {
+/// Runs `command` to completion within [`RENDER_DEADLINE`] unless `cancelled`, with the last
+/// line it wrote to stderr as the error when it fails.
+fn run_bounded(mut command: Command, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -569,6 +580,11 @@ fn run_bounded(mut command: Command) -> Result<(), String> {
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Ok(status),
+            Ok(None) if cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err("the headless run was cancelled".to_owned());
+            }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             Ok(None) => {
                 let _ = child.kill();
