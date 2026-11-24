@@ -116,7 +116,7 @@ pub fn answer(
     }
     if exports.items {
         let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
-        batches.extend(extension.catalogue(query, left, deadline, call)?);
+        batches.extend(extension.catalogue(query, left, deadline, call, Role::Keyword)?);
     }
     Ok(batches)
 }
@@ -133,7 +133,7 @@ pub fn default_answer(
     if query.trim().is_empty() || !extension.check(deadline)?.items {
         return Ok(Vec::new());
     }
-    extension.catalogue(query, limit, deadline, call)
+    extension.catalogue(query, limit, deadline, call, Role::DefaultSearch)
 }
 
 /// Consecutive rows of one section in one batch, each with its detail shown while selected.

@@ -519,7 +519,13 @@ fn a_snap_answers_host_requests_from_the_fixture_it_renders() {
     headless.grant(&bridge, &extension);
     let call = bridge.call(&extension.package, Trigger::Query);
     let batches = extension
-        .catalogue("", 10, Instant::now() + QUERY_DEADLINE, &call)
+        .catalogue(
+            "",
+            10,
+            Instant::now() + QUERY_DEADLINE,
+            &call,
+            crate::extensions::Role::Keyword,
+        )
         .unwrap();
     let titles: Vec<&str> = batches
         .iter()

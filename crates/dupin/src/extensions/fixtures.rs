@@ -176,7 +176,14 @@ impl<'a> Held<'a> {
         };
         let batches = self
             .cached
-            .search(query, limit, &mut fetch, self, call.generation)
+            .search(
+                query,
+                limit,
+                &mut fetch,
+                self,
+                call.generation,
+                super::Role::Keyword,
+            )
             .map_err(|error| self.extension.located(error))?;
         let held = self.rows.borrow();
         Ok(batches

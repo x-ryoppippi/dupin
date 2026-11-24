@@ -141,13 +141,14 @@ impl Extension {
     /// host requests go through `call`, as a search's do. Typing never cancels that, since the
     /// next keystroke needs the same catalogue. Every part of it must arrive before `deadline`,
     /// the search's own, so a slow catalogue fails with its own diagnostic before the search
-    /// expires.
+    /// expires. For the main search, `role` holds off asking again after a failure.
     pub fn catalogue(
         &self,
         query: &str,
         limit: usize,
         deadline: Instant,
         call: &Call,
+        role: Role,
     ) -> Result<Vec<Batch>, RunError> {
         let mut fetch = |cursor: Option<&str>, reason| {
             host().items(
@@ -160,7 +161,7 @@ impl Extension {
             )
         };
         self.catalogue
-            .search(query, limit, &mut fetch, self, call.generation)
+            .search(query, limit, &mut fetch, self, call.generation, role)
             .map_err(|error| self.located(error))
     }
 

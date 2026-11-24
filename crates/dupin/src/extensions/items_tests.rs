@@ -207,7 +207,13 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
     let rows = titles_of(&ExtensionProvider::new(extension.clone()), "");
     assert_eq!(rows, ["Marks failed"]);
     let error = extension
-        .catalogue("", 10, Instant::now() + QUERY_DEADLINE, &Call::none())
+        .catalogue(
+            "",
+            10,
+            Instant::now() + QUERY_DEADLINE,
+            &Call::none(),
+            Role::Keyword,
+        )
         .unwrap_err();
     assert!(
         matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic)
@@ -388,7 +394,7 @@ fn every_part_of_a_catalogue_shares_one_deadline() {
     let deadline = Duration::from_millis(400);
     let started = Instant::now();
     let error = extension
-        .catalogue("", 10, started + deadline, &Call::none())
+        .catalogue("", 10, started + deadline, &Call::none(), Role::Keyword)
         .unwrap_err();
     let elapsed = started.elapsed();
     assert!(
