@@ -93,6 +93,7 @@
 						"data": "top-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 488.0,

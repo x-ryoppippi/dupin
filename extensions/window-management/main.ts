@@ -142,6 +142,7 @@ export const actions: Actions = {
 			const target = targetFrame(command[0], focused.frame, displays);
 			if (target === null) return toast('No display is available to arrange this window.');
 			await windows.setFrame(target);
+			return { type: 'hide' };
 		} catch (error) {
 			if (!(error instanceof DupinError)) throw error;
 			// Dupin lists the request to allow above the results.

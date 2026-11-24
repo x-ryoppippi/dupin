@@ -93,6 +93,7 @@
 						"data": "centre"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 180.0,
@@ -135,6 +136,7 @@
 						"data": "next-display"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 180.0,
@@ -177,6 +179,7 @@
 						"data": "left-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,
@@ -219,6 +222,7 @@
 						"data": "right-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,
@@ -261,6 +265,7 @@
 						"data": "top-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 400.0,
@@ -303,6 +308,7 @@
 						"data": "bottom-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 399.0,
@@ -345,6 +351,7 @@
 						"data": "left-third"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,
@@ -387,6 +394,7 @@
 						"data": "centre-third"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,
@@ -429,6 +437,7 @@
 						"data": "right-third"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,
@@ -471,6 +480,7 @@
 						"data": "maximise"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 799.0,

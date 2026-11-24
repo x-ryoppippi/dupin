@@ -4,7 +4,8 @@ Window Management is an extension bundled with Dupin. It is off until you turn
 it on: open Settings → Extensions and switch on **Window Management**. Then
 type a command name such as `Left Half`, `Centre Third` or `Maximise` in the
 main search, or `window` and Space to list them all. Enter moves and resizes the
-focused window of the app that was in front when you opened the panel.
+focused window of the app that was in front when you opened the panel, then
+hides Dupin.
 
 | Command                               | Puts the window                                                                                            |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |

@@ -108,6 +108,7 @@
 						"data": "next-display"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 300.0,
@@ -127,6 +128,7 @@
 						"data": "next-display"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 300.0,
@@ -146,6 +148,7 @@
 						"data": "next-display"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 300.0,
@@ -188,6 +191,7 @@
 						"data": "left-half"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 780.0,
@@ -230,6 +234,7 @@
 						"data": "next-display"
 					}
 				},
+				"panel": "hide",
 				"windows": [
 					{
 						"height": 580.0,
