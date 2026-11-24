@@ -179,9 +179,10 @@ pub struct Replies {
     pub files: BTreeMap<String, FilesReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exec: Vec<ExecReply>,
-    /// The package's storage when the fixture starts, key by key.
-    #[serde(skip_serializing_if = "Map::is_empty")]
-    pub storage: Map<String, Value>,
+    /// The data of each record the package's storage holds when the fixture starts, oldest
+    /// first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub storage: Vec<Value>,
     /// What a clipboard read returns: content such as `{ "type": "text", "text": … }`, or
     /// `null` for an empty clipboard. Left out, reading fails as `unavailable`.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "present")]

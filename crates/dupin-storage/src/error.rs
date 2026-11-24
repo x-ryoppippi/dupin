@@ -24,6 +24,12 @@ pub enum Error {
         count: usize,
         limit: usize,
     },
+    /// [`crate::Store::put_within_limits`] found no room: storing the record would leave the
+    /// namespace holding `entries` records and `bytes` bytes, past its limits.
+    QuotaExceeded {
+        entries: usize,
+        bytes: u64,
+    },
     /// The item failed authentication or couldn't be parsed; it has been dropped.
     Corrupt(String),
     NotFound,
@@ -42,6 +48,10 @@ impl fmt::Display for Error {
             Error::InvalidLimits(why) => write!(f, "invalid storage limits: {why}"),
             Error::TooLarge { bytes, limit } => write!(f, "{bytes} bytes is over the {limit}-byte limit"),
             Error::TooManyBlobs { count, limit } => write!(f, "{count} blobs is over the limit of {limit}"),
+            Error::QuotaExceeded { entries, bytes } => write!(
+                f,
+                "storing it would leave {entries} records and {bytes} bytes, past the namespace's limits"
+            ),
             Error::Corrupt(what) => write!(f, "{what} is corrupt and was dropped"),
             Error::NotFound => f.write_str("no such stored item"),
             Error::Json(error) => write!(f, "couldn't encode the record: {error}"),

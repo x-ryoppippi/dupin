@@ -9,12 +9,15 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 dupin-broker = { path = "../dupin-broker" }
 dupin-extension-host = { path = "../dupin-extension-host" }
 dupin-extension-http = { path = "../dupin-extension-http" }
 dupin-host-services = { path = "../dupin-host-services" }
+dupin-storage = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }

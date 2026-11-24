@@ -1,0 +1,37 @@
+# autofix.ci only accepts fixes from a workflow with this exact name.
+name: autofix.ci
+
+on:
+  pull_request:
+    # Only these can move Rune's pin away from Cargo.lock or its hash in nix/cargo-vendor.nix.
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - nix/cargo-vendor.nix
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # setup-nix's Hestia cache checks for evicted packs up front.
+  actions: read
+
+jobs:
+  rune:
+    # Neither cargo nor fetching Rune depends on the flake's aarch64-darwin packages.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: autofix
+
+      - run: nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/update-rune.nu
+
+      - uses: autofix-ci/action@c5b2d67aa2274e7b5a18224e8171550871fc7e4a # v1.3.4
