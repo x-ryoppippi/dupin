@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use crate::Error;
 use crate::source::{is_full_commit, valid_rev};
 use crate::tree::{Listing, MAX_FILES, MAX_PATH_BYTES, MAX_TOTAL_BYTES, Stage};
+use crate::version::newest_version;
 
 /// How Dupin runs `git`.
 #[derive(Clone, Debug)]
@@ -77,6 +78,7 @@ impl Limits<'_> {
 /// One `ls-tree -l -z` record: mode, type, a SHA-256 object id and a padded size around a path.
 const LS_TREE_RECORD_BYTES: u64 = MAX_PATH_BYTES as u64 + 128;
 
+#[derive(Debug)]
 pub(crate) struct Fetched {
     pub commit: String,
     /// The tag or branch the commit came from, when the request named one or none.
@@ -107,6 +109,23 @@ impl Git {
         command
     }
 
+    /// Fails before anything runs when `git` is missing, or is the macOS stand-in that would
+    /// open the Command Line Tools installer instead of fetching.
+    fn check_installed(&self, url: &str) -> Result<(), Error> {
+        let missing = |why: String| {
+            Error::new("git-unavailable", format!("{url} is fetched with Git, but {why}")).hint(GIT_HINT)
+        };
+        let Some(program) = find_program(&self.program, std::env::var_os("PATH")) else {
+            return Err(missing(format!("`{}` isn't installed", self.program.display())));
+        };
+        if cfg!(target_os = "macos") && needs_developer_tools(&program, developer_dir) {
+            return Err(missing(
+                "this Mac has no Git: /usr/bin/git only offers to install the Command Line Tools".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn run(
         &self,
         mut command: Command,
@@ -121,7 +140,7 @@ impl Git {
                 "git-unavailable",
                 format!("couldn't run `{}`: {error}", self.program.display()),
             )
-            .hint("Install Git (for example with `xcode-select --install`), or install from a local folder.")
+            .hint(GIT_HINT)
         })?;
         let writer = input.and_then(|bytes| {
             let mut stdin = child.stdin.take()?;
@@ -275,6 +294,7 @@ impl Git {
                 "is not a Git source Dupin can fetch",
             ));
         }
+        self.check_installed(url)?;
         self.init(repo)?;
         let rev = match rev {
             Some(rev) => Some(rev.to_owned()),
@@ -429,6 +449,48 @@ impl Git {
     }
 }
 
+const GIT_HINT: &str = "Install from `github:owner/repo` or a folder, which need no Git, or install Git (for example with `xcode-select --install`).";
+
+/// Where `PATH` finds `program`, as the shell would; a path with a `/` is taken as it is.
+fn find_program(program: &Path, path: Option<OsString>) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let executable = |candidate: &Path| {
+        candidate
+            .metadata()
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    };
+    if program.components().count() > 1 {
+        return executable(program).then(|| program.to_owned());
+    }
+    std::env::split_paths(&path?)
+        .map(|dir| dir.join(program))
+        .find(|candidate| executable(candidate))
+}
+
+/// Whether `program` is the `/usr/bin/git` stub macOS ships, with no developer directory behind
+/// it to run the real Git from.
+fn needs_developer_tools(program: &Path, developer_dir: impl FnOnce() -> Option<PathBuf>) -> bool {
+    let program = program.canonicalize().unwrap_or_else(|_| program.to_owned());
+    program == Path::new("/usr/bin/git")
+        && !developer_dir().is_some_and(|dir| dir.join("usr/bin/git").is_file())
+}
+
+/// The developer directory the stub would run Git from, found the way `xcode-select -p` finds
+/// it, without running the stub.
+fn developer_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("DEVELOPER_DIR").filter(|dir| !dir.is_empty()) {
+        return Some(dir.into());
+    }
+    let output = Command::new("/usr/bin/xcode-select")
+        .arg("--print-path")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let printed = String::from_utf8(output.stdout).ok()?;
+    (output.status.success() && !printed.trim().is_empty()).then(|| printed.trim().into())
+}
+
 /// The bytes under `path`, counting what can be read.
 fn size_of(path: &Path) -> u64 {
     let Ok(metadata) = path.symlink_metadata() else {
@@ -447,82 +509,9 @@ fn size_of(path: &Path) -> u64 {
         .unwrap_or(0)
 }
 
-/// The highest `1.2.3` or `v1.2.3` tag; a pre-release (`v2.0.0-beta.1`) ranks below its release.
-fn newest_version(tags: &[String]) -> Option<&str> {
-    tags.iter()
-        .filter_map(|tag| version_key(tag).map(|key| (key, tag)))
-        .max_by(|(a, _), (b, _)| a.cmp(b))
-        .map(|(_, tag)| tag.as_str())
-}
-
-/// One dot-separated pre-release identifier, ordered as SemVer orders them: numbers by value,
-/// and below any name.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum PreRelease {
-    Number(u64),
-    Name(String),
-}
-
-fn version_key(tag: &str) -> Option<(Vec<u64>, bool, Vec<PreRelease>)> {
-    let version = tag.strip_prefix(['v', 'V']).unwrap_or(tag);
-    let (core, pre) = match version.split_once('-') {
-        Some((core, pre)) => (core, Some(pre)),
-        None => (version, None),
-    };
-    let mut parts = core
-        .split('.')
-        .map(|part| {
-            (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-                .then(|| part.parse().ok())
-                .flatten()
-        })
-        .collect::<Option<Vec<u64>>>()?;
-    if parts.is_empty() || parts.len() > 4 {
-        return None;
-    }
-    parts.resize(4, 0);
-    let release = pre.is_none();
-    let pre = pre
-        .unwrap_or_default()
-        .split('.')
-        .filter(|part| !part.is_empty())
-        .map(|part| match part.parse() {
-            Ok(number) if part.bytes().all(|byte| byte.is_ascii_digit()) => PreRelease::Number(number),
-            _ => PreRelease::Name(part.to_owned()),
-        })
-        .collect();
-    Some((parts, release, pre))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_newest_version_tag_wins_over_names_and_pre_releases() {
-        let tags: Vec<String> = [
-            "v1.2.0",
-            "v1.10.0",
-            "latest",
-            "v2.0.0-beta.1",
-            "1.9",
-            "v1.10.0-rc.1",
-        ]
-        .map(str::to_owned)
-        .into();
-        assert_eq!(newest_version(&tags), Some("v2.0.0-beta.1"));
-        let tags: Vec<String> = ["v1.2.0", "v1.10.0", "nightly"].map(str::to_owned).into();
-        assert_eq!(newest_version(&tags), Some("v1.10.0"));
-        let tags: Vec<String> = ["v1.10.0-rc.1", "v1.10.0"].map(str::to_owned).into();
-        assert_eq!(newest_version(&tags), Some("v1.10.0"));
-        assert_eq!(newest_version(&["nightly".to_owned()]), None);
-        let tags: Vec<String> = ["v1.0.0-rc.9", "v1.0.0-rc.10", "v1.0.0-rc"]
-            .map(str::to_owned)
-            .into();
-        assert_eq!(newest_version(&tags), Some("v1.0.0-rc.10"));
-        let tags: Vec<String> = ["v1.0.0-alpha.beta", "v1.0.0-alpha.1"].map(str::to_owned).into();
-        assert_eq!(newest_version(&tags), Some("v1.0.0-alpha.beta"));
-    }
 
     fn fake_git(script: &str) -> (tempfile::TempDir, Git) {
         use std::os::unix::fs::PermissionsExt;
@@ -536,6 +525,38 @@ mod tests {
             ..Git::default()
         };
         (dir, git)
+    }
+
+    #[test]
+    fn the_macos_git_stub_counts_as_missing_without_developer_tools() {
+        let tools = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tools.path().join("usr/bin")).unwrap();
+        std::fs::write(tools.path().join("usr/bin/git"), "").unwrap();
+        let stub = Path::new("/usr/bin/git");
+        assert!(needs_developer_tools(stub, || None));
+        assert!(needs_developer_tools(stub, || Some("/nowhere".into())));
+        assert!(!needs_developer_tools(stub, || Some(tools.path().to_owned())));
+        assert!(!needs_developer_tools(&tools.path().join("usr/bin/git"), || None));
+    }
+
+    #[test]
+    fn git_is_looked_up_on_path_without_running_it() {
+        let (dir, git) = fake_git("exit 1");
+        assert_eq!(
+            find_program(Path::new("git"), Some(dir.path().as_os_str().to_owned())),
+            Some(git.program.clone())
+        );
+        assert_eq!(find_program(Path::new("git"), Some("/nowhere".into())), None);
+        assert_eq!(find_program(Path::new("git"), None), None);
+        let missing = Git {
+            program: dir.path().join("absent"),
+            ..git
+        };
+        let error = missing
+            .resolve(&dir.path().join("repo.git"), "file:///x", None)
+            .unwrap_err();
+        assert_eq!(error.code, "git-unavailable", "{error}");
+        assert!(!dir.path().join("repo.git").exists());
     }
 
     #[test]

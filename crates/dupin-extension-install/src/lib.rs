@@ -1,12 +1,14 @@
-//! Installs Dupin extension packages from Git or a local folder into the extensions directory,
+//! Installs Dupin extension packages from GitHub, Git or a local folder into the extensions directory,
 //! pins each one in `extensions.lock`, and detects a package whose files changed after install.
 //!
 //! The launcher calls [`Integrity::check`] while it scans the extensions directory; `dupin ext`
 //! drives an [`Installer`]; the capability broker reads [`grants::effective`]. Nothing here runs
-//! package code, a package manager, or anything a repository supplies.
+//! package code, a package manager, or anything a repository supplies, and a `github:` source
+//! needs no Git.
 
 mod error;
 mod git;
+mod github;
 pub mod grants;
 mod hash;
 mod integrity;
@@ -14,13 +16,16 @@ mod lock;
 mod manifest;
 mod place;
 mod source;
+mod tarball;
 mod tree;
+mod version;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub use error::Error;
 pub use git::Git;
+pub use github::GitHub;
 pub use hash::content_hash;
 pub use integrity::Integrity;
 pub use lock::{Entry, LOCK_FILE, Lock};
@@ -42,7 +47,9 @@ pub struct Installer {
     pub extensions: PathBuf,
     /// `extensions.lock` in Dupin's data directory.
     pub lock: PathBuf,
+    /// For Git URLs other than `github:`.
     pub git: Git,
+    pub github: GitHub,
 }
 
 /// What an install, update or sync did to one package.
@@ -223,21 +230,31 @@ impl Installer {
 
     fn place(&self, target: Target<'_>, taken: Taken<'_>) -> Result<Change, Error> {
         let stage = Stage::new(&self.extensions, "install")?;
-        let fetched = match (&target.source, target.source.git_url()) {
-            (Source::Path(folder), _) => {
+        // Downloads go outside the extensions folder, so the launcher's watcher doesn't rescan
+        // on every object Git writes.
+        let fetched = match &target.source {
+            Source::Path(folder) => {
                 copy_folder(folder, &stage)?;
                 None
             }
-            (_, Some(url)) => {
-                // Outside the extensions folder, so the launcher's watcher doesn't rescan on
-                // every object Git writes.
+            Source::GitHub { owner, repo, rev } => {
+                let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
+                let repo = github::Repo {
+                    owner,
+                    name: repo,
+                    scratch: &scratch.root,
+                };
+                let fetched = self.github.resolve(&repo, rev.as_deref())?;
+                self.github.export(&repo, &fetched.commit, &stage)?;
+                Some(fetched)
+            }
+            Source::Git { url, rev } => {
                 let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
                 let repo = scratch.root.join("repo.git");
-                let fetched = self.git.resolve(&repo, &url, target.source.rev())?;
+                let fetched = self.git.resolve(&repo, url, rev.as_deref())?;
                 self.git.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
-            (_, None) => unreachable!("only a folder source has no Git URL"),
         };
         let staged = stage.package();
         std::fs::create_dir_all(&staged)
