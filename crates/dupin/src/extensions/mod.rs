@@ -408,7 +408,7 @@ fn revision(folder: &Path, entry: &Path) -> Result<Vec<FileStamp>, Diagnostic> {
         Ok(vec![module_stamp(folder, entry)?])
     } else {
         stamps(
-            dupin_js_runtime::source_files(folder)?
+            dupin_js_runtime::source_files(folder, &entry.to_string_lossy())?
                 .into_iter()
                 .map(|(_, path)| path),
         )
@@ -886,7 +886,7 @@ pub(crate) mod tests {
         let problems = catalog.problems.join("\n");
         assert!(problems.contains("d-broken: main.js:1:"), "{problems}");
         assert!(
-            problems.contains("e-no-main: main.js: is not a JavaScript file in the package folder"),
+            problems.contains("e-no-main: main.js: is not a module in the package folder"),
             "{problems}"
         );
         assert_eq!(catalog.problems.len(), 2, "{problems}");

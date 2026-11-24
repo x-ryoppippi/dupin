@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+dupin-host-services = { path = "../dupin-host-services" }
 libc = { workspace = true }
 rune = { workspace = true }
 objc2 = { workspace = true }
@@ -19,6 +20,7 @@ objc2-foundation = { workspace = true, features = [
 	"NSArray",
 	"NSBundle",
 	"NSCalendar",
+	"NSData",
 	"NSDate",
 	"NSDateFormatter",
 	"NSDateIntervalFormatter",

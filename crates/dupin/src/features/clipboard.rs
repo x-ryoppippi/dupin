@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use dupin_core::clipboard::ClipboardProvider;
 use dupin_core::{CommandError, CommandSpec, Config, QueryEligibility};
+use dupin_mac::privacy::Permission;
 
-use super::Feature;
+use super::{Capability, Feature, PermissionUse};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::ui::Ui;
 
@@ -13,6 +14,13 @@ pub(super) const FEATURE: Feature = Feature {
     configure,
     start,
     reload,
+    permissions: &[PermissionUse {
+        capability: Capability::Permission(Permission::Pasteboard),
+        label: "clipboard history",
+        enabled: |config| config.clipboard.enabled,
+        // `clip` offers the request itself, so turning the history on only checks access.
+        request_on_enable: false,
+    }],
     ..Feature::EMPTY
 };
 

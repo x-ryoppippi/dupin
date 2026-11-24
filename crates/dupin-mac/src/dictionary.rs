@@ -3,6 +3,8 @@
 use std::ptr::NonNull;
 
 use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_host_services::ServiceError;
+use dupin_host_services::dictionary::{Dictionaries, Entry};
 use objc2_core_foundation::{CFRange, CFRetained, CFString};
 
 mod layout;
@@ -78,6 +80,23 @@ impl Provider for DictionaryProvider {
             emit(Batch::from(vec![item]).with_detail(id, detail));
         }
         Ok(())
+    }
+}
+
+/// The extension `dictionary` capability, laid out as the Dictionary feature shows it.
+impl Dictionaries for DictionaryProvider {
+    fn lookup(&self, term: &str, dictionaries: Option<&[String]>) -> Result<Vec<Entry>, ServiceError> {
+        if dictionaries.is_some() {
+            return Err(ServiceError::Unsupported(
+                "macOS looks terms up in the dictionaries turned on in Dictionary's settings, \
+                 not in named ones"
+                    .into(),
+            ));
+        }
+        Ok((self.lookup)(term)
+            .map(|definition| layout::structure(term, &definition))
+            .into_iter()
+            .collect())
     }
 }
 
@@ -175,6 +194,36 @@ mod tests {
             panic!("expected one paragraph: {:?}", detail.body.blocks)
         };
         assert_eq!(text.text, "The occurrence of events by chance.");
+    }
+
+    #[test]
+    fn the_extension_service_returns_the_layout_as_data() {
+        use dupin_host_services::dictionary::{Dictionary, Lookup};
+
+        let service = Dictionary::new(DictionaryProvider::fixtures());
+        let [entry] = service
+            .lookup(&Lookup::new("serendipity", None).unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(entry.headword, "serendipity");
+        assert_eq!(entry.pronunciation.as_deref(), Some("ˌsɛr(ə)nˈdɪpɪti"));
+        assert_eq!(entry.groups[0].part_of_speech.as_deref(), Some("Noun"));
+        assert_eq!(
+            entry.groups[0].senses[0].examples,
+            ["a moment of pure serendipity."]
+        );
+        assert_eq!(entry.sections[0].title, "Origin");
+        assert!(
+            service
+                .lookup(&Lookup::new("unknown", None).unwrap())
+                .unwrap()
+                .is_empty()
+        );
+        assert!(matches!(
+            service.lookup(&Lookup::new("run", Some(vec!["Oxford".into()])).unwrap()),
+            Err(ServiceError::Unsupported(_))
+        ));
     }
 
     #[test]
