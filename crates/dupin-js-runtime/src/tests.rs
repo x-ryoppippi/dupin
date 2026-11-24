@@ -695,3 +695,51 @@ fn sources_from_another_process_meet_the_same_limits() {
         "too-many-files"
     );
 }
+
+#[test]
+fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
+    let source = "const loaded = Date.now();\n\
+        export function search() {\n\
+        \tconst made = new Date();\n\
+        \tconst parts = [loaded, made.getTime(), made instanceof Date, made.constructor === Date, new Date(0).toISOString(), Date(), Math.random(), Math.random()];\n\
+        \treturn [{ title: parts.join('|') }];\n\
+        }\n";
+    let (_folder, loaded) = package(&[("main.js", source)]);
+    let package = loaded.unwrap();
+    let environment = Environment {
+        now: 1_767_225_600_000,
+        seed: 7,
+    };
+    let title = |environment: Option<&Environment>| {
+        let rows = package
+            .search_in("", MAX_ROWS, environment, timeout(DEADLINE))
+            .unwrap();
+        let View::Text { title, .. } = &rows[0].view else {
+            panic!("expected a text row");
+        };
+        title.clone()
+    };
+    let fixed = title(Some(&environment));
+    assert_eq!(fixed, title(Some(&environment)));
+    let parts: Vec<&str> = fixed.split('|').collect();
+    assert_eq!(
+        &parts[..5],
+        [
+            "1767225600000",
+            "1767225600000",
+            "true",
+            "true",
+            "1970-01-01T00:00:00.000Z"
+        ]
+    );
+    assert!(parts[5].contains("2026"), "{fixed}");
+    assert_ne!(parts[6], parts[7]);
+    assert_ne!(
+        fixed,
+        title(Some(&Environment {
+            seed: 8,
+            ..environment
+        }))
+    );
+    assert_ne!(title(None).split('|').next(), Some("1767225600000"));
+}

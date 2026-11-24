@@ -1,10 +1,12 @@
-//! What an extension author runs on their own machine: `dupin ext new`, `dupin ext build` and
-//! `dupin ext dev`. Nothing here runs inside the launcher; the launcher only ever sees the
-//! JavaScript these commands produce. Whether that JavaScript loads is decided by the launcher's
+//! What an extension author runs on their own machine: `dupin ext new`, `dupin ext build`,
+//! `dupin ext dev`, and the fixture format `dupin ext test` and `dupin ext snap` replay. Nothing
+//! here runs inside the launcher; the launcher only ever sees the JavaScript these commands
+//! produce. Whether that JavaScript loads is decided by the launcher's
 //! own loader, which callers pass to `build` and `dev` as `validate`.
 
 mod build;
 pub mod dev;
+pub mod fixture;
 mod manifest;
 mod scaffold;
 

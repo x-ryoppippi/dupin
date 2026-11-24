@@ -142,7 +142,11 @@ fn execute(
             return Package::compile(sources, control).map(Outcome::Compiled);
         }
         Call::Check => None,
-        Call::Search { query, limit } => Some((query, limit)),
+        Call::Search {
+            query,
+            limit,
+            environment,
+        } => Some((query, limit, environment)),
     };
     let bytecode = modules
         .into_iter()
@@ -157,6 +161,8 @@ fn execute(
     let package = unsafe { Package::from_compiled(entry, bytecode) };
     match search {
         None => package.check(control).map(|()| Outcome::Checked),
-        Some((query, limit)) => package.search(&query, limit as usize, control).map(Outcome::Rows),
+        Some((query, limit, environment)) => package
+            .search_in(&query, limit as usize, environment.as_ref(), control)
+            .map(Outcome::Rows),
     }
 }

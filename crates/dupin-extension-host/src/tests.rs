@@ -128,6 +128,30 @@ fn pid_is_sandboxed(pid: u32) -> bool {
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
 
 #[test]
+fn a_fixed_environment_reaches_the_guest_through_the_helper() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let clock =
+        package("export const search = () => [{ title: `${new Date().getHours()} ${Math.random() < 1}` }];");
+    let environment = dupin_js_runtime::Environment {
+        now: 1_767_225_600_000,
+        seed: 1,
+    };
+    let rows = host
+        .search_in(
+            &clock,
+            "",
+            10,
+            Some(&environment),
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+        )
+        .unwrap();
+    // Midnight UTC is 09:00 in the helper's Asia/Tokyo.
+    assert_eq!(titles(&rows), ["9 true"]);
+}
+
+#[test]
 fn queries_run_in_one_resident_helper() {
     skip_inside_a_sandbox!();
     let host = host();

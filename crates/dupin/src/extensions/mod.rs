@@ -2,6 +2,7 @@
 //! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process.
 //! Guests get the query and return rows; they have no host access.
 
+mod fixtures;
 mod manifest;
 mod provider;
 
@@ -16,6 +17,7 @@ use dupin_extension_host::{Compiled, Host};
 use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::PluginItem;
 
+pub use fixtures::{Snapped, snap, test};
 pub use provider::{ExtensionProvider, QUERY_DEADLINE};
 
 pub(crate) use crate::catalog_watch::Watch;
@@ -63,8 +65,32 @@ impl Extension {
                 "extensions can't open views yet",
             )));
         }
-        host().search(&self.compiled, query, limit, deadline, &is_cancelled)
+        host().search_in(
+            &self.compiled,
+            query,
+            limit,
+            headless_environment(),
+            deadline,
+            &is_cancelled,
+        )
     }
+}
+
+/// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
+/// launcher it starts. A launcher with a window never reads it.
+fn headless_environment() -> Option<&'static dupin_js_runtime::Environment> {
+    static ENVIRONMENT: OnceLock<Option<dupin_js_runtime::Environment>> = OnceLock::new();
+    ENVIRONMENT
+        .get_or_init(|| {
+            if !rune::tooling::is_headless() {
+                return None;
+            }
+            let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+            serde_json::from_str::<dupin_js_runtime::Environment>(&value)
+                .ok()
+                .filter(dupin_js_runtime::Environment::is_valid)
+        })
+        .as_ref()
 }
 
 /// The one extension host every JavaScript extension shares, started on the first query.

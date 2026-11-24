@@ -5,13 +5,13 @@
 
 use std::io::{self, Read, Write};
 
-use dupin_js_runtime::Diagnostic;
+use dupin_js_runtime::{Diagnostic, Environment};
 use dupin_plugin_protocol::PluginItem;
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 /// Comfortably above the largest answer, 50 rows within 256 KiB of text.
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
 /// A package's bytecode, from at most 4 MiB of JavaScript.
@@ -50,6 +50,8 @@ pub enum Call {
     Search {
         query: String,
         limit: u32,
+        /// A fixture's fixed clock and seed; the launcher sends none.
+        environment: Option<Environment>,
     },
 }
 

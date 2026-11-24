@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
+use dupin_js_runtime::{Diagnostic, Environment, RunError, Sources};
 use dupin_plugin_protocol::{self as protocol, PluginItem};
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -198,10 +198,24 @@ impl Host {
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<PluginItem>, RunError> {
+        self.search_in(package, query, limit, None, deadline, is_cancelled)
+    }
+
+    /// [`Host::search`] with the guest's clock and `Math.random` fixed by `environment`.
+    pub fn search_in(
+        &self,
+        package: &Compiled,
+        query: &str,
+        limit: usize,
+        environment: Option<&Environment>,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Vec<PluginItem>, RunError> {
         let limit = limit.min(dupin_js_runtime::MAX_ROWS) as u32;
         let call = Call::Search {
             query: query.into(),
             limit,
+            environment: environment.copied(),
         };
         match self.call(Request::run(package, call), deadline, is_cancelled)? {
             (Answer::Rows { items }, _) => {

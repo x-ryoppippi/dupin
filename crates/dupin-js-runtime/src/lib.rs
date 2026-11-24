@@ -6,6 +6,7 @@
 //! types of TypeScript modules first, is the extension host's work.
 
 mod diagnostic;
+mod environment;
 mod output;
 mod package;
 mod typescript;
@@ -23,6 +24,7 @@ use rquickjs::promise::PromiseState;
 use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runtime, Value, WriteOptions};
 
 pub use diagnostic::Diagnostic;
+pub use environment::Environment;
 pub use package::{Sources, is_module, is_source_name, source_files};
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
@@ -129,8 +131,23 @@ impl Package {
 
     /// Calls `search(query, { limit })` and reads its answer. At most `limit` rows are kept.
     pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<PluginItem>, RunError> {
+        self.search_in(query, limit, None, control)
+    }
+
+    /// [`Package::search`], with the clock and `Math.random` fixed by `environment` before the
+    /// module loads.
+    pub fn search_in(
+        &self,
+        query: &str,
+        limit: usize,
+        environment: Option<&Environment>,
+        control: Control,
+    ) -> Result<Vec<PluginItem>, RunError> {
         let sandbox = Sandbox::new(self, control)?;
         sandbox.run(|ctx| {
+            if let Some(environment) = environment {
+                environment::install(ctx, environment)?;
+            }
             let search = sandbox.search_function(ctx)?;
             let options = Object::new(ctx.clone())?;
             options.set("limit", limit.min(MAX_ROWS) as u32)?;
