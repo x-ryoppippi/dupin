@@ -9,15 +9,15 @@ use driver.nu [
     wait-condition
     wait-for-log
 ]
-use ../e2e-file-fixtures.nu viewer-running
+use ../e2e-file-fixtures.nu [documents trashed viewer-running]
 use ../e2e-state.nu [has-match is-focused-query]
 
 export def file-actions-stage [out: path] {
     let found = {|r| has-match $r }
     let log = $out | path join dupin.log
     let root = $out | path join fixtures
-    let open_path = $root | path join open-me.dupine2e
-    let trash_path = $root | path join trash-me.dupine2e
+    let open_path = documents $out | path join open-me.dupine2e
+    let trash_path = documents $out | path join trash-me.dupine2e
     try {
         file-search $out open-me $found
         let loading = log-count $log 'dupin-trace: action-screen applications loading'
@@ -87,9 +87,9 @@ export def file-actions-stage [out: path] {
         press $out file-actions-trash-select down | ignore
         press $out file-actions-trash-confirm return | ignore
         wait-condition 'fixture moving to the Trash' {
-            not ($trash_path | path exists) and (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | length) == 1
+            not ($trash_path | path exists) and (trashed $out | length) == 1
         }
-        let moved = glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | first
+        let moved = trashed $out | first
         if (open --raw $moved | hash sha256) != (open --raw ($root | path join trash.sha256)) {
             error make {msg: 'The Trash item is not the owned fixture'}
         }
@@ -168,7 +168,7 @@ def file-row-name [out: path, name: string]: nothing -> string {
 }
 
 def file-parent [out: path]: nothing -> string {
-    let parent = $out | path join fixtures
+    let parent = documents $out
     let parent = if ($parent | str starts-with $env.HOME) {
         $parent | str replace $env.HOME '~'
     } else {
