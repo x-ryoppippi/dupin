@@ -1,6 +1,7 @@
 //! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
-//! JavaScript package run by QuickJS-ng in the sandboxed extension host process, or a Wasm
-//! guest. Guests get the query and return views; neither runtime gives them any host access.
+//! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process,
+//! or a Wasm guest. Guests get the query and return views; neither runtime gives them any host
+//! access.
 
 mod manifest;
 mod provider;
@@ -13,8 +14,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::Page;
-use dupin_extension_host::Host;
-use dupin_js_runtime::{Diagnostic, Package, RunError};
+use dupin_extension_host::{Compiled, Host};
+use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 
@@ -38,7 +39,8 @@ pub struct Extension {
 /// package.json's `dupin` key declares a JavaScript package; extension.toml a Wasm module.
 pub(crate) enum Guest {
     Wasm(GuestModule),
-    JavaScript(Package),
+    /// The bytecode the extension host compiled, which only the host ever loads.
+    JavaScript(Compiled),
 }
 
 impl std::fmt::Debug for Extension {
@@ -240,6 +242,9 @@ struct LoadedExtension {
     entry: PathBuf,
     /// Every file the guest was built from: the Wasm module, or each JavaScript file.
     files: Vec<FileStamp>,
+    /// What a JavaScript package's bytecode was compiled from, so a revision whose files are
+    /// unchanged reuses it.
+    content: Option<blake3::Hash>,
     extension: Arc<Extension>,
 }
 
@@ -275,45 +280,97 @@ fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtens
 fn load_with(
     folder: &Path,
     previous: Option<LoadedExtension>,
-    build: impl FnOnce(&Path, &str, &[FileStamp]) -> Result<Guest, Diagnostic>,
+    build: impl FnOnce(&Path, &str, &[FileStamp], Option<&LoadedExtension>) -> Result<Built, Diagnostic>,
 ) -> Result<LoadedExtension, Diagnostic> {
     let manifests = manifest::Stamps::read(folder)?;
-    if let Some(previous) = previous
-        && previous.manifests == manifests
-        && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files)
-    {
-        return Ok(previous);
-    }
+    let previous = match previous {
+        Some(previous)
+            if previous.manifests == manifests
+                && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files) =>
+        {
+            return Ok(previous);
+        }
+        previous => previous,
+    };
 
     let manifest = manifest::read(&manifests)?;
     let entry = PathBuf::from(&manifest.entry);
     let files = revision(folder, &entry)?;
-    let guest = build(folder, &manifest.entry, &files)?;
+    let built = build(folder, &manifest.entry, &files, previous.as_ref())?;
     Ok(LoadedExtension {
         manifests,
         entry,
         files,
+        content: built.content,
         extension: Arc::new(Extension {
             id: manifest.id,
             folder_name: folder_name(folder).into_owned(),
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
-            guest,
+            guest: built.guest,
             requests: AtomicU64::new(0),
         }),
     })
 }
 
-fn build_guest(folder: &Path, entry_name: &str, files: &[FileStamp]) -> Result<Guest, Diagnostic> {
+struct Built {
+    guest: Guest,
+    content: Option<blake3::Hash>,
+}
+
+fn build_guest(
+    folder: &Path,
+    entry_name: &str,
+    files: &[FileStamp],
+    previous: Option<&LoadedExtension>,
+) -> Result<Built, Diagnostic> {
     if !is_wasm(Path::new(entry_name)) {
-        return Package::load(folder, entry_name).map(Guest::JavaScript);
+        let sources = Sources::read(folder, entry_name)?;
+        let content = content_hash(&sources);
+        let unchanged = previous
+            .filter(|previous| previous.content == Some(content))
+            .and_then(|previous| match &previous.extension.guest {
+                Guest::JavaScript(compiled) => Some(compiled.clone()),
+                Guest::Wasm(_) => None,
+            });
+        let compiled = match unchanged {
+            Some(compiled) => compiled,
+            None => host()
+                .compile(&sources, Instant::now() + QUERY_DEADLINE, &|| false)
+                .map_err(|error| match error {
+                    RunError::Failed(diagnostic) => diagnostic,
+                    RunError::Cancelled => {
+                        Diagnostic::new("host-error", "the extension host cancelled compiling the package")
+                            .file(sources.entry())
+                    }
+                })?,
+        };
+        return Ok(Built {
+            guest: Guest::JavaScript(compiled),
+            content: Some(content),
+        });
     }
     let bytes = read_capped(&files[0].path, MAX_MODULE_BYTES)
         .map_err(|error| Diagnostic::new("invalid-module", error).file(entry_name))?;
-    GuestModule::load(&bytes)
-        .map(Guest::Wasm)
-        .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))
+    let module = GuestModule::load(&bytes)
+        .map_err(|error| Diagnostic::new("invalid-module", error.to_string()).file(entry_name))?;
+    Ok(Built {
+        guest: Guest::Wasm(module),
+        content: None,
+    })
+}
+
+/// Names and texts with their lengths, so moving text between files changes the hash.
+fn content_hash(sources: &Sources) -> blake3::Hash {
+    let mut hasher = blake3::Hasher::new();
+    let parts =
+        std::iter::once(sources.entry()).chain(sources.files().flat_map(|(name, source)| [name, source]));
+    for part in parts {
+        hasher.update(&(part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    hasher.finalize()
 }
 
 fn is_wasm(entry: &Path) -> bool {
@@ -709,6 +766,7 @@ pub(crate) mod tests {
 
     #[test]
     fn javascript_and_wasm_extensions_load_side_by_side() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let fixture = folder();
         let root = fixture.path();
         install(root, "a-wasm", &manifest("wasm", "wa"), Some(&guest("{}")));
@@ -796,6 +854,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_wasm_manifest_added_beside_a_package_makes_it_ambiguous() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let fixture = folder();
         let root = fixture.path();
         install_javascript(
@@ -819,6 +878,7 @@ pub(crate) mod tests {
 
     #[test]
     fn an_edit_while_a_guest_is_read_is_picked_up_by_the_next_scan() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let fixture = folder();
         let root = fixture.path();
         install_javascript(
@@ -841,8 +901,8 @@ pub(crate) mod tests {
         ] {
             let folder = root.join(name);
             let edited = folder.join(file);
-            let loaded = load_with(&folder, None, |folder, entry, files| {
-                let guest = build_guest(folder, entry, files);
+            let loaded = load_with(&folder, None, |folder, entry, files, previous| {
+                let guest = build_guest(folder, entry, files, previous);
                 fs::write(&edited, edit).unwrap();
                 guest
             })

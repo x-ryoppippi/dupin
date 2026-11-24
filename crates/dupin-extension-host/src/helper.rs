@@ -1,8 +1,7 @@
 //! The helper process: Dupin's own executable, started with [`crate::FLAG`]. It reads
-//! messages on standard input, a Unix socket whose other end Dupin holds, and runs packages
-//! there with `dupin-js-runtime`.
+//! messages on standard input, a Unix socket whose other end Dupin holds, and compiles and runs
+//! packages there with `dupin-js-runtime`.
 
-use std::collections::HashMap;
 use std::io;
 use std::os::fd::FromRawFd;
 use std::os::unix::net::UnixStream;
@@ -11,7 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Control, Diagnostic, Package, RunError};
+use dupin_js_runtime::{Control, Diagnostic, Package, RunError, Sources};
+use dupin_plugin_protocol::PluginItem;
 
 use crate::sandbox;
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -59,38 +59,47 @@ fn run(socket: UnixStream) -> io::Result<()> {
         },
         &[],
     )?;
-    let mut packages = HashMap::new();
     for (message, tail) in received {
-        match message {
-            ToHelper::Load {
-                package,
-                entry,
-                modules,
-            } => {
-                packages.insert(package, rebuild(entry, modules, tail)?);
+        let ToHelper::Run {
+            id,
+            deadline_ms,
+            entry,
+            modules,
+            call,
+        } = message
+        else {
+            continue;
+        };
+        let modules = wire::split(modules, &tail)?;
+        let cancelled = cancelled.clone();
+        let control = Control {
+            deadline: Instant::now() + Duration::from_millis(deadline_ms),
+            is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed) == id),
+        };
+        let answer = match execute(entry, modules, call, control) {
+            Ok(Outcome::Compiled(package)) => {
+                let (modules, tail) = wire::spans(package.modules());
+                let bytes: usize = tail.iter().map(|part| part.len()).sum();
+                if bytes <= wire::MAX_TAIL_BYTES {
+                    let answer = Answer::Compiled { modules };
+                    wire::write(&mut writer, &FromHelper::Done { id, answer }, &tail)?;
+                    continue;
+                }
+                Answer::Failed {
+                    diagnostic: Diagnostic::new(
+                        "package-too-large",
+                        "the compiled package is larger than the extension host can return",
+                    )
+                    .file(package.entry())
+                    .hint("Bundle and minify the extension, and leave out code it doesn't run."),
+                }
             }
-            ToHelper::Unload { package } => {
-                packages.remove(&package);
-            }
-            ToHelper::Run {
-                id,
-                package,
-                deadline_ms,
-                call,
-            } => {
-                let answer = match packages.get(&package) {
-                    Some(package) => execute(package, call, id, deadline_ms, &cancelled),
-                    None => Answer::Failed {
-                        diagnostic: Diagnostic::new(
-                            "host-error",
-                            "the package wasn't sent to the extension host",
-                        ),
-                    },
-                };
-                wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
-            }
-            ToHelper::Cancel { .. } => {}
-        }
+            Ok(Outcome::Checked) => Answer::Checked,
+            Ok(Outcome::Rows(items)) => Answer::Rows { items },
+            Err(RunError::Cancelled) => Answer::Cancelled,
+            Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
+        };
+        wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
     }
     Ok(())
 }
@@ -111,38 +120,41 @@ fn read(mut socket: UnixStream, cancelled: &AtomicU64, messages: &mpsc::SyncSend
     }
 }
 
-fn rebuild(entry: String, modules: Vec<wire::ModuleSpan>, tail: Vec<u8>) -> io::Result<Package> {
-    let mut bytecode = HashMap::with_capacity(modules.len());
-    let mut rest = &tail[..];
-    for module in modules {
-        let len = module.len as usize;
-        if len > rest.len() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "short package"));
-        }
-        let (bytes, after) = rest.split_at(len);
-        bytecode.insert(module.name, Box::from(bytes));
-        rest = after;
-    }
-    // SAFETY: only Dupin writes to this socket, and it sends bytecode that `Package::load`
-    // compiled, after this helper stated the same engine version in its hello.
-    Ok(unsafe { Package::from_compiled(entry, bytecode) })
+enum Outcome {
+    Compiled(Package),
+    Checked,
+    Rows(Vec<PluginItem>),
 }
 
-fn execute(package: &Package, call: Call, id: u64, deadline_ms: u64, cancelled: &Arc<AtomicU64>) -> Answer {
-    let cancelled = cancelled.clone();
-    let control = Control {
-        deadline: Instant::now() + Duration::from_millis(deadline_ms),
-        is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed) == id),
+fn execute(
+    entry: String,
+    modules: Vec<(String, &[u8])>,
+    call: Call,
+    control: Control,
+) -> Result<Outcome, RunError> {
+    let search = match call {
+        Call::Compile => {
+            let files = modules
+                .into_iter()
+                .map(|(name, source)| (name, source.to_vec()))
+                .collect();
+            let sources = Sources::new(entry, files)?;
+            return Package::compile(sources, control).map(Outcome::Compiled);
+        }
+        Call::Check => None,
+        Call::Search { query, limit } => Some((query, limit)),
     };
-    let result = match call {
-        Call::Check => package.check(control).map(|()| Answer::Checked),
-        Call::Search { query, limit } => package
-            .search(&query, limit as usize, control)
-            .map(|items| Answer::Rows { items }),
-    };
-    match result {
-        Ok(answer) => answer,
-        Err(RunError::Cancelled) => Answer::Cancelled,
-        Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
+    let bytecode = modules
+        .into_iter()
+        .map(|(name, bytes)| (name, Box::from(bytes)))
+        .collect();
+    // SAFETY: only Dupin writes to this socket. The only bytecode it sends is what a `compiled`
+    // answer from a helper of its own build gave it, after that helper stated this engine
+    // version, and it never makes or changes bytecode itself, so these are bytes that
+    // `Package::compile` wrote.
+    let package = unsafe { Package::from_compiled(entry, bytecode) };
+    match search {
+        None => package.check(control).map(|()| Outcome::Checked),
+        Some((query, limit)) => package.search(&query, limit as usize, control).map(Outcome::Rows),
     }
 }

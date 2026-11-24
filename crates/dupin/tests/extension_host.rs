@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use dupin_extension_host::{FLAG, Host};
-use dupin_js_runtime::{DEFAULT_ENTRY, Package};
+use dupin_extension_host::{Compiled, FLAG, Host};
+use dupin_js_runtime::{DEFAULT_ENTRY, Sources};
 use dupin_plugin_protocol::View;
 
 fn host() -> Host {
@@ -22,10 +22,17 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+fn compile(host: &Host, folder: &Path) -> Compiled {
+    let sources = Sources::read(folder, DEFAULT_ENTRY).unwrap();
+    host.compile(&sources, Instant::now() + Duration::from_secs(5), &|| false)
+        .unwrap()
+}
+
 #[test]
 fn the_dupin_executable_serves_as_the_extension_host() {
-    let package = Package::load(&root().join("examples/extensions/word-count-js"), DEFAULT_ENTRY).unwrap();
+    dupin_extension_host::skip_inside_a_sandbox!();
     let host = host();
+    let package = compile(&host, &root().join("examples/extensions/word-count-js"));
     let rows = host
         .search(
             &package,
@@ -51,7 +58,15 @@ fn the_dupin_executable_serves_as_the_extension_host() {
 fn latency_through_the_extension_host() {
     let folder = tempfile::tempdir().unwrap();
     std::fs::write(folder.path().join(DEFAULT_ENTRY), search_source()).unwrap();
-    let package = Package::load(folder.path(), DEFAULT_ENTRY).unwrap();
+    let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
+    let compile_in = |host: &Host| {
+        let started = Instant::now();
+        let package = host
+            .compile(&sources, Instant::now() + Duration::from_secs(2), &|| false)
+            .unwrap();
+        (package, started.elapsed())
+    };
+    let package = compile_in(&host()).0;
     let query = |host: &Host| {
         let started = Instant::now();
         let rows = host
@@ -67,17 +82,27 @@ fn latency_through_the_extension_host() {
         started.elapsed()
     };
 
+    let cold_compile: Vec<_> = (0..100).map(|_| compile_in(&host()).1).collect();
     let cold: Vec<_> = (0..100).map(|_| query(&host())).collect();
     let host = host();
     for _ in 0..50 {
         query(&host);
     }
+    let warm_compile: Vec<_> = (0..200).map(|_| compile_in(&host).1).collect();
     let warm: Vec<_> = (0..2000).map(|_| query(&host)).collect();
     println!(
-        "cold first result (spawn, sandbox, handshake, load, search): {}",
+        "cold compile (spawn, sandbox, handshake, compile, bytecode back): {}",
+        summary(cold_compile)
+    );
+    println!(
+        "cold first result from cached bytecode (spawn, sandbox, handshake, load, search): {}",
         summary(cold)
     );
-    println!("warm query (send, search, reply, validation): {}", summary(warm));
+    println!("compile in a running host: {}", summary(warm_compile));
+    println!(
+        "warm query (send bytecode and query, search, reply, validation): {}",
+        summary(warm)
+    );
     let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v4>::zeroed();
     let pid = host.helper_pid().unwrap() as i32;
     // SAFETY: `usage` is large enough for the RUSAGE_INFO_V4 flavor the call writes.

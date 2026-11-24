@@ -29,6 +29,13 @@ mod platform {
     unsafe extern "C" {
         fn sandbox_init(profile: *const c_char, flags: u64, errorbuf: *mut *mut c_char) -> c_int;
         fn sandbox_free_error(errorbuf: *mut c_char);
+        fn sandbox_check(pid: libc::pid_t, operation: *const c_char, kind: c_int, ...) -> c_int;
+    }
+
+    pub fn inherited() -> bool {
+        // SAFETY: a null operation asks only whether the process is sandboxed, and takes no
+        // other arguments.
+        unsafe { sandbox_check(libc::getpid(), std::ptr::null(), 0) == 1 }
     }
 
     /// Seatbelt's deny-by-default profile, with nothing allowed back: no file, network,
@@ -45,7 +52,7 @@ mod platform {
         if status == 0 {
             return Ok(());
         }
-        let reason = if error.is_null() {
+        let refused = if error.is_null() {
             "the sandbox profile was refused".to_owned()
         } else {
             // SAFETY: a non-null `error` is a NUL-terminated string from sandbox_init.
@@ -54,12 +61,21 @@ mod platform {
             unsafe { sandbox_free_error(error) };
             reason
         };
-        Err(reason)
+        if inherited() {
+            return Err(format!(
+                "Dupin already runs inside another sandbox, which the extension host can't replace ({refused})"
+            ));
+        }
+        Err(refused)
     }
 }
 
 #[cfg(not(target_os = "macos"))]
 mod platform {
+    pub fn inherited() -> bool {
+        false
+    }
+
     /// Without a sandbox the helper would run third-party code with the user's authority, so it
     /// refuses. Linux needs its own confinement (seccomp-bpf with Landlock or namespaces) first.
     pub fn enter() -> Result<(), String> {
@@ -67,4 +83,4 @@ mod platform {
     }
 }
 
-pub use platform::enter;
+pub use platform::{enter, inherited};

@@ -1,7 +1,7 @@
-//! Dupin's side: starts the helper on first use, sends it packages and calls, and stops it
-//! when a call outlives its deadline, ignores a cancellation, outgrows its memory or dies.
+//! Dupin's side: starts the helper on first use, sends it packages to compile and calls to run,
+//! and stops it when a call outlives its deadline, ignores a cancellation, outgrows its memory
+//! or dies.
 
-use std::collections::VecDeque;
 use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -11,10 +11,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Diagnostic, Package, RunError};
+use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::{self as protocol, PluginItem};
 
-use crate::wire::{self, Answer, Call, FromHelper, ModuleSpan, ToHelper};
+use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
 /// How long a call may run past its deadline, or past a cancellation, before the helper is
 /// stopped. The helper's own interrupt normally ends it well inside this.
@@ -26,15 +26,40 @@ const HANDSHAKE: Duration = Duration::from_secs(5);
 /// provider's newer query replaces its older one.
 const MAX_WAITING: usize = 64;
 const IDLE: Duration = Duration::from_secs(120);
-/// Packages, and bytes of their bytecode, kept in the helper between calls.
-const MAX_PACKAGES: usize = 64;
-const MAX_PACKAGE_BYTES: usize = 32 * 1024 * 1024;
-/// The helper's footprint beyond the bytecode it holds: the engine's 16 MiB heap, allocator
-/// overhead past it, the stack and the process itself.
+/// The helper's footprint beyond the package a call carries: the engine's 16 MiB heap,
+/// allocator overhead past it, the stack and the process itself.
 const FOOTPRINT_ALLOWANCE: u64 = 64 * 1024 * 1024;
 
 /// Makes the command that starts a helper; the host connects its standard streams.
 pub type Launcher = Box<dyn Fn() -> io::Result<Command> + Send + Sync>;
+
+/// A package's bytecode, as the extension host compiled it. Dupin keeps it as opaque bytes and
+/// only ever sends it back to the host, since QuickJS doesn't validate bytecode it loads.
+#[derive(Clone)]
+pub struct Compiled {
+    entry: String,
+    modules: Arc<[(String, Box<[u8]>)]>,
+}
+
+impl std::fmt::Debug for Compiled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Compiled")
+            .field("entry", &self.entry)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Compiled {
+    fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    fn modules(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.modules
+            .iter()
+            .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
+    }
+}
 
 /// One helper process shared by every JavaScript extension, used by one call at a time.
 pub struct Host {
@@ -57,6 +82,29 @@ struct State {
     reaping: bool,
 }
 
+/// What a call does, for the diagnostics that name it.
+#[derive(Clone, Copy)]
+enum Work {
+    Compile,
+    Search,
+}
+
+impl Work {
+    fn doing(self) -> &'static str {
+        match self {
+            Work::Compile => "compiling the package",
+            Work::Search => "search",
+        }
+    }
+
+    fn whose(self) -> &'static str {
+        match self {
+            Work::Compile => "the compile's",
+            Work::Search => "search's",
+        }
+    }
+}
+
 impl Host {
     pub fn new(launch: Launcher) -> Self {
         Self {
@@ -69,23 +117,61 @@ impl Host {
         }
     }
 
+    /// Compiles every module of `sources` in the helper, which reports syntax errors and imports
+    /// that leave the package or name a missing file.
+    pub fn compile(
+        &self,
+        sources: &Sources,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Compiled, RunError> {
+        let (modules, tail) = wire::spans(sources.files().map(|(name, source)| (name, source.as_bytes())));
+        let bytes: u64 = tail.iter().map(|part| part.len() as u64).sum();
+        // The compiler's own heap, then the source, its copies and the bytecode written from it.
+        let allowance = dupin_js_runtime::COMPILE_HEAP_BYTES as u64 + 4 * bytes;
+        let request = Request {
+            entry: sources.entry(),
+            modules,
+            tail,
+            call: Call::Compile,
+            work: Work::Compile,
+            allowance,
+        };
+        let (answer, tail) = self.call(request, deadline, is_cancelled)?;
+        let Answer::Compiled { modules } = answer else {
+            return Err(mismatch());
+        };
+        let modules = wire::split(modules, &tail).map_err(|error| {
+            RunError::Failed(host_error(format!(
+                "the extension host returned a package Dupin can't read: {error}"
+            )))
+        })?;
+        Ok(Compiled {
+            entry: sources.entry().into(),
+            modules: modules
+                .into_iter()
+                .map(|(name, bytecode)| (name, Box::from(bytecode)))
+                .collect(),
+        })
+    }
+
     /// Links and evaluates `package`'s entry and checks that it exports `search`.
     pub fn check(
         &self,
-        package: &Package,
+        package: &Compiled,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<(), RunError> {
-        match self.call(package, Call::Check, deadline, is_cancelled)? {
-            Answer::Checked => Ok(()),
-            _ => Err(host_error("the extension host gave an answer that doesn't fit the call").into()),
+        match self.call(Request::run(package, Call::Check), deadline, is_cancelled)? {
+            (Answer::Checked, _) => Ok(()),
+            _ => Err(mismatch()),
         }
     }
 
     /// Calls `search(query, { limit })` in `package`.
     pub fn search(
         &self,
-        package: &Package,
+        package: &Compiled,
         query: &str,
         limit: usize,
         deadline: Instant,
@@ -96,13 +182,13 @@ impl Host {
             query: query.into(),
             limit,
         };
-        match self.call(package, call, deadline, is_cancelled)? {
-            Answer::Rows { items } => {
+        match self.call(Request::run(package, call), deadline, is_cancelled)? {
+            (Answer::Rows { items }, _) => {
                 validate(&items, limit)
                     .map_err(|diagnostic| RunError::Failed(diagnostic.file(package.entry())))?;
                 Ok(items)
             }
-            _ => Err(host_error("the extension host gave an answer that doesn't fit the call").into()),
+            _ => Err(mismatch()),
         }
     }
 
@@ -113,12 +199,11 @@ impl Host {
 
     fn call(
         &self,
-        package: &Package,
-        call: Call,
+        request: Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
-    ) -> Result<Answer, RunError> {
-        let mut lease = self.lease(package, deadline, is_cancelled)?;
+    ) -> Result<(Answer, Vec<u8>), RunError> {
+        let mut lease = self.lease(&request, deadline, is_cancelled)?;
         if is_cancelled() {
             return Err(RunError::Cancelled);
         }
@@ -130,7 +215,7 @@ impl Host {
             Some(helper) => helper,
             None => lease.helper.insert(Helper::start(&self.shared.launch)?),
         };
-        match helper.greet(package, deadline, is_cancelled) {
+        match helper.greet(&request, deadline, is_cancelled) {
             Greeting::Ready => {}
             // A helper still starting is kept, so the next call doesn't pay for another start.
             Greeting::Waiting(error) => return Err(error),
@@ -139,12 +224,9 @@ impl Host {
                 return Err(error);
             }
         }
-        let outcome = helper
-            .load(package)
-            .and_then(|()| helper.run(id, package, call, deadline, is_cancelled));
-        match outcome {
-            Ok(Answer::Cancelled) => Err(RunError::Cancelled),
-            Ok(Answer::Failed { diagnostic }) => Err(RunError::Failed(diagnostic)),
+        match helper.run(id, request, deadline, is_cancelled) {
+            Ok((Answer::Cancelled, _)) => Err(RunError::Cancelled),
+            Ok((Answer::Failed { diagnostic }, _)) => Err(RunError::Failed(diagnostic)),
             Ok(answer) => Ok(answer),
             Err(stop) => {
                 lease.helper = None;
@@ -156,7 +238,7 @@ impl Host {
     /// Waits for the helper to be free, unless the caller gives up first.
     fn lease(
         &self,
-        package: &Package,
+        request: &Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Lease<'_>, RunError> {
@@ -164,7 +246,7 @@ impl Host {
         if state.busy && state.waiting >= MAX_WAITING {
             return Err(RunError::Failed(
                 Diagnostic::new("host-busy", "too many extension calls are waiting")
-                    .file(package.entry())
+                    .file(request.entry)
                     .hint("Try again; other extensions are still answering."),
             ));
         }
@@ -176,7 +258,7 @@ impl Host {
             }
             if Instant::now() >= deadline {
                 state.waiting -= 1;
-                return Err(RunError::Failed(deadline_passed(package)));
+                return Err(RunError::Failed(deadline_passed(request.work, request.entry)));
             }
             state = self
                 .shared
@@ -191,6 +273,33 @@ impl Host {
             helper: state.helper.take(),
             shared: &self.shared,
         })
+    }
+}
+
+/// One call to the helper, with the package it carries.
+struct Request<'a> {
+    entry: &'a str,
+    modules: Vec<wire::ModuleSpan>,
+    tail: Vec<&'a [u8]>,
+    call: Call,
+    work: Work,
+    /// Bytes the helper may grow past [`FOOTPRINT_ALLOWANCE`] for this call.
+    allowance: u64,
+}
+
+impl<'a> Request<'a> {
+    fn run(package: &'a Compiled, call: Call) -> Self {
+        let (modules, tail) = wire::spans(package.modules());
+        let bytes: u64 = tail.iter().map(|part| part.len() as u64).sum();
+        Self {
+            entry: package.entry(),
+            modules,
+            tail,
+            call,
+            work: Work::Search,
+            // The bytecode as read from the socket and as the package the helper rebuilds.
+            allowance: 2 * bytes,
+        }
     }
 }
 
@@ -247,11 +356,9 @@ struct Helper {
     socket: UnixStream,
     /// Bounded, so a helper that writes without being asked stalls on its own socket instead
     /// of growing Dupin's memory.
-    replies: mpsc::Receiver<FromHelper>,
+    replies: mpsc::Receiver<(FromHelper, Vec<u8>)>,
     started: Instant,
     greeted: bool,
-    /// Packages the helper holds, least recently used first, with their bytecode size.
-    loaded: VecDeque<(u64, usize)>,
 }
 
 impl Drop for Helper {
@@ -285,7 +392,7 @@ impl Helper {
         std::thread::Builder::new()
             .name("extension-host-replies".into())
             .spawn(move || {
-                while let Ok(Some((message, _))) = wire::read::<FromHelper>(&mut reader) {
+                while let Ok(Some(message)) = wire::read::<FromHelper>(&mut reader) {
                     if replies.send(message).is_err() {
                         return;
                     }
@@ -298,12 +405,16 @@ impl Helper {
             replies: received,
             started: Instant::now(),
             greeted: false,
-            loaded: VecDeque::new(),
         })
     }
 
     /// Waits for the helper's hello, but no longer than the call may wait.
-    fn greet(&mut self, package: &Package, deadline: Instant, is_cancelled: &dyn Fn() -> bool) -> Greeting {
+    fn greet(
+        &mut self,
+        request: &Request<'_>,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Greeting {
         let refused = |reason: String| {
             RunError::Failed(
                 Diagnostic::new(
@@ -317,19 +428,21 @@ impl Helper {
             || Greeting::Failed(RunError::Failed(host_error("the extension host didn't start")));
         while !self.greeted {
             match self.replies.recv_timeout(TICK) {
-                Ok(FromHelper::Hello { version, engine })
+                Ok((FromHelper::Hello { version, engine }, _))
                     if version == wire::VERSION && engine == dupin_js_runtime::engine_version() =>
                 {
                     self.greeted = true;
                 }
-                Ok(FromHelper::Hello { .. }) => {
+                Ok((FromHelper::Hello { .. }, _)) => {
                     return Greeting::Failed(RunError::Failed(
                         host_error("the extension host is from another Dupin build")
                             .hint("Quit and reopen Dupin after an update."),
                     ));
                 }
-                Ok(FromHelper::Refused { reason }) => return Greeting::Failed(refused(reason)),
-                Ok(FromHelper::Done { .. }) | Err(RecvTimeoutError::Disconnected) => return didnt_start(),
+                Ok((FromHelper::Refused { reason }, _)) => return Greeting::Failed(refused(reason)),
+                Ok((FromHelper::Done { .. }, _)) | Err(RecvTimeoutError::Disconnected) => {
+                    return didnt_start();
+                }
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
                     if now >= self.started + HANDSHAKE {
@@ -342,9 +455,12 @@ impl Helper {
                         return Greeting::Waiting(RunError::Failed(
                             Diagnostic::new(
                                 "host-starting",
-                                "the extension host was still starting when search's deadline passed",
+                                format!(
+                                    "the extension host was still starting when {} deadline passed",
+                                    request.work.whose()
+                                ),
                             )
-                            .file(package.entry())
+                            .file(request.entry)
                             .hint("Try again; Dupin keeps starting the extension host."),
                         ));
                     }
@@ -367,7 +483,7 @@ impl Helper {
             RunError::Failed(if error.kind() == io::ErrorKind::InvalidInput {
                 Diagnostic::new(
                     "package-too-large",
-                    "the compiled package is larger than the extension host accepts",
+                    "the package is larger than the extension host accepts",
                 )
                 .hint("Bundle and minify the extension, and leave out code it doesn't run.")
             } else {
@@ -376,64 +492,29 @@ impl Helper {
         })
     }
 
-    /// Sends `package` unless the helper holds it, making room by dropping the least recently
-    /// used packages.
-    fn load(&mut self, package: &Package) -> Result<(), RunError> {
-        if let Some(position) = self.loaded.iter().position(|(id, _)| *id == package.id()) {
-            let entry = self.loaded.remove(position).expect("present");
-            self.loaded.push_back(entry);
-            return Ok(());
-        }
-        let mut modules = Vec::new();
-        let mut tail = Vec::new();
-        for (name, bytecode) in package.modules() {
-            modules.push(ModuleSpan {
-                name: name.into(),
-                len: bytecode.len() as u32,
-            });
-            tail.push(bytecode);
-        }
-        let bytes: usize = tail.iter().map(|part| part.len()).sum();
-        while let Some(&(oldest, _)) = self.loaded.front() {
-            let held: usize = self.loaded.iter().map(|(_, size)| size).sum();
-            if self.loaded.len() < MAX_PACKAGES && held + bytes <= MAX_PACKAGE_BYTES {
-                break;
-            }
-            self.send(&ToHelper::Unload { package: oldest }, &[])?;
-            self.loaded.pop_front();
-        }
-        let message = ToHelper::Load {
-            package: package.id(),
-            entry: package.entry().into(),
-            modules,
-        };
-        self.send(&message, &tail)?;
-        self.loaded.push_back((package.id(), bytes));
-        Ok(())
-    }
-
     fn run(
         &mut self,
         id: u64,
-        package: &Package,
-        call: Call,
+        request: Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
-    ) -> Result<Answer, RunError> {
+    ) -> Result<(Answer, Vec<u8>), RunError> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let message = ToHelper::Run {
             id,
-            package: package.id(),
             deadline_ms: remaining.as_millis() as u64,
-            call,
+            entry: request.entry.into(),
+            modules: request.modules,
+            call: request.call,
         };
-        self.send(&message, &[])?;
-        let footprint_limit =
-            FOOTPRINT_ALLOWANCE + self.loaded.iter().map(|(_, size)| *size as u64).sum::<u64>();
+        self.send(&message, &request.tail)?;
+        let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
         let mut cancel_by = None;
         loop {
             match self.replies.recv_timeout(TICK) {
-                Ok(FromHelper::Done { id: answered, answer }) if answered == id => return Ok(answer),
+                Ok((FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
+                    return Ok((answer, tail));
+                }
                 // Every call given up on stops the helper, so no other reply is ever due.
                 Ok(_) => {
                     return Err(RunError::Failed(host_error(
@@ -442,7 +523,7 @@ impl Helper {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(RunError::Failed(crashed().file(package.entry())));
+                    return Err(RunError::Failed(crashed().file(request.entry)));
                 }
             }
             let now = Instant::now();
@@ -454,15 +535,18 @@ impl Helper {
                 return Err(RunError::Cancelled);
             }
             if now >= deadline + GRACE {
-                return Err(RunError::Failed(deadline_passed(package)));
+                return Err(RunError::Failed(deadline_passed(request.work, request.entry)));
             }
             if footprint(self.child.id()).is_some_and(|bytes| bytes > footprint_limit) {
                 return Err(RunError::Failed(
                     Diagnostic::new(
                         "memory-limit",
-                        "search used more memory than the extension host allows",
+                        format!(
+                            "{} used more memory than the extension host allows",
+                            request.work.doing()
+                        ),
                     )
-                    .file(package.entry())
+                    .file(request.entry)
                     .hint("Build smaller strings and arrays, and return only the items Dupin shows."),
                 ));
             }
@@ -527,13 +611,28 @@ fn host_error(message: impl Into<String>) -> Diagnostic {
     Diagnostic::new("host-error", message)
 }
 
+fn mismatch() -> RunError {
+    host_error("the extension host gave an answer that doesn't fit the call").into()
+}
+
 fn crashed() -> Diagnostic {
     Diagnostic::new("host-crashed", "the extension host stopped while answering")
         .hint("Dupin starts a new one for the next query. If this keeps happening, simplify the extension.")
 }
 
-fn deadline_passed(package: &Package) -> Diagnostic {
-    Diagnostic::new("deadline", "search didn't finish before its deadline")
-        .file(package.entry())
-        .hint("Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds.")
+fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
+    let hint = match work {
+        Work::Compile => {
+            "Bundle the extension into less JavaScript: Dupin stops compiling a package after 2 seconds."
+        }
+        Work::Search => {
+            "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
+        }
+    };
+    Diagnostic::new(
+        "deadline",
+        format!("{} didn't finish before its deadline", work.doing()),
+    )
+    .file(entry)
+    .hint(hint)
 }

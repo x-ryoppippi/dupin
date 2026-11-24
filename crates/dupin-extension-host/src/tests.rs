@@ -1,10 +1,10 @@
 use std::fs;
 use std::process::Command;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, Package, RunError};
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::View;
 
 use super::*;
@@ -54,16 +54,31 @@ fn slow_host(delay: &'static str) -> Host {
     }))
 }
 
-fn package(source: &str) -> (tempfile::TempDir, Package) {
+fn sources(files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
     let folder = tempfile::tempdir().unwrap();
-    fs::write(folder.path().join(DEFAULT_ENTRY), source).unwrap();
-    let package = Package::load(folder.path(), DEFAULT_ENTRY).unwrap();
-    (folder, package)
+    for (name, source) in files {
+        let path = folder.path().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
+    (folder, sources)
+}
+
+fn compile(host: &Host, files: &[(&str, &str)]) -> Result<Compiled, RunError> {
+    let (_folder, sources) = sources(files);
+    host.compile(&sources, Instant::now() + Duration::from_secs(5), &|| false)
+}
+
+/// `source` as `main.js`, compiled by a host other than the one a test watches.
+fn package(source: &str) -> Compiled {
+    static COMPILER: OnceLock<Host> = OnceLock::new();
+    compile(COMPILER.get_or_init(host), &[(DEFAULT_ENTRY, source)]).unwrap()
 }
 
 fn search(
     host: &Host,
-    package: &Package,
+    package: &Compiled,
     query: &str,
     within: Duration,
 ) -> Result<Vec<dupin_plugin_protocol::PluginItem>, RunError> {
@@ -79,14 +94,14 @@ fn titles(rows: &[dupin_plugin_protocol::PluginItem]) -> Vec<String> {
         .collect()
 }
 
-fn failure(result: Result<Vec<dupin_plugin_protocol::PluginItem>, RunError>) -> Diagnostic {
+fn failed<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
     match result {
         Err(RunError::Failed(diagnostic)) => diagnostic,
         other => panic!("expected a failure, got {other:?}"),
     }
 }
 
-fn is_sandboxed(pid: u32) -> bool {
+fn pid_is_sandboxed(pid: u32) -> bool {
     unsafe extern "C" {
         fn sandbox_check(pid: libc::pid_t, operation: *const std::ffi::c_char, kind: i32, ...) -> i32;
     }
@@ -98,19 +113,24 @@ fn is_sandboxed(pid: u32) -> bool {
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
 
 #[test]
-fn queries_run_in_one_resident_helper_and_packages_are_sent_once() {
+fn queries_run_in_one_resident_helper_that_compiled_their_packages() {
+    skip_inside_a_sandbox!();
     let host = host();
-    let (_folder, echo) = package(ECHO);
-    let (_other, other) = package("export const search = () => [{ title: 'other' }];");
     assert_eq!(host.helper_pid(), None, "the helper starts on first use");
+    let echo = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
+    let pid = host.helper_pid().expect("compiling started the helper");
+    assert_ne!(pid, std::process::id());
+    assert!(pid_is_sandboxed(pid));
+    assert!(!pid_is_sandboxed(std::process::id()));
+    let other = compile(
+        &host,
+        &[(DEFAULT_ENTRY, "export const search = () => [{ title: 'other' }];")],
+    )
+    .unwrap();
     assert_eq!(
         titles(&search(&host, &echo, "one", Duration::from_secs(5)).unwrap()),
         ["echo one"]
     );
-    let pid = host.helper_pid().unwrap();
-    assert_ne!(pid, std::process::id());
-    assert!(is_sandboxed(pid));
-    assert!(!is_sandboxed(std::process::id()));
     assert_eq!(
         titles(&search(&host, &other, "", Duration::from_secs(5)).unwrap()),
         ["other"]
@@ -123,8 +143,15 @@ fn queries_run_in_one_resident_helper_and_packages_are_sent_once() {
         .unwrap();
     assert_eq!(host.helper_pid(), Some(pid));
 
-    let (_folder, broken) = package("export function search() { throw new TypeError('nope'); }");
-    let diagnostic = failure(search(&host, &broken, "", Duration::from_secs(5)));
+    let broken = compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            "export function search() { throw new TypeError('nope'); }",
+        )],
+    )
+    .unwrap();
+    let diagnostic = failed(search(&host, &broken, "", Duration::from_secs(5)));
     assert_eq!(
         (diagnostic.code.as_ref(), diagnostic.to_string().as_str()),
         ("search-threw", "main.js:1:38: search threw TypeError: nope")
@@ -137,9 +164,132 @@ fn queries_run_in_one_resident_helper_and_packages_are_sent_once() {
 }
 
 #[test]
-fn guests_see_the_local_time_zone() {
+fn compile_errors_come_back_with_the_file_line_and_import_at_fault() {
+    skip_inside_a_sandbox!();
     let host = host();
-    let (_folder, probe) = package(
+    let syntax = failed(compile(
+        &host,
+        &[
+            (
+                DEFAULT_ENTRY,
+                "import './lib/util.js'; export function search() {}",
+            ),
+            ("lib/util.js", "export const x = 1;\nexport function ( {"),
+        ],
+    ));
+    assert_eq!(
+        (
+            syntax.code.as_ref(),
+            syntax.file.as_deref(),
+            syntax.line,
+            syntax.hint.is_some()
+        ),
+        ("syntax-error", Some("lib/util.js"), Some(2), true),
+        "{syntax:?}"
+    );
+    let pid = host.helper_pid().unwrap();
+
+    let import = failed(compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            "import { x } from './missing.js'; export function search() {}",
+        )],
+    ));
+    assert_eq!(
+        (
+            import.code.as_ref(),
+            import.file.as_deref(),
+            import.field.as_deref()
+        ),
+        (
+            "import-missing",
+            Some(DEFAULT_ENTRY),
+            Some("import \"./missing.js\"")
+        ),
+        "{import:?}"
+    );
+    assert_eq!(
+        host.helper_pid(),
+        Some(pid),
+        "a broken package leaves the helper running"
+    );
+}
+
+#[test]
+fn compiled_bytecode_outlives_the_helper_that_compiled_it() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let echo = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
+    let pid = host.helper_pid().unwrap();
+    // SAFETY: `pid` is the helper this host started and still owns.
+    assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        titles(&search(&host, &echo, "again", Duration::from_secs(5)).unwrap()),
+        ["echo again"]
+    );
+    assert_ne!(host.helper_pid(), Some(pid));
+}
+
+#[test]
+fn a_compile_that_outlasts_its_deadline_is_stopped() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
+    let rows: String = (0..90_000).map(|index| format!("\"row {index:08}\",")).collect();
+    let (_folder, large) = sources(&[(
+        DEFAULT_ENTRY,
+        &format!("export const rows = [{rows}];\nexport function search() {{ return []; }}"),
+    )]);
+    let started = Instant::now();
+    let diagnostic = failed(host.compile(&large, Instant::now() + Duration::from_millis(1), &|| false));
+    assert_eq!(
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+        ("deadline", Some(DEFAULT_ENTRY)),
+        "{diagnostic:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(
+        diagnostic.message.starts_with("compiling the package"),
+        "{diagnostic}"
+    );
+}
+
+#[test]
+fn a_large_package_compiles_and_answers_within_the_helper_allowance() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let rows: String = (0..90_000).map(|index| format!("\"row {index:08}\",")).collect();
+    let large = compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            &format!(
+                "const rows = [{rows}];\nexport function search() {{ return [{{ title: String(rows.length) }}]; }}"
+            ),
+        )],
+    )
+    .unwrap();
+    let pid = host.helper_pid().unwrap();
+    for _ in 0..3 {
+        assert_eq!(
+            titles(&search(&host, &large, "", Duration::from_secs(5)).unwrap()),
+            ["90000"]
+        );
+    }
+    assert_eq!(host.helper_pid(), Some(pid));
+}
+
+#[test]
+fn guests_see_the_local_time_zone() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let probe = package(
         "export const search = () => [{ title: `${new Date(1790000000000).getTimezoneOffset()} ${new Date(0).getHours()}` }];",
     );
     assert_eq!(
@@ -150,10 +300,11 @@ fn guests_see_the_local_time_zone() {
 
 #[test]
 fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_cancellation() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
     let host = slow_host("1");
-    let (_folder, echo) = package(ECHO);
     let started = Instant::now();
-    let diagnostic = failure(search(&host, &echo, "", Duration::from_millis(100)));
+    let diagnostic = failed(search(&host, &echo, "", Duration::from_millis(100)));
     assert_eq!(diagnostic.code, "host-starting", "{diagnostic:?}");
     assert!(
         started.elapsed() < Duration::from_millis(400),
@@ -236,12 +387,13 @@ fn rogue_helper_entry() {
 
 #[test]
 fn a_helper_that_speaks_out_of_turn_is_replaced_before_the_next_call() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
     let host = Host::new(Box::new(|| {
         let mut command = helper_command("tests::rogue_helper_entry")?;
         command.env(ROGUE_ENV, "1");
         Ok(command)
     }));
-    let (_folder, echo) = package(ECHO);
     assert_eq!(
         titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
         ["genuine"]
@@ -259,15 +411,16 @@ const UNINTERRUPTIBLE: &str = "export function search() { return [{ title: Strin
 
 #[test]
 fn a_native_call_the_engine_cant_interrupt_ends_by_its_deadline_and_the_helper_restarts() {
+    skip_inside_a_sandbox!();
     let host = host();
-    let (_folder, echo) = package(ECHO);
+    let echo = package(ECHO);
+    let stuck = package(UNINTERRUPTIBLE);
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
     let first = host.helper_pid().unwrap();
 
-    let (_folder, stuck) = package(UNINTERRUPTIBLE);
     let deadline = Duration::from_millis(300);
     let started = Instant::now();
-    let diagnostic = failure(search(&host, &stuck, "", deadline));
+    let diagnostic = failed(search(&host, &stuck, "", deadline));
     let took = started.elapsed();
     assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
     assert!(
@@ -285,8 +438,11 @@ fn a_native_call_the_engine_cant_interrupt_ends_by_its_deadline_and_the_helper_r
 
 #[test]
 fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
+    skip_inside_a_sandbox!();
     let host = host();
-    let (_folder, echo) = package(ECHO);
+    let echo = package(ECHO);
+    let busy = package("export function search() { for (;;) {} }");
+    let stuck = package(UNINTERRUPTIBLE);
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
     let pid = host.helper_pid().unwrap();
 
@@ -300,7 +456,6 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         move || cancelled.load(Ordering::Relaxed)
     };
 
-    let (_folder, busy) = package("export function search() { for (;;) {} }");
     let is_cancelled = cancel_after(Duration::from_millis(50));
     let started = Instant::now();
     let result = host.search(
@@ -322,7 +477,6 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         "an interruptible guest keeps the helper"
     );
 
-    let (_folder, stuck) = package(UNINTERRUPTIBLE);
     let is_cancelled = cancel_after(Duration::from_millis(50));
     let started = Instant::now();
     let result = host.search(
@@ -348,12 +502,13 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
 
 #[test]
 fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
+    skip_inside_a_sandbox!();
     let host = Arc::new(host());
-    let (_folder, echo) = package(ECHO);
+    let echo = package(ECHO);
+    let busy = package("export function search() { for (;;) {} }");
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
     let pid = host.helper_pid().unwrap();
 
-    let (_folder, busy) = package("export function search() { for (;;) {} }");
     let running = {
         let host = host.clone();
         std::thread::spawn(move || search(&host, &busy, "", Duration::from_secs(10)))
@@ -361,7 +516,7 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
     std::thread::sleep(Duration::from_millis(200));
     // SAFETY: `pid` is the helper this host started and still owns.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
-    let diagnostic = failure(running.join().unwrap());
+    let diagnostic = failed(running.join().unwrap());
     assert_eq!(diagnostic.code, "host-crashed", "{diagnostic:?}");
 
     assert_eq!(
@@ -383,8 +538,9 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
 
 #[test]
 fn guests_reach_no_module_or_global_beyond_the_language() {
+    skip_inside_a_sandbox!();
     let host = host();
-    let (_folder, probe) = package(
+    let probe = package(
         r#"
         const names = ["require", "process", "fetch", "XMLHttpRequest", "WebSocket", "os", "std",
             "Deno", "Bun", "setTimeout", "print", "console", "scriptArgs", "importScripts"];
@@ -444,6 +600,7 @@ fn sandbox_probe() {
 
 #[test]
 fn the_sandbox_denies_files_network_and_processes() {
+    skip_inside_a_sandbox!();
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -473,4 +630,41 @@ fn the_sandbox_denies_files_network_and_processes() {
 
 fn probe_file() -> std::path::PathBuf {
     std::env::temp_dir().join("dupin-extension-host-probe")
+}
+
+/// Not a test on its own: run in a child under `sandbox-exec` by the test below, so it is
+/// already sandboxed when it starts the helper.
+#[test]
+fn nested_sandbox_probe() {
+    if std::env::var_os(HELPER_ENV).is_none() {
+        return;
+    }
+    println!("nested sandboxed {}", is_sandboxed());
+    let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
+    let error = failed(host().compile(&sources, Instant::now() + Duration::from_secs(5), &|| false));
+    println!("nested {} {}", error.code, error.message);
+}
+
+#[test]
+fn a_helper_inside_another_sandbox_refuses_and_says_why() {
+    skip_inside_a_sandbox!();
+    let output = Command::new("/usr/bin/sandbox-exec")
+        .args(["-p", "(version 1)\n(allow default)\n"])
+        .arg(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "tests::nested_sandbox_probe",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(HELPER_ENV, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("nested sandboxed true"), "{stdout}");
+    assert!(
+        stdout.contains("nested sandbox-unavailable")
+            && stdout.contains("already runs inside another sandbox"),
+        "{stdout}"
+    );
 }

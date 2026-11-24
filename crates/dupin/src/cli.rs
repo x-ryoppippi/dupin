@@ -470,6 +470,7 @@ mod tests {
     }
     #[test]
     fn extension_folders_check_and_run_with_diagnostics() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let folder = |path: &str| root.join(path).to_string_lossy().into_owned();
         let word_count = folder("examples/extensions/word-count-js");
