@@ -93,6 +93,20 @@ source-edit builds against the original builder. `dupin.baseline` exposes that
 builder. The non-flake `default.nix` build uses it too, with crane at the rev
 `flake.lock` pins.
 
+### Rune updates
+
+Rune has no releases, so `Cargo.toml` pins every Rune crate, and every crate Rune's own workspace patches, at one commit of Rune's default branch, `dev`. An update flows through three steps:
+
+1. Renovate proposes the newest `dev` commit once a week (Mondays, 00:00–06:00 UTC) as one pull request that rewrites every rev. A Git commit has no release timestamp, so the three-day release age can't apply; instead the pull request never automerges, and a person merges it.
+2. On that pull request, the `autofix.ci` workflow runs `scripts/update-rune.nu`. It relocks Rune's packages in `Cargo.lock` and recomputes Rune's source hash in `nix/cargo-vendor.nix`, and autofix.ci commits the result. When the lock and the hash already match the pinned rev, the script changes nothing and reaches no network, so the workflow runs on every pull request that touches `Cargo.toml`, `Cargo.lock` or `nix/cargo-vendor.nix`.
+3. CI builds and tests the result like any other change.
+
+Before merging, read Rune's changelog (`changelog/unreleased/` in its repository) between the two revs. Renovate can't add a crate Rune's workspace newly patches, and an item in [Working around Rune](./rune-workarounds.md) may no longer be needed. To bump Rune by hand, change every rev and run the script; the dev shell doesn't evaluate until the hash matches, so take its tools from nixpkgs:
+
+```sh
+nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/update-rune.nu
+```
+
 ## Build caching
 
 The [crate boundary experiment](../experiments/crate-boundaries/README.md)
