@@ -1,4 +1,4 @@
-{ lib, ... }:
+{ lib, self, ... }:
 let
   root = ./..;
 in
@@ -53,6 +53,10 @@ in
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = dupin.lintAndTest;
+        home-manager-module = import ./tests/home-manager-module.nix {
+          inherit lib pkgs;
+          module = self.homeManagerModules.default;
+        };
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
           ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';

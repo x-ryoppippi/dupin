@@ -77,8 +77,12 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
-      # The extension SDK's tests bundle their fixtures with the Rolldown on PATH.
-      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [ rolldown ];
+      # The extension installer tests fetch from fixture Git repositories, and the extension
+      # SDK's tests bundle their fixtures with the Rolldown on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [
+        pkgs.git
+        rolldown
+      ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';

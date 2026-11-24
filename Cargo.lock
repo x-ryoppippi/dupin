@@ -744,8 +744,11 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 name = "dupin"
 version = "0.0.0"
 dependencies = [
+ "blake3",
  "dupin-core",
  "dupin-ext-sdk",
+ "dupin-extension-host",
+ "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
  "dupin-mac",
@@ -804,12 +807,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-extension-host"
+version = "0.0.0"
+dependencies = [
+ "dupin-js-runtime",
+ "dupin-plugin-protocol",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "dupin-extension-http"
 version = "0.0.0"
 dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "dupin-extension-install"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "dupin-broker",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]

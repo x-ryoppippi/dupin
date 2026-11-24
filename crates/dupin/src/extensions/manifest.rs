@@ -477,7 +477,7 @@ mod tests {
             let diagnostic = problem(&[(PACKAGE_JSON, &package(dupin))]);
             assert_eq!(
                 (
-                    diagnostic.code,
+                    diagnostic.code.as_ref(),
                     diagnostic.file.as_deref(),
                     diagnostic.field.as_deref()
                 ),
@@ -503,7 +503,7 @@ mod tests {
 
         let syntax = problem(&[(PACKAGE_JSON, "{\n  \"name\": \"w\",\n}")]);
         assert_eq!(
-            (syntax.code, syntax.line, syntax.file.as_deref()),
+            (syntax.code.as_ref(), syntax.line, syntax.file.as_deref()),
             ("invalid-manifest", Some(3), Some(PACKAGE_JSON))
         );
         assert!(!syntax.message.contains("line"), "{syntax}");
@@ -539,18 +539,18 @@ mod tests {
             (WASM_MANIFEST, WASM),
         ]);
         assert_eq!(
-            (both.code, both.file.as_deref()),
+            (both.code.as_ref(), both.file.as_deref()),
             ("ambiguous-manifest", Some(WASM_MANIFEST))
         );
 
         let plain = problem(&[(PACKAGE_JSON, r#"{"name": "plain", "version": "1.0.0"}"#)]);
         assert_eq!(
-            (plain.code, plain.file.as_deref(), plain.field.as_deref()),
+            (plain.code.as_ref(), plain.file.as_deref(), plain.field.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON), Some("dupin"))
         );
         let empty = problem(&[]);
         assert_eq!(
-            (empty.code, empty.file.as_deref()),
+            (empty.code.as_ref(), empty.file.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON))
         );
 
@@ -561,7 +561,7 @@ mod tests {
         ] {
             let javascript = problem(&[(WASM_MANIFEST, &toml)]);
             assert_eq!(
-                (javascript.code, javascript.field.as_deref()),
+                (javascript.code.as_ref(), javascript.field.as_deref()),
                 ("invalid-manifest", Some("entry")),
                 "{toml}"
             );
