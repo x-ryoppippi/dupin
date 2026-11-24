@@ -63,6 +63,12 @@ let
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
   };
+  latencyArgs = baseArgs // {
+    pname = "dupin-latency";
+    CARGO_PROFILE = "latency";
+    cargoExtraArgs = "--offline --locked --package dupin --features tooling";
+    doCheck = false;
+  };
   releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
   debugArtifacts = craneLib.buildDepsOnly debugArgs;
   lintAndTest = craneLib.mkCargoDerivation (
@@ -89,6 +95,13 @@ let
       doRemapPathPrefix = false;
     }
   );
+  # Headless-capable, for scripts/latency.nu; never shipped.
+  latencyBinary = craneLib.buildPackage (
+    latencyArgs
+    // {
+      cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
+    }
+  );
 in
 pkgs.stdenv.mkDerivation (
   packagingArgs
@@ -112,6 +125,7 @@ pkgs.stdenv.mkDerivation (
         lintAndTest
         cargoVendorDir
         cargoBinary
+        latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
       baseline = native;

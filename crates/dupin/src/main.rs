@@ -15,6 +15,7 @@ mod features;
 mod hotkey;
 mod http;
 mod icons;
+mod latency;
 mod log;
 mod mcp;
 mod prefs;
