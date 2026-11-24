@@ -6,6 +6,7 @@ use ../latency.nu [
     resolve
     typing-script
     unanswered
+    unheld
     unmeasured
     verdicts
 ]
@@ -71,6 +72,19 @@ def main [] {
     assert equal ($pairs | each { $in.baseline?.implementation? | default none }) [native "native at b11a968" none]
     assert equal ($pairs | get candidate.id) [a b c]
     assert equal (verdicts $pairs 10.0 1ms | get verdict) [ok ok new]
+    # `compare` may report that as new, but `parity` may not: c has no native result, no
+    # recorded one and no budget, as a port whose native implementation was deleted without
+    # recording its baseline would.
+    assert equal (unheld $pairs) ["c [extension]"]
+    assert equal (unheld (parity-pairs [
+        (result c extension 1.0 | insert budget_ms 5.0)
+    ] $recorded)) []
+    assert equal (unheld (parity-pairs [
+        (result b extension 2.4)
+    ] $recorded)) []
+    assert equal (unheld (parity-pairs [
+        (result c native 1.0)
+    ] $recorded)) []
     assert equal (
         parity-pairs [
             (result b native 1.0)
@@ -169,5 +183,21 @@ def main [] {
     }
     for scenario in $catalogue.scenarios {
         assert ($scenario.feature in ($catalogue.features | columns)) $"($scenario.id) has no feature"
+    }
+
+    # Every implementation besides native has something for `parity` to hold it to: the
+    # feature's native implementation, a recorded native baseline of each of its scenarios, or
+    # its own budget.
+    let baseline = open ($env.FILE_PWD | path dirname | path join latency native-baseline.json)
+    | get results
+    | get id
+    for feature in ($catalogue.features | transpose name implementations) {
+        let has_native = "native" in ($feature.implementations | columns)
+        let scenarios = $catalogue.scenarios | where feature == $feature.name | get id
+        let recorded = $scenarios | all {|id| $id in $baseline }
+        for label in ($feature.implementations | columns | where $it != "native") {
+            let setup = resolve $feature.implementations $label
+            assert ($has_native or $recorded or $setup.budget_ms? != null) $"($feature.name).($label) has no native implementation, recorded native baseline or budget_ms"
+        }
     }
 }
