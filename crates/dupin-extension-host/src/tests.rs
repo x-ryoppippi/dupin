@@ -961,6 +961,7 @@ fn forgetful_helper_entry() {
                     id: "1".into(),
                     title: format!("carried after {named_alone} named alone"),
                     subtitle: String::new(),
+                    aliases: Vec::new(),
                     keywords: Vec::new(),
                     icon: None,
                     section: None,
