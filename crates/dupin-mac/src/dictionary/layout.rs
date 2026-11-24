@@ -7,7 +7,8 @@
 //! stays as plain text, so no layout loses content.
 
 use dupin_core::Detail;
-use dupin_core::detail::escape_markdown;
+use dupin_core::detail::{Block, Inline, escape_markdown};
+use dupin_host_services::dictionary::{Entry, Group, Section, Sense};
 
 /// Parts that Oxford-style dictionaries start with a label in capitals, in the order they appear.
 const PARTS: [(&str, &str); 6] = [
@@ -388,6 +389,158 @@ fn plain(text: &str) -> String {
 
 fn tidy(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The same layout as [`detail`], as data: each `###` part of speech becomes a group whose
+/// numbered items are senses, `•` items under a sense its sub-senses and italic `▸` items its
+/// examples, and each `##` part a section. A group's text before its numbered senses is its
+/// note.
+pub(super) fn structure(term: &str, definition: &str) -> Entry {
+    let detail = detail(term, definition);
+    let mut entry = Entry {
+        headword: detail.title,
+        pronunciation: detail
+            .metadata
+            .into_iter()
+            .find(|metadata| metadata.label == "Pronunciation")
+            .map(|metadata| metadata.value),
+        truncated: detail.body.truncated,
+        ..Entry::default()
+    };
+    let mut blocks = detail.body.blocks.into_iter().peekable();
+    let mut part_of_speech = None;
+    loop {
+        let mut body = Vec::new();
+        while let Some(block) = blocks.next_if(|block| !matches!(block, Block::Heading { .. })) {
+            body.push(block);
+        }
+        if part_of_speech.is_some() || !body.is_empty() {
+            entry.groups.push(group(part_of_speech.take(), body));
+        }
+        match blocks.next() {
+            Some(Block::Heading { level: 2, text }) => {
+                let mut lines = Vec::new();
+                while let Some(block) = blocks.next_if(|block| !matches!(block, Block::Heading { .. })) {
+                    plain_text(&block, &mut lines);
+                }
+                entry.sections.push(Section {
+                    title: text.text,
+                    text: lines.join("\n"),
+                });
+            }
+            Some(Block::Heading { text, .. }) => part_of_speech = Some(text.text),
+            Some(_) | None => break,
+        }
+    }
+    entry
+}
+
+fn group(part_of_speech: Option<String>, body: Vec<Block>) -> Group {
+    let numbered = body
+        .iter()
+        .any(|block| matches!(block, Block::List { start: Some(_), .. }));
+    let mut note = Vec::new();
+    let mut senses: Vec<Sense> = Vec::new();
+    let mut before_numbers = numbered;
+    for block in body {
+        match block {
+            Block::Paragraph(text) if before_numbers => note.push(text.text),
+            Block::List {
+                start: Some(_),
+                items,
+            } => {
+                before_numbers = false;
+                senses.extend(items.iter().map(|item| item_sense(item)));
+            }
+            Block::List { start: None, items } => {
+                for item in &items {
+                    let sense = item_sense(item);
+                    match senses.last_mut() {
+                        Some(parent) => nest(parent, sense),
+                        None => senses.push(sense),
+                    }
+                }
+            }
+            Block::Paragraph(text) => senses.push(sense(&text)),
+            Block::Code(text) => senses.push(Sense {
+                definition: text,
+                ..Sense::default()
+            }),
+            Block::Heading { .. } => {}
+        }
+    }
+    Group {
+        part_of_speech,
+        note: (!note.is_empty()).then(|| note.join("\n")),
+        senses,
+    }
+}
+
+/// A list item's first paragraph as a sense, with the items nested under it.
+fn item_sense(blocks: &[Block]) -> Sense {
+    let mut parent: Option<Sense> = None;
+    for block in blocks {
+        match block {
+            Block::Paragraph(text) if parent.is_none() => parent = Some(sense(text)),
+            Block::List { items, .. } => {
+                let parent = parent.get_or_insert_with(Sense::default);
+                for item in items {
+                    nest(parent, item_sense(item));
+                }
+            }
+            other => {
+                let mut lines = Vec::new();
+                plain_text(other, &mut lines);
+                let parent = parent.get_or_insert_with(Sense::default);
+                parent.definition = [std::mem::take(&mut parent.definition), lines.join(" ")]
+                    .join(" ")
+                    .trim()
+                    .to_owned();
+            }
+        }
+    }
+    parent.unwrap_or_default()
+}
+
+/// An item that is only an example joins its parent's examples; anything else is a sub-sense.
+fn nest(parent: &mut Sense, child: Sense) {
+    if child.definition.is_empty() && child.senses.is_empty() {
+        parent.examples.extend(child.examples);
+    } else {
+        parent.senses.push(child);
+    }
+}
+
+/// A sense line is `definition: example | label : example`, with the examples in italics.
+fn sense(text: &Inline) -> Sense {
+    let Some(first) = text.runs.iter().find(|run| run.style.emphasis) else {
+        return Sense {
+            definition: text.text.trim().to_owned(),
+            ..Sense::default()
+        };
+    };
+    Sense {
+        definition: text.text[..first.range.start]
+            .trim_end()
+            .trim_end_matches(':')
+            .trim()
+            .to_owned(),
+        examples: text.text[first.range.start..]
+            .split(" | ")
+            .map(str::trim)
+            .filter(|example| !example.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        senses: Vec::new(),
+    }
+}
+
+fn plain_text(block: &Block, lines: &mut Vec<String>) {
+    match block {
+        Block::Heading { text, .. } | Block::Paragraph(text) => lines.push(text.text.clone()),
+        Block::List { items, .. } => items.iter().flatten().for_each(|block| plain_text(block, lines)),
+        Block::Code(code) => lines.push(code.clone()),
+    }
 }
 
 #[cfg(test)]

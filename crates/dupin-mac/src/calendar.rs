@@ -1,10 +1,13 @@
 use dupin_core::{Action, Batch, Item, ItemAction, Provider, ProviderError, Request, View};
+use dupin_host_services::calendar::{self as service, CalendarInfo, Calendars, Millis};
+use dupin_host_services::{OsAccess, ServiceError};
 use objc2::rc::{Retained, autoreleasepool};
-use objc2::{Message, msg_send};
-use objc2_event_kit::{EKAuthorizationStatus, EKEvent, EKEventStatus, EKEventStore};
+use objc2::runtime::AnyObject;
+use objc2::{Message, class, msg_send};
+use objc2_event_kit::{EKAuthorizationStatus, EKCalendar, EKEvent, EKEventStatus, EKEventStore};
 use objc2_foundation::{
     NSArray, NSCalendar, NSCalendarOptions, NSCalendarUnit, NSDate, NSDateFormatter, NSDateIntervalFormatter,
-    NSLocale, NSString, NSTimeZone,
+    NSLocale, NSString, NSTimeZone, NSURL,
 };
 
 use crate::privacy::{Access, CalendarAccess, Permission, PermissionStatus, calendar_authorization};
@@ -65,7 +68,8 @@ impl Provider for CalendarProvider {
             let (start, end) = bounds(&calendar, &now, terms.is_empty()).ok_or(ProviderError)?;
             let events = match &self.0 {
                 Source::EventKit(_) => {
-                    let events = STORE.with(|store| read_events(store, &start, &end, request));
+                    let events =
+                        STORE.with(|store| read_events(store, &start, &end, &|| request.is_cancelled()));
                     if calendar_authorization() != EKAuthorizationStatus::FullAccess {
                         emit(vec![permission_row()].into());
                         return Ok(());
@@ -157,9 +161,16 @@ struct Event {
     end: Retained<NSDate>,
     all_day: bool,
     occurrence: Option<Retained<NSDate>>,
+    url: Option<String>,
+    color: Option<String>,
 }
 
-fn read_events(store: &EKEventStore, start: &NSDate, end: &NSDate, request: &Request) -> Vec<Event> {
+fn read_events(
+    store: &EKEventStore,
+    start: &NSDate,
+    end: &NSDate,
+    cancelled: &dyn Fn() -> bool,
+) -> Vec<Event> {
     let events: Option<Retained<NSArray<EKEvent>>> = unsafe {
         let predicate = store.predicateForEventsWithStartDate_endDate_calendars(start, end, None);
         msg_send![store, eventsMatchingPredicate: &*predicate]
@@ -167,7 +178,7 @@ fn read_events(store: &EKEventStore, start: &NSDate, end: &NSDate, request: &Req
     events
         .iter()
         .flat_map(|events| events.iter())
-        .take_while(|_| !request.is_cancelled())
+        .take_while(|_| !cancelled())
         .filter_map(|event| unsafe {
             if event.status() == EKEventStatus::Canceled {
                 return None;
@@ -175,22 +186,119 @@ fn read_events(store: &EKEventStore, start: &NSDate, end: &NSDate, request: &Req
             let start: Option<Retained<NSDate>> = msg_send![&*event, startDate];
             let end: Option<Retained<NSDate>> = msg_send![&*event, endDate];
             let title: Option<Retained<NSString>> = msg_send![&*event, title];
+            let url: Option<Retained<NSURL>> = msg_send![&*event, URL];
+            let calendar = event.calendar();
             Some(Event {
                 id: event.calendarItemIdentifier().to_string(),
                 title: title.map_or_else(String::new, |title| title.to_string()),
                 location: event
                     .location()
                     .map_or_else(String::new, |location| location.to_string()),
-                calendar: event
-                    .calendar()
-                    .map_or_else(|| "Calendar".into(), |calendar| calendar.title().to_string()),
+                color: calendar.as_deref().and_then(color),
+                calendar: calendar.map_or_else(|| "Calendar".into(), |calendar| calendar.title().to_string()),
                 start: start?,
                 end: end?,
                 all_day: event.isAllDay(),
                 occurrence: event.occurrenceDate(),
+                url: url
+                    .and_then(|url| url.absoluteString())
+                    .map(|url| url.to_string()),
             })
         })
         .collect()
+}
+
+/// The calendar's color in sRGB.
+fn color(calendar: &EKCalendar) -> Option<String> {
+    // SAFETY: `color` and the NSColor methods below take no arguments but the color space and
+    // return an object or a CGFloat, as declared.
+    unsafe {
+        let color: Option<Retained<AnyObject>> = msg_send![calendar, color];
+        let space: Option<Retained<AnyObject>> = msg_send![class!(NSColorSpace), sRGBColorSpace];
+        let srgb: Option<Retained<AnyObject>> = msg_send![&*color?, colorUsingColorSpace: &*space?];
+        let srgb = srgb?;
+        let red: f64 = msg_send![&*srgb, redComponent];
+        let green: f64 = msg_send![&*srgb, greenComponent];
+        let blue: f64 = msg_send![&*srgb, blueComponent];
+        Some(service::hex_color(red, green, blue))
+    }
+}
+
+/// The extension `calendar` capability. It only reads Calendars access, never requests it:
+/// the app asks on enable or a deliberate action routed from it.
+impl Calendars for CalendarProvider {
+    fn access(&self) -> OsAccess {
+        match &self.0 {
+            Source::EventKit(access) => access.status().os_access(),
+            Source::Fixtures => OsAccess::Allowed,
+        }
+    }
+
+    fn day_offset(&self, at: Millis) -> Result<i64, ServiceError> {
+        autoreleasepool(|_| {
+            let (now, calendar) = self.clock();
+            let day = |date: &NSDate| day_number(&calendar, date) as i64;
+            Ok(day(&date(at)) - day(&now))
+        })
+    }
+
+    fn events(&self, start: Millis, end: Millis) -> Result<Vec<service::Event>, ServiceError> {
+        autoreleasepool(|_| {
+            let events = match &self.0 {
+                Source::EventKit(_) => {
+                    let events = STORE.with(|store| read_events(store, &date(start), &date(end), &|| false));
+                    // EventKit answers with no events when access was taken away meanwhile.
+                    if calendar_authorization() != EKAuthorizationStatus::FullAccess {
+                        return Err(ServiceError::PermissionDenied(service::PERMISSION));
+                    }
+                    events
+                }
+                Source::Fixtures => fixture_events(&self.clock().0),
+            };
+            Ok(events.into_iter().map(Event::into_service).collect())
+        })
+    }
+}
+
+impl CalendarProvider {
+    /// Now and the user's calendar, or the fixtures' fixed time in UTC.
+    fn clock(&self) -> (Retained<NSDate>, Retained<NSCalendar>) {
+        let calendar = NSCalendar::currentCalendar();
+        match self.0 {
+            Source::EventKit(_) => (NSDate::date(), calendar),
+            Source::Fixtures => {
+                calendar.setTimeZone(&NSTimeZone::timeZoneForSecondsFromGMT(0));
+                (NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW), calendar)
+            }
+        }
+    }
+}
+
+fn date(at: Millis) -> Retained<NSDate> {
+    NSDate::dateWithTimeIntervalSince1970(at as f64 / 1000.0)
+}
+
+fn millis(date: &NSDate) -> Millis {
+    (date.timeIntervalSince1970() * 1000.0).round() as Millis
+}
+
+impl Event {
+    fn into_service(self) -> service::Event {
+        let occurrence = self.occurrence.as_ref().unwrap_or(&self.start);
+        service::Event {
+            id: format!("{}:{}", self.id, millis(occurrence)),
+            start: millis(&self.start),
+            end: millis(&self.end),
+            all_day: self.all_day,
+            calendar: CalendarInfo {
+                name: self.calendar,
+                color: self.color,
+            },
+            location: Some(self.location).filter(|location| !location.is_empty()),
+            url: self.url,
+            title: self.title,
+        }
+    }
 }
 
 struct Window<'a> {
@@ -429,6 +537,8 @@ fn fixture_events(now: &NSDate) -> Vec<Event> {
         end: now.dateByAddingTimeInterval(f64::from(end)),
         all_day,
         occurrence: None,
+        url: None,
+        color: None,
     })
     .collect()
 }
@@ -575,6 +685,8 @@ mod tests {
                     end: start.dateByAddingTimeInterval(1800.0),
                     start,
                     all_day: false,
+                    url: None,
+                    color: None,
                 }
             })
             .collect();
@@ -704,5 +816,79 @@ mod tests {
             permission_row().action("open"),
             Some(&Action::OpenUrl(Permission::Calendars.settings_url().into()))
         );
+    }
+
+    #[test]
+    fn the_extension_service_reads_fixture_events_within_the_declared_days() {
+        use dupin_host_services::calendar::{Bounds, Calendar, Query};
+
+        let service = Calendar::new(CalendarProvider::fixtures());
+        let base = FIXTURE_NOW as Millis * 1000;
+        let query = Query::new(base, base + 2 * 86_400_000, None, Some("review"), None).unwrap();
+        assert_eq!(
+            service.days(&query).unwrap(),
+            Bounds {
+                past_days: 0,
+                future_days: 2
+            }
+        );
+        let events = service
+            .events(
+                &query,
+                Bounds {
+                    past_days: 0,
+                    future_days: 2,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Design review"]
+        );
+        assert!(matches!(
+            service.events(
+                &query,
+                Bounds {
+                    past_days: 0,
+                    future_days: 1,
+                }
+            ),
+            Err(ServiceError::OutOfScope(_))
+        ));
+    }
+
+    #[test]
+    fn events_reach_extensions_in_milliseconds_with_occurrence_ids() {
+        let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
+        let mut events = fixture_events(&now).into_iter();
+        let mut planning = events.next().unwrap();
+        planning.url = Some("https://example.com/plan".into());
+        planning.color = Some("#1badf8".into());
+        planning.occurrence = Some(now.clone());
+        let base = FIXTURE_NOW as Millis * 1000;
+        assert_eq!(
+            planning.into_service(),
+            service::Event {
+                id: format!("project-planning:{base}"),
+                title: "Project planning".into(),
+                start: base + 7_200_000,
+                end: base + 10_800_000,
+                all_day: false,
+                calendar: CalendarInfo {
+                    name: "Work".into(),
+                    color: Some("#1badf8".into()),
+                },
+                location: Some("Studio".into()),
+                url: Some("https://example.com/plan".into()),
+            }
+        );
+        let holiday = events.nth(1).unwrap().into_service();
+        assert!(holiday.all_day);
+        assert_eq!(holiday.location, None);
+        assert_eq!(holiday.start, base + 57_600_000);
+        assert_eq!(millis(&date(holiday.start)), holiday.start);
     }
 }
