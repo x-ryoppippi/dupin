@@ -12,6 +12,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`  |
 | `define` or `d`, then Space             | Look up a word in macOS dictionaries                  |
 | `clip` then Space                       | Search the clipboard history, when it is on           |
+| `emoji` then Space                      | Pick an emoji or symbol                               |
 | ⌫ on an empty query                     | Leave a folder or the current search mode             |
 | ↑ ↓                                     | Move the selection                                    |
 | Tab at the end of an unselected input   | Complete the selected keyword, or browse the folder   |
@@ -45,6 +46,7 @@ This history holds up to 100 terms and is separate from app-ranking history.
 - [Calendar](./features/calendar.md)
 - [Clipboard history](./features/clipboard.md)
 - [Snippets](./features/snippets.md)
+- [Emoji & Symbols](./features/emoji.md)
 - [Script commands](./features/scripts.md)
 - [Hotkeys](./features/hotkeys.md)
 - [Search selected text](./features/selected-text.md)

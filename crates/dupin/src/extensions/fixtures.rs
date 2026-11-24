@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
-use dupin_extension_bridge::{Call, Trigger};
+use dupin_extension_bridge::{Call, ClipboardAccess, Request, Trigger};
 use dupin_extension_host::{ActionEffect, Host, ItemsContext};
 use dupin_js_runtime::row::{Row, RowEffect};
 use dupin_js_runtime::{Diagnostic, Preferences, RunError};
@@ -324,6 +324,25 @@ fn replay(
                 match chosen {
                     Some(action) => {
                         outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        if let RowEffect::Paste { text } = &action.effect {
+                            let paste = Request::Clipboard(ClipboardAccess::Paste);
+                            // The launcher copies instead, so the fixture sees what the user would.
+                            if let Err(refused) =
+                                world
+                                    .bridge
+                                    .authorize(&extension.package, &paste, Trigger::Activation)
+                            {
+                                let copied = RowEffect::Copy { text: text.clone() };
+                                outcome.insert("effect".into(), Value::Object(fixture::effect(&copied)));
+                                outcome.insert(
+                                    "error".into(),
+                                    fixture::error(&Diagnostic::new(
+                                        refused.code().to_owned(),
+                                        refused.to_string(),
+                                    )),
+                                );
+                            }
+                        }
                         if let RowEffect::Run { handler, data } = &action.effect {
                             let acted = host.action(
                                 &extension.compiled,

@@ -149,6 +149,17 @@ pub fn os_access(permission: OsPermission, calendar: &CalendarAccess) -> OsAcces
     }
 }
 
+/// Asks macOS to trust Dupin with Accessibility, which pasting for an extension needs, on a
+/// deliberate press. macOS shows its prompt only while it hasn't been asked.
+pub fn request_accessibility() {
+    if cfg!(test) || rune::tooling::is_headless() {
+        return;
+    }
+    if dupin_mac::privacy::Permission::Accessibility.status() == dupin_mac::privacy::Access::NotDetermined {
+        dupin_mac::accessibility::request_once();
+    }
+}
+
 fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
     serde_json::to_value(value).map_err(|error| Failure::new("failed", error.to_string()))
 }

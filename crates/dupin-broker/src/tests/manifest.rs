@@ -217,7 +217,7 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
         })
     );
     assert_eq!(
-        problem(json!({ "clipboard": ["paste"] })),
+        problem(json!({ "clipboard": ["type"] })),
         ("invalid-value", "capabilities.clipboard[0]".into())
     );
     assert_eq!(
@@ -246,7 +246,7 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
 fn every_problem_is_reported_at_once_with_hints_where_useful() {
     let diagnostics = Capabilities::parse(&json!({
         "http": [{ "origin": "http://a.example", "methods": ["GET"] }],
-        "clipboard": ["paste"],
+        "clipboard": ["type"],
         "calendar": { "access": ["read"] }
     }))
     .unwrap_err();

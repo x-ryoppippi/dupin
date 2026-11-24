@@ -21,6 +21,13 @@ def main [] {
     assert equal (verdict (result a native 20.0) (result a extension 3.0)) ok
     assert equal (verdict null (result a extension 3.0)) new
 
+    # A feature with no native implementation is held to its own budget instead.
+    let budgeted = {|p95|
+        result a extension $p95 | insert budget_ms 5.0
+    }
+    assert equal (verdict null (do $budgeted 4.9)) ok
+    assert equal (verdict null (do $budgeted 5.1)) regressed
+
     # Every keypress must search the feature's provider; only a pass's last must show its rows.
     let pass = [
         {

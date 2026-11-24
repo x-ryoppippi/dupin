@@ -1,6 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{CommandId, CommandSpec, Config, Provider, QueryEligibility};
+use dupin_extension_bridge::OsPermission;
 use dupin_host_services::{calendar, clipboard};
 use dupin_mac::privacy::Permission;
 
@@ -24,6 +25,12 @@ pub(super) const FEATURE: Feature = Feature {
         PermissionUse {
             capability: Capability::Permission(Permission::of(clipboard::PERMISSION)),
             label: "extensions that read the clipboard",
+            enabled: |config| config.extensions,
+            request_on_enable: false,
+        },
+        PermissionUse {
+            capability: Capability::Permission(Permission::of(OsPermission::Accessibility)),
+            label: "extensions that paste",
             enabled: |config| config.extensions,
             request_on_enable: false,
         },

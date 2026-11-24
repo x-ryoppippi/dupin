@@ -1,0 +1,542 @@
+{
+	"fixture": 1,
+	"description": "Japanese keywords find emoji, including a flag by its country.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "にっこり",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "😀",
+								"title": "Copy"
+							},
+							{
+								"paste": "😀",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😀"
+								},
+								{
+									"label": "Name",
+									"text": "grinning face"
+								},
+								{
+									"label": "日本語",
+									"text": "にっこり笑う"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F600"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, grin, スマイル, にっこり, にっこり笑う, 笑う, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f600",
+						"keywords": [
+							"grinning face",
+							"face",
+							"grin",
+							"スマイル",
+							"にっこり",
+							"にっこり笑う",
+							"笑う",
+							"笑顔",
+							"顔"
+						],
+						"title": "😀 Grinning face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😙",
+								"title": "Copy"
+							},
+							{
+								"paste": "😙",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😙"
+								},
+								{
+									"label": "Name",
+									"text": "kissing face with smiling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "にっこりキス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F619"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, kiss, smile, キス, スマイル, ちゅっ, にっこりキス, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f619",
+						"keywords": [
+							"kissing face with smiling eyes",
+							"eye",
+							"face",
+							"kiss",
+							"smile",
+							"キス",
+							"スマイル",
+							"ちゅっ",
+							"にっこりキス",
+							"笑顔",
+							"顔"
+						],
+						"title": "😙 Kissing face with smiling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😺",
+								"title": "Copy"
+							},
+							{
+								"paste": "😺",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😺"
+								},
+								{
+									"label": "Name",
+									"text": "grinning cat"
+								},
+								{
+									"label": "日本語",
+									"text": "にっこり笑う猫"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F63A"
+								},
+								{
+									"label": "Keywords",
+									"text": "cat, face, grinning, mouth, open, smile, スマイル, にっこり笑う猫, 猫, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f63a",
+						"keywords": [
+							"grinning cat",
+							"cat",
+							"face",
+							"grinning",
+							"mouth",
+							"open",
+							"smile",
+							"スマイル",
+							"にっこり笑う猫",
+							"猫",
+							"笑顔",
+							"顔"
+						],
+						"title": "😺 Grinning cat"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "日本",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "🗾",
+								"title": "Copy"
+							},
+							{
+								"paste": "🗾",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🗾"
+								},
+								{
+									"label": "Name",
+									"text": "map of Japan"
+								},
+								{
+									"label": "日本語",
+									"text": "日本地図"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F5FE"
+								},
+								{
+									"label": "Keywords",
+									"text": "Japan, map, 地図, 日本, 日本地図"
+								}
+							]
+						},
+						"id": "1f5fe",
+						"keywords": ["map of Japan", "Japan", "map", "地図", "日本", "日本地図"],
+						"title": "🗾 Map of Japan"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🏯",
+								"title": "Copy"
+							},
+							{
+								"paste": "🏯",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🏯"
+								},
+								{
+									"label": "Name",
+									"text": "Japanese castle"
+								},
+								{
+									"label": "日本語",
+									"text": "城"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F3EF"
+								},
+								{
+									"label": "Keywords",
+									"text": "castle, Japanese, 城, 建物, 日本"
+								}
+							]
+						},
+						"id": "1f3ef",
+						"keywords": ["Japanese castle", "castle", "Japanese", "城", "建物", "日本"],
+						"title": "🏯 Japanese castle"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🎋",
+								"title": "Copy"
+							},
+							{
+								"paste": "🎋",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🎋"
+								},
+								{
+									"label": "Name",
+									"text": "tanabata tree"
+								},
+								{
+									"label": "日本語",
+									"text": "七夕"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F38B"
+								},
+								{
+									"label": "Keywords",
+									"text": "banner, celebration, Japanese, tree, 七夕, 和, 日本, 短冊"
+								}
+							]
+						},
+						"id": "1f38b",
+						"keywords": [
+							"tanabata tree",
+							"banner",
+							"celebration",
+							"Japanese",
+							"tree",
+							"七夕",
+							"和",
+							"日本",
+							"短冊"
+						],
+						"title": "🎋 Tanabata tree"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🎍",
+								"title": "Copy"
+							},
+							{
+								"paste": "🎍",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🎍"
+								},
+								{
+									"label": "Name",
+									"text": "pine decoration"
+								},
+								{
+									"label": "日本語",
+									"text": "門松"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F38D"
+								},
+								{
+									"label": "Keywords",
+									"text": "bamboo, celebration, Japanese, pine, お祝い, 和, 日本, 正月, 竹, 門松"
+								}
+							]
+						},
+						"id": "1f38d",
+						"keywords": [
+							"pine decoration",
+							"bamboo",
+							"celebration",
+							"Japanese",
+							"pine",
+							"お祝い",
+							"和",
+							"日本",
+							"正月",
+							"竹",
+							"門松"
+						],
+						"title": "🎍 Pine decoration"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🎎",
+								"title": "Copy"
+							},
+							{
+								"paste": "🎎",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🎎"
+								},
+								{
+									"label": "Name",
+									"text": "Japanese dolls"
+								},
+								{
+									"label": "日本語",
+									"text": "ひな祭り"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F38E"
+								},
+								{
+									"label": "Keywords",
+									"text": "celebration, doll, festival, Japanese, おだいり様, おひな様, お祝い, ひな祭り, 人形, 和, 日本"
+								}
+							]
+						},
+						"id": "1f38e",
+						"keywords": [
+							"Japanese dolls",
+							"celebration",
+							"doll",
+							"festival",
+							"Japanese",
+							"おだいり様",
+							"おひな様",
+							"お祝い",
+							"ひな祭り",
+							"人形",
+							"和",
+							"日本"
+						],
+						"title": "🎎 Japanese dolls"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🇯🇵",
+								"title": "Copy"
+							},
+							{
+								"paste": "🇯🇵",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🇯🇵"
+								},
+								{
+									"label": "Name",
+									"text": "flag: Japan"
+								},
+								{
+									"label": "日本語",
+									"text": "旗: 日本"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F1EF U+1F1F5"
+								},
+								{
+									"label": "Keywords",
+									"text": "flag, 旗, 旗: 日本, 日本"
+								}
+							]
+						},
+						"id": "1f1ef-1f1f5",
+						"keywords": ["flag: Japan", "flag", "旗", "旗: 日本", "日本"],
+						"title": "🇯🇵 Flag: Japan"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🍶",
+								"title": "Copy"
+							},
+							{
+								"paste": "🍶",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🍶"
+								},
+								{
+									"label": "Name",
+									"text": "sake"
+								},
+								{
+									"label": "日本語",
+									"text": "徳利"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F376"
+								},
+								{
+									"label": "Keywords",
+									"text": "bar, beverage, bottle, cup, drink, 徳利, 日本酒, 酒"
+								}
+							]
+						},
+						"id": "1f376",
+						"keywords": [
+							"sake",
+							"bar",
+							"beverage",
+							"bottle",
+							"cup",
+							"drink",
+							"徳利",
+							"日本酒",
+							"酒"
+						],
+						"title": "🍶 Sake"
+					},
+					{
+						"actions": [
+							{
+								"copy": "¥",
+								"title": "Copy"
+							},
+							{
+								"paste": "¥",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "¥"
+								},
+								{
+									"label": "Name",
+									"text": "yen"
+								},
+								{
+									"label": "日本語",
+									"text": "円"
+								},
+								{
+									"label": "Code points",
+									"text": "U+00A5"
+								},
+								{
+									"label": "Keywords",
+									"text": "CNY, currency, JPY, yuan, 中国元, 円, 日本円, 通貨"
+								}
+							]
+						},
+						"id": "00a5",
+						"keywords": ["yen", "CNY", "currency", "JPY", "yuan", "中国元", "円", "日本円", "通貨"],
+						"title": "¥ Yen"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

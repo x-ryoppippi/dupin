@@ -36,6 +36,7 @@ fn scope_keys_round_trip_through_their_written_form() {
         "clipboard:read",
         "clipboard:write",
         "clipboard:watch",
+        "clipboard:paste",
         "dictionary",
         "calendar",
     ] {
@@ -45,7 +46,7 @@ fn scope_keys_round_trip_through_their_written_form() {
         "http:http://a.example",
         "http:https://a.example/",
         "files:",
-        "clipboard:paste",
+        "clipboard:type",
         "network",
         "storage:x",
     ] {
