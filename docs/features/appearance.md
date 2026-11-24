@@ -20,7 +20,7 @@ Themes are built in: share the TOML section below without installing an extensio
 panel_width = 680
 row_height = 72
 corner_radius = 14
-font_family = "monospace" # "system" or "monospace"
+font_family = "monospace" # "system", "monospace", or an installed family's name
 font_size = 18
 
 [theme.light]
@@ -36,6 +36,11 @@ Each appearance accepts `background`, `text`, `secondary`, `accent`, `selected_t
 `hover` and `separator` as `#RRGGBB`. Omitted colors use the system palette. The
 background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
 Choose contrasting text and selection colors when overriding the palette.
+
+`font_family` is `"system"` (San Francisco), `"monospace"` (SF Mono), or any font
+installed on the Mac by the name Font Book shows — `"Menlo"`, `"JetBrains Mono"`,
+`"Hiragino Sans"`. A comma-separated list tries each in order, CSS-style:
+`"Iosevka, JetBrains Mono"`. A name nothing provides falls back to the system font.
 
 Geometry uses integer points: width 400–1200, row height 52–100, radius 0–32 and
 font size 12–20. Rows must be at least `3 * font_size + 7` points tall. Invalid

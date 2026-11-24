@@ -403,9 +403,32 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                         "theme-font",
                         "Font",
                         &["System", "Mono"],
-                        Some(usize::from(t.font_family == FontFamily::Monospace)),
-                        |t, i| t.font_family = [FontFamily::System, FontFamily::Monospace][i],
+                        match t.font_family {
+                            FontFamily::System => Some(0),
+                            FontFamily::Monospace => Some(1),
+                            FontFamily::Named(_) => None,
+                        },
+                        |t, i| {
+                            t.font_family = if i == 1 {
+                                FontFamily::Monospace
+                            } else {
+                                FontFamily::System
+                            };
+                        },
                     ))
+                    .children(match &t.font_family {
+                        FontFamily::Named(name) => Some(
+                            text(name.clone())
+                                .font(k.ty.small)
+                                .color(k.c.text_muted)
+                                .px(8.0)
+                                .py(4.0)
+                                .radius(6.0)
+                                .border(1.0, k.c.border_muted)
+                                .truncate(),
+                        ),
+                        _ => None,
+                    })
                     .child(segments(
                         locked,
                         k,
