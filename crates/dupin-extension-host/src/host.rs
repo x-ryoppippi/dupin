@@ -378,15 +378,7 @@ impl Host {
                 return Err(error);
             }
         }
-        let answer = helper.run(
-            id,
-            request,
-            self.shared.environment,
-            deadline,
-            is_cancelled,
-            services,
-            &self.shared.workers,
-        );
+        let answer = helper.run(id, request, &self.shared, deadline, is_cancelled, services);
         if answer.is_err() {
             lease.helper = None;
         }
@@ -411,15 +403,7 @@ impl Host {
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
         let deadline = deadline();
-        settle(helper.run(
-            id,
-            request,
-            self.shared.environment,
-            deadline,
-            is_cancelled,
-            services,
-            &self.shared.workers,
-        ))
+        settle(helper.run(id, request, &self.shared, deadline, is_cancelled, services))
     }
 
     /// Waits for the helper to be free, unless the caller gives up first.
@@ -716,11 +700,10 @@ impl Helper {
         &mut self,
         id: u64,
         request: Request<'_>,
-        environment: Option<Environment>,
+        shared: &Shared,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
-        workers: &Workers,
     ) -> Result<(Answer, Vec<u8>), RunError> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let message = ToHelper::Run {
@@ -729,12 +712,18 @@ impl Helper {
             entry: request.entry.into(),
             modules: request.modules,
             call: request.call,
-            environment,
+            environment: shared.environment,
         };
         self.send(&message, &request.tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
         let mut cancel_by = None;
-        let mut requests = Requests::new(services.clone(), deadline, id, self.finished.clone(), workers);
+        let mut requests = Requests::new(
+            services.clone(),
+            deadline,
+            id,
+            self.finished.clone(),
+            &shared.workers,
+        );
         loop {
             match self.events.recv_timeout(TICK) {
                 Ok(Event::Helper(FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
