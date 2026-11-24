@@ -2,6 +2,7 @@
   pkgs,
   crane,
   native,
+  cargo-hawk,
 }:
 let
   inherit (native.passthru)
@@ -11,7 +12,10 @@ let
     bundleSrc
     ;
   craneLib = (crane.mkLib pkgs).overrideScope (
-    _: _: {
+    _: prev: {
+      # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
+      # stay 0.0.0 (see Cargo.toml). buildPackage calls this too when given no cargoArtifacts.
+      buildDepsOnly = args: prev.buildDepsOnly (args // { version = "0.0.0"; });
       cargo = pkgs.buildPackages.cargo-auditable-cargo-wrapper.override {
         cargo = pkgs.rustPlatform.rust.cargo;
         inherit (pkgs) cargo-auditable;
@@ -58,10 +62,22 @@ let
     cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
+  # The checks never read debug info: a failing test still prints where it panicked. Without
+  # it, the debug dependency output each lockfile change adds to CI's cache is half the size.
+  checkEnv = baseArgs.env // {
+    CARGO_PROFILE_DEV_DEBUG = "false";
+  };
   debugArgs = baseArgs // {
+    env = checkEnv;
     CARGO_PROFILE = "dev";
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
+  };
+  latencyArgs = baseArgs // {
+    pname = "dupin-latency";
+    CARGO_PROFILE = "latency";
+    cargoExtraArgs = "--offline --locked --package dupin --features tooling";
+    doCheck = false;
   };
   releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
   debugArtifacts = craneLib.buildDepsOnly debugArgs;
@@ -70,11 +86,51 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
+      # The extension installer tests fetch from fixture Git repositories, and the extension
+      # SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [
+        pkgs.git
+        pkgs.esbuild
+      ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';
       checkPhaseCargoCommand = "cargo test --workspace --offline --locked";
       doCheck = true;
+      doInstallCargoArtifacts = false;
+      installPhaseCommand = "touch $out";
+    }
+  );
+  # Hawk compiles with its own toolchain, so it can't reuse the other dependency outputs.
+  hawkArgs = baseArgs // {
+    pname = "dupin-hawk";
+    env = checkEnv;
+    nativeBuildInputs = [ cargo-hawk ];
+    doCheck = false;
+  };
+  # Exclusions and entry points change what Hawk reports, not what it compiles, so the
+  # dependency run leaves out hawk.toml and scripts/hawk.nu, which change with every new crate.
+  hawkDepsConfig = pkgs.writeText "hawk.toml" ''
+    [[production]]
+    package = "dupin"
+    bin = "dupin"
+    reason = "the dependency build"
+  '';
+  hawkArtifacts = craneLib.buildDepsOnly (
+    hawkArgs
+    // {
+      buildPhaseCargoCommand = "cargo-hawk check --manifest-path Cargo.toml --config ${hawkDepsConfig}";
+    }
+  );
+  hawk = craneLib.mkCargoDerivation (
+    hawkArgs
+    // {
+      nativeBuildInputs = hawkArgs.nativeBuildInputs ++ [ pkgs.nushell ];
+      postPatch = ''
+        cp ${../hawk.toml} hawk.toml
+      '';
+      buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
+      cargoArtifacts = hawkArtifacts;
       doInstallCargoArtifacts = false;
       installPhaseCommand = "touch $out";
     }
@@ -85,6 +141,13 @@ let
       cargoArtifacts = releaseArtifacts;
       dontStrip = true;
       doRemapPathPrefix = false;
+    }
+  );
+  # Headless-capable, for scripts/latency.nu; never shipped.
+  latencyBinary = craneLib.buildPackage (
+    latencyArgs
+    // {
+      cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
     }
   );
 in
@@ -108,8 +171,11 @@ pkgs.stdenv.mkDerivation (
         releaseArtifacts
         debugArtifacts
         lintAndTest
+        hawkArtifacts
+        hawk
         cargoVendorDir
         cargoBinary
+        latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
       baseline = native;

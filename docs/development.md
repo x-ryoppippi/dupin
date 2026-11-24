@@ -32,10 +32,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p dupin-mac --example search -- in invoice # a provider from the terminal: apps, files or in
 ```
 
-For isolated local Cargo cache measurements, see the
-[Cargo cache experiment](../experiments/cargo-cache/README.md). It compares
-sccache across fresh and reused target directories without changing the
-development shell or Nix package cache.
+For rebuild times and the sccache decision, see [Build caching](#build-caching).
 
 ## Remote development with Testbox
 
@@ -82,11 +79,64 @@ authentication, warmup or native E2E succeeded.
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
-Flake builds share compiled dependencies separately for release and debug.
+Flake builds keep compiled dependencies in four outputs, one each for the
+release binary, Clippy and the tests, Hawk, whose toolchain differs, and the
+latency binary. A source edit reuses all four; only a manifest or `Cargo.lock`
+change rebuilds them. Hawk's dependency build runs with a fixed configuration,
+so editing `hawk.toml` or `scripts/hawk.nu` reuses it too. Every
+dependency-only output is named with version 0.0.0 rather than `VERSION`, so a
+release bump reuses them as well; `checks.<system>.dependency-cache-keys` fails
+if one would not. The two check builds leave out debug info, which a failing
+test does not need to report where it panicked.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
 builder and its vendor-hash definition; the hash update script evaluates it so
 updates still target `package.nix`. The non-flake `default.nix` build uses it too.
+
+## Build caching
+
+The [crate boundary experiment](../experiments/crate-boundaries/README.md)
+times representative edits. On a 6-CPU Testbox, an incremental `cargo build -p
+dupin` after editing a UI file, `dupin-core`'s session code or `dupin-mac` takes
+1.8–2.5 seconds, `cargo test --workspace --no-run` 1.8–3.0 and `cargo clippy`
+0.8–1.5. A docs-only edit rebuilds nothing. Alternating `build`, `test` and
+`clippy` rebuilds nothing either, so no feature difference between them
+forces rebuilds. A release build takes 79–92 seconds whichever crate changed,
+because fat LTO recompiles the whole program. These numbers justify no
+crate split: editing the `dupin` crate already costs the least. New crates
+should stay leaves that depend on `serde` and `libc`, as the extension crates
+do, rather than on `dupin-core`, `dupin-mac` or Rune.
+
+CI's `build` job builds Clippy and the tests, Hawk and the release app in one
+`nix build`. Across 59 recent successful runs, that step took 143–191 seconds
+(median 155) for a Rust edit, about 340 seconds when `Cargo.lock` or a
+manifest changed, and 16–18 seconds when everything came from the cache. 17
+runs could not download a path that the Hestia manifest still listed, because
+its pack had been evicted from the cache; nine of them rebuilt the app for a
+change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
+compiled dependencies. On the Testbox, the same step after a UI edit takes 107
+seconds instead of 142 now that Hawk reuses its dependencies, and the three
+dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
+release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
+debug info.
+
+sccache is not configured for local builds or CI. Cargo builds workspace
+crates incrementally in the dev profile, which sccache cannot cache, and those
+crates are all that an edit rebuilds. It can only replay third-party crates in
+a fresh target directory. In the
+[Cargo cache experiment](../experiments/cargo-cache/README.md) on the Testbox,
+a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
+seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
+It only pays when a removed target is rebuilt at the same path: 18.1 seconds
+against 47.5. CI compiles through Nix, which caches whole dependency outputs
+instead. The development shell does not include sccache. A developer who often
+deletes and rebuilds the same target directory can run it from nixpkgs without
+installing it:
+
+```sh
+nix build --inputs-from . nixpkgs#sccache --out-link target/sccache
+RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
+```
 
 ## Formatting
 
@@ -166,6 +216,44 @@ nu scripts/footprint.nu
 ## Timing a summon
 
 `DUPIN_TRACE=1` prints when the launch hotkey is registered and, for each summon, when the hotkey handler ran and when the next frame was drawn, with wall-clock times to line up with an outside measurement of when the window reached the screen.
+
+## Keypress latency
+
+`scripts/latency.nu` measures how long Dupin takes from a typed key to the first frame that shows every provider's results for the new query. It drives a headless `--realtime` run with Rune's scripted keys, which reach the query field and the session as a window's keys do, against the same fixtures as the headless renders (calendar, dictionary, clipboard), so it needs no permissions. `DUPIN_LATENCY=<file>` makes a headless run write one JSON line per edit of the query; a window never writes it.
+
+```sh
+cargo build --profile latency -p dupin --features tooling   # target/latency/dupin
+nu scripts/latency.nu run                                    # target/latency/results.json
+nu scripts/latency.nu run --only calendar --runs 1           # a quick look at one feature
+nu scripts/latency.nu compare main.json pr.json              # fails on a p95 regression
+nu scripts/latency.nu parity target/latency/results.json     # extensions against native
+```
+
+`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and Rune's headless tooling, so numbers are only comparable between builds of that profile on one machine.
+
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+
+For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
+
+- `dispatch_ms`: from the edit to the searches it starts being handed to their providers' workers.
+- `provider_ms`: from there to the last provider's final delivery leaving its worker. `providers` in the raw lines has each one's time.
+- `merge_ms`: from there to the session holding the finished, ranked results. It includes waiting for the UI thread, which may be drawing a frame.
+- `layout_ms`: from there to the next frame being built, laid out and encoded. Headless frames start at most every `1 / --fps` seconds, so this includes up to a millisecond of waiting at the default 1000 fps.
+
+`compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
+
+A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it and its extensions directory:
+
+```toml
+[features.calendar.extension]
+config = "scripts/latency/calendar-extension.toml"
+provider = "<the extension's command id>"
+extensions = "scripts/latency/calendar-extension.extensions"
+```
+
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation.
+
+The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
 
 Scripts in this repository are written in Nushell.
 

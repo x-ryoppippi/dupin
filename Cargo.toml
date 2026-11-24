@@ -74,3 +74,19 @@ opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# QuickJS-ng runs at -O3: about half the latency of -Oz for about 0.47 MiB more (see
+# experiments/js-runtime).
+[profile.release.package.rquickjs-sys]
+opt-level = 3
+
+[profile.dev.package.rquickjs-sys]
+opt-level = 3
+
+# The release build's code with Rune's headless tooling, for scripts/latency.nu. Thin LTO keeps a
+# CI build to minutes; the comparisons it serves are all between builds of this same profile.
+[profile.latency]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+strip = false

@@ -97,11 +97,45 @@ jobs:
           path: ${{ runner.temp }}/Dupin.app.tar.gz
           if-no-files-found: error
 
+  # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
+  # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
+  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure.
+  extension-host:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: extension-host
+
+      - name: Test the extension host outside the Nix sandbox
+        env:
+          DUPIN_REQUIRE_EXTENSION_HOST: '1'
+        run: nix develop --command cargo test --locked -p dupin-extension-host -p dupin
+
+  # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
+  # a required check, so e2e runs whenever the app could have changed and fails itself when the
+  # build or the extension host tests did.
   e2e:
-    needs: build
+    needs: [changes, build, extension-host]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 20
     steps:
+      - name: Require the build and the extension host tests
+        if: needs.build.result != 'success' || needs.extension-host.result != 'success'
+        env:
+          BUILD: ${{ needs.build.result }}
+          EXTENSION_HOST: ${{ needs.extension-host.result }}
+        run: |
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

@@ -9,11 +9,13 @@ mod cli;
 mod clipboard;
 mod commands;
 mod control;
+mod extension_install;
 mod extensions;
 mod features;
 mod hotkey;
 mod http;
 mod icons;
+mod latency;
 mod log;
 mod mcp;
 mod prefs;
@@ -32,6 +34,12 @@ mod web;
 mod window_management;
 
 fn main() {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == dupin_extension_host::FLAG)
+    {
+        dupin_extension_host::serve();
+    }
     if cli::run() {
         return;
     }

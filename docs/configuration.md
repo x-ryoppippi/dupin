@@ -43,6 +43,8 @@ The flake's home-manager module installs Dupin and writes `config.toml` from `se
 
 With `settings` set, `config.toml` links into the Nix store. Settings marks those keys **Managed by Nix** and saves edits to the other keys locally. To change a locked key, edit its Nix value and activate the new generation. To manage it from Settings, remove the key from Nix and activate the new generation.
 
+`extensions` declares extension packages and their grants; see [Extensions › Declaring them with Nix](./features/extensions.md#declaring-them-with-nix).
+
 ## Feature configuration
 
 - [Appearance](./features/appearance.md)
