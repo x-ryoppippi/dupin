@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use dupin_extension_host::{ActionEffect, Compiled, Host};
+use dupin_extension_host::{ActionEffect, Compiled, Host, Trust};
 use dupin_js_runtime::{Acted, DEFAULT_ENTRY, Row, RunError, Sources};
 
 use super::services::fixture;
@@ -81,7 +81,9 @@ fn world_with(
     std::fs::write(folder.path().join(DEFAULT_ENTRY), source).unwrap();
     let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
     let host = host();
-    let package = host.compile(&sources, Duration::from_secs(5), &|| false).unwrap();
+    let package = host
+        .compile(&sources, Trust::Own, Duration::from_secs(5), &|| false)
+        .unwrap();
     let http = Arc::new(fixture::Http {
         body: r#"{"archived":false}"#.into(),
         ..fixture::Http::default()
