@@ -4,8 +4,9 @@ use dupin_core::{CommandError, CommandSpec, Config};
 
 use super::{Feature, default_query};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
+use crate::extensions::preferences;
 use crate::ui::{ActionStage, Ui};
-use crate::web::{WebCatalog, WebProvider, WebSearches};
+use crate::web::{WEB_SEARCH_PACKAGE, WebProvider, WebSearches};
 
 pub(crate) const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -39,9 +40,9 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
 }
 
 fn prepare(config: &Config, commands: &mut Configure) {
-    let (catalog, notice) =
-        WebCatalog::compile(config, |keyword| commands.registry.keyword(keyword).is_some());
-    commands.web = catalog;
+    let (web, notice) =
+        crate::web::preferences(config, |keyword| commands.registry.keyword(keyword).is_some());
+    commands.web = web;
     commands.notices.extend(notice);
 }
 
@@ -54,8 +55,8 @@ fn start(providers: &mut Providers) {
 /// Runs after the extensions feature has registered this configuration's extensions, so their
 /// keywords take precedence over an alias and their catalogues are the ones searched.
 fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
+    let configured = preferences::set(WEB_SEARCH_PACKAGE, std::mem::take(&mut commands.web));
     let next = WebSearches::new(
-        std::mem::take(&mut commands.web),
         ui.web_search_sources(),
         commands.registry.keywords().map(str::to_owned).collect(),
     );
@@ -63,7 +64,7 @@ fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
         let mut web = ui.web.write().unwrap();
         let changed = *web != next;
         *web = next;
-        changed
+        changed || configured
     };
     if changed
         && let Some(screen) = &mut ui.action_screen

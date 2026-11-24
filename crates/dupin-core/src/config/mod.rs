@@ -23,7 +23,7 @@ pub use hotkeys::HotkeyTarget;
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
 pub use theme::{Backdrop, Colors, FontFamily, Theme};
-pub use web::{MAPS_SEARCH_TEMPLATE, WebSearch};
+pub use web::WebSearch;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -45,8 +45,10 @@ pub struct Config {
     pub window_management: bool,
     pub calculator: bool,
     pub calculator_currency: bool,
-    /// Web search keywords and their URL templates. `{query}` is replaced when selected.
-    pub web_searches: BTreeMap<String, WebSearch>,
+    /// Web search keywords and their URL templates, which replace the bundled web-search
+    /// extension's own when set. `{query}` is replaced when selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_searches: Option<BTreeMap<String, WebSearch>>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
     /// Text snippets by keyword. Placeholders in the text are filled in when one is used.
@@ -89,7 +91,7 @@ impl Default for Config {
             window_management: false,
             calculator: calculator::DEFAULT_ENABLED,
             calculator_currency: calculator::DEFAULT_CURRENCY,
-            web_searches: web::default_searches(),
+            web_searches: None,
             web_fallbacks: Vec::new(),
             snippets: BTreeMap::new(),
             snippet_keywords: snippets::default_keywords(),

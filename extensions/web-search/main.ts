@@ -30,7 +30,11 @@ function configured(ctx: ItemsContext): [string, Search][] {
 	if (typeof searches !== 'object' || searches === null || Array.isArray(searches)) {
 		return Object.entries(defaults);
 	}
-	return Object.entries(searches).filter((entry): entry is [string, Search] => isSearch(entry[1]));
+	const listed: [string, Search][] = [];
+	for (const [alias, search] of Object.entries(searches)) {
+		if (isSearch(search)) listed.push([alias, search]);
+	}
+	return listed;
 }
 
 function fallbacks(ctx: ItemsContext): string[] {

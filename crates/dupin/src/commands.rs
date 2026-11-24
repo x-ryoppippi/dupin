@@ -23,7 +23,8 @@ pub struct Registration {
 pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
-    pub web: crate::web::WebCatalog,
+    /// config.toml's web searches, as the bundled web-search package's preferences.
+    pub web: dupin_js_runtime::Preferences,
     pub snippets: SnippetCatalog,
 }
 
@@ -54,7 +55,7 @@ pub(super) struct Configure {
     pub defaults: Vec<CommandId>,
     pub pinned: Option<CommandId>,
     pub notices: Vec<String>,
-    pub web: crate::web::WebCatalog,
+    pub web: dupin_js_runtime::Preferences,
     pub snippets: SnippetCatalog,
 }
 
@@ -80,7 +81,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
         defaults: Vec::new(),
         pinned: None,
         notices: Vec::new(),
-        web: crate::web::WebCatalog::default(),
+        web: dupin_js_runtime::Preferences::new(),
         snippets: SnippetCatalog::default(),
     };
     for feature in MANIFEST {
@@ -129,11 +130,8 @@ pub fn register(
         snippets,
     } = configured(config)?;
     let session = Session::new(history, registry)?;
-    let web = Arc::new(RwLock::new(crate::web::WebSearches::new(
-        web,
-        Vec::new(),
-        std::collections::HashSet::new(),
-    )));
+    crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web);
+    let web = Arc::new(RwLock::new(crate::web::WebSearches::default()));
     let snippets = Arc::new(RwLock::new(snippets));
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
@@ -181,7 +179,7 @@ mod tests {
 
     #[test]
     fn manifest_preserves_command_ids_provider_order_and_keywords() {
-        use dupin_core::{Effect, config::WebSearch};
+        use dupin_core::Effect;
 
         let mut config = Config {
             calculator: true,
@@ -191,18 +189,10 @@ mod tests {
                 .map(str::to_owned)
                 .into(),
             snippet_keywords: ["shared", "snip"].map(str::to_owned).into(),
-            web_searches: ["in", "clip", "cal", "define", "shared", "snip", "web"]
-                .into_iter()
-                .map(|keyword| {
-                    (
-                        keyword.into(),
-                        WebSearch {
-                            name: "Example".into(),
-                            url: "https://example.com/?q={query}".into(),
-                        },
-                    )
-                })
-                .collect(),
+            web_searches: Some(crate::web::searches(
+                &["in", "clip", "cal", "define", "shared", "snip", "web"]
+                    .map(|keyword| (keyword, "Example", "https://example.com/?q={query}")),
+            )),
             web_fallbacks: vec!["web".into()],
             ..Config::default()
         };
@@ -244,12 +234,9 @@ mod tests {
         ] {
             assert_eq!(registry.keyword(keyword).map(CommandId::as_str), expected);
         }
-        assert_eq!(
-            web.search_urls("example")
-                .map(|(keyword, _, _)| keyword)
-                .collect::<Vec<_>>(),
-            ["web"]
-        );
+        let listed: Vec<_> = web["webSearches"].as_object().unwrap().keys().collect();
+        assert_eq!(listed, ["web"]);
+        assert_eq!(web["webFallbacks"], serde_json::json!(["web"]));
 
         let mut session = Session::new(History::default(), registry).unwrap();
         assert!(matches!(
@@ -539,11 +526,15 @@ mod tests {
     fn web_results_use_the_registered_session_action_and_completion_paths() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
 
+        dupin_extension_host::skip_inside_a_sandbox!();
         let configured = configured(&Config::default()).unwrap();
+        let bundled = crate::extensions::load_folder(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/web-search"),
+        )
+        .unwrap();
         let web = crate::web::WebProvider::new(
             Arc::new(RwLock::new(crate::web::WebSearches::new(
-                configured.web,
-                Vec::new(),
+                vec![bundled],
                 std::collections::HashSet::new(),
             ))),
             false,
@@ -621,18 +612,21 @@ mod tests {
         let added = add_extensions(&mut configured, &extensions);
 
         let words = id("extension.word-count");
-        assert_eq!(added.registered.len(), 1);
-        assert_eq!(added.registered[0].0, words);
+        let registered: Vec<_> = added.registered.iter().map(|(id, ..)| id.as_str()).collect();
+        assert_eq!(registered, ["extension.word-count", "extension.web-clash"]);
         assert_eq!(configured.registry.keyword("wc"), Some(&words));
         assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
         assert_eq!(configured.registry.keyword("snip"), Some(&id(SNIPPETS)));
-        assert!(configured.web.has_keyword("gh"));
-        assert_eq!(added.problems.len(), 5, "{:?}", added.problems);
+        // A web search's alias yields to an extension's keyword.
+        assert_eq!(
+            configured.registry.keyword("gh"),
+            Some(&id("extension.web-clash"))
+        );
+        assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
         for (problem, folder) in added.problems.iter().zip([
             "dictionary-clash-folder",
             "contents-clash-folder",
-            "web-clash-folder",
             "snippet-clash-folder",
             "second-count-folder",
         ]) {
@@ -719,13 +713,11 @@ mod tests {
         for enabled in [false, true] {
             let mut config = Config::default();
             config.clipboard.enabled = enabled;
-            config.web_searches.insert(
-                "clip".into(),
-                dupin_core::config::WebSearch {
-                    name: "Clips".into(),
-                    url: "https://clips.example/?q={query}".into(),
-                },
-            );
+            config.web_searches = Some(crate::web::searches(&[(
+                "clip",
+                "Clips",
+                "https://clips.example/?q={query}",
+            )]));
             let commands = configured(&config).unwrap();
             let clipboard = id(CLIPBOARD);
             assert_eq!(commands.registry.keyword("clip"), enabled.then_some(&clipboard));
@@ -793,7 +785,7 @@ mod tests {
 
     #[test]
     fn snippet_keywords_route_to_snippets_and_reserve_web_keywords() {
-        use dupin_core::config::{Snippet, WebSearch};
+        use dupin_core::config::Snippet;
         use dupin_core::{Effect, Session};
 
         let config = Config {
@@ -806,14 +798,11 @@ mod tests {
                 },
             )]
             .into(),
-            web_searches: [(
-                "s".into(),
-                WebSearch {
-                    name: "Search".into(),
-                    url: "https://example.com/?q={query}".into(),
-                },
-            )]
-            .into(),
+            web_searches: Some(crate::web::searches(&[(
+                "s",
+                "Search",
+                "https://example.com/?q={query}",
+            )])),
             ..Config::default()
         };
         let configured = configured(&config).unwrap();

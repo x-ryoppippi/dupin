@@ -191,14 +191,8 @@ fn routed_keywords(bundled: Vec<(PathBuf, String, String)>) -> impl Fn(&str) -> 
         if let Some((_, name, _)) = bundled.iter().find(|(.., bundled)| bundled == keyword) {
             return Some(format!("the bundled `{name}` extension"));
         }
-        let commands = commands.as_ref()?;
-        if let Some(command) = commands.registry.keyword(keyword) {
-            return Some(format!("the `{command}` command"));
-        }
-        commands
-            .web
-            .has_keyword(keyword)
-            .then(|| "a web search in config.toml".to_owned())
+        let command = commands.as_ref()?.registry.keyword(keyword)?;
+        Some(format!("the `{command}` command"))
     }
 }
 

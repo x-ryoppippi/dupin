@@ -48,7 +48,8 @@ pub(crate) fn provider(
 }
 
 /// Extensions whose commands were registered, and why the others were not. Built-in and
-/// configured keywords always win: an extension never replaces another command's keyword.
+/// configured keywords always win: an extension never replaces another command's keyword. An
+/// extension's keyword wins over a web search's alias.
 pub struct Extensions {
     pub registered: Vec<(CommandId, Arc<Extension>, Role)>,
     pub problems: Vec<String>,
@@ -63,7 +64,7 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
     let mut after = id(APPS);
     for extension in extensions {
         let keyword = &extension.keyword;
-        if configured.web.has_keyword(keyword) || configured.registry.keyword(keyword).is_some() {
+        if configured.registry.keyword(keyword).is_some() {
             added.problems.push(format!(
                 "{}: keyword `{keyword}` is already used by another command",
                 extension.folder_name

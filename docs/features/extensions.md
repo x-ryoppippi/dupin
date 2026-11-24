@@ -20,7 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. The first is **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Web Search** (`web`) lists the [web searches](./web-searches.md), such as `g` for Google, that the main search reaches by their alias.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -87,7 +87,7 @@ The manifest is the `dupin` key of `package.json`, so a package keeps one file f
 | `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                      |
 | `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                    |
 
-Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
+Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else. An extension's keyword takes precedence over a web search's alias.
 
 The module exports `search`, `items` or both. Each may be a function or an `async` function:
 
@@ -147,7 +147,7 @@ Typing `bm` and Space lists the catalogue in its own order, under its sections. 
 | `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
 | `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
 
-`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
+`ctx` is frozen through and through and holds `cursor`, the last answer's (`null` when Dupin holds nothing), `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action, and `preferences`: what the user set for the package, an empty object until packages can declare preferences. A bundled package that replaces a built-in gets that built-in's config.toml settings there, as Web Search gets `webSearches` and `webFallbacks`; a copy you change no longer does. When they change, Dupin drops the catalogue and asks again with `"load"`. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
 
 Instead of the whole catalogue, an answer can change the one Dupin holds, by `id`, so a long and busy list such as clipboard history never sends everything again:
 
@@ -170,6 +170,37 @@ Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, an
 #### The main search
 
 With `"defaultSearch": true` in its manifest, a package's catalogue also answers the main search, after apps and in the order of the extension folders, with up to eight rows ranked by the same matcher. Dupin matches the catalogue it holds, so the package never sees what you type there and `search` is never called for it. A catalogue that fails to load stays out of the main search and shows its failure under its own keyword.
+
+#### Web searches
+
+A catalogue item with `webSearch` is a [web search](./web-searches.md) rather than a row to match. Dupin fills and opens its URL itself, so typing one calls into no package:
+
+```js
+export function items() {
+	return [
+		{
+			id: 'docs',
+			title: 'Search Rust documentation',
+			subtitle: 'docs',
+			webSearch: {
+				alias: 'docs',
+				url: 'https://doc.rust-lang.org/std/?search={query}',
+				title: 'Search Rust documentation for {query}',
+				fallback: 0,
+			},
+		},
+	];
+}
+```
+
+| `webSearch` | Value                                                                                                                                                                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alias`     | Required. Up to 32 ASCII letters, digits, `_` or `-`, matched case-sensitively. A keyword, and an earlier package's alias, take precedence.                                                                                         |
+| `url`       | Required. An `http` or `https` URL of up to 4,096 bytes with a host, no credentials and one `{query}` in its path, query or fragment, which Dupin percent-encodes as UTF-8; or exactly `maps://?q={query}`, which opens Apple Maps. |
+| `title`     | Required. The row's title once a query is typed: one line with one `{query}`, which the query replaces as typed.                                                                                                                    |
+| `fallback`  | Optional, 0 to 1,000. The item is offered, lowest first, with the query when nothing else matches the main search.                                                                                                                  |
+
+The item takes no `url`, `text` or `actions`, and only a `defaultSearch` package's web searches reach the main search. Typing `docs` there shows the item first, with its own `title`, and Tab completes it to `docs` and a space; `docs rust` shows `Search Rust documentation for rust`, and Enter opens the URL in the browser. A Maps search needs a query. Each web search is also offered by Send to for text, and the package's own keyword lists every web search, filled with what you type. Web searches never count towards usage ranking.
 
 ### Details
 
@@ -637,6 +668,7 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `description` | Optional text for people.                                                                                                   |
 | `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                       |
 | `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                    |
+| `preferences` | Optional. The object `items` sees as `ctx.preferences`, empty when left out. `snap` doesn't pass it on.                     |
 | `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate` and `event`, and `expect`. |
 
 | `environment` key | Default                        | Fixes                                                                                                      |
@@ -655,7 +687,7 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`.                               |
 | `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                      | `error` when the handler failed.                                            |
 
-Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy` and `open` for a row's first Copy and Open URL, and `action-<index>` for the others. A query step calls `search`; an `items()` catalogue isn't replayed yet. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
+Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy` and `open` for a row's first Copy and Open URL, and `action-<index>` for the others. A query step answers as the package's keyword does: `search`, for a package without `items` or once the query isn't blank, then the matches of the `items()` catalogue, loaded afresh for each fixture, and its web searches filled with the query. A catalogue row has the package's own `id`, its `title`, `subtitle`, `section` and `actions`. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
 
 `replies` answers host requests in place of this Mac. Every request still goes through the broker, against the scopes `package.json` declares, so an undeclared origin, a method or path out of scope, or a clipboard read while typing fails exactly as in the launcher, before any reply is looked up. A request the fixture has no reply for fails rather than reaching the network, a program or a file of yours.
 
@@ -702,7 +734,7 @@ Installing never runs anything from the package, and there is no package manager
 - `dupin.main` (default `main.js`) is a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file in the package, not a declaration file. A JSX entry, or a build output that isn't committed, fails with a hint to build and commit it;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
 - there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch or download of more than 64 MiB is stopped before it finishes, and a tarball whose entries aren't plain files and folders inside its one top-level folder is refused;
-- the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
+- the keyword isn't already used by a built-in command or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
 
 A folder source skips `.git` and its top-level `node_modules`. The package is written into a hidden folder beside the others and then renamed into place, swapping with the previous copy on an update, so a running Dupin sees the old package or the new one and never half of either. It runs once the [extensions folder](#turning-them-on) is on, like any other folder there.

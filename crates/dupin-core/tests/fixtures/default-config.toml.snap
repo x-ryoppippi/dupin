@@ -20,22 +20,6 @@ extensions = false
 
 [bindings]
 
-[web_searches.g]
-name = "Google"
-url = "https://www.google.com/search?q={query}"
-
-[web_searches.gh]
-name = "GitHub"
-url = "https://github.com/search?q={query}"
-
-[web_searches.maps]
-name = "Apple Maps"
-url = "maps://?q={query}"
-
-[web_searches.yt]
-name = "YouTube"
-url = "https://www.youtube.com/results?search_query={query}"
-
 [snippets]
 
 [theme]

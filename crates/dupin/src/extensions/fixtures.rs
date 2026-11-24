@@ -6,13 +6,14 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::Trigger;
 use dupin_extension_host::{ActionEffect, Host};
 use dupin_js_runtime::row::{Row, RowEffect};
-use dupin_js_runtime::{Diagnostic, RunError};
+use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
 
 use super::provider::row_item;
@@ -124,6 +125,7 @@ fn replay(
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger).services;
+    let preferences = Arc::new(fixture.preferences.clone());
     let mut rows: Vec<Row> = Vec::new();
     let mut selected: Option<usize> = None;
     let mut steps = Vec::new();
@@ -133,11 +135,11 @@ fn replay(
         let mut problem = None;
         match action {
             Action::Query(query) => {
-                let answer = host.search(
-                    &extension.compiled,
+                let answer = answer(
+                    &host,
+                    extension,
                     query,
-                    dupin_js_runtime::MAX_ROWS,
-                    Instant::now() + QUERY_DEADLINE,
+                    &preferences,
                     cancelled,
                     &call(Trigger::Query),
                 );
@@ -251,6 +253,104 @@ fn replay(
         }
     }
     Ok(Replay { steps })
+}
+
+/// The rows a query step shows: what `search` computes for it, then the catalogue's matches and
+/// its web searches filled with the query, as under the package's keyword. The catalogue is
+/// asked for with the fixture's own preferences, so each fixture loads it afresh.
+fn answer(
+    host: &Host,
+    extension: &Extension,
+    query: &str,
+    preferences: &Arc<Preferences>,
+    cancelled: &dyn Fn() -> bool,
+    services: &Arc<dyn dupin_extension_host::Services>,
+) -> Result<Vec<Row>, RunError> {
+    let deadline = Instant::now() + QUERY_DEADLINE;
+    let exports = host.check(&extension.compiled, deadline, cancelled)?;
+    let limit = dupin_js_runtime::MAX_ROWS;
+    let mut rows = if exports.search && (!exports.items || !query.trim().is_empty()) {
+        host.search(&extension.compiled, query, limit, deadline, cancelled, services)?
+    } else {
+        Vec::new()
+    };
+    if exports.items {
+        let mut fetch = |cursor: Option<&str>, reason, preferences: &Preferences| {
+            host.items(
+                &extension.compiled,
+                cursor,
+                reason,
+                preferences,
+                deadline,
+                cancelled,
+            )
+        };
+        let batches = extension
+            .catalogue
+            .search(query, limit, preferences, &mut fetch, extension)?;
+        let searches = extension
+            .catalogue
+            .web_searches(preferences, &mut fetch, extension)?;
+        for batch in &batches {
+            rows.extend(
+                batch
+                    .items
+                    .iter()
+                    .map(|item| item_row(extension, item, batch.section.clone())),
+            );
+        }
+        rows.extend(
+            searches
+                .iter()
+                .filter_map(|(shown, search)| crate::web::item(shown, search, query.trim(), false))
+                .map(|item| item_row(extension, &item, None)),
+        );
+        rows.truncate(limit);
+    }
+    Ok(rows)
+}
+
+/// A row the launcher holds, as fixtures state rows: the package's own ID and what each action
+/// does.
+fn item_row(extension: &Extension, item: &dupin_core::Item, section: Option<String>) -> Row {
+    let prefix = format!("extension:{}/", extension.id);
+    let subtitle = match &item.view {
+        dupin_core::View::Text { subtitle, .. } => subtitle.clone(),
+        _ => String::new(),
+    };
+    let actions = item
+        .actions
+        .iter()
+        .filter_map(|action| {
+            let effect = match item.action(&action.id)? {
+                dupin_core::Action::Copy(text) => RowEffect::Copy { text: text.clone() },
+                dupin_core::Action::OpenUrl(url) => RowEffect::OpenUrl { url: url.clone() },
+                dupin_core::Action::Extension {
+                    request: dupin_core::ExtensionRequest::Run { action, data },
+                    ..
+                } => RowEffect::Run {
+                    handler: action.clone(),
+                    data: data.clone(),
+                },
+                _ => return None,
+            };
+            Some(dupin_js_runtime::row::RowAction {
+                title: action.title.clone(),
+                effect,
+            })
+        })
+        .collect();
+    Row {
+        id: item.id.strip_prefix(&prefix).unwrap_or(&item.id).to_owned(),
+        title: item.display_title().to_owned(),
+        subtitle,
+        keywords: Vec::new(),
+        icon: None,
+        section,
+        detail: None,
+        actions,
+        web_search: None,
+    }
 }
 
 /// A failed call is the step's outcome; a cancelled one means the step never ran.

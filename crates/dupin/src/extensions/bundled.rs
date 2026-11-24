@@ -230,6 +230,20 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_extension_passes_its_fixtures() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let source = directory().unwrap();
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let folder = entry.unwrap().path();
+            if folder.join("fixtures").is_dir() {
+                let report = crate::extensions::test(&folder, false, &|| false)
+                    .unwrap_or_else(|diagnostic| panic!("{}: {diagnostic}", folder.display()));
+                assert!(report.passed, "{}:\n{}", folder.display(), report.text);
+            }
+        }
+    }
+
+    #[test]
     fn ejecting_copies_a_bundled_package_into_the_extensions_folder_once() {
         let bundled = tempfile::tempdir().unwrap();
         let user = tempfile::tempdir().unwrap();
