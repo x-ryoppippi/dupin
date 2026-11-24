@@ -24,8 +24,7 @@ fn root() -> PathBuf {
 
 fn compile(host: &Host, folder: &Path) -> Compiled {
     let sources = Sources::read(folder, DEFAULT_ENTRY).unwrap();
-    host.compile(&sources, Instant::now() + Duration::from_secs(5), &|| false)
-        .unwrap()
+    host.compile(&sources, Duration::from_secs(5), &|| false).unwrap()
 }
 
 #[test]
@@ -61,9 +60,7 @@ fn latency_through_the_extension_host() {
     let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
     let compile_in = |host: &Host| {
         let started = Instant::now();
-        let package = host
-            .compile(&sources, Instant::now() + Duration::from_secs(2), &|| false)
-            .unwrap();
+        let package = host.compile(&sources, Duration::from_secs(2), &|| false).unwrap();
         (package, started.elapsed())
     };
     let package = compile_in(&host()).0;
@@ -82,23 +79,21 @@ fn latency_through_the_extension_host() {
         started.elapsed()
     };
 
-    let cold_compile: Vec<_> = (0..100).map(|_| compile_in(&host()).1).collect();
+    let compiles: Vec<_> = (0..100).map(|_| compile_in(&host()).1).collect();
     let cold: Vec<_> = (0..100).map(|_| query(&host())).collect();
     let host = host();
     for _ in 0..50 {
         query(&host);
     }
-    let warm_compile: Vec<_> = (0..200).map(|_| compile_in(&host).1).collect();
     let warm: Vec<_> = (0..2000).map(|_| query(&host)).collect();
     println!(
-        "cold compile (spawn, sandbox, handshake, compile, bytecode back): {}",
-        summary(cold_compile)
+        "compile, in a helper of its own (spawn, sandbox, handshake, compile, bytecode back): {}",
+        summary(compiles)
     );
     println!(
         "cold first result from cached bytecode (spawn, sandbox, handshake, load, search): {}",
         summary(cold)
     );
-    println!("compile in a running host: {}", summary(warm_compile));
     println!(
         "warm query (send bytecode and query, search, reply, validation): {}",
         summary(warm)

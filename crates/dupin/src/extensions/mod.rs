@@ -337,7 +337,7 @@ fn build_guest(
         let compiled = match unchanged {
             Some(compiled) => compiled,
             None => host()
-                .compile(&sources, Instant::now() + QUERY_DEADLINE, &|| false)
+                .compile(&sources, QUERY_DEADLINE, &|| false)
                 .map_err(|error| match error {
                     RunError::Failed(diagnostic) => diagnostic,
                     RunError::Cancelled => {

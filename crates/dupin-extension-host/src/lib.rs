@@ -3,7 +3,9 @@
 //! untrusted source and cannot be interrupted, its interpreter cannot interrupt every native
 //! operation, and its heap limit doesn't bound the process, so the boundary Dupin relies on is
 //! one it can kill: the host stops the helper and starts another on the next call. Dupin keeps
-//! only the bytecode the helper returns, as opaque bytes it sends back with each call.
+//! only the bytecode a helper returns, as opaque bytes it sends back with each call. Each
+//! package compiles in a helper started for it alone, so a helper one package compromised can't
+//! plant bytecode for another that outlives the restart.
 
 mod helper;
 mod host;

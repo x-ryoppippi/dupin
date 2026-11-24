@@ -149,9 +149,11 @@ fn execute(
         .map(|(name, bytes)| (name, Box::from(bytes)))
         .collect();
     // SAFETY: only Dupin writes to this socket. The only bytecode it sends is what a `compiled`
-    // answer from a helper of its own build gave it, after that helper stated this engine
-    // version, and it never makes or changes bytecode itself, so these are bytes that
-    // `Package::compile` wrote.
+    // answer gave it from a helper of its own build, after that helper stated this engine
+    // version, and it never makes or changes bytecode itself. That helper was started to
+    // compile this package alone, so these are bytes `Package::compile` wrote from this
+    // package's source, or ones that source subverted its own compile into writing, which can
+    // do no more than running the source could.
     let package = unsafe { Package::from_compiled(entry, bytecode) };
     match search {
         None => package.check(control).map(|()| Outcome::Checked),

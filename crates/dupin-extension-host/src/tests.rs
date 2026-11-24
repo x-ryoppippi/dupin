@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, RunError, Sources};
@@ -67,13 +67,23 @@ fn sources(files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
 
 fn compile(host: &Host, files: &[(&str, &str)]) -> Result<Compiled, RunError> {
     let (_folder, sources) = sources(files);
-    host.compile(&sources, Instant::now() + Duration::from_secs(5), &|| false)
+    host.compile(&sources, Duration::from_secs(5), &|| false)
 }
 
-/// `source` as `main.js`, compiled by a host other than the one a test watches.
+/// `source` as `main.js`, compiled.
 fn package(source: &str) -> Compiled {
-    static COMPILER: OnceLock<Host> = OnceLock::new();
-    compile(COMPILER.get_or_init(host), &[(DEFAULT_ENTRY, source)]).unwrap()
+    compile(&host(), &[(DEFAULT_ENTRY, source)]).unwrap()
+}
+
+/// A host that counts the helpers it starts.
+fn counting_host() -> (Host, Arc<AtomicUsize>) {
+    let started = Arc::new(AtomicUsize::new(0));
+    let count = started.clone();
+    let host = Host::new(Box::new(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+        helper_command("tests::helper_entry")
+    }));
+    (host, started)
 }
 
 fn search(
@@ -113,24 +123,24 @@ fn pid_is_sandboxed(pid: u32) -> bool {
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
 
 #[test]
-fn queries_run_in_one_resident_helper_that_compiled_their_packages() {
+fn queries_run_in_one_resident_helper() {
     skip_inside_a_sandbox!();
     let host = host();
-    assert_eq!(host.helper_pid(), None, "the helper starts on first use");
     let echo = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
-    let pid = host.helper_pid().expect("compiling started the helper");
-    assert_ne!(pid, std::process::id());
-    assert!(pid_is_sandboxed(pid));
-    assert!(!pid_is_sandboxed(std::process::id()));
     let other = compile(
         &host,
         &[(DEFAULT_ENTRY, "export const search = () => [{ title: 'other' }];")],
     )
     .unwrap();
+    assert_eq!(host.helper_pid(), None, "the helper starts on the first query");
     assert_eq!(
         titles(&search(&host, &echo, "one", Duration::from_secs(5)).unwrap()),
         ["echo one"]
     );
+    let pid = host.helper_pid().unwrap();
+    assert_ne!(pid, std::process::id());
+    assert!(pid_is_sandboxed(pid));
+    assert!(!pid_is_sandboxed(std::process::id()));
     assert_eq!(
         titles(&search(&host, &other, "", Duration::from_secs(5)).unwrap()),
         ["other"]
@@ -164,6 +174,57 @@ fn queries_run_in_one_resident_helper_that_compiled_their_packages() {
 }
 
 #[test]
+fn every_compile_runs_in_a_helper_no_other_code_has_reached() {
+    skip_inside_a_sandbox!();
+    let (host, started) = counting_host();
+    let first = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
+    assert_eq!(started.load(Ordering::Relaxed), 1);
+    search(&host, &first, "warm", Duration::from_secs(5)).unwrap();
+    let resident = host.helper_pid().unwrap();
+    assert_eq!(started.load(Ordering::Relaxed), 2);
+
+    let second = compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            "export const search = () => [{ title: 'second' }];",
+        )],
+    )
+    .unwrap();
+    assert_eq!(
+        started.load(Ordering::Relaxed),
+        3,
+        "the helper that ran a search compiles nothing"
+    );
+    assert_eq!(host.helper_pid(), Some(resident));
+    assert_eq!(
+        titles(&search(&host, &second, "", Duration::from_secs(5)).unwrap()),
+        ["second"]
+    );
+    assert_eq!(started.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn a_compile_neither_waits_for_a_running_search_nor_counts_the_helper_start_against_its_limit() {
+    skip_inside_a_sandbox!();
+    let host = Arc::new(host());
+    let busy = package("export function search() { for (;;) {} }");
+    let running = {
+        let host = host.clone();
+        std::thread::spawn(move || search(&host, &busy, "", Duration::from_secs(3)))
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    compile(&host, &[(DEFAULT_ENTRY, ECHO)]).expect("compiled beside the running search");
+    assert!(!running.is_finished(), "the search was still running");
+    assert_eq!(failed(running.join().unwrap()).code, "deadline");
+
+    let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
+    slow_host("1")
+        .compile(&sources, Duration::from_millis(100), &|| false)
+        .expect("the limit starts once the helper is ready");
+}
+
+#[test]
 fn compile_errors_come_back_with_the_file_line_and_import_at_fault() {
     skip_inside_a_sandbox!();
     let host = host();
@@ -187,7 +248,6 @@ fn compile_errors_come_back_with_the_file_line_and_import_at_fault() {
         ("syntax-error", Some("lib/util.js"), Some(2), true),
         "{syntax:?}"
     );
-    let pid = host.helper_pid().unwrap();
 
     let import = failed(compile(
         &host,
@@ -209,18 +269,14 @@ fn compile_errors_come_back_with_the_file_line_and_import_at_fault() {
         ),
         "{import:?}"
     );
-    assert_eq!(
-        host.helper_pid(),
-        Some(pid),
-        "a broken package leaves the helper running"
-    );
 }
 
 #[test]
-fn compiled_bytecode_outlives_the_helper_that_compiled_it() {
+fn compiled_bytecode_outlives_the_helper_that_ran_it() {
     skip_inside_a_sandbox!();
     let host = host();
     let echo = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
+    search(&host, &echo, "first", Duration::from_secs(5)).unwrap();
     let pid = host.helper_pid().unwrap();
     // SAFETY: `pid` is the helper this host started and still owns.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
@@ -236,14 +292,13 @@ fn compiled_bytecode_outlives_the_helper_that_compiled_it() {
 fn a_compile_that_outlasts_its_deadline_is_stopped() {
     skip_inside_a_sandbox!();
     let host = host();
-    compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
     let rows: String = (0..90_000).map(|index| format!("\"row {index:08}\",")).collect();
     let (_folder, large) = sources(&[(
         DEFAULT_ENTRY,
         &format!("export const rows = [{rows}];\nexport function search() {{ return []; }}"),
     )]);
     let started = Instant::now();
-    let diagnostic = failed(host.compile(&large, Instant::now() + Duration::from_millis(1), &|| false));
+    let diagnostic = failed(host.compile(&large, Duration::from_millis(1), &|| false));
     assert_eq!(
         (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
         ("deadline", Some(DEFAULT_ENTRY)),
@@ -275,14 +330,15 @@ fn a_large_package_compiles_and_answers_within_the_helper_allowance() {
         )],
     )
     .unwrap();
-    let pid = host.helper_pid().unwrap();
+    let mut pids = Vec::new();
     for _ in 0..3 {
         assert_eq!(
             titles(&search(&host, &large, "", Duration::from_secs(5)).unwrap()),
             ["90000"]
         );
+        pids.push(host.helper_pid().unwrap());
     }
-    assert_eq!(host.helper_pid(), Some(pid));
+    assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
 }
 
 #[test]
@@ -641,7 +697,7 @@ fn nested_sandbox_probe() {
     }
     println!("nested sandboxed {}", is_sandboxed());
     let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
-    let error = failed(host().compile(&sources, Instant::now() + Duration::from_secs(5), &|| false));
+    let error = failed(host().compile(&sources, Duration::from_secs(5), &|| false));
     println!("nested {} {}", error.code, error.message);
 }
 

@@ -1,5 +1,5 @@
-//! Dupin's side: starts the helper on first use, sends it packages to compile and calls to run,
-//! and stops it when a call outlives its deadline, ignores a cancellation, outgrows its memory
+//! Dupin's side: starts a helper for each package to compile and one shared helper, on first
+//! use, for the calls that run them, and stops a helper when a call outlives its deadline, ignores a cancellation, outgrows its memory
 //! or dies.
 
 use std::io;
@@ -61,7 +61,8 @@ impl Compiled {
     }
 }
 
-/// One helper process shared by every JavaScript extension, used by one call at a time.
+/// One helper process shared by every JavaScript extension, used by one call at a time, and a
+/// helper of its own for each compile.
 pub struct Host {
     shared: Arc<Shared>,
 }
@@ -117,12 +118,17 @@ impl Host {
         }
     }
 
-    /// Compiles every module of `sources` in the helper, which reports syntax errors and imports
-    /// that leave the package or name a missing file.
+    /// Compiles every module of `sources` in a helper started for this compile alone, which
+    /// reports syntax errors and imports that leave the package or name a missing file.
+    /// `limit` is how long compiling may take once that helper is ready.
+    ///
+    /// Every later helper loads the bytecode unvalidated, so no other package's code may have
+    /// reached the helper that writes it. Not waiting for the shared helper also keeps a busy
+    /// extension from failing another's load.
     pub fn compile(
         &self,
         sources: &Sources,
-        deadline: Instant,
+        limit: Duration,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Compiled, RunError> {
         let (modules, tail) = wire::spans(sources.files().map(|(name, source)| (name, source.as_bytes())));
@@ -137,7 +143,13 @@ impl Host {
             work: Work::Compile,
             allowance,
         };
-        let (answer, tail) = self.call(request, deadline, is_cancelled)?;
+        let mut helper = Helper::start(&self.shared.launch)?;
+        match helper.greet(&request, helper.started + HANDSHAKE, is_cancelled) {
+            Greeting::Ready => {}
+            Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
+        }
+        let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
+        let (answer, tail) = settle(helper.run(id, request, Instant::now() + limit, is_cancelled))?;
         let Answer::Compiled { modules } = answer else {
             return Err(mismatch());
         };
@@ -224,15 +236,11 @@ impl Host {
                 return Err(error);
             }
         }
-        match helper.run(id, request, deadline, is_cancelled) {
-            Ok((Answer::Cancelled, _)) => Err(RunError::Cancelled),
-            Ok((Answer::Failed { diagnostic }, _)) => Err(RunError::Failed(diagnostic)),
-            Ok(answer) => Ok(answer),
-            Err(stop) => {
-                lease.helper = None;
-                Err(stop)
-            }
+        let answer = helper.run(id, request, deadline, is_cancelled);
+        if answer.is_err() {
+            lease.helper = None;
         }
+        settle(answer)
     }
 
     /// Waits for the helper to be free, unless the caller gives up first.
@@ -605,6 +613,15 @@ fn validate(items: &[PluginItem], limit: u32) -> Result<(), Diagnostic> {
             "the extension host returned rows Dupin can't show: {error}"
         ))
     })
+}
+
+/// A helper's answer as the call's result: its own failure or cancellation becomes the error.
+fn settle(answer: Result<(Answer, Vec<u8>), RunError>) -> Result<(Answer, Vec<u8>), RunError> {
+    match answer? {
+        (Answer::Cancelled, _) => Err(RunError::Cancelled),
+        (Answer::Failed { diagnostic }, _) => Err(RunError::Failed(diagnostic)),
+        answer => Ok(answer),
+    }
 }
 
 fn host_error(message: impl Into<String>) -> Diagnostic {
