@@ -1,6 +1,6 @@
 # Working around Rune
 
-Rune is pre-release and doesn't take pull requests, so Dupin works around what it hits. Rune is pinned to a `dev` rev in `Cargo.toml` (`dev` is never rewritten); check each item again when bumping it, and patch every crate Rune's own workspace patches at the same rev.
+Rune is pre-release and doesn't take pull requests, so Dupin works around what it hits. Rune is pinned to a `dev` rev in `Cargo.toml` (`dev` is never rewritten); check each item again when bumping it, replace its hash in `nix/cargo-vendor.nix`, and patch every crate Rune's own workspace patches at the same rev.
 
 - **Two `tiny-skia-path 0.11.4` packages.** Rune vendors a patched copy as a path dependency while `resvg` keeps the published one. nixpkgs' `importCargoLock` can't vendor both, so `nix/cargo-vendor.nix` uses crane, which vendors each source into its own directory.
 - **Vendored crates keep `Cargo.toml.orig`.** Rune's `vendor/` copies published crates whole, and `cargo package --list`, which crane lists a Git crate's files with, rejects that file name, so `nix/cargo-vendor.nix` deletes it from the checkout.
