@@ -1257,6 +1257,78 @@ fn a_bundled_package_that_ships_off_waits_to_be_turned_on_with_its_grants() {
 }
 
 #[test]
+fn a_base_without_a_revision_switches_bundled_packages_and_denies_their_scopes() {
+    let base = base(
+        r#"
+version = 1
+
+[packages."bundled:window-management"]
+enabled = true
+
+[packages."bundled:calendar"]
+deny = ["calendar"]
+
+[packages."bundled:emoji"]
+enabled = false
+"#,
+    );
+    let mut broker = Broker::new(base, Local::default());
+    let windows = id("bundled:window-management");
+    let calendar = id("bundled:calendar");
+    let emoji = id("bundled:emoji");
+    broker.set_bundled(windows.clone(), rev(R1), false);
+    broker.set_bundled(calendar.clone(), rev(R1), true);
+    broker.set_bundled(emoji.clone(), rev(R1), true);
+    let _ = broker.install(
+        windows.clone(),
+        rev(R1),
+        caps(json!({ "windows": ["read", "arrange"] })),
+    );
+    let _ = broker.install(
+        calendar.clone(),
+        rev(R1),
+        caps(json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } })),
+    );
+    let _ = broker.install(emoji.clone(), rev(R1), caps(json!({ "clipboard": ["paste"] })));
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    broker.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+
+    assert!(
+        broker.is_enabled(&windows) && !broker.is_turned_off(&windows),
+        "the base turns on a package that ships off"
+    );
+    permit(broker.check(
+        &windows,
+        &rev(R1),
+        &Request::Windows(WindowsAccess::Arrange),
+        Trigger::Activation,
+    ));
+    broker.set_enabled(&windows, false).unwrap();
+    assert!(
+        broker.is_turned_off(&windows),
+        "a choice in Dupin can still turn it off"
+    );
+
+    let read = Request::CalendarRead {
+        past_days: 0,
+        future_days: 7,
+    };
+    assert!(broker.is_enabled(&calendar));
+    assert_eq!(
+        denial(broker.check(&calendar, &rev(R1), &read, Trigger::Query)),
+        Denial::DeniedByBase(ScopeKey::Calendar),
+        "a base denial outranks the bundled pre-grant"
+    );
+    assert_eq!(
+        broker.consent(&calendar, &rev(R1), &broker.consents(&calendar)[0].0, None),
+        Err(BrokerError::DeniedByBase(ScopeKey::Calendar))
+    );
+
+    assert!(broker.is_turned_off(&emoji));
+    assert_eq!(broker.set_enabled(&emoji, true), Err(BrokerError::DisabledByBase));
+}
+
+#[test]
 fn a_changed_copy_of_a_package_that_ships_off_waits_like_any_new_extension() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("window-management");
