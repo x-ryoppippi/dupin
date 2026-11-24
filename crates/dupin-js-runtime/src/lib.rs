@@ -627,7 +627,7 @@ impl<'a> Sandbox<'a> {
                         "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
                     }
                     Export::Items => {
-                        "Answer sooner with part of the list and `more: true`: Dupin stops items after 2 seconds."
+                        "Make items return sooner: Dupin stops loading a catalogue 2 seconds after it asks, counting every part."
                     }
                     Export::Action => "Make the action return sooner: Dupin stops it after 2 seconds.",
                 }),

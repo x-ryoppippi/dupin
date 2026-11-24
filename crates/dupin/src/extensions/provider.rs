@@ -94,17 +94,22 @@ pub fn answer(
     }
     if exports.items {
         let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
-        batches.extend(extension.catalogue(query, left)?);
+        batches.extend(extension.catalogue(query, left, deadline)?);
     }
     Ok(batches)
 }
 
 /// The catalogue's matches for the main search. The package never sees the query.
-pub fn default_answer(extension: &Extension, query: &str, limit: usize) -> Result<Vec<Batch>, RunError> {
-    if query.trim().is_empty() || !extension.check(Instant::now() + QUERY_DEADLINE)?.items {
+pub fn default_answer(
+    extension: &Extension,
+    query: &str,
+    limit: usize,
+    deadline: Instant,
+) -> Result<Vec<Batch>, RunError> {
+    if query.trim().is_empty() || !extension.check(deadline)?.items {
         return Ok(Vec::new());
     }
-    extension.catalogue(query, limit)
+    extension.catalogue(query, limit, deadline)
 }
 
 /// Consecutive rows of one section in one batch, each with its detail shown while selected.
@@ -231,6 +236,7 @@ impl Provider for ExtensionProvider {
         if request.limit == 0 {
             return Ok(());
         }
+        let deadline = Instant::now() + QUERY_DEADLINE;
         let answer = match self.role {
             Role::Keyword => {
                 let cancellation = request.cancellation();
@@ -239,11 +245,11 @@ impl Provider for ExtensionProvider {
                     &request.query,
                     request.page.as_ref(),
                     request.limit,
-                    Instant::now() + QUERY_DEADLINE,
+                    deadline,
                     move || cancellation.is_cancelled(),
                 )
             }
-            Role::DefaultSearch => default_answer(&self.extension, &request.query, request.limit),
+            Role::DefaultSearch => default_answer(&self.extension, &request.query, request.limit, deadline),
         };
         if request.is_cancelled() {
             return Ok(());

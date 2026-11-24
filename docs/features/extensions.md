@@ -123,7 +123,7 @@ Typing `bm` and Space lists the catalogue in its own order, under its sections. 
 | `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
 | `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
 
-`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Items sent in parts or as an update need an `id`.
+`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Items sent in parts or as an update need an `id`.
 
 Instead of the whole catalogue, an answer can change the one Dupin holds, by `id`, so a long and busy list such as clipboard history never sends everything again:
 
@@ -303,7 +303,7 @@ TypeScript whose types can simply be erased runs as written; see [TypeScript wit
 | Modules (`.js` and `.ts`)                       | 256 and 4 MiB                                                                                 |
 | Heap                                            | 16 MiB, or 64 MiB while compiling                                                             |
 | Stack                                           | 512 KiB                                                                                       |
-| Time per query, `items` part, action or compile | 2 seconds                                                                                     |
+| Time per query, `items` load, action or compile | 2 seconds                                                                                     |
 | Promise jobs per call                           | 10,000                                                                                        |
 | Items and text in one answer                    | 50 and 256 KiB; for `items`, 500 and 1 MiB                                                    |
 | A catalogue                                     | 10,000 items and 8 MiB of text; 24 MiB across all extensions                                  |

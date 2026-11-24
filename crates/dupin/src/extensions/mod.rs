@@ -82,17 +82,11 @@ impl Extension {
 
     /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
     /// holds none or it went stale. Typing never cancels that, since the next keystroke needs
-    /// the same catalogue.
-    pub fn catalogue(&self, query: &str, limit: usize) -> Result<Vec<Batch>, RunError> {
-        let mut fetch = |cursor: Option<&str>, reason| {
-            host().items(
-                &self.compiled,
-                cursor,
-                reason,
-                Instant::now() + QUERY_DEADLINE,
-                &|| false,
-            )
-        };
+    /// the same catalogue. Every part of it must arrive before `deadline`, the search's own, so
+    /// a slow catalogue fails with its own diagnostic before the search expires.
+    pub fn catalogue(&self, query: &str, limit: usize, deadline: Instant) -> Result<Vec<Batch>, RunError> {
+        let mut fetch =
+            |cursor: Option<&str>, reason| host().items(&self.compiled, cursor, reason, deadline, &|| false);
         self.catalogue
             .search(query, limit, &mut fetch, self)
             .map_err(|error| match error {

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::{Catalogue, Change, Entry};
 use dupin_core::{Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
@@ -197,7 +197,9 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
     );
     let rows = titles_of(&ExtensionProvider::new(extension.clone()), "");
     assert_eq!(rows, ["Marks failed"]);
-    let error = extension.catalogue("", 10).unwrap_err();
+    let error = extension
+        .catalogue("", 10, Instant::now() + QUERY_DEADLINE)
+        .unwrap_err();
     assert!(
         matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic)
             if diagnostic.code == "unknown-id" && diagnostic.file.as_deref() == Some("main.js")),
@@ -234,6 +236,36 @@ fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
     assert_eq!(titles_of(&keyword, ""), ["Shopping list"]);
     assert!(titles_of(&main, "secret").is_empty());
     assert_eq!(extension.catalogue.len(), 1);
+}
+
+#[test]
+fn every_part_of_a_catalogue_shares_one_deadline() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        "",
+        &[(
+            "main.js",
+            r#"export function items(ctx) {
+                 const end = Date.now() + 150;
+                 while (Date.now() < end) {}
+                 const part = Number(ctx.cursor ?? 0) + 1;
+                 return { more: part < 10, cursor: String(part), items: [{ id: `part-${part}`, title: `Part ${part}` }] };
+               }"#,
+        )],
+    );
+    // Linked first, so the deadline below only has the parts to cover.
+    extension.check(Instant::now() + QUERY_DEADLINE).unwrap();
+    // Short, since the busy parts hold the extension host every other test shares.
+    let deadline = Duration::from_millis(400);
+    let started = Instant::now();
+    let error = extension.catalogue("", 10, started + deadline).unwrap_err();
+    let elapsed = started.elapsed();
+    assert!(
+        matches!(&error, dupin_js_runtime::RunError::Failed(diagnostic) if diagnostic.code == "deadline"),
+        "{error:?}"
+    );
+    assert!(elapsed < deadline + Duration::from_millis(300), "{elapsed:?}");
+    assert_eq!(extension.catalogue.len(), 0);
 }
 
 /// A native provider over a catalogue, as a built-in port's baseline would be.
