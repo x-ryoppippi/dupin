@@ -20,12 +20,26 @@ pub const WEB_SEARCH_PACKAGE: &str = "bundled:web-search";
 const MAX_NAME_CHARS: usize = 80;
 const MAX_FALLBACKS: usize = 20;
 
-/// `web_searches` and `web_fallbacks` from config.toml as the web-search package's preferences:
-/// only what is set, and only entries it can list, with a notice for the rest.
-pub fn preferences(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Preferences, Option<String>) {
-    let mut preferences = Preferences::new();
+/// The aliases the bundled package lists while config.toml sets no `web_searches`.
+pub const DEFAULT_ALIASES: [&str; 4] = ["g", "gh", "maps", "yt"];
+
+/// config.toml's web searches as the bundled package receives them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Configured {
+    /// `web_searches` and `web_fallbacks`, only what is set and only entries the package can
+    /// list, which it reads as `ctx.preferences`.
+    pub preferences: Preferences,
+    /// The aliases it lists from them, or its defaults. Like any configured keyword, no
+    /// extension keyword takes one.
+    pub aliases: HashSet<String>,
+}
+
+/// config.toml's web searches for the bundled package, with a notice for the entries it can't
+/// list.
+pub fn configured(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Configured, Option<String>) {
+    const CONFLICT: &str = "Some web searches were ignored because a keyword, name, or URL template is invalid or conflicts with another command.";
+    let mut configured = Configured::default();
     let mut problems = Vec::new();
-    let mut valid = HashSet::new();
     if let Some(searches) = &config.web_searches {
         let mut listed = serde_json::Map::new();
         for (keyword, search) in searches {
@@ -34,13 +48,23 @@ pub fn preferences(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Pref
                 && valid_name(&search.name)
                 && web_search::check_template(&search.url).is_ok()
             {
-                valid.insert(keyword.as_str());
+                configured.aliases.insert(keyword.clone());
                 listed.insert(keyword.clone(), json!({ "name": search.name, "url": search.url }));
             } else {
-                problems.push("Some web searches were ignored because a keyword, name, or URL template is invalid or conflicts with another command.");
+                problems.push(CONFLICT);
             }
         }
-        preferences.insert("webSearches".into(), Value::Object(listed));
+        configured
+            .preferences
+            .insert("webSearches".into(), Value::Object(listed));
+    } else {
+        for alias in DEFAULT_ALIASES {
+            if is_reserved(alias) {
+                problems.push(CONFLICT);
+            } else {
+                configured.aliases.insert(alias.to_owned());
+            }
+        }
     }
 
     let mut fallbacks = Vec::new();
@@ -54,14 +78,16 @@ pub fn preferences(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Pref
             problems.push("Duplicate web fallbacks were ignored.");
             continue;
         }
-        if config.web_searches.is_none() || valid.contains(keyword.as_str()) {
+        if configured.aliases.contains(keyword) {
             fallbacks.push(Value::from(keyword.as_str()));
         } else {
             problems.push("Web fallbacks without a valid configured search were ignored.");
         }
     }
     if !fallbacks.is_empty() {
-        preferences.insert("webFallbacks".into(), Value::Array(fallbacks));
+        configured
+            .preferences
+            .insert("webFallbacks".into(), Value::Array(fallbacks));
     }
 
     let notice = (!problems.is_empty()).then(|| {
@@ -73,7 +99,7 @@ pub fn preferences(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Pref
         }
         unique.join(" ")
     });
-    (preferences, notice)
+    (configured, notice)
 }
 
 fn valid_name(name: &str) -> bool {
@@ -110,7 +136,7 @@ impl WebSearches {
 
     /// Each source's searches, asking a package for its catalogue when it must, without the
     /// ones whose alias is a keyword or an earlier package's alias.
-    fn searches(&self, deadline: Instant) -> Vec<(Item, WebSearch)> {
+    pub fn searches(&self, deadline: Instant) -> Vec<(Item, WebSearch)> {
         self.usable(self.sources.iter().flat_map(|extension| {
             let listed = extension.check(deadline).and_then(|exports| {
                 if exports.items {
@@ -128,13 +154,15 @@ impl WebSearches {
         }))
     }
 
-    /// The searches Dupin holds now, without asking any package.
-    fn held(&self) -> Vec<(Item, WebSearch)> {
-        self.usable(
-            self.sources
-                .iter()
-                .flat_map(|extension| extension.held_web_searches()),
-        )
+    /// The searches [`WebSearches::searches`] would return, if Dupin holds every source's
+    /// current catalogue and can read it without asking any package or waiting.
+    pub fn held(&self) -> Option<Vec<(Item, WebSearch)>> {
+        let held = self
+            .sources
+            .iter()
+            .map(|extension| extension.held_web_searches())
+            .collect::<Option<Vec<_>>>()?;
+        Some(self.usable(held.into_iter().flatten()))
     }
 
     fn usable(&self, searches: impl Iterator<Item = (Item, WebSearch)>) -> Vec<(Item, WebSearch)> {
@@ -143,17 +171,17 @@ impl WebSearches {
             .filter(|(_, search)| !self.reserved.contains(&search.alias) && seen.insert(search.alias.clone()))
             .collect()
     }
+}
 
-    /// Every search Dupin holds, filled with `query`: its alias, title and URL.
-    pub fn search_urls(&self, query: &str) -> Vec<(String, String, String)> {
-        self.held()
-            .into_iter()
-            .filter_map(|(item, search)| {
-                let url = search.url_for(query)?;
-                Some((search.alias, item.display_title().to_owned(), url))
-            })
-            .collect()
-    }
+/// Each of `searches` filled with `query`: its alias, title and URL.
+pub fn search_urls<'a>(
+    searches: &'a [(Item, WebSearch)],
+    query: &'a str,
+) -> impl Iterator<Item = (&'a str, &'a str, String)> {
+    searches.iter().filter_map(move |(item, search)| {
+        let url = search.url_for(query)?;
+        Some((search.alias.as_str(), item.display_title(), url))
+    })
 }
 
 /// The row a web search shows for `query`: its own title until something is typed, and an
@@ -299,10 +327,17 @@ mod tests {
         }
     }
 
+    fn aliases(configured: &Configured) -> Vec<&str> {
+        let mut aliases: Vec<_> = configured.aliases.iter().map(String::as_str).collect();
+        aliases.sort_unstable();
+        aliases
+    }
+
     #[test]
     fn config_reaches_the_package_only_once_set_and_without_entries_it_could_not_list() {
-        let (view, notice) = preferences(&Config::default(), |_| false);
-        assert!(view.is_empty());
+        let (web, notice) = configured(&Config::default(), |_| false);
+        assert!(web.preferences.is_empty());
+        assert_eq!(aliases(&web), DEFAULT_ALIASES);
         assert_eq!(notice, None);
 
         let mut config = Config {
@@ -317,9 +352,10 @@ mod tests {
             web_fallbacks: vec!["docs".into(), "missing".into(), "docs".into(), "maps".into()],
             ..Config::default()
         };
-        let (view, notice) = preferences(&config, reserved(&config));
+        let (web, notice) = configured(&config, reserved(&config));
+        assert_eq!(aliases(&web), ["docs", "maps"]);
         assert_eq!(
-            Value::Object(view),
+            Value::Object(web.preferences),
             json!({
                 "webSearches": {
                     "docs": { "name": "Docs", "url": "https://docs.example/?q={query}" },
@@ -339,14 +375,38 @@ mod tests {
 
         config.web_searches = Some(Default::default());
         config.web_fallbacks = (0..MAX_FALLBACKS + 2).map(|index| format!("f{index}")).collect();
-        let (view, notice) = preferences(&config, |_| false);
-        assert_eq!(Value::Object(view), json!({ "webSearches": {} }));
+        let (web, notice) = configured(&config, |_| false);
+        assert!(web.aliases.is_empty());
+        assert_eq!(Value::Object(web.preferences), json!({ "webSearches": {} }));
         assert!(notice.unwrap().contains("without a valid configured search"));
 
-        config.web_searches = None;
-        let (view, notice) = preferences(&config, |_| false);
-        assert_eq!(view["webFallbacks"].as_array().unwrap().len(), MAX_FALLBACKS);
+        let many: Vec<_> = (0..MAX_FALLBACKS + 2).map(|index| format!("f{index}")).collect();
+        config.web_searches = Some(searches(
+            &many
+                .iter()
+                .map(|alias| (alias.as_str(), "Many", "https://many.example/?q={query}"))
+                .collect::<Vec<_>>(),
+        ));
+        let (web, notice) = configured(&config, |_| false);
+        assert_eq!(
+            web.preferences["webFallbacks"].as_array().unwrap().len(),
+            MAX_FALLBACKS
+        );
         assert!(notice.unwrap().contains("after the first 20"));
+
+        // Without `web_searches`, the package's defaults are checked as configured ones were.
+        config.web_searches = None;
+        config.web_fallbacks = vec!["g".into(), "google".into(), "gh".into()];
+        let (web, notice) = configured(&config, |keyword| keyword == "gh");
+        assert_eq!(aliases(&web), ["g", "maps", "yt"]);
+        assert_eq!(Value::Object(web.preferences), json!({ "webFallbacks": ["g"] }));
+        let notice = notice.unwrap();
+        for expected in [
+            "Some web searches were ignored",
+            "Web fallbacks without a valid configured search were ignored.",
+        ] {
+            assert!(notice.contains(expected), "{notice}");
+        }
     }
 
     fn bundled() -> Arc<Extension> {
@@ -380,8 +440,8 @@ mod tests {
     }
 
     fn set(extension: &Extension, config: &Config) {
-        let (view, _) = preferences(config, |_| false);
-        held::set(extension.package.as_str(), view);
+        let (web, _) = configured(config, |_| false);
+        held::set(extension.package.as_str(), web.preferences);
     }
 
     // One test, so nothing else changes the package's preferences while it runs.
@@ -455,7 +515,11 @@ mod tests {
             ]
         );
         assert_eq!(titles(""), ["Search Google", "Search GitHub", "Search YouTube"]);
-        let held = WebSearches::new(vec![extension.clone()], HashSet::new());
+        let sources = WebSearches::new(vec![extension.clone()], HashSet::new());
+        let held = sources.held().expect("typing loaded the catalogue");
+        let mut listed: Vec<_> = held.iter().map(|(_, search)| search.alias.as_str()).collect();
+        listed.sort_unstable();
+        assert_eq!(listed, DEFAULT_ALIASES);
         let receivers = crate::receivers::for_payload(&Payload::text("日本語 +&/#?"), &held);
         let receivers: Vec<_> = receivers
             .iter()
@@ -474,6 +538,7 @@ mod tests {
 
         let mut config = Config {
             web_searches: Some(searches(&[
+                ("web", "DuckDuckGo", "https://duckduckgo.com/?q={query}"),
                 ("g", "Example", "https://example.com/find?term={query}"),
                 ("gh", "GitHub", "https://github.com/search?q={query}"),
                 (
@@ -488,8 +553,26 @@ mod tests {
         };
         set(&extension, &config);
         assert_eq!(
+            sources.held(),
+            None,
+            "Send to never offers searches from other settings"
+        );
+        let refreshed = sources.searches(Instant::now() + QUERY_DEADLINE);
+        assert_eq!(sources.held().as_ref(), Some(&refreshed));
+        let receivers = crate::receivers::for_payload(&Payload::text("term"), &refreshed);
+        assert!(receivers.contains(&ItemAction::new(
+            "web:g",
+            "Search Example (g)",
+            Action::OpenUrl("https://example.com/find?term=term".into()),
+        )));
+        assert!(!receivers.iter().any(|receiver| receiver.id == "web:maps"));
+        assert_eq!(
             url(&collect(&web, "g term", 5)[0]),
             "https://example.com/find?term=term"
+        );
+        assert_eq!(
+            url(&collect(&web, "web term", 5)[0]),
+            "https://duckduckgo.com/?q=term"
         );
         assert!(collect(&web, "maps term", 5).is_empty());
         assert!(collect(&web, "define term", 5).is_empty());

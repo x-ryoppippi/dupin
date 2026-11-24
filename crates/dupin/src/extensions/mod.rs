@@ -155,9 +155,13 @@ impl Extension {
             .map_err(|error| self.located(error))
     }
 
-    /// The web searches Dupin holds for the package now, without asking it.
-    pub fn held_web_searches(&self) -> Vec<(Item, WebSearch)> {
-        self.catalogue.held_web_searches()
+    /// What [`Extension::web_searches`] would return, if Dupin can answer it now without asking
+    /// the package or waiting.
+    pub fn held_web_searches(&self) -> Option<Vec<(Item, WebSearch)>> {
+        if !self.exports.get()?.items {
+            return Some(Vec::new());
+        }
+        self.catalogue.held_web_searches(&preferences::of(&self.package))
     }
 
     fn fetch(

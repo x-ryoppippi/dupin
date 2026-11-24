@@ -1,8 +1,7 @@
-use dupin_core::{Action, ItemAction, Payload, ShareTarget};
+use dupin_core::{Action, Item, ItemAction, Payload, ShareTarget};
+use dupin_js_runtime::web_search::WebSearch;
 
-use crate::web::WebSearches;
-
-pub fn for_payload(payload: &Payload, web: &WebSearches) -> Vec<ItemAction> {
+pub fn for_payload(payload: &Payload, web: &[(Item, WebSearch)]) -> Vec<ItemAction> {
     let mut receivers = Vec::new();
     let text = payload.nonblank_text();
     if let Some(text) = text {
@@ -35,7 +34,7 @@ pub fn for_payload(payload: &Payload, web: &WebSearches) -> Vec<ItemAction> {
         receivers.push(ItemAction::new("copy-path", title, Action::Copy(text)));
     }
     if let Some(query) = text {
-        receivers.extend(web.search_urls(query).into_iter().map(|(alias, title, url)| {
+        receivers.extend(crate::web::search_urls(web, query).map(|(alias, title, url)| {
             ItemAction::new(
                 &format!("web:{alias}"),
                 &format!("{title} ({alias})"),
@@ -49,27 +48,23 @@ pub fn for_payload(payload: &Payload, web: &WebSearches) -> Vec<ItemAction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dupin_core::Item;
 
     #[test]
     fn receivers_follow_the_payload_types() {
-        let web = WebSearches::default();
+        let web: &[(Item, WebSearch)] = &[];
         let ids = |actions: Vec<ItemAction>| actions.into_iter().map(|action| action.id).collect::<Vec<_>>();
-        assert!(for_payload(&Payload::default(), &web).is_empty());
-        assert!(for_payload(&Payload::text(" \n "), &web).is_empty());
-        assert_eq!(
-            ids(for_payload(&Payload::text("Definition"), &web)),
-            ["copy-text"]
-        );
+        assert!(for_payload(&Payload::default(), web).is_empty());
+        assert!(for_payload(&Payload::text(" \n "), web).is_empty());
+        assert_eq!(ids(for_payload(&Payload::text("Definition"), web)), ["copy-text"]);
 
         let mut item = Item::path("/tmp/file.txt".into(), "file.txt".into(), vec![]);
         assert_eq!(
-            ids(for_payload(&item.payload, &web)),
+            ids(for_payload(&item.payload, web)),
             ["share", "airdrop", "mail", "copy-path"]
         );
         item.payload.text = Some("  Definition  ".into());
         item.payload.paths.push("/tmp/another file.txt".into());
-        item.actions = for_payload(&item.payload, &web);
+        item.actions = for_payload(&item.payload, web);
         assert_eq!(
             ids(item.actions.clone()),
             ["copy-text", "share", "airdrop", "mail", "copy-path"]

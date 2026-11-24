@@ -48,8 +48,8 @@ pub(crate) fn provider(
 }
 
 /// Extensions whose commands were registered, and why the others were not. Built-in and
-/// configured keywords always win: an extension never replaces another command's keyword. An
-/// extension's keyword wins over a web search's alias.
+/// configured keywords, including config.toml's web search aliases, always win: an extension
+/// never replaces another command's keyword.
 pub struct Extensions {
     pub registered: Vec<(CommandId, Arc<Extension>, Role)>,
     pub problems: Vec<String>,
@@ -64,36 +64,45 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
     let mut after = id(APPS);
     for extension in extensions {
         let keyword = &extension.keyword;
-        if configured.registry.keyword(keyword).is_some() {
+        let holder = if configured.web.aliases.contains(keyword) {
+            Some("a web search in config.toml")
+        } else {
+            configured.registry.keyword(keyword).map(|_| "another command")
+        };
+        if let Some(holder) = holder {
             added.problems.push(format!(
-                "{}: keyword `{keyword}` is already used by another command",
+                "{}: keyword `{keyword}` is already used by {holder}",
                 extension.folder_name
             ));
-            continue;
-        }
-        let Ok(command) = CommandId::new(format!("extension.{}", extension.id)) else {
-            continue;
-        };
-        let mut spec = CommandSpec::new(
-            command.clone(),
-            50,
-            presentation(
-                &format!("Ask {}", extension.name),
-                Some(&extension.name),
-                Some(&format!("Type for {}  ·  ⌫ back to apps", extension.name)),
-                Some("No results"),
-                true,
-                0.0,
-            ),
-        )
-        // An `items()` catalogue lists itself before anything is typed; `search` still only
-        // runs for a query.
-        .with_query_eligibility(QueryEligibility::Any);
-        spec.deadline = QUERY_DEADLINE + std::time::Duration::from_secs(1);
-        if configured.registry.register(spec).is_ok()
-            && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
-        {
-            added.registered.push((command, extension.clone(), Role::Keyword));
+            // The package behind the built-in web searches still lists them without its keyword.
+            if extension.package.as_str() != crate::web::WEB_SEARCH_PACKAGE {
+                continue;
+            }
+        } else {
+            let Ok(command) = CommandId::new(format!("extension.{}", extension.id)) else {
+                continue;
+            };
+            let mut spec = CommandSpec::new(
+                command.clone(),
+                50,
+                presentation(
+                    &format!("Ask {}", extension.name),
+                    Some(&extension.name),
+                    Some(&format!("Type for {}  ·  ⌫ back to apps", extension.name)),
+                    Some("No results"),
+                    true,
+                    0.0,
+                ),
+            )
+            // An `items()` catalogue lists itself before anything is typed; `search` still only
+            // runs for a query.
+            .with_query_eligibility(QueryEligibility::Any);
+            spec.deadline = QUERY_DEADLINE + std::time::Duration::from_secs(1);
+            if configured.registry.register(spec).is_ok()
+                && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
+            {
+                added.registered.push((command, extension.clone(), Role::Keyword));
+            }
         }
         if !extension.default_search {
             continue;

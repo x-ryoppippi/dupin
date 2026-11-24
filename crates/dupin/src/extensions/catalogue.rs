@@ -118,13 +118,18 @@ impl Cached {
         self.fresh(preferences, fetch, convert, held_web_searches)
     }
 
-    /// The web searches Dupin holds right now, without asking the package or waiting for a
-    /// search that is filling the catalogue.
-    pub fn held_web_searches(&self) -> Vec<(Item, WebSearch)> {
-        match self.shared.state.try_lock() {
-            Ok(state) if state.due.is_none() => held_web_searches(&state.catalogue),
-            _ => Vec::new(),
-        }
+    /// The web searches [`Cached::web_searches`] would return for `preferences` without asking
+    /// the package, if Dupin holds them and can read them without waiting for a search that is
+    /// filling the catalogue.
+    pub fn held_web_searches(&self, preferences: &Arc<Preferences>) -> Option<Vec<(Item, WebSearch)>> {
+        let state = self.shared.state.try_lock().ok()?;
+        let current = state.due.is_none()
+            && !state.expires.is_some_and(|expires| Instant::now() >= expires)
+            && state
+                .preferences
+                .as_ref()
+                .is_some_and(|held| Arc::ptr_eq(held, preferences));
+        current.then(|| held_web_searches(&state.catalogue))
     }
 
     fn fresh<T>(
@@ -576,22 +581,37 @@ mod tests {
                 false,
             ))
         };
-        assert!(cached.held_web_searches().is_empty());
         let first = none();
+        assert_eq!(cached.held_web_searches(&first), None);
         let searches = cached.web_searches(&first, &mut fetch, ENTRY).unwrap();
         assert_eq!(searches.len(), 1);
         assert_eq!(searches[0].0.id, "held/g");
         assert_eq!(searches[0].1.alias, "g");
-        assert_eq!(cached.held_web_searches().len(), 1);
+        assert_eq!(cached.held_web_searches(&first).unwrap().len(), 1);
         assert_eq!(
             titles(&cached.search("", 10, &first, &mut fetch, ENTRY).unwrap()),
             ["Alpha"]
         );
         let mut changed = Preferences::new();
         changed.insert("webFallbacks".into(), serde_json::json!(["g"]));
-        cached
-            .web_searches(&Arc::new(changed), &mut fetch, ENTRY)
-            .unwrap();
+        let changed = Arc::new(changed);
+        assert_eq!(
+            cached.held_web_searches(&changed),
+            None,
+            "held for other preferences"
+        );
+        cached.web_searches(&changed, &mut fetch, ENTRY).unwrap();
         assert_eq!(seen, [(Reason::Load, 0), (Reason::Load, 1)]);
+        assert_eq!(cached.held_web_searches(&changed).unwrap().len(), 1);
+        assert_eq!(cached.held_web_searches(&first), None);
+
+        cached.shared.lock().expires = Some(Instant::now());
+        assert_eq!(cached.held_web_searches(&changed), None, "expired");
+        cached.shared.lock().expires = None;
+        let filling = cached.shared.lock();
+        assert_eq!(cached.held_web_searches(&changed), None, "being filled");
+        drop(filling);
+        cached.invalidate();
+        assert_eq!(cached.held_web_searches(&changed), None, "invalidated");
     }
 }

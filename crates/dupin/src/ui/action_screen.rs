@@ -392,7 +392,10 @@ impl Ui {
         else {
             return;
         };
-        let actions = crate::receivers::for_payload(&screen.item.payload, &self.web.read().unwrap());
+        let web = self.web.read().unwrap().clone();
+        let held = web.held();
+        let actions =
+            crate::receivers::for_payload(&screen.item.payload, held.as_deref().unwrap_or_default());
         if actions.is_empty() {
             return;
         }
@@ -400,6 +403,42 @@ impl Ui {
         screen.stage = ActionStage::Receivers { actions, selected: 0 };
         crate::trace::action_screen("receivers");
         tx.scroll_into_view("action-0");
+        if held.is_some() || screen.item.payload.nonblank_text().is_none() {
+            return;
+        }
+        // The catalogues aren't loaded, are being filled, or were loaded for other settings, so
+        // their web searches join the list once a package has answered, as typing waits for them.
+        let key = screen.key.clone();
+        let me = self.me.clone();
+        let running = self.running.clone();
+        running.fetch_add(1, Ordering::AcqRel);
+        std::thread::spawn(move || {
+            let searches = web.searches(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE);
+            me.update(move |ui, _| ui.web_receivers_found(&key, &web, &searches));
+            running.fetch_sub(1, Ordering::AcqRel);
+        });
+    }
+
+    fn web_receivers_found(
+        &mut self,
+        key: &str,
+        web: &crate::web::WebSearches,
+        searches: &[(dupin_core::Item, dupin_js_runtime::web_search::WebSearch)],
+    ) {
+        if *self.web.read().unwrap() != *web {
+            return;
+        }
+        let Some(screen) = self
+            .action_screen
+            .as_mut()
+            .filter(|screen| screen.key == key && screen.is_current(&self.session))
+        else {
+            return;
+        };
+        if let ActionStage::Receivers { actions, .. } = &mut screen.stage {
+            *actions = crate::receivers::for_payload(&screen.item.payload, searches);
+            crate::trace::action_screen("receivers with web searches");
+        }
     }
 
     pub fn pick_receiver(&mut self, index: usize, tx: &mut Tx) {
@@ -636,7 +675,7 @@ mod action_screen_tests {
         screen.selected = screen.item.actions.len();
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
         screen.stage = ActionStage::Receivers {
-            actions: crate::receivers::for_payload(&screen.item.payload, &crate::web::WebSearches::default()),
+            actions: crate::receivers::for_payload(&screen.item.payload, &[]),
             selected: 0,
         };
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);

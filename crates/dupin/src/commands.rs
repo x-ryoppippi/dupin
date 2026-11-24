@@ -23,8 +23,8 @@ pub struct Registration {
 pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
-    /// config.toml's web searches, as the bundled web-search package's preferences.
-    pub web: dupin_js_runtime::Preferences,
+    /// config.toml's web searches, as the bundled web-search package receives them.
+    pub web: crate::web::Configured,
     pub snippets: SnippetCatalog,
 }
 
@@ -55,7 +55,7 @@ pub(super) struct Configure {
     pub defaults: Vec<CommandId>,
     pub pinned: Option<CommandId>,
     pub notices: Vec<String>,
-    pub web: dupin_js_runtime::Preferences,
+    pub web: crate::web::Configured,
     pub snippets: SnippetCatalog,
 }
 
@@ -81,7 +81,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
         defaults: Vec::new(),
         pinned: None,
         notices: Vec::new(),
-        web: dupin_js_runtime::Preferences::new(),
+        web: crate::web::Configured::default(),
         snippets: SnippetCatalog::default(),
     };
     for feature in MANIFEST {
@@ -130,7 +130,7 @@ pub fn register(
         snippets,
     } = configured(config)?;
     let session = Session::new(history, registry)?;
-    crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web);
+    crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web.preferences);
     let web = Arc::new(RwLock::new(crate::web::WebSearches::default()));
     let snippets = Arc::new(RwLock::new(snippets));
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
@@ -234,9 +234,14 @@ mod tests {
         ] {
             assert_eq!(registry.keyword(keyword).map(CommandId::as_str), expected);
         }
-        let listed: Vec<_> = web["webSearches"].as_object().unwrap().keys().collect();
+        let listed: Vec<_> = web.preferences["webSearches"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect();
         assert_eq!(listed, ["web"]);
-        assert_eq!(web["webFallbacks"], serde_json::json!(["web"]));
+        assert_eq!(web.preferences["webFallbacks"], serde_json::json!(["web"]));
+        assert_eq!(web.aliases, ["web".to_owned()].into());
 
         let mut session = Session::new(History::default(), registry).unwrap();
         assert!(matches!(
@@ -613,20 +618,22 @@ mod tests {
 
         let words = id("extension.word-count");
         let registered: Vec<_> = added.registered.iter().map(|(id, ..)| id.as_str()).collect();
-        assert_eq!(registered, ["extension.word-count", "extension.web-clash"]);
+        assert_eq!(registered, ["extension.word-count"]);
         assert_eq!(configured.registry.keyword("wc"), Some(&words));
         assert_eq!(configured.registry.keyword("define"), Some(&id(DICTIONARY)));
         assert_eq!(configured.registry.keyword("in"), Some(&id(CONTENTS)));
         assert_eq!(configured.registry.keyword("snip"), Some(&id(SNIPPETS)));
-        // A web search's alias yields to an extension's keyword.
-        assert_eq!(
-            configured.registry.keyword("gh"),
-            Some(&id("extension.web-clash"))
+        assert_eq!(configured.registry.keyword("gh"), None);
+        assert_eq!(added.problems.len(), 5, "{:?}", added.problems);
+        assert!(
+            added.problems[2].contains("a web search in config.toml"),
+            "{}",
+            added.problems[2]
         );
-        assert_eq!(added.problems.len(), 4, "{:?}", added.problems);
         for (problem, folder) in added.problems.iter().zip([
             "dictionary-clash-folder",
             "contents-clash-folder",
+            "web-clash-folder",
             "snippet-clash-folder",
             "second-count-folder",
         ]) {
@@ -641,6 +648,52 @@ mod tests {
         session.set_query("wc two words");
         assert_eq!(session.command_id(), &words);
         assert_eq!(session.query(), "two words");
+    }
+
+    #[test]
+    fn the_web_search_package_keeps_listing_searches_when_its_keyword_is_taken() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let web_search = || {
+            let mut bundled = extension("Web Search", "web");
+            bundled.package = dupin_extension_bridge::PackageId::new(crate::web::WEB_SEARCH_PACKAGE).unwrap();
+            bundled.default_search = true;
+            let mut other = extension("Other", "web");
+            other.default_search = true;
+            [Arc::new(bundled), Arc::new(other)]
+        };
+        let by_alias = Config {
+            web_searches: Some(crate::web::searches(&[(
+                "web",
+                "DuckDuckGo",
+                "https://duckduckgo.com/?q={query}",
+            )])),
+            ..Config::default()
+        };
+        let by_dictionary = Config {
+            dictionary_keywords: vec!["web".into()],
+            ..Config::default()
+        };
+        for (config, holder) in [
+            (by_alias, "a web search in config.toml"),
+            (by_dictionary, "another command"),
+        ] {
+            let mut configured = configured(&config).unwrap();
+            let added = add_extensions(&mut configured, &web_search());
+            let roles: Vec<_> = added
+                .registered
+                .iter()
+                .map(|(command, _, role)| (command.as_str(), *role))
+                .collect();
+            assert_eq!(roles, [("extension-search.web-search", Role::DefaultSearch)]);
+            assert_eq!(added.problems.len(), 2, "{:?}", added.problems);
+            assert!(
+                added.problems.iter().all(|problem| problem.contains(holder)),
+                "{:?}",
+                added.problems
+            );
+        }
     }
 
     #[test]

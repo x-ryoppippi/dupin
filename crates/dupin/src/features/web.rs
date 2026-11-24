@@ -41,7 +41,7 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
 
 fn prepare(config: &Config, commands: &mut Configure) {
     let (web, notice) =
-        crate::web::preferences(config, |keyword| commands.registry.keyword(keyword).is_some());
+        crate::web::configured(config, |keyword| commands.registry.keyword(keyword).is_some());
     commands.web = web;
     commands.notices.extend(notice);
 }
@@ -53,9 +53,10 @@ fn start(providers: &mut Providers) {
 }
 
 /// Runs after the extensions feature has registered this configuration's extensions, so their
-/// keywords take precedence over an alias and their catalogues are the ones searched.
+/// keywords take precedence over the aliases other packages list and their catalogues are the
+/// ones searched.
 fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
-    let configured = preferences::set(WEB_SEARCH_PACKAGE, std::mem::take(&mut commands.web));
+    let configured = preferences::set(WEB_SEARCH_PACKAGE, std::mem::take(&mut commands.web.preferences));
     let next = WebSearches::new(
         ui.web_search_sources(),
         commands.registry.keywords().map(str::to_owned).collect(),

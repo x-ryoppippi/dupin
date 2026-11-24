@@ -87,7 +87,7 @@ The manifest is the `dupin` key of `package.json`, so a package keeps one file f
 | `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                      |
 | `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                    |
 
-Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else. An extension's keyword takes precedence over a web search's alias.
+Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword from config.toml or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else. Web Search alone still lists its web searches without its keyword.
 
 The module exports `search`, `items` or both. Each may be a function or an `async` function:
 
@@ -734,7 +734,7 @@ Installing never runs anything from the package, and there is no package manager
 - `dupin.main` (default `main.js`) is a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file in the package, not a declaration file. A JSX entry, or a build output that isn't committed, fails with a hint to build and commit it;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
 - there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch or download of more than 64 MiB is stopped before it finishes, and a tarball whose entries aren't plain files and folders inside its one top-level folder is refused;
-- the keyword isn't already used by a built-in command or another folder in the extensions folder;
+- the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
 
 A folder source skips `.git` and its top-level `node_modules`. The package is written into a hidden folder beside the others and then renamed into place, swapping with the previous copy on an update, so a running Dupin sees the old package or the new one and never half of either. It runs once the [extensions folder](#turning-them-on) is on, like any other folder there.
