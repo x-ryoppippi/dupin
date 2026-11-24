@@ -1,10 +1,57 @@
 //! First-party extensions that ship with Dupin: `Contents/Resources/extensions` inside
-//! Dupin.app, or the repository's `extensions/` for a build run from the source tree.
+//! Dupin.app, or the repository's `extensions/` for a build run from the source tree. Only a
+//! folder whose files match what this build sealed is loaded as bundled.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use dupin_js_runtime::Diagnostic;
+
+include!(concat!(env!("OUT_DIR"), "/bundled_seals.rs"));
+
+/// The content hash of each bundled package folder, by folder name, as the build found them.
+#[derive(Clone, Debug)]
+pub struct Seals(Vec<(String, String)>);
+
+impl Seals {
+    pub fn shipped() -> Self {
+        Self(
+            SHIPPED
+                .iter()
+                .map(|(name, hash)| ((*name).to_owned(), (*hash).to_owned()))
+                .collect(),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn of(folders: &[&Path]) -> Self {
+        Self(
+            folders
+                .iter()
+                .map(|folder| {
+                    let name = folder.file_name().unwrap().to_string_lossy().into_owned();
+                    (name, dupin_extension_install::content_hash(folder).unwrap())
+                })
+                .collect(),
+        )
+    }
+
+    /// Why the folder must not load as bundled, or `None` when it is one this build shipped,
+    /// byte for byte.
+    pub fn check(&self, folder: &Path) -> Option<String> {
+        let name = folder.file_name()?.to_string_lossy();
+        let Some((_, expected)) = self.0.iter().find(|(shipped, _)| *shipped == name) else {
+            return Some("isn't an extension this build of Dupin shipped, so it stays off".into());
+        };
+        match dupin_extension_install::content_hash(folder) {
+            Ok(hash) if hash == *expected => None,
+            Ok(_) => {
+                Some("its files differ from the ones this build of Dupin shipped, so it stays off".into())
+            }
+            Err(error) => Some(format!("Couldn't check its files, so it stays off: {error}")),
+        }
+    }
+}
 
 /// Where the running Dupin's bundled extensions are, if it has any.
 pub fn directory() -> Option<PathBuf> {
@@ -24,18 +71,30 @@ fn in_app(executable: &Path) -> Option<PathBuf> {
         .then(|| contents.join("Resources/extensions"))
 }
 
-/// The bundled package called `name`, by the `name` in its package.json.
-pub fn find(bundled: &Path, name: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(bundled).ok()?;
+/// Each bundled package's folder, with the `name` and keyword in its package.json.
+pub fn packages(bundled: &Path) -> Vec<(PathBuf, String, String)> {
+    let Ok(entries) = std::fs::read_dir(bundled) else {
+        return Vec::new();
+    };
     entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_dir())
-        .find(|folder| {
-            super::manifest::Stamps::read(folder)
+        .filter_map(|folder| {
+            let manifest = super::manifest::Stamps::read(&folder)
                 .and_then(|stamps| super::manifest::read(&stamps))
-                .is_ok_and(|manifest| manifest.id == name)
+                .ok()?;
+            Some((folder, manifest.id, manifest.keyword))
         })
+        .collect()
+}
+
+/// The bundled package called `name`, by the `name` in its package.json.
+pub fn find(bundled: &Path, name: &str) -> Option<PathBuf> {
+    packages(bundled)
+        .into_iter()
+        .find(|(_, id, _)| id == name)
+        .map(|(folder, ..)| folder)
 }
 
 /// Copies the bundled package `name` into `user`, the extensions folder, for the user to edit.
@@ -105,6 +164,37 @@ mod tests {
         assert_eq!(in_app(Path::new("/repo/target/debug/dupin")), None);
         let source = directory().expect("the repository's extensions folder");
         assert!(find(&source, "dupin").is_some(), "{}", source.display());
+    }
+
+    #[test]
+    fn this_build_sealed_every_bundled_package_as_it_is_in_the_repository() {
+        let source = directory().unwrap();
+        let seals = Seals::shipped();
+        let mut folders = 0;
+        for entry in std::fs::read_dir(&source).unwrap() {
+            let folder = entry.unwrap().path();
+            if folder.is_dir() && !folder.file_name().unwrap().to_string_lossy().starts_with('.') {
+                assert_eq!(seals.check(&folder), None, "{}", folder.display());
+                folders += 1;
+            }
+        }
+        assert_eq!(seals.0.len(), folders);
+    }
+
+    #[test]
+    fn a_folder_the_build_did_not_seal_is_refused() {
+        let bundled = tempfile::tempdir().unwrap();
+        let about = bundled.path().join("about");
+        std::fs::create_dir(&about).unwrap();
+        std::fs::write(about.join("main.js"), "export const search = () => [];").unwrap();
+        let seals = Seals::of(&[&about]);
+        assert_eq!(seals.check(&about), None);
+
+        std::fs::write(about.join("main.js"), "export const search = () => [1];").unwrap();
+        assert!(seals.check(&about).unwrap().contains("differ"));
+        let added = bundled.path().join("added");
+        std::fs::create_dir(&added).unwrap();
+        assert!(seals.check(&added).unwrap().contains("isn't an extension"));
     }
 
     #[test]

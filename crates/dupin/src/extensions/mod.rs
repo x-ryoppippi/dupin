@@ -177,8 +177,9 @@ pub fn directory() -> Option<PathBuf> {
 struct Scanner {
     loaded: HashMap<PathBuf, LoadedExtension>,
     previous: Option<Catalog>,
-    /// Keeps a folder off when it no longer matches extensions.lock.
-    integrity: Option<dupin_extension_install::Integrity>,
+    /// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled
+    /// package this build sealed.
+    integrity: Option<Box<dyn FnMut(&Path) -> Option<String> + Send>>,
 }
 
 impl Scanner {
@@ -227,11 +228,7 @@ impl Scanner {
             folders.truncate(MAX_EXTENSIONS);
         }
         for folder in folders {
-            if let Some(problem) = self
-                .integrity
-                .as_mut()
-                .and_then(|integrity| integrity.check(&folder))
-            {
+            if let Some(problem) = self.integrity.as_mut().and_then(|integrity| integrity(&folder)) {
                 catalog
                     .problems
                     .push(format!("{}: {problem}", folder_name(&folder)));
@@ -474,22 +471,39 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Scans now and after changes under `directory`, delivering changed catalogues in order. Only
-/// the user's folder holds packages extensions.lock pins.
+/// Scans now and after changes under `directory`, delivering changed catalogues in order. The
+/// user's folder holds packages extensions.lock pins; the bundled folder only the packages
+/// this build sealed.
 pub fn watch(
     directory: PathBuf,
     origin: Origin,
     deliver: impl Fn(Catalog) + Send + 'static,
 ) -> std::io::Result<Watch> {
-    let mut scanner = Scanner {
-        integrity: match origin {
-            Origin::User => {
-                crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new)
-            }
-            Origin::Bundled => None,
-        },
-        ..Scanner::default()
+    let integrity: Option<Box<dyn FnMut(&Path) -> Option<String> + Send>> = match origin {
+        Origin::User => crate::extension_install::lock_path().map(|lock| {
+            let mut integrity = dupin_extension_install::Integrity::new(lock);
+            Box::new(move |folder: &Path| integrity.check(folder)) as _
+        }),
+        Origin::Bundled => {
+            let seals = bundled::Seals::shipped();
+            Some(Box::new(move |folder: &Path| seals.check(folder)))
+        }
     };
+    watch_with(
+        directory,
+        Scanner {
+            integrity,
+            ..Scanner::default()
+        },
+        deliver,
+    )
+}
+
+fn watch_with(
+    directory: PathBuf,
+    mut scanner: Scanner,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
@@ -578,7 +592,7 @@ pub(crate) mod tests {
 
     fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
         let (updates, received) = mpsc::channel();
-        let watcher = watch(directory.to_owned(), Origin::Bundled, move |catalog| {
+        let watcher = watch_with(directory.to_owned(), Scanner::default(), move |catalog| {
             let _ = updates.send(catalog);
         })
         .unwrap();
@@ -840,8 +854,9 @@ pub(crate) mod tests {
             },
         );
         lock.write(&lock_path).unwrap();
+        let mut integrity = dupin_extension_install::Integrity::new(lock_path);
         let mut scanner = Scanner {
-            integrity: Some(dupin_extension_install::Integrity::new(lock_path)),
+            integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
         };
         assert_eq!(scanner.scan(&root).extensions.len(), 1);
@@ -855,6 +870,31 @@ pub(crate) mod tests {
             "{:?}",
             catalog.problems
         );
+    }
+
+    #[test]
+    fn the_bundled_folder_loads_only_what_the_build_sealed() {
+        let fixture = folder();
+        let root = fixture.path();
+        let wasm = guest("{}");
+        install(root, "words", &manifest("words", "wc"), Some(&wasm));
+        let seals = bundled::Seals::of(&[&root.join("words")]);
+        install(root, "added", &manifest("added", "add"), Some(&wasm));
+        let mut scanner = Scanner {
+            integrity: Some(Box::new(move |folder: &Path| seals.check(folder))),
+            ..Scanner::default()
+        };
+        let catalog = scanner.scan(root);
+        assert_eq!(catalog.extensions.len(), 1);
+        assert_eq!(catalog.extensions[0].id, "words");
+        assert!(
+            catalog.problems[0].starts_with("added: isn't"),
+            "{:?}",
+            catalog.problems
+        );
+
+        std::fs::write(root.join("words/guest.wasm"), guest("{\"tampered\":true}")).unwrap();
+        assert!(scanner.scan(root).extensions.is_empty());
     }
 
     #[test]

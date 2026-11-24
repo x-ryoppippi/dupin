@@ -94,15 +94,10 @@ def main [
     $feed
 }
 
-# This checkout's bundled extensions, each package folder in extensions/, in place of whatever
-# the bundle held. Their files are read-only so nothing edits them in place; folders stay
-# writable, or the updater couldn't delete the bundle it replaces.
+# The bundled extensions stay those of the build, the only ones its binary sealed. Their files
+# are read-only again, so nothing edits them in place; folders stay writable, or the updater
+# couldn't delete the bundle it replaces.
 def bundle-extensions [target: path]: nothing -> nothing {
-    rm --recursive --force $target
-    mkdir $target
-    for package in (ls extensions | where type == dir | get name) {
-        ^cp -R $package $target
-    }
     ^find $target -type f -exec chmod a-w '{}' +
 }
 

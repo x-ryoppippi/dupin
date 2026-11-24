@@ -56,6 +56,9 @@ objc2-metal = { workspace = true, features = [
 	"MTLRenderPipeline",
 ] }
 
+[build-dependencies]
+dupin-extension-install = { path = "../dupin-extension-install" }
+
 [dev-dependencies]
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
 wat = "1"
