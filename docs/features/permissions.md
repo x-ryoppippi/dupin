@@ -14,4 +14,8 @@ macOS grants access to Dupin as a whole, but that never lets an extension use it
 - A grant covers the exact version you approved. An update that asks for more asks you again; anything it no longer needs is dropped.
 - Extensions that ship with Dupin are on by default with their own grants in place, but still ask macOS for access on first use. A copy you change is treated like any other extension.
 
-An extension that reads calendar events needs Calendars access, and one that reads or watches the clipboard needs Dupin allowed to paste from other apps. Settings → Permissions will list those extensions beside the features that use the same access. Extensions can't use any of this yet; [Capability broker](../capability-broker.md) describes the rules.
+An extension that reads calendar events needs Calendars access, and one that reads or watches the clipboard needs Dupin allowed to paste from other apps. Settings → Permissions lists extensions among the uses of Calendars and Paste from Other Apps, and will name each extension that declares them. Turning on the Extensions setting itself never asks macOS for either. Extensions can't use any of this yet; [Capability broker](../capability-broker.md) describes the rules.
+
+## Paste from Other Apps
+
+Settings → Permissions has a **Paste from Other Apps** row, used by clipboard history and by extensions that read the clipboard. On macOS versions that report the pasteboard access policy, clipboard history records in the background only while it is **Always Allow**; earlier versions have no policy, and the row shows Allowed. Request Access reads the clipboard once so macOS asks and lists Dupin in System Settings; turning clipboard history on only checks the policy. If macOS is set to ask or deny, Open System Settings goes to Privacy & Security, where you can always allow Dupin to paste from other apps.

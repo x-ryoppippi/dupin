@@ -318,3 +318,116 @@ fn a_sense_that_ends_without_a_full_stop_is_still_followed_by_the_next() {
         ]
     );
 }
+
+fn sense(definition: &str, examples: &[&str], senses: Vec<Sense>) -> Sense {
+    Sense {
+        definition: definition.into(),
+        examples: examples.iter().map(|example| (*example).into()).collect(),
+        senses,
+    }
+}
+
+#[test]
+fn an_english_entry_as_data_keeps_the_layouts_structure() {
+    let entry = structure("run", ENGLISH);
+    assert_eq!(entry.headword, "run");
+    assert_eq!(entry.dictionary, None);
+    assert_eq!(entry.pronunciation.as_deref(), Some("rʌn"));
+    assert!(!entry.truncated);
+    assert_eq!(
+        entry.groups,
+        [
+            Group {
+                part_of_speech: Some("Verb".into()),
+                note: Some("(runs, running; past ran; past participle run)".into()),
+                senses: vec![
+                    sense(
+                        "[no object] move on foot faster than walking",
+                        &["she ran to the station", "he ran the last few yards."],
+                        vec![
+                            sense(
+                                "(of a machine) operate",
+                                &["the engine runs on diesel."],
+                                Vec::new()
+                            ),
+                            sense(
+                                "[with object] cause to operate",
+                                &["run the dishwasher twice a week."],
+                                Vec::new()
+                            ),
+                        ],
+                    ),
+                    sense(
+                        "[with object] be in charge of",
+                        &[
+                            "he runs a small bakery",
+                            "(-run as adjective) : a family-run hotel."
+                        ],
+                        Vec::new(),
+                    ),
+                ],
+            },
+            Group {
+                part_of_speech: Some("Noun".into()),
+                note: None,
+                senses: vec![
+                    sense("an act of running", &["a morning run."], Vec::new()),
+                    sense("a journey on a regular route", &["the school run."], Vec::new()),
+                ],
+            },
+        ]
+    );
+    assert_eq!(
+        entry.sections,
+        [
+            Section {
+                title: "Phrases".into(),
+                text: "on the run 1 trying to avoid being caught. 2 while running: he caught it on the run. \
+                       [late 18th century]"
+                    .into(),
+            },
+            Section {
+                title: "Origin".into(),
+                text: "Old English rinnan.".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn entries_without_parts_of_speech_keep_their_examples_and_sub_senses() {
+    let cat = structure("猫", JAPANESE_ENGLISH);
+    assert_eq!(
+        cat.groups,
+        [Group {
+            part_of_speech: None,
+            note: None,
+            senses: vec![sense(
+                "ねこ 【猫】 a cat ; ｟愛称｠ a puss | pʊs |, a pussy (cat) (!主に小児語) .",
+                &[
+                    "三毛猫 a tortoiseshell cat.",
+                    "黒猫 a black cat.",
+                    "猫を飼っている have [keep] a cat."
+                ],
+                Vec::new(),
+            )],
+        }]
+    );
+
+    let run = structure("走る", JAPANESE);
+    let [group] = run.groups.as_slice() else {
+        panic!("{:?}", run.groups)
+    };
+    assert_eq!(group.note.as_deref(), Some("はし・る 2【走る】（動ラ五）"));
+    assert_eq!(
+        group.senses[2],
+        sense(
+            "液体が動く。",
+            &[],
+            vec![
+                sense("㋐ はやく流れる。", &[], Vec::new()),
+                sense("㋑ 飛びはねる。", &[], Vec::new())
+            ],
+        )
+    );
+}

@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -64,6 +64,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let mut parser = pico_args::Arguments::from_vec(args.iter().map(std::ffi::OsString::from).collect());
     let json = parser.contains("--json");
     let typescript = parser.contains("--ts");
+    let bundled = parser.contains("--bundle");
     let options = dupin_ext_sdk::BuildOptions {
         sourcemap: parser.contains("--sourcemap"),
     };
@@ -74,20 +75,20 @@ fn parse(args: &[String]) -> Result<Action, String> {
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
         ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap => {
-            let template = if typescript {
-                dupin_ext_sdk::Template::TypeScript
-            } else {
-                dupin_ext_sdk::Template::JavaScript
+            let template = match (typescript, bundled) {
+                (_, true) => dupin_ext_sdk::Template::Bundled,
+                (true, false) => dupin_ext_sdk::Template::TypeScript,
+                (false, false) => dupin_ext_sdk::Template::JavaScript,
             };
             Ok(Action::ExtNew(folder.to_string(), template))
         }
-        ["ext", "build", folder] if !folder.starts_with('-') && !typescript => {
+        ["ext", "build", folder] if !folder.starts_with('-') && !typescript && !bundled => {
             Ok(Action::ExtBuild(folder.to_string(), options))
         }
-        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript => {
+        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript && !bundled => {
             Ok(Action::ExtDev(folder.to_string(), options))
         }
-        _ if typescript || options.sourcemap => Err("invalid arguments; use dupin --help".into()),
+        _ if typescript || bundled || options.sourcemap => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
@@ -394,7 +395,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             match rolldown {
                 Some(rolldown) => println!("Built {} with {rolldown}", built.output),
                 None => println!(
-                    "{} is plain JavaScript, needs no build and passes the check",
+                    "{} runs as written, needs no build and passes the check",
                     built.output
                 ),
             }
@@ -661,6 +662,87 @@ mod tests {
     }
 
     #[test]
+    fn typescript_packages_check_run_and_publish_without_a_build() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let root = tempfile::tempdir().unwrap();
+        let extensions = tempfile::tempdir().unwrap();
+        let package = root.path().join("greeter");
+        dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::TypeScript).unwrap();
+        let folder = package.to_string_lossy().into_owned();
+        assert_eq!(
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["runtime"],
+            "javascript"
+        );
+        assert_eq!(
+            execute(Action::ExtRun(folder.clone(), "Dupin".into()), true).unwrap()["items"][0]["view"]["title"],
+            "Hello, Dupin!"
+        );
+        assert_eq!(
+            execute(Action::ExtBuild(folder.clone(), Default::default()), true).unwrap()["rolldown"],
+            Value::Null
+        );
+
+        let published = dupin_ext_sdk::dev::DevCopy {
+            package_dir: &package,
+            extensions: extensions.path(),
+            rolldown: None,
+            options: dupin_ext_sdk::BuildOptions::default(),
+            validate: &check_package,
+        };
+        let mut outcome = None;
+        published.watch(std::time::Duration::ZERO, &|| false, &mut |published| {
+            outcome = Some(published)
+        });
+        assert_eq!(outcome.unwrap().unwrap().revision, 1);
+        let link = extensions.path().join("greeter");
+        assert!(link.join("src/main.ts").is_file());
+        crate::extensions::check_folder(&link).unwrap();
+
+        let main = package.join("src/main.ts");
+        let source = std::fs::read_to_string(&main).unwrap();
+        std::fs::write(&main, format!("{source}\nenum Mode {{\n\tOn,\n}}\n")).unwrap();
+        let line = source.lines().count() as u32 + 2;
+        match execute(Action::ExtCheck(folder.clone()), true) {
+            Err(Failure::Diagnostic(diagnostic)) => assert_eq!(
+                (
+                    diagnostic.code.as_ref(),
+                    diagnostic.file.as_deref(),
+                    diagnostic.line
+                ),
+                ("typescript-needs-build", Some("src/main.ts"), Some(line)),
+                "{diagnostic:?}"
+            ),
+            other => panic!("expected the enum to be rejected, got {other:?}"),
+        }
+
+        std::fs::write(
+            &main,
+            source.replace(
+                "if (!name) return [];",
+                "if (!name) return [];\n\tif (name === 'throw') throw new Error(name as string);",
+            ),
+        )
+        .unwrap();
+        let throw_line = source
+            .lines()
+            .position(|line| line.contains("if (!name)"))
+            .unwrap() as u32
+            + 2;
+        match execute(Action::ExtRun(folder, "throw".into()), true) {
+            Err(Failure::Diagnostic(diagnostic)) => assert_eq!(
+                (
+                    diagnostic.code.as_ref(),
+                    diagnostic.file.as_deref(),
+                    diagnostic.line
+                ),
+                ("search-threw", Some("src/main.ts"), Some(throw_line)),
+                "{diagnostic:?}"
+            ),
+            other => panic!("expected search to throw, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn plain_text_answers_list_rows_and_actions() {
         use dupin_plugin_protocol::{Effect, PluginAction, PluginItem, View};
         let items = vec![PluginItem {
@@ -736,6 +818,15 @@ mod tests {
             parse(&args(&["ext", "new", "greeter"])).unwrap(),
             Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::JavaScript)
         );
+        for bundled in [
+            &["ext", "new", "--bundle", "greeter"][..],
+            &["ext", "new", "--ts", "--bundle", "greeter"],
+        ] {
+            assert_eq!(
+                parse(&args(bundled)).unwrap(),
+                Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::Bundled)
+            );
+        }
         let sourcemap = dupin_ext_sdk::BuildOptions { sourcemap: true };
         assert_eq!(
             parse(&args(&["ext", "build", "greeter", "--sourcemap", "--json"])).unwrap(),
@@ -749,6 +840,7 @@ mod tests {
             &["ext", "new", "greeter", "--sourcemap"][..],
             &["ext", "build", "greeter", "--ts"],
             &["ext", "check", "greeter", "--ts"],
+            &["ext", "dev", "greeter", "--bundle"],
             &["ext", "dev"],
             &["ext", "check", "guest.wasm", "request.json"],
             &["ext", "snap", "guest.wasm", "request.json", "view.png"],

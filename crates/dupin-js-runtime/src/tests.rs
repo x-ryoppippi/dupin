@@ -636,6 +636,31 @@ fn source_nested_too_deeply_to_compile_is_reported_where_it_is() {
         ("stack-limit", Some("lib.js")),
         "{diagnostic:?}"
     );
+
+    let typescript = format!(
+        "export const nested: unknown = {}0{};",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    );
+    let sources = Sources::new(
+        "main.ts".into(),
+        vec![
+            ("lib.ts".to_owned(), typescript.into_bytes()),
+            (
+                "main.ts".to_owned(),
+                b"import './lib.ts'; export function search(): [] { return []; }".to_vec(),
+            ),
+        ],
+    )
+    .unwrap();
+    let Err(RunError::Failed(diagnostic)) = Package::compile(sources, timeout(DEADLINE)) else {
+        panic!("a TypeScript module nested {depth} deep compiled");
+    };
+    assert_eq!(
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+        ("stack-limit", Some("lib.ts")),
+        "{diagnostic:?}"
+    );
 }
 
 #[test]

@@ -17,7 +17,7 @@ const CONFIG_PREFIX: &str = "rolldown.config.";
 /// at the module that imports it.
 const REPORT_VARIABLE: &str = "DUPIN_BUILD_REPORT";
 
-/// What `dupin ext new --ts` writes as `rolldown.config.ts`, and what a package without a
+/// What `dupin ext new --bundle` writes as `rolldown.config.ts`, and what a package without a
 /// Rolldown configuration of its own is bundled with.
 pub(crate) const CONFIG: &str = include_str!("../templates/rolldown.config.ts");
 

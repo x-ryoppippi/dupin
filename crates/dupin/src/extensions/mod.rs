@@ -199,6 +199,7 @@ fn folder_name(folder: &Path) -> std::borrow::Cow<'_, str> {
 
 struct LoadedExtension {
     manifests: manifest::Stamps,
+    entry: String,
     /// Every JavaScript file the package was compiled from.
     files: Vec<FileStamp>,
     /// What the bytecode was compiled from, so a revision whose files are unchanged reuses it.
@@ -257,7 +258,7 @@ fn load_with(
     let previous = match previous {
         Some(previous)
             if previous.manifests == manifests
-                && revision(folder).is_ok_and(|files| files == previous.files) =>
+                && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files) =>
         {
             return Ok(previous);
         }
@@ -265,10 +266,11 @@ fn load_with(
     };
 
     let manifest = manifest::read(&manifests)?;
-    let files = revision(folder)?;
+    let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
     Ok(LoadedExtension {
         manifests,
+        entry: manifest.entry,
         files,
         content,
         extension: Arc::new(Extension {
@@ -316,9 +318,9 @@ fn content_hash(sources: &Sources) -> blake3::Hash {
     hasher.finalize()
 }
 
-/// The files the package would be compiled from now, to compare with a loaded revision.
-fn revision(folder: &Path) -> Result<Vec<FileStamp>, Diagnostic> {
-    dupin_js_runtime::source_files(folder)?
+/// The files the package with `entry` would be compiled from now, to compare with a loaded revision.
+fn revision(folder: &Path, entry: &str) -> Result<Vec<FileStamp>, Diagnostic> {
+    dupin_js_runtime::source_files(folder, entry)?
         .into_iter()
         .map(|(_, path)| {
             FileStamp::read(path.clone()).map_err(|error| {
@@ -818,7 +820,7 @@ pub(crate) mod tests {
         let problems = catalog.problems.join("\n");
         assert!(problems.contains("d-broken: main.js:1:"), "{problems}");
         assert!(
-            problems.contains("e-no-main: main.js: is not a JavaScript file in the package folder"),
+            problems.contains("e-no-main: main.js: is not a module in the package folder"),
             "{problems}"
         );
         assert_eq!(catalog.problems.len(), 2, "{problems}");
