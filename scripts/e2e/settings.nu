@@ -4,6 +4,7 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-for-log
     wait-frontmost
 ]
@@ -17,7 +18,7 @@ export def settings-stage [out: path] {
     wait-frontmost Calculator
     press $out press-hotkey-again alt+space | ignore
     poll $out field-again $focused find --app Dupin --role textfield --first
-    ^osascript -e 'tell application "System Events" to keystroke "," using command down'
+    press $out open-settings 'cmd+,' | ignore
     let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
     let appearance = (poll
         $out
@@ -128,12 +129,7 @@ export def settings-stage [out: path] {
         textfield
         --first
     )
-    ^osascript -e 'tell application "System Events"
-        repeat with typedKey in characters of "dupin settings"
-            keystroke (typedKey as text)
-            delay 0.12
-        end repeat
-    end tell'
+    type-text $out type-dupin-settings 'dupin settings' | ignore
     (poll
         $out
         settings-search-query

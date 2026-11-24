@@ -29,6 +29,7 @@ in
             ''
               nu scripts/tests/e2e-assets.nu
               nu scripts/tests/e2e-comment.nu
+              nu scripts/tests/e2e-keys.nu
               nu scripts/tests/e2e-recording.nu
               nu scripts/tests/e2e-state.nu
               nu scripts/tests/e2e-file-fixtures.nu

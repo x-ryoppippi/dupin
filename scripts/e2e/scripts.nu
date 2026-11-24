@@ -4,22 +4,12 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-condition
     wait-for-log
 ]
 use ../e2e-script-fixtures.nu script-processes-stopped
 use ../e2e-state.nu [has-match is-focused-query]
-
-def type-script-text [value: string] {
-    ^osascript -e 'on run argv
-        tell application "System Events"
-            repeat with typedKey in characters of (item 1 of argv)
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell
-    end run' $value
-}
 
 def script-query [out: path, title: string] {
     press $out $'($title)-summon' alt+space | ignore
@@ -49,7 +39,7 @@ def script-query [out: path, title: string] {
         --first
     )
     if $stale.data?.match? != null { error make {msg: 'Launcher reopened with an old script card'} }
-    type-script-text $title
+    type-text $out $'($title)-type' $title | ignore
     (poll
         $out
         $'($title)-query'
@@ -115,7 +105,7 @@ export def scripts-stage [out: path] {
             --first
         ) | ignore
         let arguments = "first '$HOME' '*.rs'"
-        type-script-text $arguments
+        type-text $out scripts-type-arguments $arguments | ignore
         wait-for-log $log $echo_searched
         let before_argument_refresh = log-count $log $echo_searched
         cp ($scripts | path join failure) $extra

@@ -71,10 +71,7 @@ export def cli-stage [out: path, binary: path] {
             --include-bounds
         ) | ignore
         snap $out cli-pick
-        ^osascript -e 'tell application "System Events"
-            key code 125
-            key code 36
-        end tell'
+        press $out cli-pick-blue down return | ignore
         let selected = job recv --tag 2 --timeout 20sec
         $selected | to json | save ($out | path join cli-picked.json)
         if $selected.exit_code != 0 or ($selected.stdout | from json) != blue {

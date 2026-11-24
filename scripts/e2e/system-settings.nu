@@ -4,6 +4,7 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-frontmost
 ]
 use ../e2e-state.nu [has-match is-focused-match]
@@ -30,12 +31,7 @@ export def system-pane [out: path] {
         textfield
         --first
     )
-    ^osascript -e 'tell application "System Events"
-        repeat with typedKey in characters of "bluetooth"
-            keystroke (typedKey as text)
-            delay 0.12
-        end repeat
-    end tell'
+    type-text $out bluetooth-evidence-type bluetooth | ignore
     (poll
         $out bluetooth-evidence-query
         {|r| $r.ok and $r.data?.match?.value? == 'bluetooth' }

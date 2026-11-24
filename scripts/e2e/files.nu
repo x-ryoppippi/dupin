@@ -5,6 +5,7 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-condition
     wait-for-log
 ]
@@ -136,12 +137,10 @@ def open-trash-confirmation [out: path, name: string] {
         )
         $selected = $row.data.match.name
         if $selected == 'Move to Trash ↩' {
-            let opened = press $out $name return
-            if not $opened.ok { error make {msg: 'Could not open the Trash confirmation'} }
+            press $out $name return | ignore
             return
         }
-        let pressed = press $out $'($name)-down-($step)' down
-        if not $pressed.ok { error make {msg: 'Could not select the next file action'} }
+        press $out $'($name)-down-($step)' down | ignore
     }
     error make {msg: 'Could not select Move to Trash'}
 }
@@ -199,7 +198,7 @@ def file-search [out: path, query: string, found: closure] {
         textfield
         --first
     ) | ignore
-    ^osascript -e 'tell application "System Events" to keystroke " "'
+    press $out $'file-actions-($query)-space' space | ignore
     (poll
         $out
         $'file-actions-($query)-mode'
@@ -214,14 +213,7 @@ def file-search [out: path, query: string, found: closure] {
         --exact
         --first
     ) | ignore
-    ^osascript -e 'on run argv
-        tell application "System Events"
-            repeat with typedKey in characters of (item 1 of argv)
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell
-    end run' $file
+    type-text $out $'file-actions-($query)-type' $file | ignore
     (poll
         $out
         $'file-actions-($query)-query'

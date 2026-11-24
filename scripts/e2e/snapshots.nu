@@ -5,6 +5,7 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-for-log
 ]
 use ../e2e-state.nu [has-match is-focused-query]
@@ -19,12 +20,7 @@ export def snapshot-stage [out: path] {
     if ($archive | path exists) { error make {msg: 'Snapshot archive was not isolated'} }
     try {
         let done = log-count $log 'dupin-trace: results done query="calculator"'
-        ^osascript -e 'tell application "System Events"
-            repeat with typedKey in characters of "calculator"
-                keystroke (typedKey as text)
-                delay 0.12
-            end repeat
-        end tell'
+        type-text $out snapshots-type-calculator calculator | ignore
         (poll
             $out
             snapshots-query
@@ -96,7 +92,7 @@ export def snapshot-stage [out: path] {
         ) | ignore
         snap $out snapshots-opened
 
-        ^osascript -e 'tell application "System Events" to keystroke "zzz"'
+        type-text $out snapshots-type-filter zzz | ignore
         (poll
             $out
             snapshots-filter
@@ -124,7 +120,7 @@ export def snapshot-stage [out: path] {
             --first
         ) | ignore
         snap $out snapshots-filtered
-        ^osascript -e 'tell application "System Events" to key code 51 using command down'
+        press $out snapshots-clear-filter cmd+backspace | ignore
         (poll
             $out
             snapshots-cleared

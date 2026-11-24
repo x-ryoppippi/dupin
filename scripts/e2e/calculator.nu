@@ -5,6 +5,7 @@ use driver.nu [
     poll
     press
     snap
+    type-text
     wait-for-log
 ]
 use ../e2e-state.nu [has-match is-focused-query]
@@ -14,12 +15,7 @@ export def calculator-stage [out: path] {
     # `type` needs a settable AX value or the main window, and the field has neither: the
     # panel never activates, so it is key but not main. Press keys as a person would, from one
     # process: one `agent-desktop press` per key lost keys before they reached Dupin.
-    ^osascript -e 'tell application "System Events"
-        repeat with typedKey in characters of "calculator"
-            keystroke (typedKey as text)
-            delay 0.12
-        end repeat
-    end tell'
+    type-text $out type-calculator calculator | ignore
     snap $out typed
     # Fuzzy matching would still find Calculator from a query missing keys, so check every key
     # reached the field.
@@ -51,10 +47,10 @@ export def calculator-stage [out: path] {
         textfield
         --first
     )
-    ^osascript -e 'tell application "System Events" to key code 123'
+    press $out quick-look-left left | ignore
     wait-for-log --after $left_before $log 'dupin-trace: key Left '
     wait-for-log --after $closed_before $log 'dupin-trace: quick-look picker input visible=false key=false'
-    ^osascript -e 'tell application "System Events" to key code 124'
+    press $out quick-look-right right | ignore
     snap $out quick-look-restored
 
     let before = poll $out before-return {|r| $r.ok } list-apps
