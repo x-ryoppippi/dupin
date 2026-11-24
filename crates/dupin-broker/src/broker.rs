@@ -396,6 +396,19 @@ impl Broker {
         }
     }
 
+    /// Whether the user or the base turned the package off, rather than never turning it on.
+    /// Unreadable grants count as off, since a choice they hold can't be known.
+    pub fn is_turned_off(&self, id: &PackageId) -> bool {
+        let Some(installed) = self.installed.get(id) else {
+            return true;
+        };
+        let Some(packages) = &self.local.packages else {
+            return true;
+        };
+        packages.get(id).and_then(|package| package.enabled) == Some(false)
+            || self.base_enabled(id, &installed.revision) == Some(false)
+    }
+
     /// The installed revision, for a host that lists [`Broker::consents`] and later passes
     /// what it showed to [`Broker::consent`].
     pub fn revision(&self, id: &PackageId) -> Option<&Revision> {

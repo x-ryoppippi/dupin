@@ -1047,3 +1047,24 @@ fn denials_explain_themselves() {
         "`files:notes` needs a file, folder or program you pick"
     );
 }
+
+#[test]
+fn only_a_choice_to_turn_a_package_off_counts_as_turned_off() {
+    let (mut broker, package) = installed(github());
+    assert!(!broker.is_enabled(&package));
+    assert!(!broker.is_turned_off(&package));
+    broker.set_enabled(&package, false).unwrap();
+    assert!(broker.is_turned_off(&package));
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.is_turned_off(&package));
+    assert!(broker.is_turned_off(&id("missing")));
+
+    let base = Base::parse("version = 1\n[packages.bookmarks]\nenabled = false\n").unwrap();
+    let mut locked = Broker::new(base, Local::default());
+    let _ = locked.install(package.clone(), rev(R1), github());
+    assert!(locked.is_turned_off(&package));
+
+    let mut unreadable = Broker::new(Base::default(), Local::unreadable());
+    let _ = unreadable.install(package.clone(), rev(R1), github());
+    assert!(unreadable.is_turned_off(&package));
+}
