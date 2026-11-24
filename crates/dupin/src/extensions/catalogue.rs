@@ -20,8 +20,7 @@ use dupin_core::{Batch, Item};
 use dupin_extension_bridge::Generation;
 use dupin_js_runtime::row::{MAX_PAGE_BYTES, MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::web_search::WebSearch;
-use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
-use serde_json::Value;
+use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
 
 use super::Role;
 
@@ -42,7 +41,8 @@ pub(crate) struct Cached {
 }
 
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
-pub(crate) type Fetch<'a> = dyn FnMut(Option<&str>, Reason, &Value) -> Result<CataloguePage, RunError> + 'a;
+pub(crate) type Fetch<'a> =
+    dyn FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> + 'a;
 
 /// How the rows a package sends become the entries Dupin holds. An entry's ID need not be the
 /// row's, so the IDs an update removes are mapped the same way before they reach the catalogue.
@@ -56,7 +56,7 @@ pub(crate) trait Convert {
 /// generation its host requests run in, and for which search.
 #[derive(Clone, Copy)]
 pub(crate) struct Asking<'a> {
-    pub preferences: &'a Arc<Value>,
+    pub preferences: &'a Arc<Preferences>,
     pub generation: Option<Generation>,
     pub role: Role,
 }
@@ -78,14 +78,14 @@ struct State {
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
     /// The preferences the catalogue was asked for with.
-    preferences: Option<Arc<Value>>,
+    preferences: Option<Arc<Preferences>>,
     /// The broker generation the rows were asked under.
     generation: Option<Generation>,
     /// The [`Shared::forgotten`] count the rows were asked after.
     forgotten: u64,
     /// The preferences the last ask failed with, while nothing else has changed since that
     /// could make the next one succeed.
-    failed: Option<Arc<Value>>,
+    failed: Option<Arc<Preferences>>,
 }
 
 impl Default for Cached {
@@ -166,12 +166,15 @@ impl Cached {
     /// The web searches [`Cached::web_searches`] would return for `preferences` without asking
     /// the package, if Dupin holds them and can read them without waiting for a search that is
     /// filling the catalogue.
-    pub fn held_web_searches(&self, preferences: &Arc<Value>) -> Option<Vec<(Item, WebSearch)>> {
+    pub fn held_web_searches(&self, preferences: &Arc<Preferences>) -> Option<Vec<(Item, WebSearch)>> {
         let state = self.shared.state.try_lock().ok()?;
         let current = state.due.is_none()
             && state.forgotten == self.shared.forgotten.load(Ordering::Acquire)
             && !state.expires.is_some_and(|expires| Instant::now() >= expires)
-            && state.preferences.as_ref().is_some_and(|held| held == preferences);
+            && state
+                .preferences
+                .as_ref()
+                .is_some_and(|held| Arc::ptr_eq(held, preferences));
         current.then(|| held_web_searches(&state.catalogue))
     }
 
@@ -193,7 +196,7 @@ impl Cached {
         let held_off = state
             .failed
             .as_ref()
-            .is_some_and(|failed| failed == asking.preferences);
+            .is_some_and(|failed| Arc::ptr_eq(failed, asking.preferences));
         if held_off && asking.role == Role::DefaultSearch {
             self.shared.bytes.store(0, Ordering::Relaxed);
             return Ok(T::default());
@@ -271,12 +274,15 @@ impl State {
     fn refresh(
         &mut self,
         now: Instant,
-        preferences: &Arc<Value>,
+        preferences: &Arc<Preferences>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<(), RunError> {
         let expired = self.expires.is_some_and(|expires| now >= expires);
-        let changed = self.preferences.as_ref().is_some_and(|held| held != preferences);
+        let changed = self
+            .preferences
+            .as_ref()
+            .is_some_and(|held| !Arc::ptr_eq(held, preferences));
         let Some(mut reason) = changed
             .then_some(Reason::Load)
             .or(self.due)
@@ -373,6 +379,7 @@ mod tests {
             id: id.into(),
             title: title.into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             match_text: None,
             time: None,
@@ -409,6 +416,7 @@ mod tests {
                     alternate: None,
                     actions: Vec::new(),
                 },
+                aliases: row.aliases,
                 keywords: row.keywords,
                 section: None,
                 detail: None,
@@ -427,12 +435,12 @@ mod tests {
 
     const ENTRY: &Prefixed = &Prefixed;
 
-    fn none() -> Arc<Value> {
-        static NONE: OnceLock<Arc<Value>> = OnceLock::new();
+    fn none() -> Arc<Preferences> {
+        static NONE: OnceLock<Arc<Preferences>> = OnceLock::new();
         NONE.get_or_init(Arc::default).clone()
     }
 
-    fn keyword(preferences: &Arc<Value>) -> Asking<'_> {
+    fn keyword(preferences: &Arc<Preferences>) -> Asking<'_> {
         Asking {
             preferences,
             generation: None,
@@ -461,7 +469,7 @@ mod tests {
     fn the_package_is_asked_once_and_typing_only_matches_what_is_held() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Value| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -491,7 +499,7 @@ mod tests {
     fn parts_and_updates_follow_the_cursor_and_invalidation_asks_with_it() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Value| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(match (cursor, reason) {
                 (None, Reason::Load) => page(
@@ -565,7 +573,7 @@ mod tests {
             },
         ]
         .into_iter();
-        let mut fetch = |_: Option<&str>, _, _: &Value| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             Ok(page(answers.next().expect("asked once per change"), "1", false))
         };
         assert_eq!(
@@ -600,7 +608,7 @@ mod tests {
     fn an_expired_catalogue_is_asked_again_and_a_failure_starts_over() {
         let cached = Cached::default();
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, _: &Value| {
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
             reasons.push(reason);
             match reasons.len() {
                 1 => Ok(CataloguePage {
@@ -652,7 +660,7 @@ mod tests {
         let calls = RefCell::new(Vec::new());
         let failing = Cell::new(true);
         let ask = |role| {
-            let mut fetch = |_: Option<&str>, reason, _: &Value| {
+            let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
                 calls.borrow_mut().push(reason);
                 if failing.get() {
                     Err(RunError::Failed(Diagnostic::new("items-threw", "needs-consent")))
@@ -709,10 +717,10 @@ mod tests {
     }
 
     #[test]
-    fn other_preferences_ask_a_failed_catalogue_again_from_the_main_search() {
+    fn other_preferences_ask_a_failed_catalogue_again_for_web_searches() {
         let cached = Cached::default();
         let mut calls = 0;
-        let mut fetch = |_: Option<&str>, _, _: &Value| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             calls += 1;
             Err(RunError::Failed(Diagnostic::new(
                 "items-threw",
@@ -733,7 +741,10 @@ mod tests {
                 .is_empty(),
             "held off with the same preferences"
         );
-        let changed = Arc::new(serde_json::json!({ "webSearches": {} }));
+        let changed = Arc::new(Preferences::from_iter([(
+            "webSearches".into(),
+            serde_json::json!({}),
+        )]));
         assert!(cached.web_searches(main(&changed), &mut fetch, ENTRY).is_err());
         assert_eq!(calls, 2);
     }
@@ -748,7 +759,7 @@ mod tests {
         let filling = std::thread::spawn({
             let cached = cached.clone();
             move || {
-                let mut fetch = |_: Option<&str>, _, _: &Value| {
+                let mut fetch = |_: Option<&str>, _, _: &Preferences| {
                     asked.send(()).unwrap();
                     answered.recv().unwrap();
                     Ok(page(
@@ -772,7 +783,7 @@ mod tests {
         assert_eq!(filling.join().unwrap(), ["Before"]);
 
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, _: &Value| {
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
             reasons.push(reason);
             Ok(page(
                 PageChange::Reset {
@@ -821,7 +832,7 @@ mod tests {
 
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason, _: &Value| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -884,7 +895,7 @@ mod tests {
         let heavy = 7;
         let full = 19;
         let mut sent = 0;
-        let mut fetch = |_: Option<&str>, _, _: &Value| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             sent += 1;
             let rows = if sent <= heavy {
                 let mut large = row(&format!("heavy-{sent}"), "Heavy");
@@ -917,7 +928,7 @@ mod tests {
     #[test]
     fn a_rejected_change_or_endless_parts_drop_the_catalogue() {
         let cached = Cached::default();
-        let mut fetch = |_: Option<&str>, _, _: &Value| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             Ok(page(
                 PageChange::Update {
                     prepend: Vec::new(),
@@ -937,7 +948,7 @@ mod tests {
             "{error:?}"
         );
         let mut endless =
-            |_: Option<&str>, _, _: &Value| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
+            |_: Option<&str>, _, _: &Preferences| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
         let error = cached
             .search("", 10, keyword(&none()), &mut endless, ENTRY)
             .unwrap_err();
@@ -948,13 +959,72 @@ mod tests {
     }
 
     #[test]
-    fn other_preferences_load_the_catalogue_again_and_web_searches_come_from_it() {
+    fn other_preferences_load_the_catalogue_again() {
+        let cached = Cached::default();
+        let mut seen = Vec::new();
+        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+            seen.push((reason, preferences.len()));
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("a", "Alpha")],
+                },
+                "1",
+                false,
+            ))
+        };
+        let first = none();
+        cached.search("", 10, keyword(&first), &mut fetch, ENTRY).unwrap();
+        cached
+            .search("a", 10, keyword(&first), &mut fetch, ENTRY)
+            .unwrap();
+        let changed = Arc::new(Preferences::from_iter([("paste".into(), true.into())]));
+        cached
+            .search("a", 10, keyword(&changed), &mut fetch, ENTRY)
+            .unwrap();
+        cached
+            .search("al", 10, keyword(&changed), &mut fetch, ENTRY)
+            .unwrap();
+        assert_eq!(seen, [(Reason::Load, 0), (Reason::Load, 1)]);
+    }
+
+    #[test]
+    fn other_preferences_ask_a_failed_catalogue_again_from_the_main_search() {
+        let cached = Cached::default();
+        let mut calls = 0;
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            calls += 1;
+            Err(RunError::Failed(Diagnostic::new(
+                "items-threw",
+                "bad preferences",
+            )))
+        };
+        let main = |preferences| Asking {
+            preferences,
+            generation: None,
+            role: Role::DefaultSearch,
+        };
+        let first = none();
+        assert!(cached.search("a", 10, main(&first), &mut fetch, ENTRY).is_err());
+        assert!(
+            cached
+                .search("a", 10, main(&first), &mut fetch, ENTRY)
+                .unwrap()
+                .is_empty(),
+            "held off with the same preferences"
+        );
+        let changed = Arc::new(Preferences::from_iter([("paste".into(), true.into())]));
+        assert!(cached.search("a", 10, main(&changed), &mut fetch, ENTRY).is_err());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn web_searches_come_from_the_catalogue_held_for_the_current_preferences() {
         use dupin_js_runtime::web_search::WebSearch;
 
         let cached = Cached::default();
         let mut seen = Vec::new();
-        let mut fetch = |_: Option<&str>, reason, preferences: &Value| {
-            seen.push((reason, preferences.as_object().map_or(0, serde_json::Map::len)));
+        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+            seen.push((reason, preferences.len()));
             let mut search = row("g", "Search Google");
             search.web_search = Some(WebSearch {
                 alias: "g".into(),
@@ -981,7 +1051,10 @@ mod tests {
             titles(&cached.search("", 10, keyword(&first), &mut fetch, ENTRY).unwrap()),
             ["Alpha"]
         );
-        let changed = Arc::new(serde_json::json!({ "webFallbacks": ["g"] }));
+        let changed = Arc::new(Preferences::from_iter([(
+            "webFallbacks".into(),
+            serde_json::json!(["g"]),
+        )]));
         assert_eq!(
             cached.held_web_searches(&changed),
             None,

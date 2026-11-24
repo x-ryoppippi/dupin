@@ -20,6 +20,8 @@ const KEYWORD_PENALTY: i32 = 8;
 pub struct Entry {
     /// Its `id` is unique within the catalogue.
     pub item: Item,
+    /// Other names for the row, matched as its title is, such as a snippet's keyword.
+    pub aliases: Vec<String>,
     /// Further words the query is matched against.
     pub keywords: Vec<String>,
     /// The heading the row is listed under while the query is empty.
@@ -124,6 +126,7 @@ pub struct Catalogue {
 struct Row {
     entry: Entry,
     title: Name,
+    aliases: Vec<Name>,
     keywords: Vec<Name>,
     /// For [`Matching::Words`]: the title, keywords and match text, lowercased once. The match
     /// text is kept only here.
@@ -138,6 +141,7 @@ impl Row {
         match matching {
             Matching::Fuzzy => Self {
                 title: Name::new(entry.item.display_title()),
+                aliases: entry.aliases.iter().map(|alias| Name::new(alias)).collect(),
                 keywords: entry.keywords.iter().map(|keyword| Name::new(keyword)).collect(),
                 folded: String::new(),
                 entry,
@@ -145,12 +149,13 @@ impl Row {
             },
             Matching::Words => {
                 let mut folded = entry.item.display_title().to_lowercase();
-                for text in entry.keywords.iter().chain(&match_text) {
+                for text in entry.aliases.iter().chain(&entry.keywords).chain(&match_text) {
                     folded.push('\n');
                     folded.push_str(&text.to_lowercase());
                 }
                 Self {
                     title: Name::new(""),
+                    aliases: Vec::new(),
                     keywords: Vec::new(),
                     folded,
                     entry,
@@ -160,19 +165,24 @@ impl Row {
         }
     }
 
-    /// The row's best match, and whether it was on its title rather than one of its keywords.
+    /// The row's best match, and whether it was on its title rather than an alias or keyword.
     fn score(&self, query: &Query, scratch: &mut Scratch) -> Option<(i32, bool)> {
         let on_title = fuzzy::score_only(query, &self.title, scratch);
+        let on_alias = self
+            .aliases
+            .iter()
+            .filter_map(|alias| fuzzy::score_only(query, alias, scratch))
+            .max();
         let on_keyword = self
             .keywords
             .iter()
             .filter_map(|keyword| fuzzy::score_only(query, keyword, scratch))
             .max()
             .map(|score| score - KEYWORD_PENALTY);
-        match (on_title, on_keyword) {
-            (Some(title), Some(keyword)) if keyword > title => Some((keyword, false)),
+        match (on_title, on_alias.max(on_keyword)) {
+            (Some(title), Some(other)) if other > title => Some((other, false)),
             (Some(title), _) => Some((title, true)),
-            (None, keyword) => keyword.map(|score| (score, false)),
+            (None, other) => other.map(|score| (score, false)),
         }
     }
 }
@@ -521,6 +531,7 @@ fn entry_bytes(entry: &Entry) -> usize {
         + view
         + item.payload.text.as_ref().map_or(0, String::len)
         + actions
+        + entry.aliases.iter().map(String::len).sum::<usize>()
         + entry.keywords.iter().map(String::len).sum::<usize>()
         + entry.section.as_ref().map_or(0, |section| section.len())
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
@@ -580,7 +591,7 @@ fn action_bytes(action: &Action) -> usize {
                     ExtensionRequest::Run { action, data } => {
                         action.len() + data.as_ref().map_or(0, |data| data.to_string().len())
                     }
-                    ExtensionRequest::Paste { text } => text.len(),
+                    ExtensionRequest::Paste { text, .. } => text.len(),
                     ExtensionRequest::Allow { scope, revision } => scope.len() + revision.len(),
                     ExtensionRequest::Deny { scope } | ExtensionRequest::RequestAccess { scope } => {
                         scope.len()
@@ -620,6 +631,7 @@ mod tests {
                 alternate: None,
                 actions: Vec::new(),
             },
+            aliases: Vec::new(),
             keywords: Vec::new(),
             section: None,
             detail: None,
@@ -815,6 +827,19 @@ mod tests {
     }
 
     #[test]
+    fn aliases_match_as_the_title_does_without_highlights() {
+        let mut aliased = entry("aliased", "Visual Studio Code");
+        aliased.aliases = vec!["editor".into()];
+        let catalogue = catalogue(vec![entry("plain", "Editorial"), aliased]);
+        let batches = catalogue.search("editor", 10, 0);
+        assert_eq!(titles(&batches), ["Visual Studio Code", "Editorial"]);
+        assert!(batches[0].items[0].matched.is_empty());
+        assert!(!batches[0].items[1].matched.is_empty());
+        assert_eq!(titles(&catalogue.search("visual", 10, 0)), ["Visual Studio Code"]);
+        assert!(!catalogue.search("visual", 10, 0)[0].items[0].matched.is_empty());
+    }
+
+    #[test]
     fn an_empty_query_lists_rows_in_order_under_their_sections_without_scores() {
         let mut first = entry("1", "One");
         first.section = Some("Pinned".into());
@@ -952,7 +977,10 @@ mod tests {
         let text = "x".repeat(16 * 1024);
         let paste = Action::Extension {
             extension: "emoji".into(),
-            request: crate::ExtensionRequest::Paste { text: text.clone() },
+            request: crate::ExtensionRequest::Paste {
+                text: text.clone(),
+                template: false,
+            },
         };
         let overhead = "aA".len() + "pP".len();
         for (action, held) in [

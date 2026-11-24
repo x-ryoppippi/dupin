@@ -463,6 +463,7 @@ fn a_port_answers_like_the_native_catalogue_it_replaces() {
                     alternate: None,
                     actions: vec![ItemAction::new("open", "Open URL", Action::OpenUrl(url))],
                 },
+                aliases: Vec::new(),
                 keywords: row["keywords"]
                     .as_array()
                     .map(|keywords| keywords.iter().map(|k| k.as_str().unwrap().to_owned()).collect())

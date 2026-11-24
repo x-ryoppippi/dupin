@@ -19,7 +19,7 @@ use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::{Call, ClipboardAccess, Request, Trigger};
 use dupin_extension_host::{ActionEffect, Host};
 use dupin_js_runtime::row::{Row, RowEffect};
-use dupin_js_runtime::{Diagnostic, RunError};
+use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
 
 use super::catalogue::{Asking, Cached, Convert};
@@ -162,17 +162,17 @@ impl<'a> Held<'a> {
         host: &Host,
         query: &str,
         limit: usize,
-        preferences: &Arc<Value>,
+        preferences: &Arc<Preferences>,
         call: &Call,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let mut fetch = |cursor: Option<&str>, reason, preferences: &Value| {
+        let mut fetch = |cursor: Option<&str>, reason, settings: &Preferences| {
             host.items(
                 &self.extension.compiled,
                 cursor,
                 reason,
-                preferences,
+                self.extension.preferences_with(settings),
                 deadline,
                 cancelled,
                 &call.services,
@@ -227,7 +227,7 @@ fn query_rows(
     extension: &Extension,
     held: &Held<'_>,
     query: &str,
-    preferences: &Arc<Value>,
+    preferences: &Arc<Preferences>,
     call: &Call,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<Row>, RunError> {
@@ -262,9 +262,7 @@ fn replay(
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger);
-    // A fixture stands for what the package's feature chose, so nothing this process chose
-    // reaches it.
-    let preferences = Arc::new(extension.preferences.resolve(fixture.preferences.clone()));
+    let preferences = Arc::new(fixture.preferences.clone());
     let held = Held::new(extension);
     let mut rows: Vec<Row> = Vec::new();
     let mut selected: Option<usize> = None;
@@ -322,7 +320,7 @@ fn replay(
                 });
                 match chosen {
                     Some(action) => {
-                        outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        outcome.insert("effect".into(), Value::Object(fixture::chosen(action)));
                         if let RowEffect::Paste { text } = &action.effect {
                             let paste = Request::Clipboard(ClipboardAccess::Paste);
                             // The launcher copies instead, so the fixture sees what the user would.
@@ -331,8 +329,11 @@ fn replay(
                                     .bridge
                                     .authorize(&extension.package, &paste, Trigger::Activation)
                             {
-                                let copied = RowEffect::Copy { text: text.clone() };
-                                outcome.insert("effect".into(), Value::Object(fixture::effect(&copied)));
+                                let copied = dupin_js_runtime::row::RowAction {
+                                    effect: RowEffect::Copy { text: text.clone() },
+                                    ..action.clone()
+                                };
+                                outcome.insert("effect".into(), Value::Object(fixture::chosen(&copied)));
                                 outcome.insert(
                                     "error".into(),
                                     fixture::error(&Diagnostic::new(
@@ -347,7 +348,7 @@ fn replay(
                                 &extension.compiled,
                                 handler,
                                 data.as_ref().unwrap_or(&Value::Null),
-                                &preferences,
+                                &extension.preferences_with(&preferences),
                                 Instant::now() + ACTION_DEADLINE,
                                 cancelled,
                                 &call(Trigger::Activation).services,
@@ -394,7 +395,7 @@ fn replay(
                     &extension.compiled,
                     event,
                     data,
-                    &preferences,
+                    &extension.preferences_with(&preferences),
                     Instant::now() + ACTION_DEADLINE,
                     cancelled,
                     &call(Trigger::Background).services,
@@ -474,6 +475,7 @@ fn item_row(extension: &Extension, item: &dupin_core::Item) -> Row {
         id: item.id.strip_prefix(&prefix).unwrap_or(&item.id).to_owned(),
         title: item.display_title().to_owned(),
         subtitle,
+        aliases: Vec::new(),
         keywords: Vec::new(),
         match_text: None,
         time: None,

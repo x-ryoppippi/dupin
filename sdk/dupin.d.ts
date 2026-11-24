@@ -69,6 +69,8 @@ declare module 'dupin' {
 		 * remembers which items are picked by it.
 		 */
 		id: string;
+		/** Up to 16 other names of up to 64 bytes, such as a short code, matched as the title is. */
+		aliases?: string[];
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
 		/** With `"match": "words"`, more text, up to 64 KiB, that finds the item; it never shows. */
@@ -133,9 +135,17 @@ declare module 'dupin' {
 		metadata?: Metadata[];
 	}
 
+	/**
+	 * `copy` and `paste` take 1 byte to 64 KiB of text. With `template`, Dupin fills `{date}`
+	 * (`2026-01-31`), `{time}` (`09:05`), `{datetime}` and `{clipboard}` (the clipboard's text)
+	 * when the action is chosen, so the package never sees the clipboard; other braces stay as
+	 * written. Only a bundled package that replaces a built-in gets templates; any other's text
+	 * is copied or pasted as written. `paste` needs the `clipboard: ['paste']` scope, and copies
+	 * without it.
+	 */
 	export type Action =
-		| { title: string; copy: string }
-		| { title: string; paste: string }
+		| { title: string; copy: string; template?: boolean }
+		| { title: string; paste: string; template?: boolean }
 		| { title: string; open: string }
 		/** Shows the file at the absolute path selected in Finder; it opens nothing. */
 		| { title: string; reveal: string }
@@ -172,10 +182,10 @@ declare module 'dupin' {
 	}
 
 	/**
-	 * What the user chose for each of the manifest's `preferences`, or its default: a string,
-	 * boolean or number. A bundled package that replaces a built-in also gets that built-in's
-	 * config.toml settings no preference can declare, as Web Search gets `webSearches` and
-	 * `webFallbacks`. Dupin freezes it through and through.
+	 * What the user chose for each of the manifest's `preferences`, or its default. The package
+	 * Dupin shipped for a built-in that reads config.toml also finds that built-in's settings
+	 * here, as Web Search finds `webSearches` and `webFallbacks`; a change asks `items` again
+	 * with reason `load`. Dupin freezes it through and through.
 	 */
 	export type Preferences = Readonly<Record<string, Json>>;
 

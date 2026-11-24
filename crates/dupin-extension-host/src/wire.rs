@@ -344,6 +344,7 @@ mod tests {
                 id: index.to_string(),
                 title: "a".into(),
                 subtitle: control(1),
+                aliases: vec!["a".into(); 16],
                 keywords: vec!["a".into(); 16],
                 match_text: None,
                 time: None,
@@ -362,7 +363,13 @@ mod tests {
                         12
                     ],
                 }),
-                actions: vec![RowAction::new("a", RowEffect::Copy { text: control(1) }); 8],
+                actions: vec![
+                    RowAction {
+                        template: true,
+                        ..RowAction::new("a", RowEffect::Copy { text: control(1) })
+                    };
+                    8
+                ],
                 web_search: None,
             })
             .collect();
@@ -412,6 +419,7 @@ mod tests {
             id: "a".into(),
             title: "A".into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             match_text: None,
             time: None,

@@ -6,7 +6,7 @@ use super::{Feature, default_query};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::extensions::preferences;
 use crate::ui::{ActionStage, Ui};
-use crate::web::{WEB_SEARCH, WebProvider, WebSearches};
+use crate::web::{WEB_SEARCH_PACKAGE, WebProvider, WebSearches};
 
 pub(crate) const WEB_KEYWORDS: &str = "web.keywords";
 const WEB_FALLBACKS: &str = "web.fallbacks";
@@ -56,10 +56,7 @@ fn start(providers: &mut Providers) {
 /// keywords take precedence over the aliases other packages list and their catalogues are the
 /// ones searched.
 fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
-    let configured = preferences::choose(WEB_SEARCH, std::mem::take(&mut commands.web.preferences));
-    if configured {
-        ui.preferences_changed(WEB_SEARCH);
-    }
+    let configured = preferences::set(WEB_SEARCH_PACKAGE, std::mem::take(&mut commands.web.preferences));
     let next = WebSearches::new(
         ui.web_search_sources(),
         commands.registry.keywords().map(str::to_owned).collect(),

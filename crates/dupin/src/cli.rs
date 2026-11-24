@@ -616,9 +616,9 @@ fn effect_json(action: &dupin_core::Action) -> Value {
             ..
         } => serde_json::json!({"kind": "run", "handler": action, "data": data}),
         Action::Extension {
-            request: dupin_core::ExtensionRequest::Paste { text },
+            request: dupin_core::ExtensionRequest::Paste { text, template },
             ..
-        } => serde_json::json!({"kind": "paste", "text": text}),
+        } => serde_json::json!({"kind": "paste", "text": text, "template": template}),
         other => serde_json::json!({"kind": format!("{other:?}")}),
     }
 }
@@ -707,7 +707,7 @@ fn describe_answer(batches: &[dupin_core::Batch]) -> String {
                         ..
                     } => format!("runs {action}"),
                     dupin_core::Action::Extension {
-                        request: dupin_core::ExtensionRequest::Paste { text },
+                        request: dupin_core::ExtensionRequest::Paste { text, .. },
                         ..
                     } => format!("paste {text}"),
                     other => format!("{other:?}"),

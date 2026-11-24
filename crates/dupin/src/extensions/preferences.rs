@@ -1,10 +1,16 @@
 //! What a package lets the user choose, from the `preferences` of its manifest, and what is
 //! chosen now. A feature that ships as a bundled package sets the values from its own Settings
-//! rows or config.toml keys; any other package gets the defaults it declares.
+//! rows; any other package gets the defaults it declares.
+//!
+//! The package Dupin shipped for a built-in that reads config.toml is also handed that
+//! built-in's settings, by its package ID, so settings made before the port keep working and a
+//! changed copy, which is third-party, never sees them. A catalogue loaded with other settings
+//! than the current ones is asked for again from the start.
 
 use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
+use dupin_extension_bridge::PackageId;
 use dupin_js_runtime::Diagnostic;
 use serde_json::{Map, Value};
 
@@ -168,25 +174,18 @@ impl Preferences {
 
     /// Every declared preference: the value `package`'s feature chose, else its default.
     pub(super) fn values(&self, package: &str) -> Value {
-        self.resolve(lock_read().get(package).cloned().unwrap_or_default())
-    }
-
-    /// Every declared preference: its valid value in `chosen`, else its default. A feature may
-    /// also hand its package settings no preference can declare, such as Web Search's list of
-    /// searches, which reach the package as they are.
-    pub(super) fn resolve(&self, mut chosen: Map<String, Value>) -> Value {
-        let mut values: Map<String, Value> = self
+        let chosen = lock_read().get(package).cloned().unwrap_or_default();
+        let values: Map<String, Value> = self
             .0
             .iter()
             .map(|(name, preference)| {
                 let value = chosen
-                    .remove(name)
+                    .get(name)
                     .filter(|value| preference.accepts(value))
-                    .unwrap_or_else(|| preference.default.clone());
-                (name.clone(), value)
+                    .unwrap_or(&preference.default);
+                (name.clone(), value.clone())
             })
             .collect();
-        values.extend(chosen);
         Value::Object(values)
     }
 }
@@ -225,10 +224,61 @@ pub(crate) fn choose(package: &str, values: Map<String, Value>) -> bool {
     true
 }
 
+/// The config.toml settings a built-in hands the package it shipped as.
+pub(crate) type Settings = dupin_js_runtime::Preferences;
+
+fn held() -> &'static RwLock<HashMap<String, Arc<Settings>>> {
+    static HELD: OnceLock<RwLock<HashMap<String, Arc<Settings>>>> = OnceLock::new();
+    HELD.get_or_init(RwLock::default)
+}
+
+fn none() -> &'static Arc<Settings> {
+    static NONE: OnceLock<Arc<Settings>> = OnceLock::new();
+    NONE.get_or_init(Arc::default)
+}
+
+/// Sets the config.toml settings of `package`, and says whether they changed.
+pub(crate) fn set(package: &str, settings: Settings) -> bool {
+    let mut held = held().write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if held.get(package).is_some_and(|current| **current == settings) {
+        return false;
+    }
+    if settings.is_empty() {
+        return held.remove(package).is_some();
+    }
+    held.insert(package.to_owned(), Arc::new(settings));
+    true
+}
+
+/// The config.toml settings of `package`: the same value until they are set again.
+pub(crate) fn of(package: &PackageId) -> Arc<Settings> {
+    held()
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(package.as_str())
+        .unwrap_or_else(|| none())
+        .clone()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn settings_stay_the_same_value_until_they_change() {
+        let package = PackageId::new("bundled:preferences-test").unwrap();
+        assert!(of(&package).is_empty());
+        let mut settings = Settings::new();
+        settings.insert("a".into(), 1.into());
+        assert!(set(package.as_str(), settings.clone()));
+        let first = of(&package);
+        assert!(!set(package.as_str(), settings));
+        assert!(Arc::ptr_eq(&first, &of(&package)));
+        assert!(set(package.as_str(), Settings::new()));
+        assert!(of(&package).is_empty());
+        assert!(!set(package.as_str(), Settings::new()));
+    }
 
     #[test]
     fn declared_defaults_give_way_to_valid_chosen_values() {
@@ -246,17 +296,12 @@ mod tests {
         values.insert("retention".into(), json!("1d"));
         values.insert("images".into(), json!("no"));
         values.insert("entries".into(), json!(11));
-        values.insert("searches".into(), json!({ "g": { "name": "Google" } }));
+        values.insert("undeclared".into(), json!(1));
         assert!(choose("preferences-test-a", values.clone()));
         assert!(!choose("preferences-test-a", values));
         assert_eq!(
             preferences.values("preferences-test-a"),
-            json!({
-                "retention": "1d",
-                "images": true,
-                "entries": 5,
-                "searches": { "g": { "name": "Google" } },
-            })
+            json!({ "retention": "1d", "images": true, "entries": 5 })
         );
     }
 

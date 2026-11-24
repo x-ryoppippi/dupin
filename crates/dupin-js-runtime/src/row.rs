@@ -10,6 +10,8 @@ pub(crate) const MAX_TITLE_BYTES: usize = 512;
 pub(crate) const MAX_SUBTITLE_BYTES: usize = 2048;
 pub(crate) const MAX_ID_BYTES: usize = 128;
 pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024;
+/// A copy or paste action's text, as long as a snippet's.
+pub(crate) const MAX_ACTION_TEXT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_KEYWORDS: usize = 16;
 pub(crate) const MAX_KEYWORD_BYTES: usize = 64;
 /// As much text as a clipboard change carries, so a history can be found by all of it.
@@ -50,6 +52,9 @@ pub struct Row {
     pub title: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub subtitle: String,
+    /// Other names, matched as the title is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keywords: Vec<String>,
     /// More text a catalogue that matches words finds the row by.
@@ -129,6 +134,10 @@ pub struct Metadata {
 pub struct RowAction {
     pub title: String,
     pub effect: RowEffect,
+    /// Dupin fills the placeholders of a copy or paste action's text when the action is
+    /// chosen, so the package never sees the clipboard or the time.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub template: bool,
     /// ⌘Enter runs it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub alternate: bool,
@@ -146,6 +155,7 @@ impl RowAction {
         Self {
             title: title.into(),
             effect,
+            template: false,
             alternate: false,
             confirm: None,
             needs_file: false,
@@ -234,8 +244,8 @@ impl Reason {
     }
 }
 
-/// Which export answered, which decides the fields and limits that apply: `keywords` only mean
-/// something to a catalogue.
+/// Which export answered, which decides the fields and limits that apply: `aliases` and
+/// `keywords` only mean something to a catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Search,
@@ -267,12 +277,13 @@ impl Row {
             return Err("`subtitle` is too long".into());
         }
         if source == Source::Search
-            && (!self.keywords.is_empty()
+            && (!self.aliases.is_empty()
+                || !self.keywords.is_empty()
                 || self.match_text.is_some()
                 || self.time.is_some()
                 || self.file.is_some())
         {
-            return Err("`keywords`, `matchText`, `time` and `file` belong to items()".into());
+            return Err("`aliases`, `keywords`, `matchText`, `time` and `file` belong to items()".into());
         }
         if self
             .match_text
@@ -296,10 +307,10 @@ impl Row {
                 return Err("a web search opens its own URL, so it has no `url`, `text` or `actions`".into());
             }
         }
-        if self.keywords.len() > MAX_KEYWORDS {
-            return Err("too many `keywords`".into());
+        if self.keywords.len() > MAX_KEYWORDS || self.aliases.len() > MAX_KEYWORDS {
+            return Err("too many `aliases` or `keywords`".into());
         }
-        for keyword in &self.keywords {
+        for keyword in self.aliases.iter().chain(&self.keywords) {
             line("keywords", keyword, MAX_KEYWORD_BYTES)?;
         }
         if let Some(icon) = &self.icon {
@@ -334,6 +345,9 @@ impl Row {
         }
         for action in &self.actions {
             line("actions.title", &action.title, MAX_ACTION_TITLE_BYTES)?;
+            if action.template && !matches!(action.effect, RowEffect::Copy { .. } | RowEffect::Paste { .. }) {
+                return Err("only a copy or paste action can be a template".into());
+            }
             if (action.alternate || action.confirm.is_some() || action.needs_file)
                 && !matches!(action.effect, RowEffect::Run { .. })
             {
@@ -343,11 +357,11 @@ impl Row {
                 line("actions.confirm", confirm, MAX_ACTION_TITLE_BYTES)?;
             }
             match &action.effect {
-                RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
-                    return Err("a copy action's text must be 1 byte to 16 KiB".into());
+                RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
+                    return Err("a copy action's text must be 1 byte to 64 KiB".into());
                 }
-                RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
-                    return Err("a paste action's text must be 1 byte to 16 KiB".into());
+                RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
+                    return Err("a paste action's text must be 1 byte to 64 KiB".into());
                 }
                 RowEffect::OpenUrl { url } if !is_openable(url, source) => {
                     return Err(match source {
@@ -401,6 +415,7 @@ impl Row {
         self.id.len()
             + self.title.len()
             + self.subtitle.len()
+            + self.aliases.iter().map(String::len).sum::<usize>()
             + self.keywords.iter().map(String::len).sum::<usize>()
             + self.match_text.as_ref().map_or(0, String::len)
             + self.file.as_ref().map_or(0, String::len)

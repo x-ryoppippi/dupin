@@ -87,7 +87,7 @@ fn a_catalogue_reaches_host_services_as_a_search_does() {
             &package,
             None,
             Reason::Load,
-            &serde_json::json!({}),
+            serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,
             &services(&fixture),

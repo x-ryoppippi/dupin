@@ -15,9 +15,7 @@ use serde_json::{Map, Value, json};
 
 use crate::extensions::{Extension, QUERY_DEADLINE, Role};
 
-/// The bundled package that lists config.toml's web searches, by its `name`.
-pub const WEB_SEARCH: &str = "web-search";
-/// [`WEB_SEARCH`] as the broker knows the bundled copy.
+/// The bundled package that lists config.toml's web searches, as the broker knows it.
 pub const WEB_SEARCH_PACKAGE: &str = "bundled:web-search";
 const MAX_NAME_CHARS: usize = 80;
 const MAX_FALLBACKS: usize = 20;
@@ -485,7 +483,7 @@ mod tests {
 
     fn set(extension: &Extension, config: &Config) {
         let (web, _) = configured(config, |_| false);
-        held::choose(&extension.id, web.preferences);
+        held::set(extension.package.as_str(), web.preferences);
     }
 
     // One test, so nothing else changes the package's preferences while it runs.
@@ -632,7 +630,7 @@ mod tests {
         set(&extension, &config);
         assert!(collect(&web, "g term", 5).is_empty());
         assert!(collect(&fallbacks, "term", 5).is_empty());
-        held::choose(&extension.id, Map::new());
+        held::set(extension.package.as_str(), Map::new());
     }
 
     #[test]
