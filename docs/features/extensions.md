@@ -53,14 +53,14 @@ Type `wc two words` to see **2 words**. Enter copies `2`. [`examples/extensions/
 
 The manifest is the `dupin` key of `package.json`, so a package keeps one file for Dupin and its own JavaScript tooling. Dupin reads it as plain JSON before running any code:
 
-| Key                  | Value                                                                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`               | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                      |
-| `version`            | Required. 1–32 characters without spaces.                                                                                             |
-| `dupin.title`        | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                             |
-| `dupin.keyword`      | Required. Up to 32 bytes, no spaces.                                                                                                  |
-| `dupin.main`         | Optional. The module that exports `search`, a `.js` or `.mjs` file inside the folder, such as `dist/index.js`. Defaults to `main.js`. |
-| `dupin.capabilities` | Reserved. Dupin grants no capabilities yet, so any entry in it is an error.                                                           |
+| Key                  | Value                                                                                                                                                                         |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`               | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                                                              |
+| `version`            | Required. 1–32 characters without spaces.                                                                                                                                     |
+| `dupin.title`        | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                                                                     |
+| `dupin.keyword`      | Required. Up to 32 bytes, no spaces.                                                                                                                                          |
+| `dupin.main`         | Optional. The module that exports `search`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`. |
+| `dupin.capabilities` | Reserved. Dupin grants no capabilities yet, so any entry in it is an error.                                                                                                   |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
 
@@ -80,7 +80,7 @@ Enter runs the first action: **Open URL** when the item has a `url`, otherwise *
 
 ### What the module can reach
 
-The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), and the host module `dupin`, which for now exports only `apiVersion`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
+The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`, which for now exports only `apiVersion`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
 There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, so module-level variables never carry from one query to the next. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
@@ -193,11 +193,11 @@ Events come earliest first:
 
 A read's `content` is the most specific form the copy offers: files, then a URL, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then text. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, not when the extension reads it. So while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); under the default policy they return `needs-permission`, and Dupin only asks when you choose Request Access. Writing needs no macOS permission.
 
-TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
+TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                        | Value                                                                                         |
 | ---------------------------- | --------------------------------------------------------------------------------------------- |
-| JavaScript files             | 256 and 4 MiB                                                                                 |
+| Modules (`.js` and `.ts`)    | 256 and 4 MiB                                                                                 |
 | Heap                         | 16 MiB, or 64 MiB while compiling                                                             |
 | Stack                        | 512 KiB                                                                                       |
 | Time per query or compile    | 2 seconds                                                                                     |
@@ -206,11 +206,11 @@ TypeScript, JSX and npm packages are built on your machine: bundle the extension
 | Extensions read              | 64 folders                                                                                    |
 | Extension host memory        | 64 MiB plus twice the bytecode, or the compile heap and four times the source while compiling |
 
-Typing again cancels the running query. A thrown error, a rejected or never-settling promise, an exhausted limit or an invalid answer becomes a "_Name_ failed" row with the file, line or field at fault; it never affects Dupin or other extensions. When Dupin loads or reloads the folder, the extension host compiles every JavaScript file, so a syntax error or a broken import is reported in Settings, with its file and line, before the first query.
+Typing again cancels the running query. A thrown error, a rejected or never-settling promise, an exhausted limit or an invalid answer becomes a "_Name_ failed" row with the file, line or field at fault; it never affects Dupin or other extensions. When Dupin loads or reloads the folder, the extension host compiles every module, so a syntax error, TypeScript that needs a build or a broken import is reported in Settings, with its file and line, before the first query.
 
 ### Security model
 
-Dupin never parses, compiles or runs extension JavaScript itself. The extension host is Dupin's own executable run with `--extension-host`. One host, started on the first query, runs every JavaScript extension's queries, and each package is compiled in a host started for that compile alone. Before it touches any extension code, the host confines itself with a deny-by-default macOS sandbox: it cannot open or list files, use the network, connect to other processes or system services, or start programs. Its resource limits allow no new files, child processes or core dumps. Dupin reads each package's files within the limits above and sends their text over a private socket; that host compiles them under the same deadline, limits and watchdog as a query, counted from when it is ready, returns bytecode or a diagnostic and exits. A compile never waits for another extension's query, and a host one package has subverted never compiles another. Dupin keeps the bytecode as opaque bytes, reuses it while the files' content is unchanged and sends it back with every query, so the host never reads the extensions folder and a package can never supply bytecode of its own. Dupin checks every answer again before showing it. The host keeps the time zone it starts with, so `Date` reports local time.
+Dupin never parses, compiles or runs extension code itself; erasing TypeScript's types is part of the host's compile. The extension host is Dupin's own executable run with `--extension-host`. One host, started on the first query, runs every JavaScript extension's queries, and each package is compiled in a host started for that compile alone. Before it touches any extension code, the host confines itself with a deny-by-default macOS sandbox: it cannot open or list files, use the network, connect to other processes or system services, or start programs. Its resource limits allow no new files, child processes or core dumps. Dupin reads each package's files within the limits above and sends their text over a private socket; that host compiles them under the same deadline, limits and watchdog as a query, counted from when it is ready, returns bytecode or a diagnostic and exits. A compile never waits for another extension's query, and a host one package has subverted never compiles another. Dupin keeps the bytecode as opaque bytes, reuses it while the files' content is unchanged and sends it back with every query, so the host never reads the extensions folder and a package can never supply bytecode of its own. Dupin checks every answer again before showing it. The host keeps the time zone it starts with, so `Date` reports local time.
 
 The sandbox contains an extension that breaks out of the engine through a flaw in QuickJS-ng, but because every JavaScript extension shares the host, such an extension could see the other extensions' code and queries and change their answers until the host is replaced. Install only extensions you trust. A host that sends anything Dupin didn't ask for is stopped.
 
@@ -249,42 +249,57 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 
 `dupin ext` has three commands for writing an extension. They describe a package with `package.json`, whose `dupin` key is the manifest: `title`, `keyword` and optionally `main`, the module Dupin runs, which defaults to `main.js`. The package's `name` is its id and the name of its folder in `extensions/`.
 
-### `dupin ext new <dir> [--ts]`
+### `dupin ext new <dir> [--ts | --bundle]`
 
 Creates a package in a new or empty folder. The folder's name becomes the id, so it takes 1–64 lowercase letters, digits or hyphens.
 
 | File                          | Purpose                                                                                                     |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `package.json`                | The name, version 0.1.0, `"keywords": ["dupin-extension"]` and the `dupin` key, with the id as the keyword. |
-| `main.js` or `src/main.ts`    | A `search` that greets the query.                                                                           |
+| `main.js` or `src/main.ts`    | A `search` that greets the query: `src/main.ts` with `--ts` or `--bundle`.                                  |
 | `dupin.d.ts`                  | The API's declarations, for editors and `tsc --noEmit`.                                                     |
 | `fixtures/search.json`        | A query and the items `search` answers it with.                                                             |
 | `README.md`                   | How to develop, build and share the package.                                                                |
-| `tsconfig.json`, `.gitignore` | `--ts` only. The compiler sees ES2023 and nothing else, as the guest does.                                  |
-| `rolldown.config.ts`          | `--ts` only. How `dupin ext build`, `dupin ext dev` and the workflow bundle `src/main.ts`.                  |
-| `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Rolldown and commits it on every push to `main`.                  |
+| `tsconfig.json`, `.gitignore` | `--ts` and `--bundle`. The compiler sees ES2023 and nothing else, as the guest does.                        |
+| `rolldown.config.ts`          | `--bundle` only. How `dupin ext build`, `dupin ext dev` and the workflow bundle `src/main.ts`.              |
+| `.github/workflows/build.yml` | `--bundle` only. Rebuilds `dist/main.js` with Rolldown and commits it on every push to `main`.              |
 
 `dupin ext new .` names the package after the current folder.
 
-With `--ts`, `package.json` adds `"source": "src/main.ts"`, pins `rolldown` to an exact version in `devDependencies`, and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle. Run `bun install` once and commit the `bun.lock` it writes.
+With `--ts`, `dupin.main` is `src/main.ts`, which Dupin runs as written. With `--bundle`, for a package with npm dependencies, `package.json` adds `"source": "src/main.ts"`, pins `rolldown` to an exact version in `devDependencies`, and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle. Run `bun install` once and commit the `bun.lock` it writes.
 
-The `--ts` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
+The `--bundle` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
 
 `dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
+
+### TypeScript without a build
+
+When `dupin.main` is a `.ts`, `.mts` or `.tsx` file, the package's TypeScript files are modules too, and the extension host erases their types as it compiles them: each annotation, interface, type alias, type argument and other type-only part becomes spaces of the same length, line breaks kept, so the line and column of every error and stack frame are the author's own and no source map is needed. Nothing is type-checked; run `tsc --noEmit` for that. Erasing a 2,000-line file takes about 1.3 ms.
+
+Erased: type annotations and return types, `interface`, `type`, type parameters and arguments, `as`, `satisfies`, non-null `!`, `import type`, `export type` and `type` specifiers, `declare`, `abstract` classes and members, overload signatures, `?` and `!` on names, `public`, `private`, `protected`, `readonly` and `override` on class members, index signatures, `implements`, `this` parameters and namespaces that hold only types.
+
+Rejected with `typescript-needs-build`, the file, line and column, and a hint: `enum` (`const` or not, and `declare const enum`, whose uses a compiler inlines), a namespace or `module` holding values, parameter properties (`constructor(private x)`), decorators, JSX, `import x = require(…)` or `import A = B.C`, and `export =`. Each needs a compiler to produce JavaScript; replace it as the hint says, or bundle the package. A `<T>value` assertion is rejected too, as `erasableSyntaxOnly` rejects it: blanking a type that ends its line after `return` would end the statement there. Write `value as T` instead. A module whose brackets nest more than 1,000 levels deep fails with `stack-limit` at the bracket that passes the limit.
+
+- Import TypeScript files with their extension, `./util.ts`, as `allowImportingTsExtensions` lets `tsc` accept.
+- Import types with `import type` or a `type` specifier. A type imported as a value is kept and fails to link, since nothing exports it; the scaffold's `verbatimModuleSyntax` and `erasableSyntaxOnly` make `tsc` and editors flag both mistakes.
+- Declaration files (`.d.ts`, `.d.mts`) are not modules and are never compiled.
+- With a JavaScript `dupin.main`, TypeScript files are ignored, so a bundled package can keep its sources beside the bundle.
+
+Bundle with `dupin ext build` when the package uses npm packages, needs syntax that is rejected above, or should ship as one file.
 
 ### `dupin ext build <dir> [--sourcemap]`
 
 A package with `source` is bundled into a single ES module at `dupin.main`, with its npm dependencies, by [Rolldown](https://rolldown.rs): the package's own `node_modules/.bin/rolldown`, or else `rolldown` on `PATH`. Dupin never downloads it; with neither, the build fails and says how to add it (`bun add -d rolldown` or `pnpm add -D rolldown`). Rolldown's CLI runs on Node.js.
 
-The build uses the package's `rolldown.config.*`, which the `--ts` scaffold writes, and a package without one is bundled with the same configuration built into Dupin. A `rolldown.config.js` or `.mjs` is refused, because the launcher loads every `.js` and `.mjs` file in the package as extension code; use `.ts`, `.mts`, `.cts` or `.cjs`. `dupin ext build` sets only the output file and, with `--sourcemap`, a linked `<main>.map`. The configuration produces one ES module for `platform: "neutral"`, with dynamic imports inlined and no other chunks, keeps `dupin` as the only external import, and reads each dependency's `module` or `main` field. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
+The build uses the package's `rolldown.config.*`, which the `--bundle` scaffold writes, and a package without one is bundled with the same configuration built into Dupin. A `rolldown.config.js` or `.mjs` is refused, because the launcher loads every `.js` and `.mjs` file in the package as extension code; use `.ts`, `.mts`, `.cts` or `.cjs`. `dupin ext build` sets only the output file and, with `--sourcemap`, a linked `<main>.map`. The configuration produces one ES module for `platform: "neutral"`, with dynamic imports inlined and no other chunks, keeps `dupin` as the only external import, and reads each dependency's `module` or `main` field. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
 
 A dependency that imports a Node built-in (`fs`, `net`, `child_process` and the rest, with or without `node:`), by `import`, `import()` or `require`, fails the build, naming the file that imports it. The configuration's resolver hook stops it before Rolldown would keep it as an external import, since the guest has no built-ins. Any other import Rolldown can't resolve, such as a dependency that isn't installed, fails the build too. A failed build or check puts back the `dupin.main` that was there before.
 
-A package without `source` is plain JavaScript and needs no build; `build` only checks it. [`dupin ext install`](#installing-and-updating) installs packages from Git without building them, so commit the bundle; the `--ts` scaffold's workflow does that for you.
+A package without `source` runs as written, JavaScript or TypeScript, and needs no build; `build` only checks it. [`dupin ext install`](#installing-and-updating) installs packages from Git without building them, so commit the bundle; the `--bundle` scaffold's workflow does that for you.
 
 ### `dupin ext dev <dir> [--sourcemap]`
 
-Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the JavaScript into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
+Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the modules into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
 
 `dev` refuses to replace an `extensions/<name>` that is not its own symlink, so an installed extension of the same name is safe. Stop `dev` with ⌃C; the last revision stays installed until you delete `extensions/<name>` and `extensions/.dev/<name>`.
 
@@ -302,7 +317,7 @@ dupin ext install ./word-count                              # a folder, copied a
 
 Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
 
-The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
+The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is committed to the repository: JavaScript or erasable TypeScript as written, or the bundle a build made.
 
 Installing never runs anything from the package, and there is no package manager, install script or build. How Dupin fetches depends on the source:
 
@@ -313,7 +328,7 @@ Installing never runs anything from the package, and there is no package manager
 `dupin ext update` and `dupin ext sync` fetch the same way. Before placing anything, Dupin checks that:
 
 - `package.json` has a valid `dupin` key and `name`;
-- `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
+- `dupin.main` (default `main.js`) is a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file in the package, not a declaration file. A JSX entry, or a build output that isn't committed, fails with a hint to build and commit it;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
 - there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch or download of more than 64 MiB is stopped before it finishes, and a tarball whose entries aren't plain files and folders inside its one top-level folder is refused;
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;

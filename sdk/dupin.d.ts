@@ -1,5 +1,10 @@
-// Types for Dupin extensions, apiVersion 1. Dupin runs JavaScript only and never reads this
-// file; it is for editors and `tsc --noEmit`. `dupin ext new` copies it into each package.
+// Types for Dupin extensions, apiVersion 1. Dupin never reads this file; it is for editors and
+// `tsc --noEmit`. `dupin ext new` copies it into each package.
+//
+// Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
+// Import these types with `import type { Item } from 'dupin'`: a type imported as a value stays
+// in the module and fails to link. `enum`, namespaces with values, parameter properties,
+// decorators and JSX need a build (`dupin ext build`), as do npm dependencies.
 // Docs: https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md
 
 declare module 'dupin' {

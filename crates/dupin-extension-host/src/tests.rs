@@ -55,13 +55,18 @@ fn slow_host(delay: &'static str) -> Host {
 }
 
 fn sources(files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
+    sources_from(DEFAULT_ENTRY, files)
+}
+
+/// `files` in a package folder whose entry is `entry`, read as Dupin reads them.
+fn sources_from(entry: &str, files: &[(&str, &str)]) -> (tempfile::TempDir, Sources) {
     let folder = tempfile::tempdir().unwrap();
     for (name, source) in files {
         let path = folder.path().join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, source).unwrap();
     }
-    let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
+    let sources = Sources::read(folder.path(), entry).unwrap();
     (folder, sources)
 }
 
@@ -268,6 +273,73 @@ fn compile_errors_come_back_with_the_file_line_and_import_at_fault() {
             Some("import \"./missing.js\"")
         ),
         "{import:?}"
+    );
+}
+
+#[test]
+fn typescript_compiles_in_the_helper_and_reports_its_own_lines() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let compile_ts = |files: &[(&str, &str)]| {
+        let (_folder, sources) = sources_from("main.ts", files);
+        host.compile(&sources, Duration::from_secs(5), &|| false)
+    };
+    let greet = (
+        "lib/greet.ts",
+        "export const greet = <T extends string>(name: T): string => `Hello, ${name}`;\n",
+    );
+    let package = compile_ts(&[
+        (
+            "main.ts",
+            "import type { Item } from 'dupin';\n\
+             import { greet } from './lib/greet.ts';\n\
+             \n\
+             interface Options {\n\
+             \tlimit: number;\n\
+             }\n\
+             \n\
+             export function search(query: string, _options: Options): Item[] {\n\
+             \tif (query === 'throw') throw new Error(`no ${query as string}`);\n\
+             \treturn [{ title: greet(query)! }];\n\
+             }\n",
+        ),
+        greet,
+    ])
+    .unwrap();
+    assert_eq!(
+        titles(&search(&host, &package, "Dupin", Duration::from_secs(5)).unwrap()),
+        ["Hello, Dupin"]
+    );
+    let thrown = failed(search(&host, &package, "throw", Duration::from_secs(5)));
+    assert_eq!(
+        (thrown.code.as_ref(), thrown.file.as_deref(), thrown.line),
+        ("search-threw", Some("main.ts"), Some(9)),
+        "{thrown:?}"
+    );
+
+    let rejected = failed(compile_ts(&[
+        (
+            "main.ts",
+            "import './lib/greet.ts';\nexport function search() { return []; }\n",
+        ),
+        ("lib/greet.ts", "export const a = 1;\n\nenum Mode {\n\tOn,\n}\n"),
+    ]));
+    assert_eq!(
+        (
+            rejected.code.as_ref(),
+            rejected.file.as_deref(),
+            rejected.line,
+            rejected.column
+        ),
+        ("typescript-needs-build", Some("lib/greet.ts"), Some(3), Some(1)),
+        "{rejected:?}"
+    );
+    assert!(
+        rejected
+            .hint
+            .as_deref()
+            .is_some_and(|hint| hint.contains("dupin ext build")),
+        "{rejected:?}"
     );
 }
 
