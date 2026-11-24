@@ -239,22 +239,26 @@ fn rename_across_parents(
 }
 
 /// Give the owner write and search access to the folder `checked` describes, returning a
-/// descriptor to restore its mode by. Nothing here follows a link: another user who can
-/// rename entries in the parent could have put one where the folder was.
+/// descriptor to restore its mode by. The mode changes only through a descriptor whose
+/// identity matches `checked`: another user who can rename entries in the parent could have
+/// put a link, file or folder where the folder was.
 fn unlock_directory(source: &Path, checked: &fs::Metadata) -> io::Result<fs::File> {
-    let path = CString::new(source.as_os_str().as_encoded_bytes())?;
-    let mode = (checked.permissions().mode() | 0o300) as libc::mode_t;
-    // SAFETY: The path is NUL-terminated and lives through the call.
-    if unsafe { libc::lchmod(path.as_ptr(), mode) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let entry = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_SEARCH | libc::O_NOFOLLOW)
-        .open(source)?;
+    let open = |access| {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(access | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(source)
+    };
+    let entry = open(libc::O_SEARCH).or_else(|_| open(0)).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("The folder couldn't be opened to unlock it ({error})."),
+        )
+    })?;
     if file_identity(&entry.metadata()?) != file_identity(checked) {
         return Err(io::Error::other("The folder changed during the move."));
     }
+    entry.set_permissions(fs::Permissions::from_mode(checked.permissions().mode() | 0o300))?;
     Ok(entry)
 }
 
@@ -697,8 +701,8 @@ mod tests {
     }
 
     #[test]
-    fn unlocking_a_read_only_folder_never_changes_what_a_link_in_its_place_names() {
-        let dir = Scratch::new("unlock-link");
+    fn unlocking_a_read_only_folder_never_changes_an_entry_put_in_its_place() {
+        let dir = Scratch::new("unlock-swap");
         let aside = dir.0.join("aside");
         fs::create_dir(&aside).unwrap();
         fs::set_permissions(&aside, fs::Permissions::from_mode(0o555)).unwrap();
@@ -715,10 +719,44 @@ mod tests {
             assert!(unlock_directory(&folder, &checked).is_err());
             fs::remove_file(&folder).unwrap();
         }
+        for target in [&secret, &private] {
+            fs::rename(target, &folder).unwrap();
+            assert!(unlock_directory(&folder, &checked).is_err());
+            fs::rename(&folder, target).unwrap();
+        }
         assert_eq!(secret.metadata().unwrap().mode() & 0o7777, 0o600);
         assert_eq!(private.metadata().unwrap().mode() & 0o7777, 0o700);
         assert_eq!(aside.metadata().unwrap().mode() & 0o7777, 0o555);
         fs::set_permissions(&aside, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn unlocking_a_folder_opens_it_by_whichever_access_its_owner_has() {
+        let dir = Scratch::new("unlock-access");
+        for mode in [0o555, 0o444, 0o111] {
+            let folder = dir.0.join(format!("folder-{mode:o}"));
+            fs::create_dir(&folder).unwrap();
+            fs::set_permissions(&folder, fs::Permissions::from_mode(mode)).unwrap();
+            let checked = folder.symlink_metadata().unwrap();
+
+            let entry = unlock_directory(&folder, &checked).unwrap();
+            assert_eq!(folder.metadata().unwrap().mode() & 0o7777, mode | 0o300);
+            entry.set_permissions(checked.permissions()).unwrap();
+            fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_folder_its_owner_cannot_open_is_left_locked() {
+        let dir = Scratch::new("unlock-closed");
+        let folder = dir.0.join("folder");
+        fs::create_dir(&folder).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+        let checked = folder.symlink_metadata().unwrap();
+
+        assert!(unlock_directory(&folder, &checked).is_err());
+        assert_eq!(folder.symlink_metadata().unwrap().mode() & 0o7777, 0o000);
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
