@@ -66,7 +66,13 @@ impl Services for NoServices {
 pub struct Compiled {
     entry: String,
     modules: Arc<[(String, Box<[u8]>)]>,
+    /// What Dupin calls this compile in every run of it, so a helper that holds its bytecode is
+    /// sent only this. No other compile in this process has it.
+    name: u64,
 }
+
+/// The name of the next compile.
+static NEXT_COMPILE: AtomicU64 = AtomicU64::new(1);
 
 impl std::fmt::Debug for Compiled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,6 +89,7 @@ impl Compiled {
         Self {
             entry: dupin_js_runtime::DEFAULT_ENTRY.into(),
             modules: Arc::from([]),
+            name: NEXT_COMPILE.fetch_add(1, Ordering::Relaxed),
         }
     }
 
@@ -193,6 +200,7 @@ impl Host {
         let allowance = dupin_js_runtime::COMPILE_HEAP_BYTES as u64 + 4 * bytes;
         let request = Request {
             entry: sources.entry(),
+            package: None,
             modules,
             tail,
             call: Call::Compile,
@@ -220,6 +228,7 @@ impl Host {
                 .into_iter()
                 .map(|(name, bytecode)| (name, Box::from(bytecode)))
                 .collect(),
+            name: NEXT_COMPILE.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -453,6 +462,8 @@ impl Host {
 /// One call to the helper, with the package it carries.
 struct Request<'a> {
     entry: &'a str,
+    /// The compile it runs, which the helper may hold; none for a compile.
+    package: Option<u64>,
     modules: Vec<wire::ModuleSpan>,
     tail: Vec<&'a [u8]>,
     call: Call,
@@ -467,6 +478,7 @@ impl<'a> Request<'a> {
         let bytes: u64 = tail.iter().map(|part| part.len() as u64).sum();
         Self {
             entry: package.entry(),
+            package: Some(package.name),
             modules,
             tail,
             call,
@@ -535,6 +547,8 @@ struct Helper {
     finished: mpsc::SyncSender<Event>,
     started: Instant,
     greeted: bool,
+    /// The compiles whose bytecode this helper was sent, which it may still hold.
+    sent: HashSet<u64>,
 }
 
 /// What a running call waits for: the helper's next message, or one of its host requests
@@ -577,7 +591,7 @@ impl Helper {
         let child = command.spawn().map_err(unavailable)?;
         let (events, received) = mpsc::sync_channel(1);
         let finished = events.clone();
-        let mut reader = ours.try_clone().map_err(unavailable)?;
+        let mut reader = io::BufReader::new(ours.try_clone().map_err(unavailable)?);
         ours.set_write_timeout(Some(HANDSHAKE)).map_err(unavailable)?;
         std::thread::Builder::new()
             .name("extension-host-replies".into())
@@ -597,6 +611,7 @@ impl Helper {
             finished,
             started: Instant::now(),
             greeted: false,
+            sent: HashSet::new(),
         })
     }
 
@@ -699,6 +714,8 @@ impl Helper {
         })
     }
 
+    /// Runs `request`, sending its package's bytecode only if this helper wasn't sent it before
+    /// or has let it go since.
     fn run(
         &mut self,
         id: u64,
@@ -708,17 +725,45 @@ impl Helper {
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
+        let mut answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
+        if matches!(answer.0, Answer::Missing) && request.package.is_some_and(|name| self.sent.remove(&name))
+        {
+            answer = self.exchange(id, &request, shared, deadline, is_cancelled, services)?;
+        }
+        if matches!(answer.0, Answer::Missing) {
+            return Err(mismatch());
+        }
+        self.sent.extend(request.package);
+        Ok(answer)
+    }
+
+    fn exchange(
+        &mut self,
+        id: u64,
+        request: &Request<'_>,
+        shared: &Shared,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<(Answer, Vec<u8>), RunError> {
+        let held = request.package.is_some_and(|name| self.sent.contains(&name));
         let remaining = deadline.saturating_duration_since(Instant::now());
+        let (modules, tail): (_, &[&[u8]]) = if held {
+            (None, &[])
+        } else {
+            (Some(request.modules.clone()), &request.tail)
+        };
         let message = ToHelper::Run {
             id,
             deadline_ms: remaining.as_millis() as u64,
             entry: request.entry.into(),
-            modules: request.modules,
-            call: request.call,
+            package: request.package,
+            modules,
+            call: request.call.clone(),
             environment: shared.environment,
         };
-        self.send(&message, &request.tail)?;
-        let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
+        self.send(&message, tail)?;
+        let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
         let mut cancel_by = None;
         let mut requests = Requests::new(
             services.clone(),

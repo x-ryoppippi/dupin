@@ -1,11 +1,12 @@
 //! Messages between Dupin and its extension host, over one Unix socket. A frame is two
 //! big-endian `u32` lengths, then a JSON header and a binary tail of those lengths. A `run`
 //! carries the package in its tail, module after module: its source to compile, or the bytecode
-//! a compile returned. A `compiled` answer carries that bytecode the same way. While a run is
-//! going, the helper may send `host` requests, each with its JSON arguments as the tail, and Dupin
-//! answers each with a `reply` whose tail is the JSON result.
+//! a compile returned, unless the helper already holds that bytecode. A `compiled` answer
+//! carries that bytecode the same way. While a run is going, the helper may send `host`
+//! requests, each with its JSON arguments as the tail, and Dupin answers each with a `reply`
+//! whose tail is the JSON result.
 
-use std::io::{self, Read, Write};
+use std::io::{self, IoSlice, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
 use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
@@ -13,24 +14,32 @@ use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
 const MAX_HEADER_BYTES: usize = 6 * MAX_PAGE_BYTES + 2 * 1024 * 1024;
 /// A package's bytecode, from at most 4 MiB of JavaScript.
 pub const MAX_TAIL_BYTES: usize = 32 * 1024 * 1024;
+/// The bytecode a helper holds for later runs; it lets the least recently run go first.
+pub const MAX_HELD_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ToHelper {
-    /// The tail holds each module in `modules`' order. The helper keeps nothing once it answers.
+    /// The tail holds each module in `modules`' order. Of a run, the helper keeps only the
+    /// bytecode of a package Dupin names, for later runs of it.
     Run {
         id: u64,
         /// Milliseconds the run may take from when the helper reads it.
         deadline_ms: u64,
         entry: String,
-        modules: Vec<ModuleSpan>,
+        /// The compiled package Dupin runs, which it names the same in every run. None for a
+        /// compile.
+        package: Option<u64>,
+        /// None when Dupin sent this helper `package`'s bytecode before; the helper answers
+        /// `missing` if it no longer holds it.
+        modules: Option<Vec<ModuleSpan>>,
         call: Call,
         /// A fixture's fixed clock and seed; the launcher's own runs carry none.
         environment: Option<Environment>,
@@ -41,14 +50,14 @@ pub enum ToHelper {
     Reply { id: u64, call: u32 },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModuleSpan {
     pub name: String,
     pub len: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Call {
     /// The modules are source text; the answer is their bytecode.
@@ -125,6 +134,8 @@ pub enum Answer {
     Failed {
         diagnostic: Diagnostic,
     },
+    /// The run named a package without its bytecode, and the helper doesn't hold it.
+    Missing,
 }
 
 /// The spans of `modules`, and the parts of a tail that carries them.
@@ -161,19 +172,30 @@ pub fn split(spans: Vec<ModuleSpan>, tail: &[u8]) -> io::Result<Vec<(String, &[u
     Ok(modules)
 }
 
+/// Writes one frame in as few writes as the socket takes, so the reader wakes once for it.
 pub fn write(writer: &mut impl Write, message: &impl Serialize, tail: &[&[u8]]) -> io::Result<()> {
-    let header = serde_json::to_vec(message).map_err(io::Error::other)?;
+    let mut frame = vec![0; 8];
+    serde_json::to_writer(&mut frame, message).map_err(io::Error::other)?;
+    let header_len = frame.len() - 8;
     let tail_len: usize = tail.iter().map(|part| part.len()).sum();
-    if header.len() > MAX_HEADER_BYTES || tail_len > MAX_TAIL_BYTES {
+    if header_len > MAX_HEADER_BYTES || tail_len > MAX_TAIL_BYTES {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "message too large"));
     }
-    let mut frame = Vec::with_capacity(8 + header.len());
-    frame.extend_from_slice(&(header.len() as u32).to_be_bytes());
-    frame.extend_from_slice(&(tail_len as u32).to_be_bytes());
-    frame.extend_from_slice(&header);
-    writer.write_all(&frame)?;
-    for part in tail {
-        writer.write_all(part)?;
+    frame[..4].copy_from_slice(&(header_len as u32).to_be_bytes());
+    frame[4..8].copy_from_slice(&(tail_len as u32).to_be_bytes());
+    let mut parts: Vec<IoSlice<'_>> = std::iter::once(&frame[..])
+        .chain(tail.iter().copied())
+        .filter(|part| !part.is_empty())
+        .map(IoSlice::new)
+        .collect();
+    let mut parts = &mut parts[..];
+    while !parts.is_empty() {
+        match writer.write_vectored(parts) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(written) => IoSlice::advance_slices(&mut parts, written),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
     }
     writer.flush()
 }
@@ -212,7 +234,8 @@ mod tests {
             id: 7,
             deadline_ms: 100,
             entry: "main.js".into(),
-            modules,
+            package: None,
+            modules: Some(modules),
             call: Call::Compile,
             environment: None,
         };
@@ -220,7 +243,12 @@ mod tests {
         write(&mut bytes, &ToHelper::Cancel { id: 2 }, &[]).unwrap();
         let mut reader = &bytes[..];
         let (first, tail) = read::<ToHelper>(&mut reader).unwrap().unwrap();
-        let ToHelper::Run { id: 7, modules, .. } = first else {
+        let ToHelper::Run {
+            id: 7,
+            modules: Some(modules),
+            ..
+        } = first
+        else {
             panic!("{first:?}");
         };
         assert_eq!(
@@ -364,11 +392,24 @@ mod tests {
                 id: 1,
                 deadline_ms: 2,
                 entry: "main.js".into(),
-                modules: vec![span()],
+                package: Some(5),
+                modules: Some(vec![span()]),
                 call,
                 environment: Some(Environment { now: 3, seed: 4 }),
             })
-            .chain([ToHelper::Cancel { id: 1 }, ToHelper::Reply { id: 1, call: 2 }])
+            .chain([
+                ToHelper::Run {
+                    id: 1,
+                    deadline_ms: 2,
+                    entry: "main.js".into(),
+                    package: Some(5),
+                    modules: None,
+                    call: Call::Check,
+                    environment: None,
+                },
+                ToHelper::Cancel { id: 1 },
+                ToHelper::Reply { id: 1, call: 2 },
+            ])
             .map(|message| serde_json::to_string(&message).unwrap())
             .collect();
         let answers = [
@@ -409,6 +450,7 @@ mod tests {
             Answer::Failed {
                 diagnostic: Diagnostic::new("code", "message"),
             },
+            Answer::Missing,
         ];
         shapes.extend(
             [
@@ -433,18 +475,19 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (6, SHAPES.map(str::to_owned).to_vec()),
+            (7, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
 
-    const SHAPES: [&str; 19] = [
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
+    const SHAPES: [&str; 21] = [
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
         r#"{"kind":"cancel","id":1}"#,
         r#"{"kind":"reply","id":1,"call":2}"#,
         r#"{"kind":"hello","version":0,"engine":"e"}"#,
@@ -458,6 +501,7 @@ mod tests {
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"missing"}}"#,
     ];
 
     #[test]

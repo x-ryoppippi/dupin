@@ -911,4 +911,69 @@ fn no_guest_state_outlives_its_call_in_the_resident_helper() {
     assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
 }
 
+const FORGETFUL_ENV: &str = "DUPIN_EXTENSION_HOST_FORGETFUL";
+
+/// Not a test: a helper that holds no package, so it answers `missing` to every run that names
+/// one without carrying its bytecode.
+#[test]
+fn forgetful_helper_entry() {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::net::UnixStream;
+
+    use wire::{Answer, FromHelper, ToHelper};
+
+    if std::env::var_os(FORGETFUL_ENV).is_none() {
+        return;
+    }
+    // SAFETY: the host starts this process with the socket as standard input.
+    let mut socket = unsafe { UnixStream::from_raw_fd(0) };
+    let hello = FromHelper::Hello {
+        version: wire::VERSION,
+        engine: dupin_js_runtime::engine_version().into(),
+    };
+    wire::write(&mut socket, &hello, &[]).unwrap();
+    while let Ok(Some((message, _))) = wire::read::<ToHelper>(&mut socket) {
+        let ToHelper::Run { id, modules, .. } = message else {
+            continue;
+        };
+        let answer = match modules {
+            None => Answer::Missing,
+            Some(_) => Answer::Rows {
+                items: vec![Row {
+                    id: "1".into(),
+                    title: "carried".into(),
+                    subtitle: String::new(),
+                    keywords: Vec::new(),
+                    icon: None,
+                    section: None,
+                    detail: None,
+                    actions: Vec::new(),
+                }],
+            },
+        };
+        wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).unwrap();
+    }
+    std::process::exit(0);
+}
+
+#[test]
+fn a_package_the_helper_no_longer_holds_is_sent_again() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    let host = Host::new(Box::new(|| {
+        let mut command = helper_command("tests::forgetful_helper_entry")?;
+        command.env(FORGETFUL_ENV, "1");
+        Ok(command)
+    }));
+    let mut pids = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
+            ["carried"]
+        );
+        pids.push(host.helper_pid().unwrap());
+    }
+    assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
+}
+
 mod services;
