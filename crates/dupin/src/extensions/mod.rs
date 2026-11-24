@@ -173,13 +173,15 @@ pub fn directory() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join("extensions"))
 }
 
+/// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled package
+/// this build sealed.
+type Integrity = Box<dyn FnMut(&Path) -> Option<String> + Send>;
+
 #[derive(Default)]
 struct Scanner {
     loaded: HashMap<PathBuf, LoadedExtension>,
     previous: Option<Catalog>,
-    /// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled
-    /// package this build sealed.
-    integrity: Option<Box<dyn FnMut(&Path) -> Option<String> + Send>>,
+    integrity: Option<Integrity>,
 }
 
 impl Scanner {
@@ -479,7 +481,7 @@ pub fn watch(
     origin: Origin,
     deliver: impl Fn(Catalog) + Send + 'static,
 ) -> std::io::Result<Watch> {
-    let integrity: Option<Box<dyn FnMut(&Path) -> Option<String> + Send>> = match origin {
+    let integrity: Option<Integrity> = match origin {
         Origin::User => crate::extension_install::lock_path().map(|lock| {
             let mut integrity = dupin_extension_install::Integrity::new(lock);
             Box::new(move |folder: &Path| integrity.check(folder)) as _
