@@ -5,7 +5,8 @@ name: Latency
 # is larger than many real changes. A feature whose bundled extension is declared beside its
 # native implementation must match it, or, once the native one is deleted, match what this job
 # measured of it at its last commit (scripts/latency/native-baseline.json), so that comparison
-# fails the job. Dispatching with `ref` measures that commit instead, to record such a baseline.
+# fails the job. Dispatching with `ref` measures that commit's native implementations instead,
+# to record such a baseline.
 on:
   push:
     branches: [main]
@@ -37,7 +38,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Commit to measure instead of the branch's head
+        description: Commit whose native implementations to measure instead of the branch's head
         type: string
         required: false
 
@@ -64,10 +65,14 @@ jobs:
 
       - run: nix build .#dupin-latency --out-link result-latency
 
+      # A baseline is of native implementations; a commit's ports may not run in its own build.
       - name: Measure
+        env:
+          IMPLEMENTATION: ${{ inputs.ref && 'native' || '' }}
         run: >-
           nix shell --inputs-from . nixpkgs#nushell --command
           nu scripts/latency.nu run --bin result-latency/bin/dupin --out "$RUNNER_TEMP/latency/results.json"
+          ${IMPLEMENTATION:+--implementation "$IMPLEMENTATION"}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
