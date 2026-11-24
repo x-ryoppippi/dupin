@@ -11,6 +11,9 @@
 # measured keypress must search it and the whole of `typed` must show its rows, so a scenario
 # that never reaches its feature fails rather than timing another one) and, optionally, an
 # `extensions` directory copied beside the config and `settings` merged over the config. An
+# extension's implementation also names its `package`, as the broker knows it: the whole of
+# `typed` must show rows that package answered, so a port whose package is missing or fails,
+# which its built-in's provider answers with a row of its own, fails too. An
 # implementation that `extends` another of its feature starts from that one, so the port of a
 # built-in declares only its extensions and the settings that hand the feature to them:
 #
@@ -18,6 +21,7 @@
 #   extends = "native"
 #   settings = { extensions = true, notes = { enabled = false } }
 #   provider = "extension.notes"
+#   package = "notes"
 #   extensions = "scripts/latency/notes.extensions"
 #
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
@@ -35,6 +39,7 @@ provider = "apps.search"
 [features.calendar.extension]
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
+package = "bundled:calendar"
 
 [features.dictionary.native]
 config = "scripts/headless/config/dupin/config.toml"
@@ -53,6 +58,7 @@ provider = "web.keywords"
 [features.snippets.extension]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"
+package = "bundled:snippets"
 
 # A 5,000-row items() catalogue under its keyword. Loading it is the warm-up's work; a measured
 # keypress only matches the rows Dupin holds and calls into no extension.
@@ -60,6 +66,7 @@ provider = "snippets.search"
 config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension.catalogue"
+package = "catalogue"
 extensions = "scripts/latency/catalogue.extensions"
 
 # The main search with that catalogue in it, as its `defaultSearch` asks. It adds to apps rather
@@ -68,17 +75,15 @@ extensions = "scripts/latency/catalogue.extensions"
 config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension-search.catalogue"
+package = "catalogue"
 extensions = "scripts/latency/catalogue.extensions"
 
 # The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
-# nothing native ever answered it. The latency binary is built outside the source tree, so it
-# finds no bundled extensions there: the repository's `extensions/` is its extensions folder
-# instead, where a copy of a bundled package runs as the package does.
+# nothing native ever answered it.
 [features.emoji.extension]
 config = "scripts/headless/config/dupin/config.toml"
-settings = { extensions = true }
 provider = "extension.emoji"
-extensions = "extensions"
+package = "bundled:emoji"
 budget_ms = 5.0
 
 [[scenarios]]

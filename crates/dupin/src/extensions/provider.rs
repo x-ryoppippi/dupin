@@ -360,7 +360,11 @@ impl Provider for ExtensionProvider {
             }
         }
         match answer {
-            Ok(batches) => batches.into_iter().for_each(emit),
+            Ok(batches) => {
+                let rows = batches.iter().map(|batch| batch.items.len()).sum();
+                crate::latency::package_answered(id.as_str(), rows);
+                batches.into_iter().for_each(emit);
+            }
             Err(RunError::Cancelled) => {}
             Err(RunError::Failed(diagnostic)) => {
                 crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));

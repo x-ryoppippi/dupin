@@ -110,6 +110,29 @@ def main [] {
     ]
     assert equal (unanswered $typed_over web.keywords 2) 0
 
+    # A port answers under its built-in's provider, which shows a row of its own when the
+    # package is missing or fails: only rows the named package answered count.
+    let ported = {|packages: record|
+        [
+            {
+                searched: [snippets.search]
+                shown: {snippets.search: 1}
+                packages: {}
+            }
+            {
+                searched: [snippets.search]
+                shown: {snippets.search: 1}
+                packages: $packages
+            }
+        ]
+    }
+    assert equal (
+        unanswered (do $ported {"bundled:snippets": 1}) snippets.search 2 "bundled:snippets"
+    ) 0
+    assert equal (unanswered (do $ported {}) snippets.search 2 "bundled:snippets") 1
+    assert equal (unanswered (do $ported {snippets: 1}) snippets.search 2 "bundled:snippets") 1
+    assert equal (unanswered (do $ported {}) snippets.search 2) 0
+
     let ms = 1..100 | each { into float }
     assert equal ($ms | percentiles) {p50: 50.0, p95: 95.0, p99: 99.0}
     assert equal ([7.0] | percentiles) {p50: 7.0, p95: 7.0, p99: 7.0}
@@ -165,6 +188,9 @@ def main [] {
             let setup = resolve $feature.implementations $label
             assert ($setup.config | is-not-empty) $"($feature.name).($label) has no config"
             assert ($setup.provider | is-not-empty) $"($feature.name).($label) has no provider"
+            if $label != native {
+                assert ($setup.package? | is-not-empty) $"($feature.name).($label) names no package"
+            }
         }
     }
     for scenario in $catalogue.scenarios {

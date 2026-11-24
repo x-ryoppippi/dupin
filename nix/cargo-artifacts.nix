@@ -145,11 +145,21 @@ let
       doRemapPathPrefix = false;
     }
   );
-  # Headless-capable, for scripts/latency.nu; never shipped.
+  # Headless-capable, for scripts/latency.nu; never shipped. Laid out as Dupin.app is, so it
+  # finds the bundled extensions it sealed, as the app does, rather than none at all.
   latencyBinary = craneLib.buildPackage (
     latencyArgs
     // {
       cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
+      postInstall = ''
+        app=$out/Applications/Dupin.app/Contents
+        mkdir -p $app/MacOS $app/Resources/extensions
+        mv $out/bin/dupin $app/MacOS/dupin
+        for package in extensions/*/; do
+          cp -R "''${package%/}" $app/Resources/extensions/
+        done
+        ln -s $app/MacOS/dupin $out/bin/dupin
+      '';
     }
   );
 in

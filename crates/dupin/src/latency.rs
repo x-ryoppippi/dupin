@@ -12,6 +12,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use dupin_core::CommandId;
@@ -35,10 +37,22 @@ struct Sample {
     /// Rows per provider in the finished results; with `pending`'s providers, what lets the
     /// driver tell which feature answered.
     shown: BTreeMap<String, usize>,
+    /// Rows each extension package answered with since the edit, by package ID. A built-in's
+    /// port answers under the built-in's provider, which shows a row of its own when the
+    /// package is missing or fails, so only this tells the driver the package itself answered.
+    packages: BTreeMap<String, usize>,
 }
 
 thread_local! {
     static PROBE: RefCell<Option<Probe>> = RefCell::new(open());
+}
+
+/// Packages answer on search workers, away from the thread that holds the probe.
+static PROBING: AtomicBool = AtomicBool::new(false);
+static ANSWERED: Mutex<BTreeMap<String, usize>> = Mutex::new(BTreeMap::new());
+
+fn answered() -> std::sync::MutexGuard<'static, BTreeMap<String, usize>> {
+    ANSWERED.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn open() -> Option<Probe> {
@@ -49,6 +63,7 @@ fn open() -> Option<Probe> {
     let path = std::env::var_os("DUPIN_LATENCY")?;
     let file = File::create(&path)
         .unwrap_or_else(|error| panic!("DUPIN_LATENCY {}: {error}", path.to_string_lossy()));
+    PROBING.store(true, Ordering::Relaxed);
     Some(Probe {
         out: BufWriter::new(file),
         sample: None,
@@ -84,8 +99,18 @@ pub fn edit_started(t: f64, query: &str) {
             last_provider: None,
             done: None,
             shown: BTreeMap::new(),
+            packages: BTreeMap::new(),
         });
+        answered().clear();
     });
+}
+
+/// The extension `package` answered a search with `rows` rows, from whichever thread ran it.
+pub fn package_answered(package: &str, rows: usize) {
+    if rows == 0 || !PROBING.load(Ordering::Relaxed) {
+        return;
+    }
+    *answered().entry(package.to_owned()).or_default() += rows;
 }
 
 /// The session took the edit and its searches have started. `settled` is true when nothing
@@ -153,6 +178,7 @@ impl Sample {
         for origin in origins {
             *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
         }
+        self.packages = std::mem::take(&mut *answered());
     }
 }
 
@@ -189,6 +215,7 @@ impl Probe {
                     "providers": sample.providers,
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
                     "shown": sample.shown,
+                    "packages": sample.packages,
                 })
             }
             _ => serde_json::json!({

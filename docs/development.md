@@ -245,9 +245,9 @@ nu scripts/latency.nu compare main.json pr.json              # fails on a p95 re
 nu scripts/latency.nu parity target/latency/results.json     # extensions against native
 ```
 
-`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
+`nix build .#dupin-latency` builds the same binary, laid out as Dupin.app is so it loads the bundled extensions as the app does; one built from the source tree finds them in `extensions/`. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
-Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. An extension's implementation also names its `package`, as the broker knows it (`bundled:<name>` for a bundled one): the whole of the measured characters must show rows that package answered. A built-in's port answers under the built-in's provider, which shows a row of its own when the package is missing or fails, so without its package named a broken port would pass. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
 For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
 
@@ -258,13 +258,13 @@ For each scenario the results give p50, p95 and p99 of the total, and p50 and p9
 
 `compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
 
-A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it and its extensions directory:
+A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it:
 
 ```toml
 [features.dictionary.extension]
 config = "scripts/latency/dictionary-extension.toml"
-provider = "<the extension's command id>"
-extensions = "scripts/latency/dictionary-extension.extensions"
+provider = "<the command id it answers>"
+package = "bundled:dictionary"
 ```
 
 Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's by more than 10% or 0.5 ms, whichever is larger. Its floor is half `compare`'s because native's p95 varies by only about a quarter of a millisecond between CI runs, and 1 ms would let a port of a 1.4 ms scenario be 70% slower. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's and Snippets' do. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
@@ -274,6 +274,7 @@ Every scenario of that feature then also runs with the extension, under the same
 extends = "native"
 settings = { extensions = true, notes = { enabled = false } }
 provider = "extension.notes"
+package = "notes"
 extensions = "scripts/latency/notes.extensions"
 ```
 
@@ -282,9 +283,8 @@ A bundled extension that adds a feature Dupin never had natively has no native i
 ```toml
 [features.emoji.extension]
 config = "scripts/headless/config/dupin/config.toml"
-settings = { extensions = true }
 provider = "extension.emoji"
-extensions = "extensions"
+package = "bundled:emoji"
 budget_ms = 5.0
 ```
 
