@@ -3,6 +3,7 @@
 //! checks authority, prompts or knows which package asked.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use dupin_extension_http as http;
@@ -47,6 +48,12 @@ impl Failure {
     }
 }
 
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
 pub trait Http: Send + Sync {
     /// Fetches `request` within `scope` until `cancel` fires. The app's implementation is
     /// [`http::HttpService::fetch`].
@@ -80,27 +87,31 @@ pub trait Exec: Send + Sync {
     ) -> Result<exec::Outcome, exec::ExecError>;
 }
 
-/// One package's private key-value data. The app's implementation keeps it encrypted at rest;
-/// the bridge has already checked the package's quota against [`Storage::size`].
+/// Packages' encrypted namespaces. The app's and the tests' implementation is
+/// [`crate::PackageStorage`]; the bridge picks the namespace and the limits from the permit.
 pub trait Storage: Send + Sync {
-    fn get(&self, package: &str, key: &str) -> Result<Option<Value>, Failure>;
-    /// `retention_days` is how long the value may be kept unread.
-    fn set(
+    /// `namespace`, open with `limits`, which apply at once if they changed since it opened.
+    fn open(
         &self,
-        package: &str,
-        key: &str,
-        value: &Value,
-        retention_days: Option<u32>,
-    ) -> Result<(), Failure>;
-    fn delete(&self, package: &str, key: &str) -> Result<(), Failure>;
-    fn keys(&self, package: &str) -> Result<Vec<String>, Failure>;
-    /// The bytes the package stores, counted as each key plus its value encoded as JSON.
-    fn size(&self, package: &str) -> Result<u64, Failure>;
+        namespace: &str,
+        limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure>;
+    /// Deletes `namespace` and everything in it.
+    fn discard(&self, namespace: &str) -> Result<(), Failure>;
 }
 
-/// The bytes one entry counts toward a package's quota.
-pub(crate) fn entry_size(key: &str, value: &Value) -> u64 {
-    (key.len() + value.to_string().len()) as u64
+impl<T: Storage> Storage for Arc<T> {
+    fn open(
+        &self,
+        namespace: &str,
+        limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
+        T::open(self, namespace, limits)
+    }
+
+    fn discard(&self, namespace: &str) -> Result<(), Failure> {
+        T::discard(self, namespace)
+    }
 }
 
 /// Keeps a watch going while it is held.
@@ -130,7 +141,7 @@ pub trait Calendar: Send + Sync {
     -> Result<Value, Failure>;
 }
 
-/// What a host service is missing, such as the encrypted store before it exists.
+/// What a host service is missing, such as one a headless run has no use for.
 pub struct Unavailable(pub &'static str);
 
 impl Unavailable {
@@ -162,25 +173,14 @@ impl Exec for Unavailable {
 }
 
 impl Storage for Unavailable {
-    fn get(&self, _package: &str, _key: &str) -> Result<Option<Value>, Failure> {
-        Err(self.failure())
-    }
-    fn set(
+    fn open(
         &self,
-        _package: &str,
-        _key: &str,
-        _value: &Value,
-        _retention: Option<u32>,
-    ) -> Result<(), Failure> {
+        _namespace: &str,
+        _limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
         Err(self.failure())
     }
-    fn delete(&self, _package: &str, _key: &str) -> Result<(), Failure> {
-        Err(self.failure())
-    }
-    fn keys(&self, _package: &str) -> Result<Vec<String>, Failure> {
-        Err(self.failure())
-    }
-    fn size(&self, _package: &str) -> Result<u64, Failure> {
+    fn discard(&self, _namespace: &str) -> Result<(), Failure> {
         Err(self.failure())
     }
 }
@@ -326,61 +326,6 @@ pub(crate) mod fixture {
                     truncated: false,
                 }),
             })
-        }
-    }
-
-    #[derive(Default)]
-    pub(crate) struct Storage {
-        pub(crate) data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
-    }
-
-    impl super::Storage for Arc<Storage> {
-        fn get(&self, package: &str, key: &str) -> Result<Option<Value>, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .and_then(|entries| entries.get(key).cloned()))
-        }
-        fn set(
-            &self,
-            package: &str,
-            key: &str,
-            value: &Value,
-            _retention: Option<u32>,
-        ) -> Result<(), Failure> {
-            self.data
-                .lock()
-                .unwrap()
-                .entry(package.into())
-                .or_default()
-                .insert(key.into(), value.clone());
-            Ok(())
-        }
-        fn delete(&self, package: &str, key: &str) -> Result<(), Failure> {
-            if let Some(entries) = self.data.lock().unwrap().get_mut(package) {
-                entries.remove(key);
-            }
-            Ok(())
-        }
-        fn keys(&self, package: &str) -> Result<Vec<String>, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .map(|entries| entries.keys().cloned().collect())
-                .unwrap_or_default())
-        }
-        fn size(&self, package: &str) -> Result<u64, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .map(|entries| entries.iter().map(|(key, value)| entry_size(key, value)).sum())
-                .unwrap_or(0))
         }
     }
 

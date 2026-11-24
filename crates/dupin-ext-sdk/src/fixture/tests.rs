@@ -145,7 +145,7 @@ fn replies_events_and_their_paths_are_checked() {
             "http": [{ "request": { "url": "https://api.github.com/repos/x" }, "response": { "json": { "archived": false } } }],
             "files": { "notes": { "today.md": "# Today", "archive/old.md": "old" }, "todo": "- [ ] write" },
             "exec": [{ "profile": "@script:open-in-zed", "stdout": "opened" }],
-            "storage": { "count": 3 },
+            "storage": [{ "count": 3 }],
             "clipboard": { "type": "text", "text": "hi" },
             "dictionary": { "run": [{ "headword": "run" }] },
             "calendar": [{ "id": "a", "title": "Review", "start": 100, "end": 200 }],

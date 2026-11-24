@@ -2,7 +2,8 @@
 //! consent, behind host services that answer from the fixture's `replies` alone. Requests go
 //! through the same decoding and broker checks as the launcher's; only the services differ, and
 //! none of them reaches the network, a program, the clipboard, calendars or Dupin's storage.
-//! A `files` scope is bound to a scratch folder holding the fixture's files.
+//! A `files` scope is bound to a scratch folder holding the fixture's files, and `storage` to
+//! a scratch store sealed with a throwaway key, seeded with the fixture's records.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -11,17 +12,21 @@ use std::sync::{Arc, Mutex};
 
 use dupin_ext_sdk::fixture::{Consent, FilesReply, Replies};
 use dupin_extension_bridge::services::{self, Services, Subscription};
+use dupin_extension_bridge::storage::Namespace;
 use dupin_extension_bridge::{
-    Base, Bridge, Broker, Failure, FilesKind, Local, OsAccess, OsPermission, Scope,
+    Base, Bridge, Broker, Failure, FilesKind, Local, OsAccess, OsPermission, PackageStorage, Scope,
 };
 use dupin_extension_http as http;
 use dupin_host_services::exec;
 use dupin_js_runtime::Diagnostic;
-use serde_json::{Map, Value};
+use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
+use serde_json::Value;
 
 use super::super::Extension;
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+/// Under the scratch folder; the dot keeps it apart from every `files` scope's name.
+const STORAGE_DIR: &str = ".storage";
 /// Bound to every executable profile; the fixture's exec service never runs it.
 const UNRUN_PROGRAM: &str = "/usr/bin/false";
 
@@ -29,7 +34,8 @@ const UNRUN_PROGRAM: &str = "/usr/bin/false";
 #[derive(Default)]
 pub(super) struct Effects {
     pub clipboard: Vec<String>,
-    pub storage_changed: bool,
+    /// The whole store, when the step changed it.
+    pub storage: Option<Value>,
 }
 
 pub(super) struct Fixture {
@@ -42,7 +48,11 @@ pub(super) struct Fixture {
 struct State {
     replies: Replies,
     now: i64,
-    storage: Mutex<Map<String, Value>>,
+    storage: PackageStorage,
+    /// The package's namespace once a call has opened and seeded it.
+    opened: Mutex<Option<Arc<Namespace>>>,
+    /// The store as the last step left it.
+    stored: Mutex<Vec<Value>>,
     effects: Mutex<Effects>,
 }
 
@@ -63,10 +73,13 @@ impl Fixture {
                     format!("couldn't make a scratch folder: {error}"),
                 )
             })?;
+        let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::random());
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
-            storage: Mutex::new(replies.storage.clone()),
+            storage: PackageStorage::new(storage),
+            opened: Mutex::default(),
+            stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
         });
         let services = Services {
@@ -159,12 +172,37 @@ impl Fixture {
 
     /// What the package did since the last call.
     pub fn take_effects(&self) -> Effects {
-        std::mem::take(&mut *lock(&self.state.effects))
+        let mut effects = std::mem::take(&mut *lock(&self.state.effects));
+        let Some(namespace) = lock(&self.state.opened).clone() else {
+            return effects;
+        };
+        let now = match namespace.with(records) {
+            Ok(records) => records,
+            Err(error) => vec![Value::from(format!("the store couldn't be read: {error}"))],
+        };
+        let mut stored = lock(&self.state.stored);
+        if *stored != now {
+            effects.storage = Some(Value::from(now.clone()));
+            *stored = now;
+        }
+        effects
     }
+}
 
-    pub fn storage(&self) -> Value {
-        Value::Object(lock(&self.state.storage).clone())
+/// Each record's data, oldest first; blobs are left out.
+fn records(store: &Store) -> Result<Vec<Value>, dupin_storage::Error> {
+    let mut records = Vec::new();
+    let mut before = None;
+    loop {
+        let page = store.list(before.as_ref(), usize::MAX)?;
+        records.extend(page.records.into_iter().map(|record| record.data));
+        match page.next {
+            Some(next) => before = Some(next),
+            None => break,
+        }
     }
+    records.reverse();
+    Ok(records)
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -282,38 +320,32 @@ impl services::Exec for Shared {
 }
 
 impl services::Storage for Shared {
-    fn get(&self, _package: &str, key: &str) -> Result<Option<Value>, Failure> {
-        Ok(lock(&self.0.storage).get(key).cloned())
-    }
-
-    fn set(
-        &self,
-        _package: &str,
-        key: &str,
-        value: &Value,
-        _retention_days: Option<u32>,
-    ) -> Result<(), Failure> {
-        lock(&self.0.storage).insert(key.into(), value.clone());
-        lock(&self.0.effects).storage_changed = true;
-        Ok(())
-    }
-
-    fn delete(&self, _package: &str, key: &str) -> Result<(), Failure> {
-        if lock(&self.0.storage).remove(key).is_some() {
-            lock(&self.0.effects).storage_changed = true;
+    /// Seeds the namespace with the fixture's records the first time a call opens it.
+    fn open(&self, namespace: &str, limits: Limits) -> Result<Arc<Namespace>, Failure> {
+        let mut opened = lock(&self.0.opened);
+        let store = self.0.storage.open(namespace, limits)?;
+        if opened.is_none() {
+            let seeded = self.0.replies.storage.iter().try_for_each(|data| {
+                store
+                    .with(|store| {
+                        store.put_within_limits(NewRecord {
+                            data: data.clone(),
+                            blobs: Vec::new(),
+                        })
+                    })
+                    .map(drop)
+            });
+            if let Err(failure) = seeded {
+                self.0.storage.discard(namespace)?;
+                return Err(failure);
+            }
+            *opened = Some(store.clone());
         }
-        Ok(())
+        Ok(store)
     }
 
-    fn keys(&self, _package: &str) -> Result<Vec<String>, Failure> {
-        Ok(lock(&self.0.storage).keys().cloned().collect())
-    }
-
-    fn size(&self, _package: &str) -> Result<u64, Failure> {
-        Ok(lock(&self.0.storage)
-            .iter()
-            .map(|(key, value)| (key.len() + value.to_string().len()) as u64)
-            .sum())
+    fn discard(&self, namespace: &str) -> Result<(), Failure> {
+        self.0.storage.discard(namespace)
     }
 }
 

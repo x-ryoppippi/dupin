@@ -2,9 +2,12 @@
 //! its service and released only while the permit still holds.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use dupin_broker::{
     ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
 };
@@ -13,8 +16,8 @@ use dupin_host_services::{exec, files};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::services::{Failure, entry_size};
-use crate::{Session, failure_for};
+use crate::services::Failure;
+use crate::{Session, failure_for, storage};
 
 const MAX_URL_BYTES: usize = 8 * 1024;
 const MAX_HEADERS: usize = 64;
@@ -22,8 +25,13 @@ const MAX_HEADER_BYTES: usize = 8 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 /// A response a guest receives whole; its heap is 16 MiB.
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_KEY_BYTES: usize = 256;
-const MAX_VALUE_BYTES: usize = 1024 * 1024;
+/// Blobs one stored record may carry, within `MAX_ITEM_BYTES` together with its JSON.
+const MAX_BLOBS: usize = 16;
+const DEFAULT_PAGE: usize = 50;
+const MAX_PAGE: usize = 200;
+/// The stored JSON one page of records returns at most, beyond its first record; the reply
+/// must fit in the guest's heap.
+const MAX_PAGE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORD_CHARS: usize = 200;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_INPUTS: usize = 32;
@@ -83,15 +91,30 @@ struct ExecArgs {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Key {
-    key: String,
+struct Put {
+    data: Value,
+    /// Base64, as JSON carries bytes.
+    #[serde(default)]
+    blobs: Vec<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Set {
-    key: String,
-    value: Value,
+struct Id {
+    id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListArgs {
+    before: Option<String>,
+    limit: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Handle {
+    handle: String,
 }
 
 #[derive(Deserialize)]
@@ -131,66 +154,69 @@ impl Session {
             "files.read" => self.files(decode(args)?, FilesAccess::Read),
             "files.list" => self.files(decode(args)?, FilesAccess::List),
             "exec.run" => self.exec(decode(args)?, cancelled),
-            "storage.get" => {
-                let Key { key } = decode(args)?;
-                key_valid(&key)?;
-                let permit = self.permit(&Request::Storage {
-                    op: StorageOp::Read,
-                    size_after: 0,
-                })?;
-                let value = self.bridge.services.storage.get(self.package.as_str(), &key)?;
-                self.release(&permit, cancelled)?;
-                Ok(json!({ "value": value }))
-            }
-            "storage.keys" => {
-                let Nothing {} = decode(args)?;
-                let permit = self.permit(&Request::Storage {
-                    op: StorageOp::Read,
-                    size_after: 0,
-                })?;
-                let keys = self.bridge.services.storage.keys(self.package.as_str())?;
-                self.release(&permit, cancelled)?;
-                Ok(json!({ "keys": keys }))
-            }
-            "storage.set" => {
-                let Set { key, value } = decode(args)?;
-                key_valid(&key)?;
-                if value.to_string().len() > MAX_VALUE_BYTES {
-                    return Err(Failure::new(
-                        "too-large",
-                        format!("a stored value is at most {MAX_VALUE_BYTES} bytes as JSON"),
-                    ));
-                }
-                let storage = &self.bridge.services.storage;
-                let package = self.package.as_str();
-                let before = storage.size(package)?;
-                let replaced = storage
-                    .get(package, &key)?
-                    .map_or(0, |old| entry_size(&key, &old));
-                let size_after = before - replaced.min(before) + entry_size(&key, &value);
-                let permit = self.permit(&Request::Storage {
-                    op: StorageOp::Write,
-                    size_after,
-                })?;
-                let retention = match permit.scope() {
-                    Scope::Storage { retention_days, .. } => *retention_days,
-                    _ => None,
-                };
+            "storage.put" => {
+                let Put { data, blobs } = decode(args)?;
+                let record = new_record(data, &blobs)?;
+                let (permit, namespace) = self.storage(StorageOp::Write)?;
                 // A write is an effect, so the permit is checked again just before it.
                 self.release(&permit, cancelled)?;
-                storage.set(package, &key, &value, retention)?;
-                Ok(Value::Null)
+                let record = namespace.with(|store| store.put_within_limits(record))?;
+                Ok(record_json(record))
+            }
+            "storage.get" => {
+                let Id { id } = decode(args)?;
+                let id = record_id(&id)?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let record = namespace.with(|store| store.get(&id))?;
+                self.release(&permit, cancelled)?;
+                Ok(record.map_or(Value::Null, record_json))
+            }
+            "storage.list" => {
+                let ListArgs { before, limit } = decode(args)?;
+                let before = before.as_deref().map(cursor).transpose()?;
+                let limit = limit.map_or(DEFAULT_PAGE, |limit| (limit as usize).clamp(1, MAX_PAGE));
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let page = namespace.with(|store| store.list(before.as_ref(), limit))?;
+                self.release(&permit, cancelled)?;
+                Ok(page_json(page))
+            }
+            "storage.readBlob" => {
+                let Handle { handle } = decode(args)?;
+                let handle: dupin_storage::BlobHandle = handle
+                    .parse()
+                    .map_err(|_| Failure::invalid("not a blob handle"))?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let bytes = namespace.with(|store| store.read_blob(&handle))?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "data": BASE64.encode(&*bytes) }))
             }
             "storage.delete" => {
-                let Key { key } = decode(args)?;
-                key_valid(&key)?;
-                let permit = self.permit(&Request::Storage {
-                    op: StorageOp::Write,
-                    size_after: 0,
-                })?;
+                let Id { id } = decode(args)?;
+                let id = record_id(&id)?;
+                let (permit, namespace) = self.storage(StorageOp::Delete)?;
                 self.release(&permit, cancelled)?;
-                self.bridge.services.storage.delete(self.package.as_str(), &key)?;
+                let deleted = namespace.with(|store| store.delete(&id))?;
+                Ok(json!({ "deleted": deleted }))
+            }
+            "storage.clear" => {
+                let Nothing {} = decode(args)?;
+                let (permit, namespace) = self.storage(StorageOp::Delete)?;
+                self.release(&permit, cancelled)?;
+                namespace.with(dupin_storage::Store::clear)?;
                 Ok(Value::Null)
+            }
+            "storage.usage" => {
+                let Nothing {} = decode(args)?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let usage = namespace.with(|store| Ok(store.usage()))?;
+                self.release(&permit, cancelled)?;
+                let limits = storage_limits(&permit)?;
+                Ok(json!({
+                    "entries": usage.entries,
+                    "bytes": usage.bytes,
+                    "quotaBytes": limits.max_total_bytes,
+                    "retentionDays": limits.max_age.map(|age| age.as_secs() / (24 * 60 * 60)),
+                }))
             }
             "clipboard.read" => {
                 let Nothing {} = decode(args)?;
@@ -478,6 +504,17 @@ impl Session {
         Ok(result)
     }
 
+    /// The package's own namespace, open with the quota and retention the permit names.
+    fn storage(&self, op: StorageOp) -> Result<(Permit, Arc<storage::Namespace>), Failure> {
+        let permit = self.permit(&Request::Storage { op })?;
+        let store = self
+            .bridge
+            .services
+            .storage
+            .open(&self.namespace, storage_limits(&permit)?)?;
+        Ok((permit, store))
+    }
+
     /// Asks the broker for `request` under this call's trigger.
     fn permit(&self, request: &Request) -> Result<Permit, Failure> {
         self.bridge.sync();
@@ -537,11 +574,97 @@ impl Session {
     }
 }
 
-fn key_valid(key: &str) -> Result<(), Failure> {
-    if key.is_empty() || key.len() > MAX_KEY_BYTES {
-        return Err(Failure::invalid(format!("a key is 1–{MAX_KEY_BYTES} bytes")));
+/// The record to store, refused whole when it is larger than one record may be.
+fn new_record(data: Value, blobs: &[String]) -> Result<dupin_storage::NewRecord, Failure> {
+    if blobs.len() > MAX_BLOBS {
+        return Err(Failure::new(
+            "too-large",
+            format!("a record carries at most {MAX_BLOBS} blobs"),
+        ));
     }
-    Ok(())
+    let too_large = || {
+        Failure::new(
+            "too-large",
+            format!(
+                "a record's JSON and blobs are at most {} bytes",
+                storage::MAX_ITEM_BYTES
+            ),
+        )
+    };
+    let blobs = blobs
+        .iter()
+        .map(|blob| {
+            BASE64
+                .decode(blob)
+                .map_err(|_| Failure::invalid("a blob must be Base64"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let bytes = data.to_string().len() + blobs.iter().map(Vec::len).sum::<usize>();
+    if bytes as u64 > storage::MAX_ITEM_BYTES {
+        return Err(too_large());
+    }
+    Ok(dupin_storage::NewRecord { data, blobs })
+}
+
+fn storage_limits(permit: &Permit) -> Result<dupin_storage::Limits, Failure> {
+    match permit.scope() {
+        Scope::Storage {
+            quota_bytes,
+            retention_days,
+        } => Ok(storage::limits(*quota_bytes, *retention_days)),
+        _ => Err(Failure::new("failed", "the permit isn't for storage")),
+    }
+}
+
+fn record_id(id: &str) -> Result<dupin_storage::RecordId, Failure> {
+    id.parse().map_err(|_| Failure::invalid("not a record ID"))
+}
+
+fn cursor(text: &str) -> Result<dupin_storage::Cursor, Failure> {
+    text.parse().map_err(|_| Failure::invalid("not a page cursor"))
+}
+
+/// A record as the guest receives it: its ID and handles are opaque, and `createdAt` is
+/// milliseconds since the epoch.
+fn record_json(record: dupin_storage::Record) -> Value {
+    let created_at = record
+        .created_at()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis() as u64);
+    let blobs: Vec<Value> = record
+        .blobs
+        .iter()
+        .map(|blob| json!({ "handle": blob.handle.to_string(), "size": blob.len }))
+        .collect();
+    json!({
+        "id": record.id.to_string(),
+        "createdAt": created_at,
+        "data": record.data,
+        "blobs": blobs,
+    })
+}
+
+/// A page cut short where its records' JSON would pass [`MAX_PAGE_BYTES`], continuing after
+/// the last record it kept.
+fn page_json(page: dupin_storage::Page) -> Value {
+    let total = page.records.len();
+    let mut bytes = 0;
+    let mut records = Vec::new();
+    let mut next = page.next;
+    for record in page.records {
+        bytes += record.data.to_string().len() as u64;
+        if !records.is_empty() && bytes > MAX_PAGE_BYTES {
+            break;
+        }
+        records.push(record);
+    }
+    if records.len() < total {
+        next = records.last().map(dupin_storage::Record::cursor);
+    }
+    json!({
+        "records": records.into_iter().map(record_json).collect::<Vec<_>>(),
+        "next": next.map(|cursor| cursor.to_string()),
+    })
 }
 
 fn revoked() -> Failure {

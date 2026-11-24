@@ -101,6 +101,18 @@ impl Ui {
                 });
                 self.show(tx);
             }
+            Command::ExtensionDataDelete { package } => {
+                let bridge = self.extensions.bridge.clone();
+                let package = dupin_extension_bridge::PackageId::new(package.as_str());
+                std::thread::spawn(move || {
+                    let result = package.map_err(|error| error.to_string()).and_then(|id| {
+                        bridge
+                            .delete_data(&id, dupin_extension_bridge::Origin::User)
+                            .map_err(|failure| failure.to_string())
+                    });
+                    call.finish(result.map(|()| serde_json::Value::Null));
+                });
+            }
             Command::ConfigGet {} => call.finish(
                 serde_json::to_value(&*self.configuration.values.borrow())
                     .map_err(|_| "could not encode settings".into()),

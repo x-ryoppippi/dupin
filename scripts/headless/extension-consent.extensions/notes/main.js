@@ -4,11 +4,11 @@ export async function search(query) {
 	const text = query.trim();
 	let saved = [];
 	try {
-		saved = (await storage.get('notes')) ?? [];
+		saved = (await storage.list({ limit: 20 })).records;
 	} catch (error) {
 		return [{ title: `Notes can't read its storage`, subtitle: error.message }];
 	}
-	const rows = saved.map((note) => ({ title: note, text: note }));
+	const rows = saved.map((note) => ({ title: note.data, text: note.data }));
 	if (text)
 		rows.unshift({
 			title: `Save “${text}”`,
@@ -19,8 +19,7 @@ export async function search(query) {
 
 export const actions = {
 	async save({ text }) {
-		const saved = (await storage.get('notes')) ?? [];
-		await storage.set('notes', [text, ...saved].slice(0, 20));
+		await storage.put(text);
 		return { type: 'toast', text: 'Saved' };
 	},
 };

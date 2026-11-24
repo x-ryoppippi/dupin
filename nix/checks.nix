@@ -34,6 +34,7 @@ in
               nu scripts/tests/e2e-file-fixtures.nu
               nu scripts/tests/e2e-script-fixtures.nu
               nu scripts/tests/latency.nu
+              nu scripts/tests/update-rune.nu
             '';
         inherit (dupin) hawk;
         # Clippy and the tests share one debug build of the dependencies. Formatting is
