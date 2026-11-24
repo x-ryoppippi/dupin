@@ -688,10 +688,7 @@ pub(crate) mod tests {
             ("b-duplicate", "used by another extension"),
             ("c-bad-id", "`name` must be"),
             ("d-spaced-keyword", "`dupin.keyword` must be"),
-            (
-                "e-missing-entry",
-                "is not a JavaScript file in the package folder",
-            ),
+            ("e-missing-entry", "is not a module in the package folder"),
             ("f-unknown-key", "`dupin.extra` is not a key Dupin reads"),
             ("g-escape", "`dupin.main` must be a relative path"),
             ("h-broken", "main.js:1:"),

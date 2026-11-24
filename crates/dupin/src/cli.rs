@@ -670,8 +670,8 @@ mod tests {
         dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::TypeScript).unwrap();
         let folder = package.to_string_lossy().into_owned();
         assert_eq!(
-            execute(Action::ExtCheck(folder.clone()), true).unwrap()["runtime"],
-            "javascript"
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["id"],
+            "greeter"
         );
         assert_eq!(
             execute(Action::ExtRun(folder.clone(), "Dupin".into()), true).unwrap()["items"][0]["view"]["title"],
