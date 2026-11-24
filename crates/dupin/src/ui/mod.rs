@@ -44,7 +44,7 @@ pub use search::ICON_SIZE;
 
 use action_screen::ActionScreen;
 use control::{CallerHold, Picker};
-use extensions::Extensions;
+pub(crate) use extensions::Extensions;
 use lifecycle::Restart;
 use notices::Notices;
 use reload::backdrop_source;

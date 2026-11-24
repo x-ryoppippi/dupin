@@ -142,19 +142,55 @@ fn granted(broker: &mut Broker, folder: &std::path::Path) -> Vec<String> {
 /// decisions left under it were about another package. A running Dupin reads the file again
 /// before it next decides or saves.
 fn forget_grants(name: &str) -> Result<(), Diagnostic> {
-    let (mut broker, Some(path)) = grants() else {
-        return Ok(());
-    };
+    match crate::extensions::access::local_path() {
+        Some(path) => forget_grants_in(&path, name),
+        None => Ok(()),
+    }
+}
+
+/// [`forget_grants`] over the local grant file at `path`.
+pub(crate) fn forget_grants_in(path: &std::path::Path, name: &str) -> Result<(), Diagnostic> {
     let Ok(id) = PackageId::new(name) else {
         return Ok(());
     };
     if !path.exists() {
         return Ok(());
     }
+    let unsaved = |message: String| {
+        Diagnostic::new("grants-unsaved", message).file(crate::extensions::access::LOCAL_FILE)
+    };
+    let source = std::fs::read_to_string(path).map_err(|error| unsaved(error.to_string()))?;
+    let local = Local::parse(&source).map_err(|error| unsaved(error.to_string()))?;
+    let mut broker = Broker::new(Base::default(), local);
     broker.uninstall(&id);
-    broker.save(&path).map_err(|error| {
-        Diagnostic::new("grants-unsaved", error.to_string()).file(crate::extensions::access::LOCAL_FILE)
-    })
+    broker.save(path).map_err(|error| unsaved(error.to_string()))
+}
+
+/// `dupin ext eject NAME`: copies the bundled package into the extensions folder. The copy
+/// starts afresh, as a name installed afresh does: a changed copy ejected before and deleted
+/// left its decisions and stored data under the same name, and they were about other code.
+pub fn eject(name: &str) -> Result<PathBuf, Diagnostic> {
+    let bundled = crate::extensions::bundled::directory()
+        .ok_or_else(|| Diagnostic::new("no-bundled", "this build of Dupin has no bundled extensions"))?;
+    let user = crate::extensions::directory().ok_or_else(|| {
+        Diagnostic::new(
+            "no-directory",
+            "couldn't find the extensions folder beside config.toml",
+        )
+    })?;
+    let copy = crate::extensions::bundled::eject(&bundled, &user, name)?;
+    if let Err(failure) = forget_grants(name).and_then(|()| delete_data(name)) {
+        let _ = std::fs::remove_dir_all(&copy);
+        return Err(Diagnostic::new(
+            failure.code.clone(),
+            format!(
+                "Didn't eject {name}, because what an earlier copy of it was allowed or stored \
+                 must be forgotten first. {}",
+                failure.message
+            ),
+        ));
+    }
+    Ok(copy)
 }
 
 /// Uninstalling deletes what the package stored, and so does installing a name afresh, since a

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use dupin_core::{CommandId, CommandSpec, Config, Provider, QueryEligibility};
@@ -53,6 +54,22 @@ impl Port {
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+}
+
+/// Gives `provider`, the extension registered for `command`, to the built-in that answers
+/// `command` through a port, or back for a searcher of its own.
+pub(crate) fn hand_over(
+    ports: &HashMap<CommandId, Arc<Port>>,
+    command: &CommandId,
+    provider: Arc<dyn Provider>,
+) -> Option<Arc<dyn Provider>> {
+    match ports.get(command) {
+        Some(port) => {
+            port.set(Some(provider));
+            None
+        }
+        None => Some(provider),
     }
 }
 
