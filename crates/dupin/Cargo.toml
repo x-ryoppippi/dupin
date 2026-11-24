@@ -8,6 +8,10 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
+[features]
+# Rune's headless runs outside a debug build, for the latency benchmark (scripts/latency.nu).
+tooling = ["rune/tooling"]
+
 [dependencies]
 fend-core = "1.5.9"
 pico-args = "0.5"
@@ -15,6 +19,8 @@ roxmltree = "0.21.2"
 dupin-plugin-protocol = { workspace = true }
 dupin-plugin-runtime = { path = "../dupin-plugin-runtime" }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
+dupin-extension-install = { path = "../dupin-extension-install" }
+dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }

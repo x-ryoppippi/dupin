@@ -173,7 +173,7 @@ Plain HTTP(S) Open, Copy and Push actions use existing host validation and a del
 
 1. **Enable.** New installations start off. Deliberately enabling one shows its requested scopes and lets the user grant them individually. Dupin.app requests any still-undetermined macOS access needed for a selected scope. First deliberate use can request access if configured outside Settings. Startup, Settings open, reload, background search and fixtures only inspect status.
 2. **Explain.** Build Settings → Permissions from the existing `features::permission_uses()` and validated extension declarations. Show each OS permission once and list its consumers and extension grants. **Request Access** can ask macOS on behalf of Dupin with a feature off. That OS decision grants no extension authority by itself. Offer **Open System Settings** after denial and refresh access on focus and prompt completion.
-3. **Revoke.** Scope each grant to the installed package and approved revision. Disable or revoke immediately, cancel owned work where possible, drop pending completions and invalidate derived caches and actions. Reapproving a grant cannot revive old completions. Previously completed external effects may survive. Reuse the existing policy's invalidation semantics behind the broker. Keep installation IDs and revisions out of the author API. [Current permission policy](../features/permissions.md) · [Guest policy semantics](../plugin-permissions.md) · [Owner decision](https://github.com/x-ryoppippi/dupin/issues/12)
+3. **Revoke.** Scope each grant to the installed package and approved revision. Disable or revoke immediately, cancel owned work where possible, drop pending completions and invalidate derived caches and actions. Reapproving a grant cannot revive old completions. Previously completed external effects may survive. Reuse the existing policy's invalidation semantics behind the broker. Keep installation IDs and revisions out of the author API. [Current permission policy](../features/permissions.md) · [Capability broker](../capability-broker.md) · [Owner decision](https://github.com/x-ryoppippi/dupin/issues/12)
 
 ## Agent workflow and packaging
 
@@ -224,6 +224,10 @@ Check in a pinned experiment modeled on `experiments/wasm-app-size`. Compare sig
 ## Cross-platform notes
 
 Use the same QuickJS-ng release, schema, fixtures and limits on macOS and Linux X11. The helper mode and pipe protocol are portable, but each platform needs its own sandbox: Linux needs a separate mechanism, such as seccomp with Landlock or bubblewrap, and Windows would need job objects or an AppContainer. Build and run the fixture suite on the Linux port before expanding the API. Keep executable resolution, file handles, process cleanup, clipboard and permissions in platform adapters. Report unsupported capabilities clearly. macOS uses Dupin.app for TCC. Windows comes later and uses the same guest contract with its own host adapters. [Linux PR #166](https://github.com/x-ryoppippi/dupin/pull/166) · [QuickJS-ng supported platforms](https://quickjs-ng.github.io/quickjs/supported_platforms/)
+
+## Sync
+
+Sync between the owner's Macs is a host service on `dupin-storage` namespaces, through a user-chosen synced folder with end-to-end encryption and no Dupin server. Built-ins such as snippets and clipboard history get it by declaring a sync mode for their namespace. An extension's `storage` namespace syncs only with a `storage.sync` scope that the user grants on each Mac, and the extension list syncs from the lock file while grants are re-consented on each Mac. [Sync design](./sync.md)
 
 ## Rollout
 

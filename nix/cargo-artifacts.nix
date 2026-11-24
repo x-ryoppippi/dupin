@@ -63,6 +63,12 @@ let
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
   };
+  latencyArgs = baseArgs // {
+    pname = "dupin-latency";
+    CARGO_PROFILE = "latency";
+    cargoExtraArgs = "--offline --locked --package dupin --features tooling";
+    doCheck = false;
+  };
   releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
   debugArtifacts = craneLib.buildDepsOnly debugArgs;
   lintAndTest = craneLib.mkCargoDerivation (
@@ -70,6 +76,12 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
+      # The extension installer tests fetch from fixture Git repositories, and the extension
+      # SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [
+        pkgs.git
+        pkgs.esbuild
+      ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';
@@ -85,6 +97,13 @@ let
       cargoArtifacts = releaseArtifacts;
       dontStrip = true;
       doRemapPathPrefix = false;
+    }
+  );
+  # Headless-capable, for scripts/latency.nu; never shipped.
+  latencyBinary = craneLib.buildPackage (
+    latencyArgs
+    // {
+      cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
     }
   );
 in
@@ -110,6 +129,7 @@ pkgs.stdenv.mkDerivation (
         lintAndTest
         cargoVendorDir
         cargoBinary
+        latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
       baseline = native;
