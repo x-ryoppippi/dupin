@@ -1,7 +1,9 @@
 //! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
 //! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process.
-//! Guests get the query and return rows; they have no host access.
+//! Guests get the query and return rows. They reach host services only through the broker
+//! bridge, which checks each request against the scopes a package declares and the user granted.
 
+pub mod access;
 mod fixtures;
 mod manifest;
 mod provider;
@@ -13,12 +15,14 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::Page;
-use dupin_extension_host::{Compiled, Host};
+use dupin_extension_bridge::{Capabilities, PackageId, Revision};
+use dupin_extension_host::{ActionEffect, Compiled, Host, Services};
 use dupin_js_runtime::{Diagnostic, RunError, Sources};
 use dupin_plugin_protocol::PluginItem;
 
 pub use fixtures::{Snapped, snap, test};
-pub use provider::{ExtensionProvider, QUERY_DEADLINE};
+pub(crate) use provider::is_answered_consent_row;
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -30,6 +34,12 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
+    /// What the broker knows the package by.
+    pub package: PackageId,
+    /// The revision grants are for: package.json and every module Dupin runs.
+    pub revision: Revision,
+    /// The most the package may do, as the broker read it from package.json.
+    pub capabilities: Capabilities,
     /// The bytecode the extension host compiled, which only the host ever loads.
     compiled: Compiled,
 }
@@ -50,7 +60,8 @@ impl Extension {
         host().check(&self.compiled, deadline, &|| false)
     }
 
-    /// Asks the guest for `query`. Extensions can't open views, so none can ask inside one.
+    /// Asks the guest for `query`, answering its host requests with `services`. Extensions
+    /// can't open views, so none can ask inside one.
     pub fn query(
         &self,
         query: &str,
@@ -58,6 +69,7 @@ impl Extension {
         limit: usize,
         deadline: Instant,
         is_cancelled: impl Fn() -> bool + 'static,
+        services: &Arc<dyn Services>,
     ) -> Result<Vec<PluginItem>, RunError> {
         if page.is_some() {
             return Err(RunError::Failed(Diagnostic::new(
@@ -65,38 +77,48 @@ impl Extension {
                 "extensions can't open views yet",
             )));
         }
-        host().search_in(
-            &self.compiled,
-            query,
-            limit,
-            headless_environment(),
-            deadline,
-            &is_cancelled,
-        )
+        host().search(&self.compiled, query, limit, deadline, &is_cancelled, services)
     }
-}
 
-/// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
-/// launcher it starts. A launcher with a window never reads it.
-fn headless_environment() -> Option<&'static dupin_js_runtime::Environment> {
-    static ENVIRONMENT: OnceLock<Option<dupin_js_runtime::Environment>> = OnceLock::new();
-    ENVIRONMENT
-        .get_or_init(|| {
-            if !rune::tooling::is_headless() {
-                return None;
-            }
-            let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
-            serde_json::from_str::<dupin_js_runtime::Environment>(&value)
-                .ok()
-                .filter(dupin_js_runtime::Environment::is_valid)
-        })
-        .as_ref()
+    /// Runs `actions[name](data)`, which the user chose.
+    pub fn act(
+        &self,
+        name: &str,
+        data: &serde_json::Value,
+        deadline: Instant,
+        services: &Arc<dyn Services>,
+    ) -> Result<Option<ActionEffect>, RunError> {
+        host().action(&self.compiled, name, data, deadline, &|| false, services)
+    }
+
+    /// Runs `events[name](event)` for something Dupin watched on the package's behalf.
+    pub fn event(
+        &self,
+        name: &str,
+        event: &serde_json::Value,
+        deadline: Instant,
+        services: &Arc<dyn Services>,
+    ) -> Result<(), RunError> {
+        host().event(&self.compiled, name, event, deadline, &|| false, services)
+    }
 }
 
 /// The one extension host every JavaScript extension shares, started on the first query.
 fn host() -> &'static Host {
     static HOST: OnceLock<Host> = OnceLock::new();
-    HOST.get_or_init(|| Host::new(Box::new(helper_command)))
+    HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
+}
+
+/// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
+/// launcher it starts. A launcher with a window never reads it.
+fn headless_environment() -> Option<dupin_js_runtime::Environment> {
+    if !rune::tooling::is_headless() {
+        return None;
+    }
+    let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+    serde_json::from_str::<dupin_js_runtime::Environment>(&value)
+        .ok()
+        .filter(dupin_js_runtime::Environment::is_valid)
 }
 
 /// Dupin's own executable as the extension host, with nothing inherited it doesn't need.
@@ -294,6 +316,8 @@ fn load_with(
     let manifest = manifest::read(&manifests)?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
+    let package = package_id(&manifest)?;
+    let revision = package_revision(folder, &content)?;
     Ok(LoadedExtension {
         manifests,
         entry: manifest.entry,
@@ -305,9 +329,49 @@ fn load_with(
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
+            package,
+            revision,
+            capabilities: manifest.capabilities,
             compiled,
         }),
     })
+}
+
+/// The revision grants are for: package.json and every module Dupin runs (`content`), so a
+/// change to the declaration or the code is another revision and what Dupin never reads isn't.
+/// Home Manager names the same revision in its declared grants, through `dupin ext revision`.
+fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, Diagnostic> {
+    let package = std::fs::read(folder.join(manifest::PACKAGE_JSON)).map_err(|error| {
+        Diagnostic::new("invalid-manifest", format!("Couldn't read it: {error}")).file(manifest::PACKAGE_JSON)
+    })?;
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&(package.len() as u64).to_le_bytes());
+    hasher.update(&package);
+    hasher.update(content.as_bytes());
+    Revision::new(format!("blake3:{}", hasher.finalize().to_hex()))
+        .map_err(|error| Diagnostic::new("host-error", error))
+}
+
+/// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
+fn package_id(manifest: &manifest::Manifest) -> Result<PackageId, Diagnostic> {
+    PackageId::new(manifest.id.clone()).map_err(|error| {
+        Diagnostic::new("invalid-manifest", error)
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+    })
+}
+
+/// What the broker knows the package in `folder` by, the revision Dupin gives it, which
+/// declared grants name, and what it declares.
+pub fn declaration_of(folder: &Path) -> Result<(PackageId, Revision, Capabilities), Diagnostic> {
+    let manifests = manifest::Stamps::read(folder)?;
+    let manifest = manifest::read(&manifests)?;
+    let sources = Sources::read(folder, &manifest.entry)?;
+    Ok((
+        package_id(&manifest)?,
+        package_revision(folder, &content_hash(&sources))?,
+        manifest.capabilities,
+    ))
 }
 
 fn compile(
@@ -412,6 +476,9 @@ pub(crate) mod tests {
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
+            package: PackageId::new("fixture").unwrap(),
+            revision: Revision::new("blake3:fixture").unwrap(),
+            capabilities: Capabilities::default(),
             compiled: Compiled::empty(),
         }
     }
@@ -754,8 +821,6 @@ pub(crate) mod tests {
                 version: "0.1.0".into(),
                 keyword: "wc".into(),
                 requested: vec![],
-                granted: vec![],
-                pending_consent: vec![],
             },
         );
         lock.write(&lock_path).unwrap();
@@ -859,7 +924,14 @@ pub(crate) mod tests {
         assert!(!Arc::ptr_eq(&catalog.extensions[0], &updated.extensions[0]));
         assert!(Arc::ptr_eq(&catalog.extensions[1], &updated.extensions[1]));
         let items = updated.extensions[0]
-            .query("", None, 10, Instant::now() + QUERY_DEADLINE, || false)
+            .query(
+                "",
+                None,
+                10,
+                Instant::now() + QUERY_DEADLINE,
+                || false,
+                &(Arc::new(dupin_extension_host::NoServices) as _),
+            )
             .unwrap();
         assert_eq!(
             items[0].view,

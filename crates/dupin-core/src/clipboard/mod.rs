@@ -246,6 +246,11 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Apps whose copies are never recorded, which extensions don't see either.
+    pub fn ignored_apps(&self) -> &[String] {
+        &self.ignored_apps
+    }
+
     fn keeps(&self, content: &Content) -> bool {
         let (allowed, limit) = match content.kind() {
             Kind::Text => (true, self.max_entry_bytes),

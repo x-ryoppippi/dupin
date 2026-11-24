@@ -21,8 +21,16 @@ pub const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-pub const EXPECTATIONS: [&str; 7] = [
-    "rows", "selected", "effect", "error", "sections", "detail", "toasts",
+pub const EXPECTATIONS: [&str; 9] = [
+    "rows",
+    "selected",
+    "effect",
+    "toasts",
+    "clipboard",
+    "error",
+    "sections",
+    "detail",
+    "storage",
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -110,27 +118,36 @@ pub struct Step {
     /// Moves the selection to this row, counting from 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub select: Option<usize>,
-    /// Chooses the selected row's action with this title or id. Its effect is recorded, never
-    /// carried out.
+    /// Chooses the selected row's action with this title or id. A `run` action calls the
+    /// package's handler as Enter would; any other effect is recorded, never carried out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activate: Option<String>,
+    /// Calls the package's `events[event]` with `data`, as a watch Dupin keeps for it would.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect: Option<Map<String, Value>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Action<'a> {
     Query(&'a str),
     Select(usize),
     Activate(&'a str),
+    Event(&'a str, &'a Value),
 }
 
 impl Step {
     pub fn action(&self) -> Action<'_> {
-        match (&self.query, self.select, &self.activate) {
-            (Some(query), None, None) => Action::Query(query),
-            (None, Some(row), None) => Action::Select(row),
-            (None, None, Some(action)) => Action::Activate(action),
+        match (&self.query, self.select, &self.activate, &self.event) {
+            (Some(query), None, None, None) => Action::Query(query),
+            (None, Some(row), None, None) => Action::Select(row),
+            (None, None, Some(action), None) => Action::Activate(action),
+            (None, None, None, Some(event)) => {
+                Action::Event(event, self.data.as_ref().unwrap_or(&Value::Null))
+            }
             _ => unreachable!("validated by `parse`"),
         }
     }
@@ -143,33 +160,40 @@ impl Action<'_> {
             Action::Query(query) => format!("query {}", Value::from(*query)),
             Action::Select(row) => format!("select {row}"),
             Action::Activate(action) => format!("activate {}", Value::from(*action)),
+            Action::Event(event, _) => format!("event {}", Value::from(*event)),
         }
     }
 }
 
-/// The host services' answers, by capability. A request no reply matches fails with
-/// `unavailable`, so a fixture never falls through to the machine.
+/// What the host services answer, by capability, in place of the network, files, programs,
+/// storage, the clipboard, dictionaries and calendars. A request the fixture has no reply for
+/// fails as `unavailable`; nothing falls through to this Mac.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Replies {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub http: Vec<HttpReply>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub files: Vec<FileReply>,
+    /// Each `files` scope's contents by name: the text of a `file` scope, or a `directory`
+    /// scope's files by relative path.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub files: BTreeMap<String, FilesReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exec: Vec<ExecReply>,
-    /// The extension's storage when the fixture starts, key by key.
+    /// The package's storage when the fixture starts, key by key.
     #[serde(skip_serializing_if = "Map::is_empty")]
     pub storage: Map<String, Value>,
+    /// What a clipboard read returns: content such as `{ "type": "text", "text": … }`, or
+    /// `null` for an empty clipboard. Left out, reading fails as `unavailable`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub clipboard: Option<ClipboardReplies>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub dictionary: Vec<DictionaryReply>,
+    pub clipboard: Option<Value>,
+    /// Each term's entries, in the dictionary service's shape.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub dictionary: BTreeMap<String, Vec<Value>>,
     /// The events a calendar read sees, in the calendar service's shape.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calendar: Vec<Value>,
-    /// Your decision for each scope, named as the broker names grants, such as
-    /// `http:https://api.github.com`. A declared scope left out is granted.
+    /// Your decision on each declared scope, named as grant files name it, such as
+    /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub consent: BTreeMap<String, Consent>,
 }
@@ -217,28 +241,30 @@ fn ok() -> u16 {
     200
 }
 
+impl HttpResponse {
+    pub fn body(&self) -> Vec<u8> {
+        match (&self.json, &self.body) {
+            (Some(json), _) => json.to_string().into_bytes(),
+            (None, Some(body)) => body.clone().into_bytes(),
+            (None, None) => Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FileReply {
-    /// The `files` scope's name, as `dupin.capabilities.files` declares it.
-    pub scope: String,
-    /// Relative to the scope's root; `""` is the root.
-    #[serde(default)]
-    pub path: String,
-    /// What a listing returns.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub entries: Option<Vec<Value>>,
-    /// What a read returns, as text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contents: Option<String>,
+#[serde(untagged)]
+pub enum FilesReply {
+    File(String),
+    Directory(BTreeMap<String, String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExecReply {
-    /// The `exec` profile or `@script:` target.
-    pub target: String,
-    /// Matches any arguments when left out.
+    /// The profile's name as `dupin.capabilities.exec` declares it, `@script:` included.
+    pub profile: String,
+    /// The arguments the run must have, after its inputs fill the template. Matches any when
+    /// left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     #[serde(default)]
@@ -249,146 +275,23 @@ pub struct ExecReply {
     pub stderr: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ClipboardReplies {
-    /// What a read returns: `{ "change": …, "content": … }`, or `null` for an empty clipboard.
-    pub read: Value,
-    /// The copies a watch delivers, in order.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DictionaryReply {
-    pub term: String,
-    pub entries: Vec<Value>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Consent {
     Allow,
+    /// Granted, then revoked.
     Deny,
-    /// Not answered yet: the request fails with `needs-consent`.
+    /// Not answered yet, so a request needs consent.
     Pending,
 }
 
-/// A host service request, as the broker bridge decodes it from the guest.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Request<'a> {
-    Http { method: &'a str, url: &'a str },
-    FilesList { scope: &'a str, path: &'a str },
-    FilesRead { scope: &'a str, path: &'a str },
-    Exec { target: &'a str, args: &'a [String] },
-    StorageGet { key: &'a str },
-    ClipboardRead,
-    DictionaryLookup { term: &'a str },
-    CalendarRead { start: i64, end: i64 },
-}
-
-/// The error a guest's call gets, with the codes the host services use.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ReplyError {
-    pub code: &'static str,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub scope: Option<String>,
-}
-
-impl Replies {
-    /// Answers `request`, which the package's grant `scope` covers, from the fixture alone.
-    pub fn answer(&self, scope: &str, request: &Request<'_>) -> Result<Value, ReplyError> {
-        match self.consent.get(scope) {
-            Some(Consent::Deny) => {
-                return Err(ReplyError {
-                    code: "denied",
-                    message: format!("the fixture denies {scope}"),
-                    scope: Some(scope.into()),
-                });
-            }
-            Some(Consent::Pending) => {
-                return Err(ReplyError {
-                    code: "needs-consent",
-                    message: format!("{scope} is waiting for your decision"),
-                    scope: Some(scope.into()),
-                });
-            }
-            Some(Consent::Allow) | None => {}
-        }
-        let missing = |what: String| ReplyError {
-            code: "unavailable",
-            message: format!("the fixture has no reply for {what}"),
-            scope: None,
-        };
-        match *request {
-            Request::Http { method, url } => self
-                .http
-                .iter()
-                .find(|reply| reply.request.method.eq_ignore_ascii_case(method) && reply.request.url == url)
-                .map(|reply| {
-                    let response = &reply.response;
-                    let body = match (&response.json, &response.body) {
-                        (Some(json), _) => json.to_string(),
-                        (None, Some(body)) => body.clone(),
-                        (None, None) => String::new(),
-                    };
-                    json!({
-                        "status": response.status,
-                        "ok": (200..300).contains(&response.status),
-                        "headers": response.headers,
-                        "body": body,
-                    })
-                })
-                .ok_or_else(|| missing(format!("{} {url}", method.to_ascii_uppercase()))),
-            Request::FilesList { scope, path } | Request::FilesRead { scope, path } => {
-                let listing = matches!(request, Request::FilesList { .. });
-                self.files
-                    .iter()
-                    .filter(|reply| reply.scope == scope && reply.path == path)
-                    .find_map(|reply| {
-                        if listing {
-                            reply.entries.clone().map(Value::from)
-                        } else {
-                            reply.contents.clone().map(Value::from)
-                        }
-                    })
-                    .ok_or_else(|| {
-                        let verb = if listing { "listing" } else { "reading" };
-                        missing(format!("{verb} {scope}:{path}"))
-                    })
-            }
-            Request::Exec { target, args } => self
-                .exec
-                .iter()
-                .find(|reply| reply.target == target && reply.args.as_deref().is_none_or(|want| want == args))
-                .map(|reply| json!({"status": reply.status, "stdout": reply.stdout, "stderr": reply.stderr}))
-                .ok_or_else(|| missing(format!("running {target}"))),
-            Request::StorageGet { key } => Ok(self.storage.get(key).cloned().unwrap_or(Value::Null)),
-            Request::ClipboardRead => self
-                .clipboard
-                .as_ref()
-                .map(|clipboard| clipboard.read.clone())
-                .ok_or_else(|| missing("reading the clipboard".into())),
-            Request::DictionaryLookup { term } => self
-                .dictionary
-                .iter()
-                .find(|reply| reply.term == term)
-                .map(|reply| Value::from(reply.entries.clone()))
-                .ok_or_else(|| missing(format!("looking up {}", Value::from(term)))),
-            Request::CalendarRead { start, end } => Ok(Value::from(
-                self.calendar
-                    .iter()
-                    .filter(|event| {
-                        let at = |key| event.get(key).and_then(Value::as_i64);
-                        at("start").is_some_and(|from| from < end) && at("end").is_some_and(|to| to > start)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>(),
-            )),
-        }
-    }
+/// A relative path inside a files scope: plain names joined by `/`.
+fn is_relative_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 512
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains('\0'))
 }
 
 /// Reads and checks the fixture in `bytes`. `name` is the file's path inside the package.
@@ -462,11 +365,15 @@ pub fn parse(name: &str, bytes: &[u8]) -> Result<Fixture, Diagnostic> {
             step.query.is_some(),
             step.select.is_some(),
             step.activate.is_some(),
+            step.event.is_some(),
         ];
         if given.iter().filter(|given| **given).count() != 1 {
             return Err(at(
-                "must have exactly one of `query`, `select` and `activate`".into()
+                "must have exactly one of `query`, `select`, `activate` and `event`".into(),
             ));
+        }
+        if step.data.is_some() && step.event.is_none() {
+            return Err(at("`data` goes with an `event`".into()));
         }
         if step
             .query
@@ -485,6 +392,19 @@ pub fn parse(name: &str, bytes: &[u8]) -> Result<Fixture, Diagnostic> {
         {
             return Err(at(format!("`expect` has no `{key}`"))
                 .hint(format!("Expect any of {}.", EXPECTATIONS.join(", "))));
+        }
+    }
+    for (scope, reply) in &fixture.replies.files {
+        let paths: Vec<&String> = match reply {
+            FilesReply::File(_) => Vec::new(),
+            FilesReply::Directory(files) => files.keys().collect(),
+        };
+        if let Some(path) = paths.into_iter().find(|path| !is_relative_path(path)) {
+            return Err(
+                invalid(format!("{path:?} is not a relative path inside the scope"))
+                    .field(format!("replies.files.{scope}"))
+                    .hint("Name files such as `notes/today.md`, without `..` or a leading `/`."),
+            );
         }
     }
     Ok(fixture)
@@ -691,12 +611,14 @@ pub fn rows(items: &[PluginItem]) -> Value {
         .collect()
 }
 
-/// What choosing an action would do, as `{ "copy": … }`, `{ "url": … }` or `{ "push": … }`.
+/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }`, `{ "push": … }` or
+/// `{ "run": … }`.
 pub fn effect(effect: &Effect) -> Map<String, Value> {
     let (key, value) = match effect {
         Effect::Copy { text } => ("copy", Value::from(text.clone())),
         Effect::OpenUrl { url } => ("url", Value::from(url.clone())),
         Effect::Push { view, title, .. } => ("push", json!({"view": view, "title": title})),
+        Effect::Run { action, data } => ("run", json!({"action": action, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])
 }

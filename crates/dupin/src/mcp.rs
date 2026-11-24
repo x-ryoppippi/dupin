@@ -515,6 +515,7 @@ fn extension_tool(workspace: &Path, name: &str, arguments: &Map<String, Value>) 
                     dupin_js_runtime::MAX_ROWS,
                     std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                     || false,
+                    &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
                 )
                 .map_err(|error| match error {
                     dupin_js_runtime::RunError::Failed(failure) => diagnostic(failure),

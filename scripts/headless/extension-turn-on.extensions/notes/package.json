@@ -1,0 +1,13 @@
+{
+	"name": "notes",
+	"version": "0.1.0",
+	"dupin": {
+		"title": "Notes",
+		"keyword": "nt",
+		"capabilities": {
+			"storage": {
+				"quotaBytes": 65536
+			}
+		}
+	}
+}

@@ -76,6 +76,7 @@ impl Ui {
         }
         if !self.shown && !rune::tooling::is_headless() {
             self.frontmost_pid = window_management::frontmost_pid();
+            crate::extensions::access::refresh_os_access(&self.extensions.bridge, &self.calendar_access);
         }
         if let Some(problem) = self.backdrop.refresh() {
             crate::log::warn(problem);

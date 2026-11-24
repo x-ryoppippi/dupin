@@ -5,6 +5,7 @@
 
 mod appearance;
 mod controls;
+mod extensions;
 mod general;
 mod permissions;
 mod search;
@@ -27,6 +28,8 @@ use crate::icons;
 use crate::ui::Ui;
 use crate::update::Updater;
 
+pub use self::extensions::InstalledExtension;
+
 pub const SIZE: (f32, f32) = (760.0, 480.0);
 
 /// Room above the sidebar's rows for the traffic lights, which sit over a full-size content view.
@@ -44,6 +47,7 @@ enum Page {
     General,
     Search,
     Appearance,
+    Extensions,
     Permissions,
     Updates,
 }
@@ -54,6 +58,7 @@ impl Page {
             Page::General => "General",
             Page::Search => "Search",
             Page::Appearance => "Appearance",
+            Page::Extensions => "Extensions",
             Page::Permissions => "Permissions",
             Page::Updates => "Updates",
         }
@@ -65,6 +70,7 @@ impl Page {
             Page::General => "page-general",
             Page::Search => "page-search",
             Page::Appearance => "page-appearance",
+            Page::Extensions => "page-extensions",
             Page::Permissions => "page-permissions",
             Page::Updates => "page-updates",
         }
@@ -75,6 +81,7 @@ impl Page {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
             Page::Appearance => &icons::SPARKLES,
+            Page::Extensions => &icons::PUZZLE,
             Page::Permissions => &icons::SHIELD,
             Page::Updates => &icons::REFRESH,
         }
@@ -106,6 +113,12 @@ pub struct Prefs {
     active_radius: u16,
     /// Loaded extensions as "Name (keyword)", and why others were skipped.
     extensions: (Vec<String>, Vec<String>),
+    /// The broker bridge the panel's extensions go through, once the panel has one.
+    access: Option<dupin_extension_bridge::Bridge>,
+    /// Loaded JavaScript packages, for Extensions.
+    installed: Vec<InstalledExtension>,
+    /// Why the last Allow, Revoke or switch on Extensions didn't apply.
+    extension_problem: Option<String>,
 }
 
 impl Prefs {
@@ -144,6 +157,9 @@ impl Prefs {
             settings,
             config_problem: None,
             extensions: Default::default(),
+            access: None,
+            installed: Vec::new(),
+            extension_problem: None,
             hotkey_problem: None,
             scripts_notice: None,
             login: LoginPreference::current(),
@@ -154,8 +170,11 @@ impl Prefs {
     }
 
     pub fn refresh_permissions(&mut self) {
-        if self.welcome.is_none() && self.page == Page::Permissions {
+        if self.welcome.is_none() && matches!(self.page, Page::Permissions | Page::Extensions) {
             self.permissions = permissions::read(&self.calendar_access);
+            if let Some(bridge) = &self.access {
+                crate::extensions::access::refresh_os_access(bridge, &self.calendar_access);
+            }
         }
     }
 
@@ -321,6 +340,10 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (None, Page::General) => general::page(s, k, hair),
         (None, Page::Search) => search::page(s, k, hair),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
+        (None, Page::Extensions) => extensions::problem(s, k)
+            .into_iter()
+            .chain(extensions::page(s, k, hair))
+            .collect(),
         (None, Page::Permissions) => permissions::page(s, k, hair),
         (None, Page::Updates) => updates::page(s, k, hair),
     };
@@ -398,7 +421,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_follows()
         .gap(4.0);
     let permissions = permissions::available().then_some(Page::Permissions);
-    for page in [Page::General, Page::Search, Page::Appearance]
+    for page in [Page::General, Page::Search, Page::Appearance, Page::Extensions]
         .into_iter()
         .chain(permissions)
     {
@@ -615,6 +638,93 @@ mod tests {
                 .any(|element| element.key.as_deref() == Some("extension-problems"));
             assert_eq!(shows_problems, extensions);
         }
+    }
+
+    #[test]
+    fn extensions_lists_each_declared_scope_with_its_standing_and_waiting_requests() {
+        use dupin_extension_bridge::{
+            Bridge, Broker, Capabilities, ConsentState, PackageId, Revision, Services, Trigger,
+        };
+
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        let bridge = Bridge::new(
+            Broker::new(Default::default(), Default::default()),
+            None,
+            Services::none(),
+        );
+        let id = PackageId::new("weather").unwrap();
+        let revision = Revision::new("blake3:fixture").unwrap();
+        bridge.install(
+            &id,
+            revision.clone(),
+            Capabilities::parse(&serde_json::json!({
+                "http": [{ "origin": "https://api.example.com", "methods": ["GET"] }],
+                "dictionary": ["lookup"],
+            }))
+            .unwrap(),
+        );
+        bridge.set_enabled(&id, true).unwrap();
+        let http = bridge.scopes(&id)[0].scope.clone();
+        bridge.allow(&id, &revision, &http, None).unwrap();
+        // A request that needs consent leaves one waiting, as a guest's would.
+        let call = bridge.call(&id, Trigger::Query);
+        let reply = call.services.call(
+            "dictionary.lookup",
+            br#"{"word":"dupin"}"#,
+            std::time::Instant::now() + Duration::from_secs(1),
+            &Default::default(),
+        );
+        assert!(String::from_utf8(reply).unwrap().contains("needs-consent"));
+        state.reflect_extension_access(
+            bridge.clone(),
+            vec![InstalledExtension {
+                package: id.clone(),
+                name: "Weather".into(),
+                keyword: "wx".into(),
+            }],
+        );
+        // Not `show`, which reads macOS access, and the pasteboard is out of reach in the Nix
+        // build sandbox.
+        state.page = Page::Extensions;
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
+        let keys: Vec<_> = runtime
+            .elements()
+            .iter()
+            .filter_map(|element| element.key.clone())
+            .collect();
+        for key in [
+            "waiting",
+            "pending-0-allow",
+            "pending-0-deny",
+            "extension-0",
+            "extension-0-enabled",
+            "extension-0-scope-0-revoke",
+            "extension-0-scope-1-allow",
+        ] {
+            assert!(keys.iter().any(|found| found == key), "missing {key} in {keys:?}");
+        }
+        let labels: Vec<_> = runtime
+            .accessibility_tree()
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect();
+        assert!(
+            labels
+                .iter()
+                .any(|label| label == "Weather wants to look words up in the system dictionaries"),
+            "{labels:?}"
+        );
+
+        // Revoking from Settings takes the grant away at once.
+        let (x, y) = runtime.find("extension-0-scope-0-revoke").unwrap();
+        runtime.pointer_down(x, y);
+        runtime.pointer_up(x, y);
+        runtime.frame(0.0);
+        assert_eq!(bridge.scopes(&id)[0].state, ConsentState::Revoked);
     }
 
     #[test]

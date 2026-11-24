@@ -3,19 +3,21 @@
 //! zone instead of the machine's. `snap` renders a step's panel with the launcher itself,
 //! headless, in a scratch home that holds only the package.
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
-use dupin_extension_host::Host;
+use dupin_extension_bridge::Trigger;
+use dupin_extension_host::{ActionEffect, Host};
 use dupin_js_runtime::{Diagnostic, RunError};
-use dupin_plugin_protocol::PluginItem;
+use dupin_plugin_protocol::{Effect, PluginItem};
 use serde_json::{Map, Value, json};
 
-use super::{Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
+use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
+
+mod services;
 
 /// Passes a fixture's clock and seed to the headless launcher `snap` starts.
 pub(super) const HEADLESS_ENVIRONMENT: &str = "DUPIN_HEADLESS_EXTENSION_ENVIRONMENT";
@@ -38,17 +40,13 @@ pub struct Report {
 pub fn test(folder: &Path, update: bool) -> Result<Report, Diagnostic> {
     let extension = load_folder(folder)?;
     let found = fixture::discover(folder)?;
-    let mut hosts: HashMap<String, Host> = HashMap::new();
     let mut fixtures = Vec::new();
     let mut text = String::new();
     let mut failed = 0;
     for (name, path) in &found {
         let result = fixture::read(name, path).and_then(|parsed| {
-            let zone = &parsed.environment.time_zone;
-            if !hosts.contains_key(zone) {
-                hosts.insert(zone.clone(), fixture_host(name, zone)?);
-            }
-            Ok(replay(&extension, &hosts[zone], &parsed).finish(parsed, name, path, update))
+            let replayed = replay(&extension, name, &parsed)?;
+            Ok(replayed.finish(parsed, name, path, update))
         });
         let outcome = result.unwrap_or_else(|diagnostic| FixtureResult::invalid(name, diagnostic));
         if !outcome.passed {
@@ -71,9 +69,11 @@ pub fn test(folder: &Path, update: bool) -> Result<Report, Diagnostic> {
     })
 }
 
-/// A host whose helper runs in the fixture's time zone, which must be one this Mac has.
-fn fixture_host(name: &str, zone: &str) -> Result<Host, Diagnostic> {
-    if !Path::new(ZONEINFO).join(zone).is_file() {
+/// A host of the fixture's own, whose helper runs in its time zone, which must be one this Mac
+/// has, and whose guests see its clock and seed.
+fn fixture_host(name: &str, fixture: &Fixture) -> Result<Host, Diagnostic> {
+    let zone = fixture.environment.time_zone.clone();
+    if !Path::new(ZONEINFO).join(&zone).is_file() {
         return Err(
             Diagnostic::new("invalid-fixture", format!("this Mac has no time zone {zone:?}"))
                 .file(name)
@@ -81,12 +81,12 @@ fn fixture_host(name: &str, zone: &str) -> Result<Host, Diagnostic> {
                 .hint("Use a name from the tz database, such as `UTC` or `Europe/London`."),
         );
     }
-    let zone = zone.to_owned();
-    Ok(Host::new(Box::new(move || {
+    let launch = Box::new(move || {
         let mut command = helper_command()?;
         command.env("TZ", &zone);
         Ok(command)
-    })))
+    });
+    Ok(Host::fixed(launch, Some(guest_environment(fixture))))
 }
 
 fn guest_environment(fixture: &Fixture) -> dupin_js_runtime::Environment {
@@ -108,9 +108,12 @@ struct StepResult {
     problem: Option<String>,
 }
 
-/// Runs the steps in order, stopping at the first that can't run.
-fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
-    let environment = guest_environment(fixture);
+/// Runs the steps in order through the fixture's host and broker bridge, stopping at the first
+/// that can't run.
+fn replay(extension: &Extension, name: &str, fixture: &Fixture) -> Result<Replay, Diagnostic> {
+    let host = fixture_host(name, fixture)?;
+    let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
+    let call = |trigger| world.bridge.call(&extension.package, trigger).services;
     let mut rows: Vec<PluginItem> = Vec::new();
     let mut selected: Option<usize> = None;
     let mut steps = Vec::new();
@@ -120,25 +123,21 @@ fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
         let mut problem = None;
         match action {
             Action::Query(query) => {
-                let answer = host.search_in(
+                let answer = host.search(
                     &extension.compiled,
                     query,
                     dupin_js_runtime::MAX_ROWS,
-                    Some(&environment),
                     Instant::now() + QUERY_DEADLINE,
                     &|| false,
+                    &call(Trigger::Query),
                 );
-                match answer {
-                    Ok(items) => rows = items,
-                    Err(RunError::Failed(diagnostic)) => {
-                        rows = Vec::new();
-                        outcome.insert("error".into(), fixture::error(&diagnostic));
+                rows = match answer {
+                    Ok(items) => items,
+                    Err(error) => {
+                        problem = record(error, &mut outcome);
+                        Vec::new()
                     }
-                    Err(RunError::Cancelled) => {
-                        rows = Vec::new();
-                        problem = Some("the query was cancelled".into());
-                    }
-                }
+                };
                 selected = (!rows.is_empty()).then_some(0);
                 outcome.insert("rows".into(), fixture::rows(&rows));
                 if let Some(index) = selected {
@@ -157,7 +156,8 @@ fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
                 ));
             }
             Action::Activate(name) => {
-                let chosen = selected.and_then(|index| rows.get(index)).and_then(|row| {
+                let row = selected.and_then(|index| rows.get(index));
+                let chosen = row.and_then(|row| {
                     row.actions
                         .iter()
                         .find(|action| action.title == name || action.id == name)
@@ -165,10 +165,26 @@ fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
                 match chosen {
                     Some(action) => {
                         outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        if let Effect::Run { action, data } = &action.effect {
+                            let acted = host.action(
+                                &extension.compiled,
+                                action,
+                                data.as_ref().unwrap_or(&Value::Null),
+                                Instant::now() + ACTION_DEADLINE,
+                                &|| false,
+                                &call(Trigger::Activation),
+                            );
+                            match acted {
+                                Ok(Some(ActionEffect::Toast { text })) => {
+                                    outcome.insert("toasts".into(), json!([text]));
+                                }
+                                Ok(None) => {}
+                                Err(error) => problem = record(error, &mut outcome),
+                            }
+                        }
                     }
                     None => {
-                        let offered: Vec<&str> = selected
-                            .and_then(|index| rows.get(index))
+                        let offered: Vec<&str> = row
                             .map(|row| row.actions.iter().map(|action| action.title.as_str()).collect())
                             .unwrap_or_default();
                         problem = Some(if offered.is_empty() {
@@ -183,6 +199,26 @@ fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
                     }
                 }
             }
+            Action::Event(event, data) => {
+                let handled = host.event(
+                    &extension.compiled,
+                    event,
+                    data,
+                    Instant::now() + ACTION_DEADLINE,
+                    &|| false,
+                    &call(Trigger::Background),
+                );
+                if let Err(error) = handled {
+                    problem = record(error, &mut outcome);
+                }
+            }
+        }
+        let effects = world.take_effects();
+        if !effects.clipboard.is_empty() {
+            outcome.insert("clipboard".into(), effects.clipboard.into());
+        }
+        if effects.storage_changed {
+            outcome.insert("storage".into(), world.storage());
         }
         let differences = match (&problem, &step.expect) {
             (None, Some(expected)) => fixture::compare(expected, &outcome),
@@ -199,7 +235,18 @@ fn replay(extension: &Extension, host: &Host, fixture: &Fixture) -> Replay {
             break;
         }
     }
-    Replay { steps }
+    Ok(Replay { steps })
+}
+
+/// A failed call is the step's outcome; a cancelled one means the step never ran.
+fn record(error: RunError, outcome: &mut Map<String, Value>) -> Option<String> {
+    match error {
+        RunError::Failed(diagnostic) => {
+            outcome.insert("error".into(), fixture::error(&diagnostic));
+            None
+        }
+        RunError::Cancelled => Some("the call was cancelled".into()),
+    }
 }
 
 struct FixtureResult {
@@ -485,7 +532,7 @@ fn script_for(keyword: &str, fixture: &Fixture, last: usize) -> Value {
                 }
                 selected = index;
             }
-            Action::Activate(_) => continue,
+            Action::Activate(_) | Action::Event(..) => continue,
         }
         at += STEP_SECONDS;
     }

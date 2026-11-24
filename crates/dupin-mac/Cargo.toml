@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-core = { workspace = true }
+dupin-storage = { workspace = true }
 dupin-host-services = { path = "../dupin-host-services" }
 libc = { workspace = true }
 rune = { workspace = true }
@@ -52,6 +53,9 @@ objc2-app-kit = { workspace = true, features = [
 	"NSEvent",
 	"NSGraphics",
 	"NSApplication",
+	"NSOpenPanel",
+	"NSPanel",
+	"NSSavePanel",
 	"NSPasteboard",
 	"NSPasteboardItem",
 	"NSResponder",
@@ -92,6 +96,11 @@ objc2-core-foundation = { workspace = true, features = [
 	"CFURL",
 ] }
 objc2-core-text = { workspace = true, features = ["std", "CTFont", "CTFontDescriptor"] }
+objc2-security = { version = "0.3", default-features = false, features = [
+	"std",
+	"SecBase",
+	"SecItem",
+] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
 	"std",
 	"CGColorSpace",
@@ -112,6 +121,7 @@ objc2-uniform-type-identifiers = { version = "0.3", default-features = false, fe
 ] }
 memmap2 = { workspace = true }
 tempfile = "3"
+zeroize = "1.8"
 
 [lints]
 workspace = true

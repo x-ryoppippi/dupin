@@ -138,141 +138,51 @@ fn differences_name_each_path_that_changed() {
 }
 
 #[test]
-fn replies_come_only_from_the_fixture() {
-    let replies: Replies = serde_json::from_value(json!({
-        "http": [{
-            "request": { "url": "https://api.github.com/repos/x-ryoppippi/dupin" },
-            "response": { "json": { "archived": false } },
-        }],
-        "files": [{ "scope": "notes", "path": "", "entries": [{ "name": "a.md", "kind": "file" }] }],
-        "exec": [{ "target": "@script:open-in-zed", "stdout": "opened" }],
-        "storage": { "count": 3 },
-        "clipboard": { "read": { "change": 1, "content": { "type": "text", "text": "hi" } } },
-        "dictionary": [{ "term": "run", "entries": [{ "headword": "run" }] }],
-        "calendar": [{ "id": "a", "title": "Review", "start": 100, "end": 200 }],
-        "consent": { "http:https://example.com": "deny", "clipboard:read": "pending" },
+fn replies_events_and_their_paths_are_checked() {
+    let parsed = fixture(json!({
+        "fixture": 1,
+        "replies": {
+            "http": [{ "request": { "url": "https://api.github.com/repos/x" }, "response": { "json": { "archived": false } } }],
+            "files": { "notes": { "today.md": "# Today", "archive/old.md": "old" }, "todo": "- [ ] write" },
+            "exec": [{ "profile": "@script:open-in-zed", "stdout": "opened" }],
+            "storage": { "count": 3 },
+            "clipboard": { "type": "text", "text": "hi" },
+            "dictionary": { "run": [{ "headword": "run" }] },
+            "calendar": [{ "id": "a", "title": "Review", "start": 100, "end": 200 }],
+            "consent": { "http:https://example.com": "deny", "clipboard:read": "pending" },
+        },
+        "steps": [{ "query": "x" }, { "event": "clipboard", "data": { "type": "text", "text": "copied" } }],
     }))
     .unwrap();
-    let scope = "http:https://api.github.com";
-    let get = |url| Request::Http { method: "get", url };
-    let answer = replies
-        .answer(scope, &get("https://api.github.com/repos/x-ryoppippi/dupin"))
-        .unwrap();
-    assert_eq!(answer["status"], 200);
-    assert_eq!(answer["ok"], true);
-    assert_eq!(answer["body"], r#"{"archived":false}"#);
+    let replies = &parsed.replies;
+    assert_eq!(replies.http[0].request.method, "GET");
+    assert_eq!(replies.http[0].response.status, 200);
+    assert_eq!(replies.http[0].response.body(), br#"{"archived":false}"#);
+    assert_eq!(replies.files["todo"], FilesReply::File("- [ ] write".into()));
+    assert_eq!(replies.consent["clipboard:read"], Consent::Pending);
+    assert_eq!(
+        parsed.steps[1].action(),
+        Action::Event("clipboard", &json!({ "type": "text", "text": "copied" }))
+    );
+    assert_eq!(parsed.steps[1].action().describe(), r#"event "clipboard""#);
+    let reparsed = parse("fixtures/x.json", to_json(&parsed).as_bytes()).unwrap();
+    assert_eq!(reparsed, parsed);
 
-    let missing = replies
-        .answer(scope, &get("https://api.github.com/user"))
-        .unwrap_err();
-    assert_eq!(missing.code, "unavailable");
-    assert_eq!(
-        missing.message,
-        "the fixture has no reply for GET https://api.github.com/user"
-    );
-    assert_eq!(
-        replies
-            .answer(
-                scope,
-                &Request::Http {
-                    method: "POST",
-                    url: "https://api.github.com/repos/x-ryoppippi/dupin"
-                }
-            )
-            .unwrap_err()
-            .code,
-        "unavailable"
-    );
-    assert_eq!(
-        replies
-            .answer("http:https://example.com", &get("https://example.com/"))
-            .unwrap_err()
-            .code,
-        "denied"
-    );
-    assert_eq!(
-        replies
-            .answer("clipboard:read", &Request::ClipboardRead)
-            .unwrap_err()
-            .code,
-        "needs-consent"
-    );
-
-    assert_eq!(
-        replies
-            .answer(
-                "files:notes",
-                &Request::FilesList {
-                    scope: "notes",
-                    path: ""
-                }
-            )
-            .unwrap()[0]["name"],
-        "a.md"
-    );
-    assert_eq!(
-        replies
-            .answer(
-                "files:notes",
-                &Request::FilesRead {
-                    scope: "notes",
-                    path: ""
-                }
-            )
-            .unwrap_err()
-            .code,
-        "unavailable"
-    );
-    let args = ["--flag".to_owned()];
-    assert_eq!(
-        replies
-            .answer(
-                "exec:@script:open-in-zed",
-                &Request::Exec {
-                    target: "@script:open-in-zed",
-                    args: &args
-                }
-            )
-            .unwrap()["stdout"],
-        "opened"
-    );
-    assert_eq!(
-        replies
-            .answer("storage", &Request::StorageGet { key: "count" })
-            .unwrap(),
-        3
-    );
-    assert_eq!(
-        replies
-            .answer("storage", &Request::StorageGet { key: "other" })
-            .unwrap(),
-        Value::Null
-    );
-    assert_eq!(
-        replies
-            .answer("dictionary:lookup", &Request::DictionaryLookup { term: "run" })
-            .unwrap()[0]["headword"],
-        "run"
-    );
-    assert_eq!(
-        replies
-            .answer("calendar:read", &Request::CalendarRead { start: 150, end: 300 })
-            .unwrap()[0]["id"],
-        "a"
-    );
-    assert_eq!(
-        replies
-            .answer("calendar:read", &Request::CalendarRead { start: 200, end: 300 })
-            .unwrap(),
-        json!([])
-    );
-    assert_eq!(
-        Replies::default()
-            .answer("clipboard:read", &Request::ClipboardRead)
-            .unwrap_err()
-            .code,
-        "unavailable"
-    );
+    for (files, field) in [
+        (
+            json!({ "notes": { "../outside.md": "x" } }),
+            "replies.files.notes",
+        ),
+        (json!({ "notes": { "/etc/hosts": "x" } }), "replies.files.notes"),
+        (json!({ "notes": { "a//b": "x" } }), "replies.files.notes"),
+    ] {
+        let diagnostic =
+            fixture(json!({ "fixture": 1, "replies": { "files": files }, "steps": [{ "query": "x" }] }))
+                .unwrap_err();
+        assert_eq!(diagnostic.field.as_deref(), Some(field), "{diagnostic:?}");
+    }
+    let stray = fixture(json!({ "fixture": 1, "steps": [{ "query": "x", "data": 1 }] })).unwrap_err();
+    assert_eq!(stray.field.as_deref(), Some("steps[0]"));
 }
 
 #[test]

@@ -115,7 +115,7 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
         rows[0].view,
         View::Text {
             title: "Docs for a b".into(),
-            subtitle: "v1, 7 rows".into()
+            subtitle: "v2, 7 rows".into()
         }
     );
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
@@ -406,7 +406,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
     assert_eq!(
         search(&loaded.unwrap(), "").unwrap()[0].view,
         View::Text {
-            title: "1".into(),
+            title: "2".into(),
             subtitle: String::new()
         }
     );
@@ -712,7 +712,8 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
     };
     let title = |environment: Option<&Environment>| {
         let rows = package
-            .search_in("", MAX_ROWS, environment, timeout(DEADLINE))
+            .with_environment(environment.copied())
+            .search("", MAX_ROWS, timeout(DEADLINE))
             .unwrap();
         let View::Text { title, .. } = &rows[0].view else {
             panic!("expected a text row");
@@ -743,3 +744,5 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
     );
     assert_ne!(title(None).split('|').next(), Some("1767225600000"));
 }
+
+mod host;

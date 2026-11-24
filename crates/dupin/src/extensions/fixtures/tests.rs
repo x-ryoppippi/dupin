@@ -197,36 +197,199 @@ fn the_fixture_fixes_the_clock_seed_and_time_zone() {
     );
 }
 
+/// A package whose `package.json` declares `capabilities`, with `main.js`.
+fn capable(capabilities: Value, main: &str) -> (tempfile::TempDir, PathBuf) {
+    let (root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
+    let manifest = package.join("package.json");
+    let mut json: Value = serde_json::from_str(&fs::read_to_string(&manifest).unwrap()).unwrap();
+    json["dupin"]["capabilities"] = capabilities;
+    fs::write(&manifest, json.to_string()).unwrap();
+    fs::write(package.join("main.js"), main).unwrap();
+    fs::remove_file(package.join("fixtures/search.json")).unwrap();
+    (root, package)
+}
+
+fn only_title(report: &Report) -> String {
+    let steps = steps(report, 0);
+    assert!(
+        report.passed || steps.iter().all(|step| step["problem"].is_null()),
+        "{}",
+        report.text
+    );
+    steps[0]["outcome"]["rows"][0]["title"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{}", report.text))
+        .to_owned()
+}
+
 #[test]
-fn a_hostile_package_and_fixture_reach_nothing_beyond_the_fixture() {
+fn host_requests_are_answered_from_the_fixture_through_the_broker() {
     dupin_extension_host::skip_inside_a_sandbox!();
-    let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
-    fs::write(
-        package.join("main.js"),
-        "import * as dupin from 'dupin';\n\
-         export function search() {\n\
+    let (_root, package) = capable(
+        json!({
+            "http": [{ "origin": "https://example.com", "methods": ["GET"] }],
+            "files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
+            "dictionary": ["lookup"],
+            "clipboard": ["read"],
+        }),
+        "import { http, files, dictionary, clipboard } from 'dupin';\n\
+         const settle = async (work) => { try { return String(await work()); } catch (error) { return error.code; } };\n\
+         export async function search() {\n\
          \tconst reached = ['fetch', 'XMLHttpRequest', 'WebSocket', 'require', 'process', 'std', 'os', 'scriptArgs', 'setTimeout']\n\
          \t\t.filter((name) => typeof globalThis[name] !== 'undefined');\n\
-         \treturn [{ title: `${reached.join(',') || 'nothing'} ${Object.keys(dupin).join(',')}` }];\n\
+         \tconst parts = [\n\
+         \t\treached.join(',') || 'nothing',\n\
+         \t\tawait settle(async () => (await http.fetch('https://example.com/')).text()),\n\
+         \t\tawait settle(async () => (await http.fetch('https://example.com/elsewhere')).text()),\n\
+         \t\tawait settle(async () => (await http.fetch('https://api.github.com/')).text()),\n\
+         \t\tawait settle(async () => (await http.fetch('https://example.com/', { method: 'POST' })).text()),\n\
+         \t\tawait settle(() => files.readText('notes', 'today.md')),\n\
+         \t\tawait settle(async () => (await files.list('notes')).map((entry) => entry.name).join('+')),\n\
+         \t\tawait settle(() => files.readText('notes', '../outside.md')),\n\
+         \t\tawait settle(async () => (await dictionary.lookup('run'))[0].headword),\n\
+         \t\tawait settle(async () => (await dictionary.lookup('walk')).length),\n\
+         \t\tawait settle(() => clipboard.readText()),\n\
+         \t];\n\
+         \treturn [{ title: parts.join(' | ') }];\n\
          }\n",
-    )
-    .unwrap();
+    );
     write_fixture(
         &package,
-        "search.json",
+        "services.json",
         json!({
             "fixture": 1,
             "replies": {
                 "http": [{ "request": { "url": "https://example.com/" }, "response": { "body": "from the fixture" } }],
-                "exec": [{ "target": "/bin/sh", "args": ["-c", "touch /tmp/dupin-hostile"] }],
-                "consent": { "http:https://example.com": "allow" },
+                "files": { "notes": { "today.md": "# Today", "archive/old.md": "old" } },
+                "dictionary": { "run": [{ "headword": "run" }] },
+                "clipboard": { "type": "text", "text": "copied" },
             },
-            "steps": [{ "query": "x", "expect": { "rows": [{ "id": "#0", "title": "nothing apiVersion", "actions": [] }] } }],
+            "steps": [{ "query": "x" }],
+        }),
+    );
+    let title = only_title(&test(&package, false).unwrap());
+    // The fixture answers what it has a reply for and the package declared; a URL it has no
+    // reply for fails instead of reaching the network, and reading the clipboard needs the user
+    // to choose an action, so typing never reads it.
+    assert_eq!(
+        title.split(" | ").collect::<Vec<_>>(),
+        [
+            "nothing",
+            "from the fixture",
+            "network",
+            "undeclared",
+            "out-of-scope",
+            "# Today",
+            "archive+today.md",
+            "invalid",
+            "run",
+            "unavailable",
+            "needs-activation",
+        ]
+    );
+
+    write_fixture(
+        &package,
+        "services.json",
+        json!({
+            "fixture": 1,
+            "replies": { "consent": { "http:https://example.com": "deny", "files:notes": "pending" } },
+            "steps": [{ "query": "x" }],
+        }),
+    );
+    let denied = only_title(&test(&package, false).unwrap());
+    assert_eq!(
+        denied.split(" | ").collect::<Vec<_>>(),
+        [
+            "nothing",
+            "revoked",
+            "revoked",
+            "undeclared",
+            "out-of-scope",
+            "needs-consent",
+            "needs-consent",
+            "invalid",
+            "unavailable",
+            "unavailable",
+            "needs-activation",
+        ]
+    );
+
+    write_fixture(
+        &package,
+        "services.json",
+        json!({ "fixture": 1, "replies": { "consent": { "exec:anything": "allow" } }, "steps": [{ "query": "x" }] }),
+    );
+    let report = test(&package, false).unwrap();
+    assert_eq!(
+        report.json["fixtures"][0]["diagnostic"]["field"],
+        "replies.consent.exec:anything"
+    );
+}
+
+#[test]
+fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["write", "watch"] }),
+        "import { storage, clipboard } from 'dupin';\n\
+         export async function search() {\n\
+         \tconst count = (await storage.get('count')) ?? 0;\n\
+         \tconst last = (await storage.get('last')) ?? 'none';\n\
+         \treturn [{ title: `count ${count}, last ${last}`, actions: [{ title: 'Bump', run: 'bump', data: { by: 2 } }] }];\n\
+         }\n\
+         export const actions = {\n\
+         \tasync bump(data) {\n\
+         \t\tconst count = ((await storage.get('count')) ?? 0) + data.by;\n\
+         \t\tawait storage.set('count', count);\n\
+         \t\tawait clipboard.writeText(String(count));\n\
+         \t\treturn { type: 'toast', text: `now ${count}` };\n\
+         \t},\n\
+         };\n\
+         export const events = {\n\
+         \tasync clipboard(event) {\n\
+         \t\tawait storage.set('last', event.text);\n\
+         \t},\n\
+         };\n",
+    );
+    write_fixture(
+        &package,
+        "actions.json",
+        json!({
+            "fixture": 1,
+            "replies": { "storage": { "count": 1 } },
+            "steps": [
+                { "query": "x" },
+                { "activate": "Bump" },
+                { "event": "clipboard", "data": { "type": "text", "text": "elsewhere" } },
+                { "query": "x" },
+            ],
         }),
     );
     let report = test(&package, false).unwrap();
     assert!(report.passed, "{}", report.text);
+    let steps = steps(&report, 0);
+    assert_eq!(steps[0]["outcome"]["rows"][0]["title"], "count 1, last none");
+    assert_eq!(
+        steps[1]["outcome"],
+        json!({
+            "effect": { "run": { "action": "bump", "data": { "by": 2 } } },
+            "toasts": ["now 3"],
+            "clipboard": ["3"],
+            "storage": { "count": 3 },
+        })
+    );
+    assert_eq!(
+        steps[2]["outcome"],
+        json!({ "storage": { "count": 3, "last": "elsewhere" } })
+    );
+    assert_eq!(steps[3]["outcome"]["rows"][0]["title"], "count 3, last elsewhere");
+}
 
+#[test]
+fn a_linked_fixture_is_refused() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
     let outside = tempfile::NamedTempFile::new().unwrap();
     fs::write(outside.path(), r#"{ "fixture": 1, "steps": [{ "query": "x" }] }"#).unwrap();
     std::os::unix::fs::symlink(outside.path(), package.join("fixtures/linked.json")).unwrap();
