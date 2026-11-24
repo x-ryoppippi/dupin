@@ -277,6 +277,17 @@ provider = "extension.snippets"
 extensions = "scripts/latency/snippets.extensions"
 ```
 
+A bundled extension that adds a feature Dupin never had natively has no native implementation to keep parity with. It declares `budget_ms` instead, and `parity` fails when its p95 exceeds it; Emoji & Symbols is held to 5 ms:
+
+```toml
+[features.emoji.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.emoji"
+extensions = "extensions"
+budget_ms = 5.0
+```
+
 The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity.
 
 ### Native baselines

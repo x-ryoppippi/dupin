@@ -806,11 +806,11 @@ impl<'a> Reader<'a> {
                 let key = key?;
                 match key.as_str() {
                     "title" | "data" => {}
-                    "copy" | "open" | "run" => kinds.push(key),
+                    "copy" | "paste" | "open" | "run" => kinds.push(key),
                     _ => {
                         return Err(self
                             .invalid("unknown-field", format!("{at}.{key}"), "is not an action field")
-                            .hint("An action takes `title` and one of `copy`, `open` or `run`, with `data` for `run`.")
+                            .hint("An action takes `title` and one of `copy`, `paste`, `open` or `run`, with `data` for `run`.")
                             .into());
                     }
                 }
@@ -823,7 +823,7 @@ impl<'a> Reader<'a> {
                 })?;
             let [kind] = kinds.as_slice() else {
                 return Err(self
-                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `open` or `run`")
+                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open` or `run`")
                     .hint("Give `{ title: \"Open\", open: \"https://…\" }` or `{ title: \"Delete\", run: \"remove\" }`.")
                     .into());
             };
@@ -838,6 +838,11 @@ impl<'a> Reader<'a> {
                 "copy" => RowEffect::Copy {
                     text: self
                         .string(&action, &format!("{at}.copy"), "copy", MAX_TEXT_BYTES)?
+                        .expect("present"),
+                },
+                "paste" => RowEffect::Paste {
+                    text: self
+                        .string(&action, &format!("{at}.paste"), "paste", MAX_TEXT_BYTES)?
                         .expect("present"),
                 },
                 "open" => {

@@ -81,6 +81,7 @@ declare module 'dupin' {
 
 	export type Action =
 		| { title: string; copy: string }
+		| { title: string; paste: string }
 		| { title: string; open: string }
 		| ItemAction;
 
@@ -236,7 +237,8 @@ declare module 'dupin' {
 		exec?: Record<string, { args?: string[]; output?: boolean }>;
 		/** Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until deleted. */
 		storage?: { quotaBytes: number; retentionDays?: number };
-		clipboard?: ('read' | 'write' | 'watch')[];
+		/** `paste` lets a row's `paste` action paste into the front app; without it, Dupin copies. */
+		clipboard?: ('read' | 'write' | 'watch' | 'paste')[];
 		dictionary?: ['lookup'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };

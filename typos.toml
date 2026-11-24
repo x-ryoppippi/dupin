@@ -19,4 +19,7 @@ extend-exclude = [
 	"assets",
 	"experiments/cargo-cache/results/*.json",
 	"experiments/nix-cargo-cache/results/*.json",
+	# Unicode and CLDR data, and the fixtures that list it, in its own spelling.
+	"extensions/emoji/catalogue.ts",
+	"extensions/emoji/fixtures/*.json",
 ]

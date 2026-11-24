@@ -121,7 +121,8 @@ def "main compare" [
 
 # Hold every implementation other than `native` against the native one of the same scenario:
 # the run's own, or, for a feature whose native implementation is gone, the one recorded in
-# `--baseline` from the last commit that had it. Passes when nothing has a native to match.
+# `--baseline` from the last commit that had it. One that never had a native implementation is
+# held to its own `budget_ms`. Passes when nothing has a native or a budget to match.
 def "main parity" [
     results: path
     --baseline: path # Native results recorded from earlier commits; scripts/latency/native-baseline.json
@@ -252,7 +253,7 @@ def measure [
 ]: nothing -> record {
     mkdir $dir
     let gap = $settings.gap_ms / 1000
-    let per_pass = $job.typed | str length
+    let per_pass = $job.typed | split chars | length
     let passes = $settings.warmup + ($settings.samples / $per_pass | math ceil)
     let script = typing-script $job $passes $gap
     let script_path = $dir | path join script.json
@@ -407,6 +408,7 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
         prefix: $job.prefix
         typed: $job.typed
         provider: $job.setup.provider
+        budget_ms: $job.setup.budget_ms?
         commands: (
             $runs
             | get commands
@@ -431,19 +433,25 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
 }
 
 # Each pair's verdict: `regressed` when the candidate's p95 exceeds the baseline's by more than
-# `tolerance` percent of it or `floor`, whichever is larger; `new` without a baseline.
+# `tolerance` percent of it or `floor`, whichever is larger. Without a baseline, `regressed` when
+# it exceeds the candidate's own `budget_ms`, and `new` when it has none.
 export def verdicts [pairs: list<record>, tolerance: float, floor: duration]: nothing -> table {
     $pairs | each {|pair|
         let cand = $pair.candidate
         match $pair.baseline {
             null => {
-                id: $cand.id
-                baseline: null
-                candidate: $cand.implementation
-                baseline_p95_ms: null
-                candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
-                allowed_ms: null
-                verdict: "new"
+                let budget = $cand.budget_ms?
+                {
+                    id: $cand.id
+                    baseline: (if $budget == null { null } else { "budget" })
+                    candidate: $cand.implementation
+                    baseline_p95_ms: null
+                    candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
+                    allowed_ms: $budget
+                    verdict: (
+                        if $budget == null { "new" } else if $cand.p95_ms > $budget { "regressed" } else { "ok" }
+                    )
+                }
             }
             $base => {
                 let allowed = [($base.p95_ms * $tolerance / 100) ($floor / 1ms)] | math max

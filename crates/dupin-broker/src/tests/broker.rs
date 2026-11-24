@@ -1134,3 +1134,72 @@ fn a_change_that_cannot_be_saved_is_undone() {
     let _ = relaunched.install(package.clone(), rev(R1), github());
     assert!(relaunched.is_turned_off(&package));
 }
+
+#[test]
+fn pasting_is_a_scope_that_needs_a_grant_an_activation_and_accessibility() {
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let (broker, package) = enabled(github());
+    assert_eq!(
+        denial(check(&broker, &package, &paste, Trigger::Activation)),
+        Denial::Undeclared(key("clipboard:paste"))
+    );
+
+    let (mut broker, package) = enabled(caps(json!({ "clipboard": ["paste"] })));
+    assert_eq!(
+        consent_needed(check(&broker, &package, &paste, Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+    broker.approve(&package, &key("clipboard:paste"), None).unwrap();
+    assert_eq!(
+        denial(check(&broker, &package, &paste, Trigger::Query)),
+        Denial::NeedsActivation
+    );
+    assert_eq!(
+        consent_needed(check(&broker, &package, &paste, Trigger::Activation)).reason,
+        ConsentReason::OsAccess(OsPermission::Accessibility)
+    );
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let allowed = permit(check(&broker, &package, &paste, Trigger::Activation));
+    assert!(broker.validate(&allowed));
+    assert_eq!(
+        broker.os_consumers(),
+        [OsConsumer {
+            permission: OsPermission::Accessibility,
+            package: package.clone(),
+            scope: key("clipboard:paste"),
+            enabled: true,
+            granted: true,
+        }]
+    );
+    broker.revoke(&package, &key("clipboard:paste")).unwrap();
+    assert!(!broker.validate(&allowed));
+    assert_eq!(
+        Scope::Clipboard {
+            access: ClipboardAccess::Paste
+        }
+        .to_string(),
+        "paste into the app you were using"
+    );
+}
+
+#[test]
+fn only_the_pristine_bundled_revision_is_pre_granted_pasting() {
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let declares = || caps(json!({ "clipboard": ["paste"] }));
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("emoji");
+    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let _ = broker.install(package.clone(), rev(R1), declares());
+    assert!(matches!(
+        check(&broker, &package, &paste, Trigger::Activation),
+        Decision::Allow(_)
+    ));
+
+    let _ = broker.install(package.clone(), rev(R2), declares());
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(broker.check(&package, &rev(R2), &paste, Trigger::Activation)).reason,
+        ConsentReason::NotGranted
+    );
+}
