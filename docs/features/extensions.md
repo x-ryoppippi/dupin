@@ -92,17 +92,16 @@ An item can offer actions of its own, which run a function of the module's `acti
 import { storage } from 'dupin';
 
 export async function search(query) {
-	const saved = (await storage.get('notes')) ?? [];
+	const { records } = await storage.list({ limit: 20 });
 	return [
 		{ title: `Save “${query}”`, actions: [{ title: 'Save', run: 'save', data: { text: query } }] },
-		...saved.map((text) => ({ title: text, text })),
+		...records.map((note) => ({ title: note.data, text: note.data })),
 	];
 }
 
 export const actions = {
 	async save({ text }) {
-		const saved = (await storage.get('notes')) ?? [];
-		await storage.set('notes', [text, ...saved].slice(0, 20));
+		await storage.put(text);
 		return { type: 'toast', text: 'Saved' };
 	},
 };
@@ -124,8 +123,7 @@ import { storage } from 'dupin';
 export const events = {
 	async clipboard(change) {
 		if (change.type !== 'text') return;
-		const recent = (await storage.get('recent')) ?? [];
-		await storage.set('recent', [change.text, ...recent].slice(0, 50));
+		await storage.put({ text: change.text });
 	},
 };
 ```
@@ -256,7 +254,31 @@ Programs and scripts run with your own access, without a shell, as the [exec cap
 
 ### Storage
 
-`"storage": { "quotaBytes": 1048576, "retentionDays": 30 }` gives the package a key-value store of its own, up to the quota counted as each key and its value as JSON. `storage.get(key)`, `set(key, value)`, `delete(key)` and `keys()` work while you type, in actions and in event handlers; a write past the quota fails with `quota-exceeded`. Keys are 1–256 bytes and a value at most 1 MiB of JSON. The data is meant to be kept encrypted at rest, but this build has no storage service yet, so every request fails with `unavailable`.
+`"storage": { "quotaBytes": 1048576, "retentionDays": 30 }` gives the package an encrypted store of its own: records of JSON, each with the blobs (byte strings, such as an image) it carries. It works while you type, in actions and in event handlers, once you allow it.
+
+```js
+import { storage } from 'dupin';
+
+const thumbnail = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+const record = await storage.put({ title: 'Cover' }, { blobs: [thumbnail] });
+const { records, next } = await storage.list({ limit: 20 });
+const bytes = await storage.readBlob(record.blobs[0].handle);
+```
+
+| Function                  | What it does                                                                                                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `put(data, { blobs })`    | Stores a record and returns it: `{ id, createdAt, data, blobs: [{ handle, size }] }`. Blobs are typed arrays or `ArrayBuffer`s.                                                                      |
+| `get(id)`                 | The record, or `undefined`.                                                                                                                                                                          |
+| `list({ before, limit })` | Up to `limit` records (50 by default, 200 at most) older than the record `before` names, newest first, and `next` to pass as `before` for the following page. A page also ends before 2 MiB of JSON. |
+| `readBlob(handle)`        | The blob's bytes as a `Uint8Array`, while a record still carries it.                                                                                                                                 |
+| `delete(id)`, `clear()`   | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                 |
+| `usage()`                 | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                     |
+
+Record IDs and blob handles are opaque strings; IDs sort by when the record was stored. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
+
+- **Limits.** A record's JSON and its blobs are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
+- **Where it lives.** Each package has a [`dupin-storage`](./storage.md) namespace of its own, named by a hash of its package ID and where it was installed from, so no package reads another's data, a native feature's, or that of a bundled package it copies. Everything is sealed with the data key in your Keychain.
+- **Revoking keeps the data, removing deletes it.** Revoking `storage` in Settings or the panel stops every request at once and keeps what the package stored, so allowing it again finds it; Settings → Extensions offers **Delete Data** beside the scope. `dupin ext remove` deletes the package's data with it, asking the running Dupin to if it has the data open.
 
 ### Dictionary
 

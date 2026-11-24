@@ -97,18 +97,87 @@ export const exec = Object.freeze({
 	},
 });
 
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64_VALUES = new Uint8Array(128).fill(255);
+for (let index = 0; index < 64; index++) BASE64_VALUES[BASE64.charCodeAt(index)] = index;
+
+function toBase64(bytes) {
+	const chunks = [];
+	for (let start = 0; start < bytes.length; start += 3 * 4096) {
+		const end = Math.min(start + 3 * 4096, bytes.length);
+		const codes = [];
+		for (let index = start; index < end; index += 3) {
+			const left = end - index;
+			const n = (bytes[index] << 16) | ((left > 1 ? bytes[index + 1] : 0) << 8) | (left > 2 ? bytes[index + 2] : 0);
+			codes.push(
+				BASE64.charCodeAt(n >> 18),
+				BASE64.charCodeAt((n >> 12) & 63),
+				left > 1 ? BASE64.charCodeAt((n >> 6) & 63) : 61,
+				left > 2 ? BASE64.charCodeAt(n & 63) : 61,
+			);
+		}
+		chunks.push(String.fromCharCode(...codes));
+	}
+	return chunks.join('');
+}
+
+function fromBase64(text) {
+	const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+	const bytes = new Uint8Array((text.length / 4) * 3 - padding);
+	let at = 0;
+	for (let index = 0; index < text.length; index += 4) {
+		const n =
+			(BASE64_VALUES[text.charCodeAt(index)] << 18) |
+			(BASE64_VALUES[text.charCodeAt(index + 1)] << 12) |
+			((BASE64_VALUES[text.charCodeAt(index + 2)] & 63) << 6) |
+			(BASE64_VALUES[text.charCodeAt(index + 3)] & 63);
+		bytes[at++] = n >> 16;
+		if (at < bytes.length) bytes[at++] = (n >> 8) & 255;
+		if (at < bytes.length) bytes[at++] = n & 255;
+	}
+	return bytes;
+}
+
+function blobBytes(blob) {
+	if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
+	if (ArrayBuffer.isView(blob)) return new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+	throw new DupinError({ code: 'invalid', message: 'a blob is a Uint8Array, another typed array or an ArrayBuffer' });
+}
+
+function stored(record) {
+	if (record === null) return undefined;
+	return Object.freeze({
+		id: record.id,
+		createdAt: new Date(record.createdAt).toISOString(),
+		data: record.data,
+		blobs: Object.freeze(record.blobs.map((blob) => Object.freeze(blob))),
+	});
+}
+
 export const storage = Object.freeze({
-	async get(key) {
-		return (await call('storage.get', { key })).value;
+	async put(data, options = {}) {
+		const blobs = Array.from(options.blobs ?? [], (blob) => toBase64(blobBytes(blob)));
+		return stored(await call('storage.put', { data, blobs }));
 	},
-	async set(key, value) {
-		await call('storage.set', { key, value });
+	async get(id) {
+		return stored(await call('storage.get', { id }));
 	},
-	async delete(key) {
-		await call('storage.delete', { key });
+	async list(options = {}) {
+		const page = await call('storage.list', { before: options.before, limit: options.limit });
+		return Object.freeze({ records: Object.freeze(page.records.map(stored)), next: page.next ?? undefined });
 	},
-	async keys() {
-		return (await call('storage.keys', {})).keys;
+	async readBlob(handle) {
+		return fromBase64((await call('storage.readBlob', { handle })).data);
+	},
+	async delete(id) {
+		return (await call('storage.delete', { id })).deleted;
+	},
+	async clear() {
+		await call('storage.clear', {});
+	},
+	async usage() {
+		const usage = await call('storage.usage', {});
+		return Object.freeze({ ...usage, retentionDays: usage.retentionDays ?? undefined });
 	},
 });
 

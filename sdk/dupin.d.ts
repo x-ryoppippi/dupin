@@ -131,7 +131,7 @@ declare module 'dupin' {
 		 * user's script commands. `output` asks to receive stdout and stderr.
 		 */
 		exec?: Record<string, { args?: string[]; output?: boolean }>;
-		/** Encrypted key-value data private to the package. */
+		/** Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until deleted. */
 		storage?: { quotaBytes: number; retentionDays?: number };
 		clipboard?: ('read' | 'write' | 'watch')[];
 		dictionary?: ['lookup'];
@@ -221,12 +221,58 @@ declare module 'dupin' {
 		run(profile: string, inputs?: Record<string, string | number>): Promise<ExecResult>;
 	};
 
-	/** `storage` capability. Keys are 1–256 bytes; a value is at most 1 MiB of JSON. */
+	/** A blob stored with a record. The handle is opaque; pass it to `storage.readBlob`. */
+	export interface StoredBlob {
+		readonly handle: string;
+		/** In bytes. */
+		readonly size: number;
+	}
+
+	/** A record as `storage` returns it. Dupin freezes it, but not `data`. */
+	export interface StoredRecord {
+		/** Opaque. IDs sort by when the record was stored. */
+		readonly id: string;
+		/** ISO 8601, UTC. */
+		readonly createdAt: string;
+		readonly data: Json;
+		/** In the order they were given to `put`. */
+		readonly blobs: readonly StoredBlob[];
+	}
+
+	export interface StoragePage {
+		/** Newest first. */
+		readonly records: readonly StoredRecord[];
+		/** Pass as `before` for the next page; absent once this page reached the oldest. */
+		readonly next?: string;
+	}
+
+	export interface StorageUsage {
+		readonly entries: number;
+		/** Each record's JSON plus each distinct blob, counted once however many records share it. */
+		readonly bytes: number;
+		readonly quotaBytes: number;
+		readonly retentionDays?: number;
+	}
+
+	/**
+	 * `storage` capability: records of JSON and the blobs they carry, encrypted at rest and private
+	 * to the package. A record's JSON and blobs are at most 1 MiB together, with up to 16 blobs;
+	 * Dupin keeps up to 10,000 records within the declared `quotaBytes`, and deletes records older
+	 * than `retentionDays`. A `put` that doesn't fit fails with `quota-exceeded` and deletes
+	 * nothing; one over 1 MiB fails with `too-large`.
+	 */
 	export const storage: {
-		get(key: string): Promise<Json | undefined>;
-		set(key: string, value: Json): Promise<void>;
-		delete(key: string): Promise<void>;
-		keys(): Promise<string[]>;
+		put(data: Json, options?: { blobs?: (ArrayBufferView | ArrayBuffer)[] }): Promise<StoredRecord>;
+		/** `undefined` when no such record is stored. */
+		get(id: string): Promise<StoredRecord | undefined>;
+		/** Up to `limit` records (50 by default, 200 at most) older than `before`, newest first. */
+		list(options?: { before?: string; limit?: number }): Promise<StoragePage>;
+		/** Fails with `not-found` once no record carries the blob. */
+		readBlob(handle: string): Promise<Uint8Array>;
+		/** Whether the record was stored. Its blobs go once no other record carries them. */
+		delete(id: string): Promise<boolean>;
+		clear(): Promise<void>;
+		usage(): Promise<StorageUsage>;
 	};
 
 	export type Clip =

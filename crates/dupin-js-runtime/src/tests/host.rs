@@ -67,9 +67,10 @@ fn host_requests_reach_the_bridge_and_replies_settle_their_promises() {
         "http.fetch",
         r#"{"ok":{"status":200,"url":"https://api.example.com/x","redirected":false,"headers":{"content-type":"application/json"},"body":"{\"archived\":false}","truncated":false}}"#.into(),
     );
-    bridge
-        .replies
-        .insert("storage.get", r#"{"ok":{"value":{"n":3}}}"#.into());
+    bridge.replies.insert(
+        "storage.get",
+        r#"{"ok":{"id":"r","createdAt":0,"data":{"n":3},"blobs":[]}}"#.into(),
+    );
     let rows = with_host(
         r#"import { http, storage } from 'dupin';
            export async function search(query) {
@@ -78,7 +79,7 @@ fn host_requests_reach_the_bridge_and_replies_settle_their_promises() {
                storage.get(query),
              ]);
              const repo = await response.json();
-             return [{ title: `${response.ok} ${response.status} ${repo.archived} ${stored.n}` }];
+             return [{ title: `${response.ok} ${response.status} ${repo.archived} ${stored.data.n}` }];
            }"#,
         "count",
         &mut bridge,
@@ -92,8 +93,49 @@ fn host_requests_reach_the_bridge_and_replies_settle_their_promises() {
                 "http.fetch".to_owned(),
                 serde_json::json!({"url": "https://api.example.com/x", "method": "GET", "headers": {"accept": "application/json"}})
             ),
-            ("storage.get".to_owned(), serde_json::json!({"key": "count"})),
+            ("storage.get".to_owned(), serde_json::json!({"id": "count"})),
         ]
+    );
+}
+
+#[test]
+fn blobs_cross_as_base64_and_come_back_as_bytes() {
+    let mut bridge = Fixture::default();
+    bridge.replies.insert(
+        "storage.put",
+        r#"{"ok":{"id":"r","createdAt":86400000,"data":"x","blobs":[{"handle":"h","size":4}]}}"#.into(),
+    );
+    bridge
+        .replies
+        .insert("storage.readBlob", r#"{"ok":{"data":"AAEC/w=="}}"#.into());
+    let rows = with_host(
+        r#"import { storage } from 'dupin';
+           export async function search() {
+             const long = new Uint8Array(70001).map((_, index) => index % 251);
+             const record = await storage.put('x', { blobs: [new Uint8Array([0, 1, 2, 255]), new Uint8Array([1]).buffer, new Uint16Array([0x4241]), long, new Uint8Array(0)] });
+             const bytes = await storage.readBlob(record.blobs[0].handle);
+             return [{ title: `${record.createdAt} ${Object.isFrozen(record.blobs[0])} ${bytes instanceof Uint8Array} ${[...bytes]}` }];
+           }"#,
+        "",
+        &mut bridge,
+    )
+    .unwrap();
+    assert_eq!(titles(&rows), ["1970-01-02T00:00:00.000Z true true 0,1,2,255"]);
+    let blobs = bridge.sent[0].1["blobs"].as_array().unwrap();
+    assert_eq!(blobs[..3], ["AAEC/w==", "AQ==", "QUI="]);
+    let long: Vec<u8> = (0..70001).map(|index| (index % 251) as u8).collect();
+    assert_eq!(
+        base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            blobs[3].as_str().unwrap()
+        )
+        .unwrap(),
+        long
+    );
+    assert_eq!(blobs[4], "");
+    assert_eq!(
+        bridge.sent[1],
+        ("storage.readBlob".to_owned(), serde_json::json!({"handle": "h"}))
     );
 }
 
@@ -186,7 +228,7 @@ fn a_request_nobody_answers_ends_at_the_deadline_and_cancelling_ends_it_quietly(
 #[test]
 fn without_a_host_every_request_fails_as_unavailable() {
     let rows = run(
-        "import { storage } from 'dupin'; export async function search() { try { await storage.keys(); } catch (error) { return [{ title: error.code }]; } }",
+        "import { storage } from 'dupin'; export async function search() { try { await storage.usage(); } catch (error) { return [{ title: error.code }]; } }",
         "",
     )
     .unwrap();
@@ -248,11 +290,14 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
 #[test]
 fn actions_run_by_name_with_their_data_and_return_an_effect() {
     let mut bridge = Fixture::default();
-    bridge.replies.insert("storage.set", r#"{"ok":null}"#.into());
+    bridge.replies.insert(
+        "storage.put",
+        r#"{"ok":{"id":"r","createdAt":0,"data":null,"blobs":[]}}"#.into(),
+    );
     let source = r#"import { storage } from 'dupin';
         export function search() { return []; }
         export const actions = {
-          async save(data, ctx) { await storage.set('last', data); return { type: 'toast', text: `Saved ${data.id} ${Object.isFrozen(ctx)}` }; },
+          async save(data, ctx) { await storage.put(data); return { type: 'toast', text: `Saved ${data.id} ${Object.isFrozen(ctx)}` }; },
           quiet() {},
           bad() { return { type: 'toast', text: 'a\nb' }; },
         };"#;
@@ -265,8 +310,8 @@ fn actions_run_by_name_with_their_data_and_return_an_effect() {
     assert_eq!(
         bridge.sent,
         [(
-            "storage.set".to_owned(),
-            serde_json::json!({"key": "last", "value": {"id": 7}})
+            "storage.put".to_owned(),
+            serde_json::json!({"data": {"id": 7}, "blobs": []})
         )]
     );
     assert_eq!(act(source, "quiet", "null", &mut bridge), Ok(None));
@@ -293,11 +338,14 @@ fn actions_run_by_name_with_their_data_and_return_an_effect() {
 #[test]
 fn event_handlers_receive_a_frozen_event() {
     let mut bridge = Fixture::default();
-    bridge.replies.insert("storage.set", r#"{"ok":null}"#.into());
+    bridge.replies.insert(
+        "storage.put",
+        r#"{"ok":{"id":"r","createdAt":0,"data":null,"blobs":[]}}"#.into(),
+    );
     let (_folder, loaded) = package(&[(
         "main.js",
         r#"import { storage } from 'dupin';
-           export const events = { async clipboard(change) { await storage.set('seen', `${change.text} ${Object.isFrozen(change)}`); } };"#,
+           export const events = { async clipboard(change) { await storage.put(`${change.text} ${Object.isFrozen(change)}`); } };"#,
     )]);
     let package = loaded.unwrap();
     package
@@ -311,8 +359,8 @@ fn event_handlers_receive_a_frozen_event() {
     assert_eq!(
         bridge.sent,
         [(
-            "storage.set".to_owned(),
-            serde_json::json!({"key": "seen", "value": "hi true"})
+            "storage.put".to_owned(),
+            serde_json::json!({"data": "hi true", "blobs": []})
         )]
     );
     assert_eq!(

@@ -298,40 +298,35 @@ fn files_scopes_are_bound_to_the_picked_root_and_stay_inside_it() {
 }
 
 #[test]
-fn storage_writes_stay_within_the_declared_quota() {
+fn storage_needs_its_grant_and_no_activation() {
     let (mut broker, package) = enabled(caps(json!({ "storage": { "quotaBytes": 100 } })));
+    let storage = |op| Request::Storage { op };
+    assert!(matches!(
+        check(&broker, &package, &storage(StorageOp::Write), Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
     assert_eq!(
         broker.approve(&package, &ScopeKey::Storage, Some("/x".into())),
         Err(BrokerError::UnexpectedBinding(ScopeKey::Storage))
     );
     broker.approve(&package, &ScopeKey::Storage, None).unwrap();
-    let storage = |op, size_after| Request::Storage { op, size_after };
-    assert!(matches!(
-        check(&broker, &package, &storage(StorageOp::Write, 100), Trigger::Query),
-        Decision::Allow(_)
-    ));
-    assert!(matches!(
-        denial(check(
-            &broker,
-            &package,
-            &storage(StorageOp::Write, 101),
-            Trigger::Query
-        )),
-        Denial::OutOfScope { .. }
-    ));
-    assert!(matches!(
-        check(
-            &broker,
-            &package,
-            &storage(StorageOp::Read, 500),
-            Trigger::Background
-        ),
-        Decision::Allow(_)
-    ));
-    assert!(matches!(
-        check(&broker, &package, &storage(StorageOp::Delete, 0), Trigger::Query),
-        Decision::Allow(_)
-    ));
+    for (op, trigger) in [
+        (StorageOp::Write, Trigger::Query),
+        (StorageOp::Read, Trigger::Background),
+        (StorageOp::Delete, Trigger::Query),
+    ] {
+        let Decision::Allow(permit) = check(&broker, &package, &storage(op), trigger) else {
+            panic!("{op:?} under {trigger:?}");
+        };
+        assert_eq!(
+            permit.scope(),
+            &Scope::Storage {
+                quota_bytes: 100,
+                retention_days: None
+            },
+            "the service applies the quota the permit names"
+        );
+    }
 }
 
 #[test]

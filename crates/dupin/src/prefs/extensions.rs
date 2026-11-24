@@ -1,6 +1,6 @@
 //! Settings → Extensions: each installed package's declared capabilities and where each stands,
-//! with Allow, Revoke and Request Access. Opening the page only reads; macOS is asked only when
-//! the user presses Request Access.
+//! with Allow, Revoke, Request Access and, for storage, Delete Data. Opening the page only reads;
+//! macOS is asked only when the user presses Request Access.
 
 use dupin_extension_bridge::{
     Bridge, ConsentReason, ConsentRequest, ConsentState, GrantSource, OsAccess, OsPermission, PackageId,
@@ -214,6 +214,16 @@ fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &InstalledExtension
             .key(format!("{key}-allow")),
         );
     }
+    if matches!(scope, Scope::Storage { .. }) {
+        let id = extension.package.clone();
+        controls = controls.child(
+            Button::new("Delete Data")
+                .variant(ButtonVariant::Outline)
+                .on_press(move |s: &mut Prefs| s.delete_extension_data(&id))
+                .build(k)
+                .key(format!("{key}-delete-data")),
+        );
+    }
     let mut detail = scope.key().to_string();
     if let Some(permission) = permission {
         detail.push_str(&format!(" · Also needs macOS {} access", permission.name()));
@@ -329,7 +339,26 @@ impl Prefs {
 
     fn revoke(&mut self, id: &PackageId, key: &dupin_extension_bridge::ScopeKey) {
         let Some(bridge) = self.access.clone() else { return };
-        self.extension_problem = bridge.revoke(id, key).err().map(|error| error.to_string());
+        self.extension_problem = match bridge.revoke(id, key) {
+            Ok(()) if *key == dupin_extension_bridge::ScopeKey::Storage => Some(format!(
+                "Revoked. {}'s stored data is kept until you delete it or remove the extension.",
+                name_of(self, id)
+            )),
+            Ok(()) => None,
+            Err(error) => Some(error.to_string()),
+        };
+    }
+
+    /// Deletes what the package stored, off the UI thread, since it removes files.
+    fn delete_extension_data(&mut self, id: &PackageId) {
+        let Some(bridge) = self.access.clone() else { return };
+        let (id, origin) = (id.clone(), bridge.origin(id));
+        self.extension_problem = Some(format!("Deleting {}'s stored data.", name_of(self, &id)));
+        std::thread::spawn(move || {
+            if let Err(failure) = bridge.delete_data(&id, origin) {
+                crate::log::warn(&format!("couldn't delete {id}'s stored data: {failure}"));
+            }
+        });
     }
 
     fn set_extension_enabled(&mut self, id: &PackageId, enabled: bool) {

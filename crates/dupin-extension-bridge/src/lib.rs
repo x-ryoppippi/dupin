@@ -13,6 +13,7 @@
 
 mod call;
 pub mod services;
+pub mod storage;
 mod watch;
 
 use std::collections::{HashMap, HashSet};
@@ -29,6 +30,7 @@ pub use dupin_broker::{
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
 pub use services::{Failure, Services};
+pub use storage::{Origin, PackageStorage};
 
 /// The largest reply a guest receives, encoded; its heap is 16 MiB.
 const MAX_REPLY_BYTES: usize = 4 * 1024 * 1024;
@@ -89,6 +91,8 @@ pub struct Session {
     revision: Revision,
     generation: Generation,
     trigger: Trigger,
+    /// The package's own storage namespace, for the origin it was installed from.
+    namespace: String,
 }
 
 impl HostServices for Session {
@@ -147,6 +151,8 @@ struct State {
     problems: Vec<String>,
     /// Each grant file as the bridge last read or wrote it.
     seen: Seen,
+    /// Where each installed package came from, which picks its storage namespace.
+    origins: HashMap<PackageId, Origin>,
 }
 
 #[derive(Default)]
@@ -212,6 +218,7 @@ impl Bridge {
                     os: HashMap::new(),
                     problems: Vec::new(),
                     seen,
+                    origins: HashMap::new(),
                 }),
                 services,
                 base,
@@ -274,8 +281,33 @@ impl Bridge {
     /// Loads or updates a package's declaration at `revision`. It never grants anything; what
     /// a new revision widens needs consent again, and what it no longer declares is dropped.
     pub fn install(&self, id: &PackageId, revision: Revision, capabilities: Capabilities) -> Reconciliation {
+        self.load(id, revision, capabilities, Origin::User)
+    }
+
+    /// Loads a package that ships in Dupin, as [`Bridge::install`] does. While `revision` is
+    /// the one Dupin ships, its scopes are granted without asking. No package ships yet, so
+    /// only tests load one.
+    #[cfg(test)]
+    fn install_bundled(
+        &self,
+        id: &PackageId,
+        revision: Revision,
+        capabilities: Capabilities,
+    ) -> Reconciliation {
+        self.inner.lock().broker.set_bundled(id.clone(), revision.clone());
+        self.load(id, revision, capabilities, Origin::Bundled)
+    }
+
+    fn load(
+        &self,
+        id: &PackageId,
+        revision: Revision,
+        capabilities: Capabilities,
+        origin: Origin,
+    ) -> Reconciliation {
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
+        state.origins.insert(id.clone(), origin);
         let before = state.broker.generation(id);
         let report = state.broker.install(id.clone(), revision, capabilities);
         let changed = before != state.broker.generation(id);
@@ -312,6 +344,7 @@ impl Bridge {
             revision: revision.clone(),
             generation,
             trigger,
+            namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
         };
         Call {
             services: Arc::new(session),
@@ -375,6 +408,20 @@ impl Bridge {
             .pending
             .retain(|request| request.package != *id || request.key() != *key);
         Ok(())
+    }
+
+    /// Where `id` was installed from, as [`Bridge::delete_data`] takes it.
+    pub fn origin(&self, id: &PackageId) -> Origin {
+        self.inner.lock().origins.get(id).copied().unwrap_or_default()
+    }
+
+    /// Deletes everything `id` keeps in storage as a package from `origin`. Revoking `storage`
+    /// keeps the data, so allowing it again finds it; removing the package should delete it.
+    pub fn delete_data(&self, id: &PackageId, origin: Origin) -> Result<(), Failure> {
+        self.inner
+            .services
+            .storage
+            .discard(&storage::namespace(id, origin))
     }
 
     /// Reports what macOS allows, read without prompting.
@@ -665,10 +712,6 @@ pub(crate) fn failure_for(denial: &Denial) -> Failure {
         Denial::Disabled => "disabled",
         Denial::Invalid(_) => "invalid",
         Denial::Undeclared(_) => "undeclared",
-        Denial::OutOfScope {
-            key: ScopeKey::Storage,
-            ..
-        } => "quota-exceeded",
         Denial::OutOfScope { .. } => "out-of-scope",
         Denial::NeedsActivation => "needs-activation",
         Denial::Revoked(_) => "revoked",

@@ -1,6 +1,6 @@
 # Encrypted storage
 
-`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name (`clipboard`), and later an extension through the broker's `storage` capability, which maps the installed package to a namespace of its own. The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
+`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name (`clipboard`), and an extension through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
 
 ## What a namespace holds
 
@@ -8,7 +8,13 @@
 - **Blobs** are byte strings stored beside a record: an image, a file snapshot, a video. A blob is named by a keyed hash of its contents, so the same image copied twice is stored once and kept until no record refers to it. `put` returns a handle per blob; `read_blob` takes the handle and returns the bytes.
 - **Limits** apply per namespace: maximum age (any duration, or forever), maximum entries, maximum total bytes and maximum bytes per item. An item over its limit is refused whole, never truncated. The oldest records go first when a limit is exceeded. Limits apply when the namespace opens, after every `put` and when they change; the owner also runs a `Sweeper` thread that applies them periodically, so entries age out while nothing is being written. Hard ceilings (100,000 entries, 512 MiB per item, 16 GiB per namespace) bound what any owner can ask for.
 
+`put` makes room for a new record by deleting the oldest ones. `put_within_limits` refuses a record there is no room for with `QuotaExceeded` and deletes nothing but records past their age; it checks the room and writes under one lock, so writers at the same time can't pass the limits together. Extensions store with it, since their quota is a promise not to take more, not a retention policy.
+
 Every call blocks on file I/O and must run on a worker thread, never the UI thread. A `Store` can be shared between threads; calls on it are serialized. Only one `Store` per namespace can be open at a time, in this process or another, which an advisory lock on the namespace enforces.
+
+## Extension namespaces
+
+The broker bridge names an extension's namespace `ext-u-<hash>` for a package the user installed and `ext-b-<hash>` for one bundled with Dupin, where the hash is the first 160 bits of SHA-256 over the origin and the package ID. Native features use plain names without the `ext-` prefix, so the two never meet; neither do two packages, nor a user's copy of a bundled package and the bundled package itself, even when the copy is unmodified. The namespace opens with the quota and retention the package declares, bounded by Dupin's maxima (64 MiB, 10,000 records, 1 MiB per record, 3,650 days), stays open while Dupin runs, and a sweeper applies its retention hourly; every request also applies it first. Revoking `storage` keeps the namespace; `Bridge::delete_data`, which Settings' Delete Data and `dupin ext remove` call, discards it.
 
 ## On disk
 

@@ -49,8 +49,12 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         Command::Remove(name) => {
             let entry = installer.remove(&name).map_err(diagnostic)?;
             forget_grants(&name)?;
+            delete_data(&name)?;
             (
-                vec![format!("Removed {name} {} and its grants.", entry.version)],
+                vec![format!(
+                    "Removed {name} {}, its grants and its stored data.",
+                    entry.version
+                )],
                 json!({"removed": name}),
             )
         }
@@ -136,6 +140,30 @@ fn forget_grants(name: &str) -> Result<(), Diagnostic> {
     broker.save(&path).map_err(|error| {
         Diagnostic::new("grants-unsaved", error.to_string()).file(crate::extensions::access::LOCAL_FILE)
     })
+}
+
+/// Uninstalling deletes what the package stored; revoking its `storage` in Settings keeps it.
+/// A running Dupin that has the package's data open deletes it itself.
+fn delete_data(name: &str) -> Result<(), Diagnostic> {
+    let Ok(id) = PackageId::new(name) else {
+        return Ok(());
+    };
+    let Some(storage) = crate::extensions::access::storage() else {
+        return Ok(());
+    };
+    let namespace = dupin_extension_bridge::storage::namespace(&id, dupin_extension_bridge::Origin::User);
+    let unsaved = |message: String| Diagnostic::new("data-undeleted", message);
+    match storage.discard(&namespace) {
+        Ok(()) => Ok(()),
+        Err(dupin_storage::Error::Busy) => {
+            crate::control::exchange(crate::control::Command::ExtensionDataDelete {
+                package: name.to_owned(),
+            })
+            .map(|_| ())
+            .map_err(|error| unsaved(format!("Dupin couldn't delete {name}'s stored data: {error}")))
+        }
+        Err(error) => Err(unsaved(format!("Couldn't delete {name}'s stored data: {error}"))),
+    }
 }
 
 /// Who already answers a keyword in the launcher, from the effective configuration.

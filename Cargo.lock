@@ -880,6 +880,7 @@ dependencies = [
  "dupin-js-runtime",
  "dupin-mac",
  "dupin-plugin-protocol",
+ "dupin-storage",
  "fend-core",
  "libc",
  "naga",
@@ -936,14 +937,17 @@ dependencies = [
 name = "dupin-extension-bridge"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "dupin-broker",
  "dupin-extension-host",
  "dupin-extension-http",
  "dupin-host-services",
  "dupin-js-runtime",
  "dupin-plugin-protocol",
+ "dupin-storage",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 
@@ -999,6 +1003,7 @@ dependencies = [
 name = "dupin-js-runtime"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "dupin-plugin-protocol",
  "oxc_allocator",
  "oxc_ast",

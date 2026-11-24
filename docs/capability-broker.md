@@ -40,7 +40,7 @@ A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-st
 A host service describes the operation as a `Request` and calls `Broker::check(package, revision, request, trigger)`. The trigger is set by the host from input it received: `Query` while the user types, `Background` for work nobody asked for just now, and `Activation` for a deliberate action. The answer is one of:
 
 - **Allow**, with a `Permit` carrying the declared scope, its bounds and, for files and exec, the path the user picked.
-- **Deny**, with a reason that renders as a user-facing sentence: not installed, a stale revision, unreadable grants, turned off, an invalid request (such as a path with `..`), an undeclared scope, beyond the declared scope (method, files access, script output, storage quota, calendar window), a missing activation, revoked by the user, denied by the declarative base, or denied or restricted by the OS.
+- **Deny**, with a reason that renders as a user-facing sentence: not installed, a stale revision, unreadable grants, turned off, an invalid request (such as a path with `..`), an undeclared scope, beyond the declared scope (method, files access, script output, calendar window), a missing activation, revoked by the user, denied by the declarative base, or denied or restricted by the OS.
 - **NeedsConsent**, carrying the revision and declared scope to show and whether it was never granted, was widened by a new revision, or needs OS access. `may_prompt` is true only for an activation, so the host never asks while the user types or in the background.
 
 When the user grants it, the host passes that revision and scope back to `Broker::consent`. The broker refuses the approval if the package has since moved to another revision or declares the scope differently, so a consent never approves more than the user saw. Settings takes both from `Broker::revision` and `Broker::consents` when it renders the list.
@@ -118,7 +118,7 @@ For each request the session:
 
 1. decodes the arguments strictly (unknown fields, wrong types and oversized values are `invalid` before the broker sees them);
 2. builds the broker `Request` and calls `Broker::check`; a call whose generation has moved on is `revoked`;
-3. runs the service only within the permit (the HTTP origin it names, the files root and the program the user picked, the storage quota, the calendar window);
+3. runs the service only within the permit (the HTTP origin it names, the files root and the program the user picked, the package's own storage namespace with its quota and retention, checked against stored data in the same step as each write, the calendar window);
 4. calls `Broker::validate` again before an effect and before releasing the result, and drops the result if the permit no longer holds or the call ended.
 
 `NeedsConsent` fails the request with `needs-consent` and keeps a `ConsentRequest`, the revision and declared scope to show, for the panel and Settings; a request while the package is off fails with `disabled` and is remembered the same way. Allow passes that revision and scope back to `Broker::consent` and turns the package on; it re-runs nothing, and the panel only takes the answered row away. Deny revokes the scope. A guest result is shown only while the generation it started at is current, so a revocation mid-call drops the rows it produced.
