@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use dupin_extension_bridge::services::{self, Services, Subscription};
 use dupin_extension_bridge::{
@@ -50,8 +50,8 @@ pub struct Platform {
     pub scripts: Arc<RwLock<Catalog>>,
     pub runner: Runner,
     pub calendar_access: CalendarAccess,
-    /// Clipboard history's policy, whose ignored apps extensions never see copies from either.
-    pub history: Arc<Mutex<dupin_core::clipboard::History>>,
+    /// Clipboard history's settings, whose ignored apps and limits every extension follows.
+    pub clipboard: Arc<RwLock<dupin_core::config::Clipboard>>,
     /// The app the panel opened over, whose focused window the `windows` capability moves.
     pub front: Arc<dupin_mac::window_management::Front>,
 }
@@ -81,6 +81,12 @@ pub fn open(platform: Platform) -> Bridge {
             calendar: Box::new(Calendars(calendar::Calendar::new(
                 dupin_mac::EventStore::fixtures(),
             ))),
+            storage: match crate::clipboard::headless_storage() {
+                Some(storage) => Box::new(storage),
+                None => Box::new(services::Unavailable(
+                    "a headless run couldn't make scratch storage",
+                )),
+            },
             ..Services::none()
         };
         let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
@@ -109,7 +115,7 @@ pub fn open(platform: Platform) -> Bridge {
             )),
         },
         clipboard: Box::new(Pasteboard {
-            history: platform.history,
+            settings: platform.clipboard,
             service: OnceLock::new(),
         }),
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
@@ -172,24 +178,20 @@ fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
 /// The general pasteboard, read only while macOS allows it and never from an ignored app's
 /// copy. It is opened on first use, since opening it keeps the clipboard monitor running.
 struct Pasteboard {
-    history: Arc<Mutex<dupin_core::clipboard::History>>,
+    settings: Arc<RwLock<dupin_core::config::Clipboard>>,
     service: OnceLock<clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard>>,
 }
 
 impl Pasteboard {
     fn service(&self) -> &clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard> {
         self.service.get_or_init(|| {
-            let history = self.history.clone();
+            let settings = self.settings.clone();
             clipboard::Clipboard::new(dupin_mac::clipboard::GeneralPasteboard::default(), move || {
-                let ignored_apps = history
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .policy()
-                    .ignored_apps()
-                    .to_vec();
+                let settings = settings.read().unwrap_or_else(|poisoned| poisoned.into_inner());
                 clipboard::Policy {
-                    ignored_apps,
-                    ..clipboard::Policy::default()
+                    ignored_apps: settings.ignored_apps().to_vec(),
+                    max_text_bytes: settings.max_entry_bytes(),
+                    max_image_bytes: settings.max_image_bytes(),
                 }
             })
         })
@@ -210,11 +212,28 @@ impl services::Clipboard for Pasteboard {
             .map_err(Failure::from)
     }
 
+    fn write_image(&self, png: &[u8]) -> Result<(), Failure> {
+        let content = clipboard::Write::image(png.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
+    fn write_files(&self, paths: &[PathBuf]) -> Result<(), Failure> {
+        let content = clipboard::Write::copied_files(paths.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
     fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
         let watch = self
             .service()
             .watch(move |clip| {
-                if let Ok(value) = serde_json::to_value(&clip.content) {
+                if let Ok(mut value) = serde_json::to_value(&clip.content) {
+                    if let Some(source) = &clip.source {
+                        value["source"] = source.clone().into();
+                    }
                     changed(value);
                 }
             })

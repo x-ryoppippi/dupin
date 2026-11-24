@@ -26,6 +26,7 @@ const EXPECTATIONS: [&str; 11] = [
     "selected",
     "effect",
     "toasts",
+    "panel",
     "clipboard",
     "error",
     "sections",
@@ -643,6 +644,7 @@ pub fn effect(effect: &RowEffect) -> Map<String, Value> {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
         RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
+        RowEffect::Reveal { path } => ("reveal", Value::from(path.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])

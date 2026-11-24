@@ -285,14 +285,47 @@ fn execute(
         Call::Search { query, limit } => package
             .search_with(engine, &query, limit as usize, control, bridge)
             .map(Outcome::Rows),
-        Call::Items { cursor, reason } => package
-            .items(engine, cursor.as_deref(), reason, control, bridge)
+        Call::Items {
+            cursor,
+            reason,
+            preferences,
+        } => package
+            .items(
+                engine,
+                cursor.as_deref(),
+                reason,
+                &preferences.to_string(),
+                control,
+                bridge,
+            )
             .map(Outcome::Catalogue),
-        Call::Action { name, data } => package
-            .action(engine, &name, &data.to_string(), control, bridge)
+        Call::Action {
+            name,
+            data,
+            preferences,
+        } => package
+            .action(
+                engine,
+                &name,
+                &data.to_string(),
+                &preferences.to_string(),
+                control,
+                bridge,
+            )
             .map(Outcome::Acted),
-        Call::Event { name, event } => package
-            .event(engine, &name, &event.to_string(), control, bridge)
+        Call::Event {
+            name,
+            event,
+            preferences,
+        } => package
+            .event(
+                engine,
+                &name,
+                &event.to_string(),
+                &preferences.to_string(),
+                control,
+                bridge,
+            )
             .map(Outcome::Handled),
     }
 }

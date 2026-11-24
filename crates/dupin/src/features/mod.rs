@@ -47,6 +47,31 @@ pub(super) struct Bundled {
     pub package: &'static str,
     /// The command the feature registers while it is on.
     pub command: &'static str,
+    /// Whether the feature is on, and so may the package watch on its behalf.
+    pub enabled: fn(&Config) -> bool,
+}
+
+/// Whether the feature that ships as the extension called `package` is on, if one does.
+pub(crate) fn ported_enabled(package: &str, config: &Config) -> Option<bool> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.package == package)
+        .map(|bundled| (bundled.enabled)(config))
+}
+
+/// The row a built-in command that a bundled extension answers shows while the package is off
+/// or didn't load.
+pub(crate) const UNAVAILABLE_ROW: &str = "unavailable";
+
+/// Whether the row `id` that `command` shows is its feature's answer, not one Dupin shows in
+/// place of the bundled extension that answers the command.
+pub(crate) fn answered_by_feature(command: &str, id: &str) -> bool {
+    let ported = MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .any(|bundled| bundled.command == command);
+    !ported || (id != UNAVAILABLE_ROW && !crate::extensions::stands_in(id))
 }
 
 /// The built-in command the extension called `package` answers, if a feature ships as it.

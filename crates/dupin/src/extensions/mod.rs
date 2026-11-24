@@ -16,6 +16,7 @@ mod overrides;
 pub mod packages;
 #[cfg(test)]
 pub(crate) mod parity;
+pub(crate) mod preferences;
 mod provider;
 
 use std::collections::HashMap;
@@ -30,8 +31,8 @@ use dupin_extension_host::{Compiled, Host, Services};
 use dupin_js_runtime::{Acted, Diagnostic, Exports, Handled, Row, RunError, Sources};
 
 pub use fixtures::{Snapped, snap, test};
-pub(crate) use provider::is_answered_consent_row;
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub(crate) use provider::{is_answered_consent_row, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -49,6 +50,9 @@ pub struct Extension {
     pub default_search: bool,
     /// The package's `search` answers its keyword before anything is typed.
     pub empty_query: bool,
+    /// How its catalogue is matched, which also decides whether picks rank it.
+    pub matching: dupin_core::catalogue::Matching,
+    preferences: preferences::Preferences,
     /// What the package exports, once a call has linked it.
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
@@ -117,7 +121,15 @@ impl Extension {
         deadline: Instant,
         services: &Arc<dyn Services>,
     ) -> Result<Acted, RunError> {
-        let acted = host().action(&self.compiled, name, data, deadline, &|| false, services)?;
+        let acted = host().action(
+            &self.compiled,
+            name,
+            data,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
         if acted.invalidated {
             self.catalogue.invalidate();
         }
@@ -133,7 +145,15 @@ impl Extension {
         deadline: Instant,
         services: &Arc<dyn Services>,
     ) -> Result<Handled, RunError> {
-        let handled = host().event(&self.compiled, name, event, deadline, &|| false, services)?;
+        let handled = host().event(
+            &self.compiled,
+            name,
+            event,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
         if handled.invalidated {
             self.catalogue.invalidate();
         }
@@ -154,11 +174,13 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<Batch>, RunError> {
+        let preferences = self.preferences();
         let mut fetch = |cursor: Option<&str>, reason| {
             host().items(
                 &self.compiled,
                 cursor,
                 reason,
+                &preferences,
                 deadline,
                 &|| false,
                 &call.services,
@@ -172,6 +194,11 @@ impl Extension {
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
     pub fn forget_catalogue(&self) {
         self.catalogue.forget();
+    }
+
+    /// What `ctx.preferences` holds for the package's calls.
+    pub fn preferences(&self) -> serde_json::Value {
+        self.preferences.values(&self.id)
     }
 
     /// A catalogue's failure, named after the package's entry when nothing else locates it.
@@ -440,8 +467,10 @@ fn load_with(
             root: folder.to_path_buf(),
             default_search: manifest.default_search,
             empty_query: manifest.empty_query,
+            matching: manifest.matching,
+            preferences: manifest.preferences,
             exports: OnceLock::new(),
-            catalogue: catalogue::Cached::default(),
+            catalogue: catalogue::Cached::new(manifest.matching),
             package,
             revision,
             capabilities: manifest.capabilities,
@@ -624,6 +653,8 @@ pub(crate) mod tests {
             root: PathBuf::from("/fixture"),
             default_search: false,
             empty_query: false,
+            matching: Default::default(),
+            preferences: Default::default(),
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             revision: Revision::new("blake3:fixture").unwrap(),

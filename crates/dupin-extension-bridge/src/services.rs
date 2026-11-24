@@ -127,6 +127,15 @@ pub trait Clipboard: Send + Sync {
     /// none when it is empty or withheld.
     fn read(&self) -> Result<Option<Value>, Failure>;
     fn write_text(&self, text: &str) -> Result<(), Failure>;
+    /// Puts a PNG on the clipboard.
+    fn write_image(&self, _png: &[u8]) -> Result<(), Failure> {
+        Err(Failure::new("unavailable", "images can't be copied here"))
+    }
+    /// Puts files on the clipboard as Finder's Copy does. The bridge has checked that a watch
+    /// delivered them to the package.
+    fn write_files(&self, _paths: &[std::path::PathBuf]) -> Result<(), Failure> {
+        Err(Failure::new("unavailable", "files can't be copied here"))
+    }
     /// Calls `changed` with each copy, shaped as [`Clipboard::read`] returns it.
     fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure>;
 }
@@ -416,6 +425,15 @@ pub(crate) mod fixture {
         }
         fn write_text(&self, text: &str) -> Result<(), Failure> {
             *self.text.lock().unwrap() = Some(text.into());
+            Ok(())
+        }
+        fn write_image(&self, png: &[u8]) -> Result<(), Failure> {
+            *self.text.lock().unwrap() = Some(format!("image of {} bytes", png.len()));
+            Ok(())
+        }
+        fn write_files(&self, paths: &[std::path::PathBuf]) -> Result<(), Failure> {
+            let paths: Vec<_> = paths.iter().map(|path| path.display().to_string()).collect();
+            *self.text.lock().unwrap() = Some(paths.join("\n"));
             Ok(())
         }
         fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {

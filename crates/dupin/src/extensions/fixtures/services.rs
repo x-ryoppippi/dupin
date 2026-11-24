@@ -105,7 +105,10 @@ impl Replier {
                     format!("couldn't make a scratch folder: {error}"),
                 )
             })?;
-        let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::random());
+        // A fixed key, so records stored under a key, as the fixture's own are, get the same IDs
+        // on every run and a fixture can name them. The store is thrown away with the run.
+        let key = dupin_storage::DataKey::from_slice(&[0x5a; 32]).expect("32 bytes make a key");
+        let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::new(key));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
@@ -472,16 +475,25 @@ impl services::Storage for Shared {
         let mut opened = lock(&self.0.opened);
         let store = self.0.storage.open(namespace, limits)?;
         if opened.is_none() {
-            let seeded = self.0.replies.storage.iter().try_for_each(|data| {
-                store
-                    .with(|store| {
-                        store.put_within_limits(NewRecord {
-                            data: data.clone(),
-                            blobs: Vec::new(),
+            let seeded = self
+                .0
+                .replies
+                .storage
+                .iter()
+                .enumerate()
+                .try_for_each(|(index, data)| {
+                    store
+                        .with(|store| {
+                            store.upsert_within_limits(
+                                &format!("fixture record {index}"),
+                                NewRecord {
+                                    data: data.clone(),
+                                    blobs: Vec::new(),
+                                },
+                            )
                         })
-                    })
-                    .map(drop)
-            });
+                        .map(drop)
+                });
             if let Err(failure) = seeded {
                 self.0.storage.discard(namespace)?;
                 return Err(failure);

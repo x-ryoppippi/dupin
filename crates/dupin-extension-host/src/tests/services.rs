@@ -87,6 +87,7 @@ fn a_catalogue_reaches_host_services_as_a_search_does() {
             &package,
             None,
             Reason::Load,
+            &serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,
             &services(&fixture),
@@ -152,6 +153,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
             &package,
             "show",
             &serde_json::json!({"key": "k"}),
+            &serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,
             &services(&fixture),
@@ -167,6 +169,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
         &package,
         "clipboard",
         &serde_json::json!({"type": "text", "text": "copied"}),
+        &serde_json::json!({}),
         Instant::now() + Duration::from_secs(5),
         &|| false,
         &services(&fixture),
@@ -180,6 +183,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
         &package,
         "absent",
         &serde_json::Value::Null,
+        &serde_json::json!({}),
         Instant::now() + Duration::from_secs(5),
         &|| false,
         &services(&fixture),
@@ -249,10 +253,10 @@ fn actions_and_events_waiting_on_a_service_never_hold_up_searches() {
                 let deadline = Instant::now() + Duration::from_secs(10);
                 let none = serde_json::Value::Null;
                 if action {
-                    host.action(&package, "wait", &none, deadline, &|| false, &slow)
+                    host.action(&package, "wait", &none, &none, deadline, &|| false, &slow)
                         .map(drop)
                 } else {
-                    host.event(&package, "clipboard", &none, deadline, &|| false, &slow)
+                    host.event(&package, "clipboard", &none, &none, deadline, &|| false, &slow)
                         .map(drop)
                 }
             })

@@ -264,8 +264,9 @@ impl Ui {
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
     /// has already handed the broker every declaration, which never grants anything.
-    fn install_declarations(&mut self) {
+    pub(super) fn install_declarations(&mut self) {
         let bridge = self.extensions.bridge.clone();
+        let config = self.configuration.values.borrow().clone();
         for (_, extension) in self.extensions.packages.present() {
             let id = &extension.package;
             let watches = extension
@@ -274,7 +275,8 @@ impl Ui {
                     dupin_extension_bridge::ClipboardAccess::Watch,
                 ))
                 .is_some();
-            if !watches {
+            let feature_off = crate::features::ported_enabled(&extension.id, &config) == Some(false);
+            if !watches || feature_off {
                 bridge.unwatch_clipboard(id);
                 continue;
             }
@@ -349,6 +351,16 @@ impl Ui {
         self.prefs.update(|prefs, _| prefs.refresh_permissions());
     }
 
+    /// The values `package`'s preferences hold changed, so its catalogue is listed again with
+    /// them on its next use.
+    pub(crate) fn preferences_changed(&mut self, package: &str) {
+        for (extension, _) in self.extensions.registered.values() {
+            if extension.id == package {
+                extension.forget_catalogue();
+            }
+        }
+    }
+
     fn registered_extension(&self, id: &str) -> Option<Arc<Extension>> {
         self.extensions
             .registered
@@ -393,6 +405,18 @@ impl Ui {
                     }) => {
                         ui.timed_notice(text, tx);
                         None
+                    }
+                    Ok(Acted {
+                        effect:
+                            Some(
+                                effect @ (dupin_extension_host::ActionEffect::Hide
+                                | dupin_extension_host::ActionEffect::Paste),
+                            ),
+                        ..
+                    }) => {
+                        let paste = effect == dupin_extension_host::ActionEffect::Paste;
+                        ui.close_after_copy(&extension, paste, tx);
+                        return;
                     }
                     Ok(Acted { effect: None, .. }) | Err(RunError::Cancelled) => None,
                     Err(RunError::Failed(diagnostic)) => {

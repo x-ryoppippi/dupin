@@ -48,15 +48,6 @@ pub enum Action {
         paths: Vec<PathBuf>,
     },
     CopyFiles(Vec<PathBuf>),
-    /// Put a clipboard history entry back on the clipboard as it was copied, then, with
-    /// `paste`, paste it into the frontmost app.
-    RestoreClipboardEntry {
-        entry: u64,
-        paste: bool,
-    },
-    /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
-    DeleteClipboardEntry(u64),
-    ClearClipboardHistory,
     /// Read the clipboard once so macOS asks whether Dupin may; the contents are discarded.
     RequestClipboardAccess,
     /// Copy a snippet's text with its placeholders filled in as it runs, then, with `paste`,

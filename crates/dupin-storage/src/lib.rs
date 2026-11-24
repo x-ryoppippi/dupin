@@ -16,6 +16,7 @@ mod sweeper;
 
 pub use device::DeviceId;
 pub use error::Error;
+pub use fs::scratch_process;
 pub use key::{DataKey, FileKey, KeyProvider, MemoryKey};
 pub use store::{
     BlobHandle, BlobRef, Clock, Cursor, Limits, NewRecord, OpenReport, Page, Record, RecordId, Storage,

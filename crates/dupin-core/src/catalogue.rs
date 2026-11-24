@@ -1,7 +1,7 @@
 //! A list of rows kept in memory and matched natively as the user types, for a source that
 //! hands over its whole list rather than answering each query: an extension's `items()`, and
 //! built-ins ported to the same shape. Matching folds every name once, when the row arrives, so
-//! a keystroke costs one pass of the fuzzy matcher over the list and no call into the source.
+//! a keystroke costs one pass of the matcher over the list and no call into the source.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -24,6 +24,25 @@ pub struct Entry {
     pub section: Option<Arc<str>>,
     /// Shown while the row is selected.
     pub detail: Option<Arc<Detail>>,
+    /// More text [`Matching::Words`] finds the row by, which the row never shows.
+    pub match_text: Option<String>,
+    /// Unix seconds the row is from; its subtitle starts with how long ago that was.
+    pub time: Option<u64>,
+    /// The file the row stands for. While it is gone, the row shows as unavailable, without
+    /// its icon and the actions in `file_actions`.
+    pub file: Option<std::path::PathBuf>,
+    pub file_actions: Vec<String>,
+}
+
+/// How a catalogue matches what is typed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Matching {
+    /// Ranked as apps are, by how well the title or a keyword matches.
+    #[default]
+    Fuzzy,
+    /// Every word, ignoring case, anywhere in the title, a keyword or the match text, with the
+    /// rows kept in the catalogue's own order, as a history is searched.
+    Words,
 }
 
 /// How much one catalogue may hold.
@@ -39,6 +58,8 @@ pub struct Limits {
 pub enum Change {
     Reset(Vec<Entry>),
     Update {
+        /// New rows, before the existing ones, in their own order.
+        prepend: Vec<Entry>,
         /// New rows, after the existing ones.
         append: Vec<Entry>,
         /// Rows that take the place of the existing rows with their IDs.
@@ -92,6 +113,7 @@ pub struct Catalogue {
     rows: Vec<Row>,
     index: HashMap<String, usize>,
     bytes: usize,
+    matching: Matching,
 }
 
 #[derive(Debug)]
@@ -99,17 +121,38 @@ struct Row {
     entry: Entry,
     title: Name,
     keywords: Vec<Name>,
+    /// For [`Matching::Words`]: the title, keywords and match text, lowercased once. The match
+    /// text is kept only here.
+    folded: String,
     bytes: usize,
 }
 
 impl Row {
-    fn new(entry: Entry) -> Self {
+    fn new(mut entry: Entry, matching: Matching) -> Self {
         let bytes = entry_bytes(&entry);
-        Self {
-            title: Name::new(entry.item.display_title()),
-            keywords: entry.keywords.iter().map(|keyword| Name::new(keyword)).collect(),
-            entry,
-            bytes,
+        let match_text = entry.match_text.take();
+        match matching {
+            Matching::Fuzzy => Self {
+                title: Name::new(entry.item.display_title()),
+                keywords: entry.keywords.iter().map(|keyword| Name::new(keyword)).collect(),
+                folded: String::new(),
+                entry,
+                bytes,
+            },
+            Matching::Words => {
+                let mut folded = entry.item.display_title().to_lowercase();
+                for text in entry.keywords.iter().chain(&match_text) {
+                    folded.push('\n');
+                    folded.push_str(&text.to_lowercase());
+                }
+                Self {
+                    title: Name::new(""),
+                    keywords: Vec::new(),
+                    folded,
+                    entry,
+                    bytes,
+                }
+            }
         }
     }
 
@@ -131,6 +174,17 @@ impl Row {
 }
 
 impl Catalogue {
+    pub fn new(matching: Matching) -> Self {
+        Self {
+            matching,
+            ..Self::default()
+        }
+    }
+
+    pub fn matching(&self) -> Matching {
+        self.matching
+    }
+
     /// Bytes of text the catalogue holds.
     pub fn bytes(&self) -> usize {
         self.bytes
@@ -149,13 +203,18 @@ impl Catalogue {
                     return Err(ChangeError::DuplicateId(entry.item.id.clone()));
                 }
                 check_rows(entries.len(), limits)?;
-                let rows: Vec<Row> = entries.into_iter().map(Row::new).collect();
+                let matching = self.matching;
+                let rows: Vec<Row> = entries
+                    .into_iter()
+                    .map(|entry| Row::new(entry, matching))
+                    .collect();
                 let bytes = rows.iter().map(|row| row.bytes).sum();
                 check_bytes(bytes, limits)?;
                 self.rows = rows;
                 self.bytes = bytes;
             }
             Change::Update {
+                prepend,
                 append,
                 replace,
                 remove,
@@ -171,23 +230,34 @@ impl Catalogue {
                         return Err(ChangeError::DuplicateId(id.clone()));
                     }
                 }
-                let mut appended = HashSet::with_capacity(append.len());
-                for entry in &append {
+                let mut appended = HashSet::with_capacity(prepend.len() + append.len());
+                for entry in prepend.iter().chain(&append) {
                     let id = entry.item.id.as_str();
                     let held = self.contains(id) && !remove.contains(id);
                     if held || !appended.insert(id) {
                         return Err(ChangeError::DuplicateId(id.to_owned()));
                     }
                 }
-                check_rows(self.rows.len() - remove.len() + append.len(), limits)?;
-                let replace: Vec<Row> = replace.into_iter().map(Row::new).collect();
-                let append: Vec<Row> = append.into_iter().map(Row::new).collect();
+                check_rows(
+                    self.rows.len() - remove.len() + prepend.len() + append.len(),
+                    limits,
+                )?;
+                let matching = self.matching;
+                let row = |entry| Row::new(entry, matching);
+                let replace: Vec<Row> = replace.into_iter().map(row).collect();
+                let prepend: Vec<Row> = prepend.into_iter().map(row).collect();
+                let append: Vec<Row> = append.into_iter().map(row).collect();
                 let dropped: usize = remove.iter().map(|id| self.rows[self.index[id]].bytes).sum();
                 let swapped_out: usize = replace
                     .iter()
                     .map(|row| self.rows[self.index[&row.entry.item.id]].bytes)
                     .sum();
-                let added: usize = replace.iter().chain(&append).map(|row| row.bytes).sum();
+                let added: usize = replace
+                    .iter()
+                    .chain(&prepend)
+                    .chain(&append)
+                    .map(|row| row.bytes)
+                    .sum();
                 let bytes = self.bytes - dropped - swapped_out + added;
                 check_bytes(bytes, limits)?;
                 for row in replace {
@@ -196,6 +266,9 @@ impl Catalogue {
                 }
                 if !remove.is_empty() {
                     self.rows.retain(|row| !remove.contains(&row.entry.item.id));
+                }
+                if !prepend.is_empty() {
+                    self.rows.splice(0..0, prepend);
                 }
                 self.rows.extend(append);
                 self.bytes = bytes;
@@ -210,13 +283,17 @@ impl Catalogue {
         Ok(())
     }
 
-    /// The rows for `query`, at most `limit`. An empty query lists rows in the catalogue's own
-    /// order under their sections, without scores, so ranking leaves them in place. Otherwise
-    /// rows are ranked by how well they match, as apps are, in one batch without sections so
-    /// usage ranking can reorder them freely.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<Batch> {
+    /// The rows for `query`, at most `limit`, as they show at `now` (Unix seconds). An empty
+    /// query lists rows in the catalogue's own order under their sections, without scores, so
+    /// ranking leaves them in place. Otherwise [`Matching::Fuzzy`] ranks rows by how well they
+    /// match, as apps are, in one batch without sections so usage ranking can reorder them
+    /// freely, and [`Matching::Words`] keeps the rows that match in the catalogue's order.
+    pub fn search(&self, query: &str, limit: usize, now: u64) -> Vec<Batch> {
+        if self.matching == Matching::Words {
+            return self.words(query, limit, now);
+        }
         let Some(query) = Query::new(query) else {
-            return self.listed(limit);
+            return self.listed(limit, now);
         };
         let mut scratch = Scratch::default();
         let mut hits: Vec<(i32, usize, bool)> = self
@@ -249,7 +326,7 @@ impl Catalogue {
             batch.items.push(Item {
                 score: Some(score),
                 matched: positions,
-                ..entry.item.clone()
+                ..shown(entry, now)
             });
         }
         if batch.items.is_empty() {
@@ -258,7 +335,38 @@ impl Catalogue {
         vec![batch]
     }
 
-    fn listed(&self, limit: usize) -> Vec<Batch> {
+    fn words(&self, query: &str, limit: usize, now: u64) -> Vec<Batch> {
+        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+        if words.is_empty() {
+            return self.listed(limit, now);
+        }
+        let mut batch = Batch {
+            details_when_selected: true,
+            ..Batch::default()
+        };
+        let hits = self
+            .rows
+            .iter()
+            .filter(|row| words.iter().all(|word| row.folded.contains(word.as_str())))
+            .take(limit);
+        for row in hits {
+            let entry = &row.entry;
+            if let Some(detail) = &entry.detail {
+                batch.details.insert(entry.item.id.clone(), detail.clone());
+            }
+            batch.items.push(Item {
+                score: None,
+                matched: highlights(entry.item.display_title(), &words),
+                ..shown(entry, now)
+            });
+        }
+        if batch.items.is_empty() {
+            return Vec::new();
+        }
+        vec![batch]
+    }
+
+    fn listed(&self, limit: usize, now: u64) -> Vec<Batch> {
         let mut batches: Vec<Batch> = Vec::new();
         for row in self.rows.iter().take(limit) {
             let entry = &row.entry;
@@ -280,11 +388,77 @@ impl Catalogue {
             batch.items.push(Item {
                 score: None,
                 matched: Vec::new(),
-                ..entry.item.clone()
+                ..shown(entry, now)
             });
         }
         batches
     }
+}
+
+/// The row's item as it shows at `now`: with a time, its subtitle starts with how long ago
+/// that was, and a row whose file is gone says so and offers only what needs no file.
+fn shown(entry: &Entry, now: u64) -> Item {
+    let mut item = entry.item.clone();
+    let gone = entry.file.as_deref().is_some_and(|file| !file.exists());
+    let crate::View::Text { subtitle, .. } = &mut item.view else {
+        return item;
+    };
+    let parts = [
+        entry.time.map(|time| ago(now, time)),
+        gone.then(|| "Unavailable".to_owned()),
+        (!subtitle.is_empty()).then(|| std::mem::take(subtitle)),
+    ];
+    *subtitle = parts.into_iter().flatten().collect::<Vec<_>>().join(" · ");
+    if gone {
+        item.icon = None;
+        item.actions
+            .retain(|action| !entry.file_actions.contains(&action.id));
+        let offered = |id: &Option<String>| {
+            id.as_ref()
+                .filter(|id| item.actions.iter().any(|action| &action.id == *id))
+                .cloned()
+        };
+        item.primary = offered(&item.primary);
+        item.alternate = offered(&item.alternate);
+    }
+    item
+}
+
+/// How long before `now` the Unix second `then` was.
+fn ago(now: u64, then: u64) -> String {
+    let seconds = now.saturating_sub(then);
+    match seconds {
+        0..60 => "Just now".into(),
+        60..3600 => format!("{} min ago", seconds / 60),
+        3600..86_400 => format!("{} h ago", seconds / 3600),
+        _ => format!("{} d ago", seconds / 86_400),
+    }
+}
+
+/// Character indices of each word's first occurrence in `title`, ignoring case.
+fn highlights(title: &str, words: &[String]) -> Vec<usize> {
+    let lower: Vec<char> = title
+        .chars()
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect();
+    let mut matched: Vec<usize> = words
+        .iter()
+        .filter_map(|word| {
+            let word: Vec<char> = word.chars().collect();
+            (!word.is_empty() && word.len() <= lower.len())
+                .then(|| {
+                    lower
+                        .windows(word.len())
+                        .position(|window| window == word.as_slice())
+                })
+                .flatten()
+                .map(|start| start..start + word.len())
+        })
+        .flatten()
+        .collect();
+    matched.sort_unstable();
+    matched.dedup();
+    matched
 }
 
 fn check_rows(rows: usize, limits: Limits) -> Result<(), ChangeError> {
@@ -327,6 +501,8 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.keywords.iter().map(String::len).sum::<usize>()
         + entry.section.as_ref().map_or(0, |section| section.len())
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
+        + entry.match_text.as_ref().map_or(0, String::len)
+        + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
 }
 
 /// Every action names each of its variants, so one added later must say what it holds.
@@ -384,12 +560,7 @@ fn action_bytes(action: &Action) -> usize {
                     ExtensionRequest::TurnOn | ExtensionRequest::Review => 0,
                 }
         }
-        Action::System(_)
-        | Action::RestoreClipboardEntry { .. }
-        | Action::DeleteClipboardEntry(_)
-        | Action::ClearClipboardHistory
-        | Action::RequestClipboardAccess
-        | Action::OpenPreferences => 0,
+        Action::System(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,
     }
 }
 
@@ -424,6 +595,10 @@ mod tests {
             keywords: Vec::new(),
             section: None,
             detail: None,
+            match_text: None,
+            time: None,
+            file: None,
+            file_actions: Vec::new(),
         }
     }
 
@@ -449,7 +624,7 @@ mod tests {
             entry("c", "Safari"),
             entry("d", "Notes"),
         ]);
-        let batches = catalogue.search("saf", 10);
+        let batches = catalogue.search("saf", 10, 0);
         assert_eq!(
             titles(&batches),
             ["Safari", "Safari Technology Preview", "Hush Safe"]
@@ -458,8 +633,71 @@ mod tests {
         assert_eq!(batches[0].section, None);
         assert_eq!(batches[0].items[0].matched, [0, 1, 2]);
         assert!(batches[0].items.iter().all(|item| item.score.is_some()));
-        assert_eq!(titles(&catalogue.search("saf", 1)), ["Safari"]);
-        assert!(catalogue.search("zzz", 10).is_empty());
+        assert_eq!(titles(&catalogue.search("saf", 1, 0)), ["Safari"]);
+        assert!(catalogue.search("zzz", 10, 0).is_empty());
+    }
+
+    fn words(entries: Vec<Entry>) -> Catalogue {
+        let mut catalogue = Catalogue::new(Matching::Words);
+        catalogue.apply(Change::Reset(entries), LIMITS).unwrap();
+        catalogue
+    }
+
+    #[test]
+    fn words_find_every_word_anywhere_in_order_with_title_highlights() {
+        let mut long = entry("a", "Meeting moved");
+        long.match_text = Some("Meeting moved to Thursday.\nRoom: Baker Street 221B".into());
+        let mut file = entry("b", "Report.pdf");
+        file.keywords = vec!["/Users/Shared/Report.pdf".into()];
+        let catalogue = words(vec![entry("c", "Baker's dozen"), long, file]);
+        let batches = catalogue.search("BAKER room", 10, 0);
+        assert_eq!(titles(&batches), ["Meeting moved"]);
+        assert!(batches[0].items[0].score.is_none());
+        assert!(
+            batches[0].items[0].matched.is_empty(),
+            "the words are past the title"
+        );
+        assert_eq!(
+            titles(&catalogue.search("baker", 10, 0)),
+            ["Baker's dozen", "Meeting moved"]
+        );
+        assert_eq!(catalogue.search("bak", 1, 0)[0].items[0].matched, [0, 1, 2]);
+        assert_eq!(titles(&catalogue.search("shared", 10, 0)), ["Report.pdf"]);
+        assert_eq!(catalogue.search("", 10, 0)[0].items.len(), 3);
+        assert_eq!(
+            catalogue.bytes(),
+            "cBaker's dozen".len()
+                + "aMeeting moved".len()
+                + "Meeting moved to Thursday.\nRoom: Baker Street 221B".len()
+                + "bReport.pdf/Users/Shared/Report.pdf".len()
+        );
+    }
+
+    #[test]
+    fn a_timed_row_says_how_long_ago_it_was_when_it_shows() {
+        let mut timed = entry("a", "Copied");
+        timed.item.view = crate::View::Text {
+            title: "Copied".into(),
+            subtitle: "12 characters".into(),
+        };
+        timed.time = Some(1_000);
+        let mut bare = entry("b", "Bare");
+        bare.time = Some(1_000);
+        let catalogue = words(vec![timed, bare]);
+        let subtitles = |now| {
+            catalogue
+                .search("", 10, now)
+                .remove(0)
+                .items
+                .into_iter()
+                .map(|item| match item.view {
+                    crate::View::Text { subtitle, .. } => subtitle,
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(subtitles(1_030), ["Just now · 12 characters", "Just now"]);
+        assert_eq!(subtitles(1_000 + 7_200), ["2 h ago · 12 characters", "2 h ago"]);
     }
 
     #[test]
@@ -467,7 +705,7 @@ mod tests {
         let mut aliased = entry("aliased", "Visual Studio Code");
         aliased.keywords = vec!["editor".into()];
         let catalogue = catalogue(vec![entry("plain", "Editorial"), aliased]);
-        let batches = catalogue.search("editor", 10);
+        let batches = catalogue.search("editor", 10, 0);
         assert_eq!(titles(&batches), ["Editorial", "Visual Studio Code"]);
         assert!(batches[0].items[1].matched.is_empty());
     }
@@ -480,7 +718,7 @@ mod tests {
         second.section = Some("Pinned".into());
         second.detail = Some(Arc::new(Detail::new("Two", "**bold**")));
         let third = entry("3", "Three");
-        let batches = catalogue(vec![first, second, third]).search("  ", 10);
+        let batches = catalogue(vec![first, second, third]).search("  ", 10, 0);
         assert_eq!(
             batches
                 .iter()
@@ -504,6 +742,7 @@ mod tests {
         catalogue
             .apply(
                 Change::Update {
+                    prepend: vec![],
                     append: vec![entry("d", "Delta")],
                     replace: vec![entry("b", "Bravo")],
                     remove: vec!["a".into(), "never-held".into()],
@@ -511,11 +750,12 @@ mod tests {
                 LIMITS,
             )
             .unwrap();
-        assert_eq!(titles(&catalogue.search("", 10)), ["Bravo", "Gamma", "Delta"]);
+        assert_eq!(titles(&catalogue.search("", 10, 0)), ["Bravo", "Gamma", "Delta"]);
         // A removed ID may come back in the same update.
         catalogue
             .apply(
                 Change::Update {
+                    prepend: vec![],
                     append: vec![entry("c", "Charlie")],
                     replace: vec![],
                     remove: vec!["c".into()],
@@ -523,13 +763,43 @@ mod tests {
                 LIMITS,
             )
             .unwrap();
-        assert_eq!(titles(&catalogue.search("", 10)), ["Bravo", "Delta", "Charlie"]);
+        assert_eq!(
+            titles(&catalogue.search("", 10, 0)),
+            ["Bravo", "Delta", "Charlie"]
+        );
+        // So it may at the front, as a history moves a copy made again to the top.
+        catalogue
+            .apply(
+                Change::Update {
+                    prepend: vec![entry("c", "Charlie again"), entry("e", "Echo")],
+                    append: vec![],
+                    replace: vec![],
+                    remove: vec!["c".into()],
+                },
+                LIMITS,
+            )
+            .unwrap();
+        assert_eq!(
+            titles(&catalogue.search("", 10, 0)),
+            ["Charlie again", "Echo", "Bravo", "Delta"]
+        );
+        let duplicate = Change::Update {
+            prepend: vec![entry("e", "Echo twice")],
+            append: vec![],
+            replace: vec![],
+            remove: vec![],
+        };
+        assert_eq!(
+            catalogue.apply(duplicate, LIMITS),
+            Err(ChangeError::DuplicateId("e".into()))
+        );
     }
 
     #[test]
     fn a_change_that_breaks_ids_or_limits_leaves_the_catalogue_untouched() {
         let mut catalogue = catalogue(vec![entry("a", "Alpha"), entry("b", "Beta")]);
         let update = |append: Vec<Entry>, replace: Vec<Entry>| Change::Update {
+            prepend: Vec::new(),
             append,
             replace,
             remove: vec!["a".into()],
@@ -564,7 +834,7 @@ mod tests {
             catalogue.apply(update(vec![], vec![entry("b", "A much longer title")]), tight),
             Err(ChangeError::TooManyBytes { bytes: 20, limit: 12 })
         );
-        assert_eq!(titles(&catalogue.search("", 10)), ["Alpha", "Beta"]);
+        assert_eq!(titles(&catalogue.search("", 10, 0)), ["Alpha", "Beta"]);
         assert_eq!(catalogue.bytes(), "aAlphabBeta".len());
     }
 

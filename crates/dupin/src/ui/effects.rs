@@ -75,17 +75,13 @@ impl Ui {
                         }
                     }
                     Action::CopyFiles(paths) => self.copy_files(&paths, tx),
-                    Action::RestoreClipboardEntry { entry, paste } => {
-                        self.restore_clipboard_entry(entry, paste, tx)
-                    }
+
                     Action::ChooseApplication(_)
                     | Action::Trash(_)
                     | Action::Browse(_)
                     | Action::Push(_)
                     | Action::Rename(_)
-                    | Action::ChooseDestination { .. }
-                    | Action::DeleteClipboardEntry(_)
-                    | Action::ClearClipboardHistory => {}
+                    | Action::ChooseDestination { .. } => {}
                     Action::RequestClipboardAccess => self.request_clipboard_access(),
                     Action::Extension { extension, request } => {
                         self.run_extension_request(extension, request, tx)
@@ -106,14 +102,7 @@ impl Ui {
                     id,
                     action: Action::Trash(path),
                 } => self.trash_file(id, path),
-                Effect::RunConsuming {
-                    id,
-                    action: Action::DeleteClipboardEntry(entry),
-                } => self.delete_clipboard_entry(&id, entry, tx),
-                Effect::RunConsuming {
-                    action: Action::ClearClipboardHistory,
-                    ..
-                } => self.clear_clipboard_history(tx),
+
                 Effect::RunConsuming {
                     id,
                     action: Action::Extension { extension, request },

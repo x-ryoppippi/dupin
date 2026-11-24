@@ -158,7 +158,7 @@ fn clipboard_setting(s: &Prefs, k: &Kit) -> El {
         k,
         &icons::CLIPBOARD,
         "Clipboard history",
-        Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
+        Some("Keeps what you copy, encrypted on this Mac; type clip and Space to search it"),
         clipboard,
         s.lock_note(locked),
     )

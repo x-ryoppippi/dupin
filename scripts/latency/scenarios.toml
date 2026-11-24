@@ -42,7 +42,9 @@ provider = "calendar.events"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 
-[features.clipboard.native]
+# Clipboard history is the bundled extension `clipboard-history`, held to the native history it
+# replaced (scripts/latency/native-baseline.json).
+[features.clipboard.extension]
 config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"
 

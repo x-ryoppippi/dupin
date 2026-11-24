@@ -1,5 +1,5 @@
-//! The `clipboard` capability: reading the current copy, writing text, a URL or files, and
-//! watching for new copies.
+//! The `clipboard` capability: reading the current copy, writing text, a URL, an image or
+//! files, and watching for new copies.
 //!
 //! Reading and watching need macOS to let Dupin paste from other apps without asking, the
 //! same pasteboard policy clipboard history needs. Writing needs no OS permission but, like
@@ -23,7 +23,11 @@ pub const MAX_TEXT_BYTES: usize = 1024 * 1024;
 pub const MAX_URL_BYTES: usize = 8192;
 pub const MAX_FILES: usize = 64;
 pub const MAX_PATH_BYTES: usize = 4096;
+/// The largest image a read hands the guest, which receives it whole as Base64.
 pub const MAX_IMAGE_BYTES: usize = 2 * 1024 * 1024;
+/// The largest image a watch delivers or a write puts back: clipboard history's own ceiling.
+pub const MAX_WATCHED_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 /// Watches one [`Clipboard`] keeps at once.
 pub const MAX_WATCHES: usize = 16;
 /// Copies a watch may fall behind by before it misses the newer ones.
@@ -61,8 +65,10 @@ pub enum Content {
     },
     #[serde(rename_all = "camelCase")]
     Image {
-        /// `image/png` or `image/tiff`.
+        /// `image/png`: every image is converted to PNG as it is read.
         media_type: String,
+        width: u32,
+        height: u32,
         /// Base64 when serialized.
         #[serde(serialize_with = "base64")]
         data: Vec<u8>,
@@ -73,6 +79,15 @@ pub enum Content {
 pub struct FileRef {
     pub path: String,
     pub name: String,
+    /// The folder it is in, with the home folder written `~`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// Bytes, when the file could be measured as it was copied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// Its uniform type identifier, such as `public.mpeg-4`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 impl FileRef {
@@ -84,6 +99,9 @@ impl FileRef {
                 .unwrap_or(path.as_os_str())
                 .to_string_lossy()
                 .into_owned(),
+            folder: None,
+            size: None,
+            kind: None,
         }
     }
 }
@@ -99,6 +117,9 @@ fn base64<S: Serializer>(data: &[u8], serializer: S) -> Result<S::Ok, S::Error> 
 pub struct Clip {
     pub change: i64,
     pub content: Content,
+    /// The name of the app the copy came from, when it is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// What a guest may put on the clipboard, validated.
@@ -106,7 +127,12 @@ pub struct Clip {
 pub enum Write {
     Text(String),
     Url(String),
+    /// A PNG.
+    Image(Vec<u8>),
     Files(ScopedFiles),
+    /// Files a clipboard watch delivered to the package that writes them back, which the
+    /// broker bridge checked by the handles that came with them.
+    CopiedFiles(Vec<PathBuf>),
 }
 
 /// Paths of entries inside the extension's granted file scopes, only made by [`Write::files`],
@@ -142,6 +168,35 @@ impl Write {
             )));
         }
         Ok(Self::Url(url))
+    }
+
+    /// A PNG of at most [`MAX_WATCHED_IMAGE_BYTES`].
+    pub fn image(png: Vec<u8>) -> Result<Self, ServiceError> {
+        if !png.starts_with(PNG_MAGIC) || png.len() > MAX_WATCHED_IMAGE_BYTES {
+            return Err(ServiceError::Invalid(format!(
+                "an image is a PNG of at most {} MiB",
+                MAX_WATCHED_IMAGE_BYTES / 1024 / 1024
+            )));
+        }
+        Ok(Self::Image(png))
+    }
+
+    /// Files a watch delivered, which the caller has proven by their handles; each must
+    /// still be there.
+    pub fn copied_files(paths: Vec<PathBuf>) -> Result<Self, ServiceError> {
+        if paths.is_empty() || paths.len() > MAX_FILES {
+            return Err(ServiceError::Invalid(format!("name 1–{MAX_FILES} files")));
+        }
+        if paths.iter().any(|path| path.as_os_str().len() > MAX_PATH_BYTES) {
+            return Err(ServiceError::Invalid(format!(
+                "a file's path is at most {MAX_PATH_BYTES} bytes"
+            )));
+        }
+        let present: Vec<PathBuf> = paths.into_iter().filter(|path| path.exists()).collect();
+        if present.is_empty() {
+            return Err(ServiceError::Failed("Those files are no longer there.".into()));
+        }
+        Ok(Self::CopiedFiles(present))
     }
 
     /// The entries `handles` name, each still inside the scope of `files` that issued it.
@@ -205,6 +260,10 @@ pub trait Pasteboard: Send + Sync {
     fn peek(&self) -> Peek;
     /// The app the copy declares as its source, if it declares one.
     fn source(&self) -> Option<String>;
+    /// The name of the running app with bundle ID `id`.
+    fn app_name(&self, _id: &str) -> Option<String> {
+        None
+    }
     /// The contents, or `None` when the pasteboard has changed since `change`, holds nothing
     /// readable or holds more than `limits` allow.
     fn read(&self, change: i64, limits: &Limits) -> Option<Content>;
@@ -224,6 +283,9 @@ impl<P: Pasteboard + ?Sized> Pasteboard for Arc<P> {
     fn source(&self) -> Option<String> {
         (**self).source()
     }
+    fn app_name(&self, id: &str) -> Option<String> {
+        (**self).app_name(id)
+    }
     fn read(&self, change: i64, limits: &Limits) -> Option<Content> {
         (**self).read(change, limits)
     }
@@ -240,6 +302,8 @@ impl<P: Pasteboard + ?Sized> Pasteboard for Arc<P> {
 pub struct Policy {
     pub ignored_apps: Vec<String>,
     pub max_text_bytes: usize,
+    /// The largest PNG a watch delivers, after converting and scaling the image.
+    pub max_image_bytes: usize,
 }
 
 impl Default for Policy {
@@ -247,6 +311,7 @@ impl Default for Policy {
         Self {
             ignored_apps: Vec::new(),
             max_text_bytes: MAX_TEXT_BYTES,
+            max_image_bytes: MAX_IMAGE_BYTES,
         }
     }
 }
@@ -292,7 +357,7 @@ impl<P: Pasteboard + 'static> Clipboard<P> {
             return Err(ServiceError::NeedsActivation);
         }
         self.inner.allowed()?;
-        Ok(self.inner.capture(self.inner.board.peek()))
+        Ok(self.inner.capture(self.inner.board.peek(), MAX_IMAGE_BYTES))
     }
 
     pub fn write(&self, trigger: Trigger, content: &Write) -> Result<(), ServiceError> {
@@ -359,7 +424,7 @@ fn dispatch<P: Pasteboard>(inner: &Weak<Inner<P>>, copies: Receiver<Peek>) {
         if inner.allowed().is_err() {
             continue;
         }
-        let Some(clip) = inner.capture(peek) else {
+        let Some(clip) = inner.capture(peek, MAX_WATCHED_IMAGE_BYTES) else {
             continue;
         };
         let clip = Arc::new(clip);
@@ -397,7 +462,9 @@ impl<P: Pasteboard> Inner<P> {
         ServiceError::from_access(PERMISSION, self.board.access()).map_or(Ok(()), Err)
     }
 
-    fn capture(&self, peek: Peek) -> Option<Clip> {
+    /// The copy `peek` saw, unless it is withheld, from an ignored app or larger than the
+    /// policy and `image_bytes` allow.
+    fn capture(&self, peek: Peek, image_bytes: usize) -> Option<Clip> {
         if withheld(&peek.types) {
             return None;
         }
@@ -410,20 +477,28 @@ impl<P: Pasteboard> Inner<P> {
         if from_ignored {
             return None;
         }
-        if peek.types.iter().any(|kind| kind == SOURCE_TYPE)
-            && self.board.source().is_some_and(|source| ignored(&source))
-        {
+        let declared = peek
+            .types
+            .iter()
+            .any(|kind| kind == SOURCE_TYPE)
+            .then(|| self.board.source())
+            .flatten();
+        if declared.as_deref().is_some_and(ignored) {
             return None;
         }
         let limits = Limits {
             text_bytes: policy.max_text_bytes.min(MAX_TEXT_BYTES),
-            image_bytes: MAX_IMAGE_BYTES,
+            image_bytes: policy.max_image_bytes.min(image_bytes),
             files: MAX_FILES,
         };
         let content = self.board.read(peek.change, &limits)?;
+        let source = declared
+            .or_else(|| peek.apps.as_ref().and_then(|apps| apps.last().cloned()))
+            .map(|id| self.board.app_name(&id).unwrap_or(id));
         Some(Clip {
             change: peek.change,
             content,
+            source,
         })
     }
 }
@@ -553,8 +628,17 @@ impl Pasteboard for Fixture {
         state.content = Some(match content {
             Write::Text(text) => Content::Text { text: text.clone() },
             Write::Url(url) => Content::Url { url: url.clone() },
+            Write::Image(png) => Content::Image {
+                media_type: "image/png".into(),
+                width: 0,
+                height: 0,
+                data: png.clone(),
+            },
             Write::Files(files) => Content::Files {
                 files: files.paths().iter().map(|path| FileRef::new(path)).collect(),
+            },
+            Write::CopiedFiles(paths) => Content::Files {
+                files: paths.iter().map(|path| FileRef::new(path)).collect(),
             },
         });
         Ok(())
