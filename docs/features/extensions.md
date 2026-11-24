@@ -167,11 +167,11 @@ export function items(ctx) {
 
 Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say; a list that must outlast a restart lives in the package's `storage`, which `items` reads.
 
-`items` reaches host services as `search` does. It runs while you type, never because you chose an action, so it may read what you allowed (storage, files, GET and HEAD, the dictionary and calendars), and anything that needs an action you chose, such as reading the clipboard, fails with `needs-activation`. A request that needs consent shows its question under the keyword. A catalogue belongs to the access it was read under: revoking a scope or turning the extension off drops it, allowing a scope drops it too, and either way the next use asks for it from the start with `reason` `"load"`.
+`items` reaches host services as `search` does. It runs while you type, never because you chose an action, so it may use what you allowed that needs no action of yours (files, GET and HEAD, the dictionary, calendars and `storage`, whose writes and deletes need none either), and anything that needs an action you chose, such as reading the clipboard, fails with `needs-activation`. A request that needs consent shows its question under the keyword. A catalogue belongs to the access it was read under: revoking a scope or turning the extension off drops it, allowing a scope drops it too, and either way the next use asks for it from the start with `reason` `"load"`.
 
 #### The main search
 
-With `"defaultSearch": true` in its manifest, a package's catalogue also answers the main search, after apps and in the order of the extension folders, with up to eight rows ranked by the same matcher. Dupin matches the catalogue it holds, so the package never sees what you type there and `search` is never called for it. Loading the catalogue from the main search reaches host services as it does under the keyword, but the main search never asks for consent: a catalogue that fails to load, for want of consent or otherwise, stays out of it and shows its failure, and any question, under its own keyword.
+With `"defaultSearch": true` in its manifest, a package's catalogue also answers the main search, after apps and in the order of the extension folders, with up to eight rows ranked by the same matcher. Dupin matches the catalogue it holds, so the package never sees what you type there and `search` is never called for it. Loading the catalogue from the main search reaches host services as it does under the keyword, but the main search never asks for consent: a catalogue that fails to load, for want of consent or otherwise, stays out of it and shows its failure, and any question, under its own keyword. The main search doesn't ask a failed catalogue again until its access changes, something invalidates it or its keyword loads it, so it costs no call per keystroke.
 
 ### Details
 
@@ -242,26 +242,21 @@ export const events = {
 
 `change` is frozen and shaped as `clipboard.read()` returns a copy, with text cut to 64 KiB and `truncated: true` when it was. One delivery runs at a time for each package; copies that land meanwhile are coalesced to the newest, so a slow handler never builds a queue. A handler runs in the background: it may read and use `storage`, but anything that needs an action you chose fails with `needs-activation`. Revoking the scope, turning the extension off or macOS withdrawing access stops the deliveries at once.
 
-A handler that calls `items.invalidate()` has Dupin ask `items` again, with its cursor and `reason` `"invalidated"`, and search the current query again so the change shows at once. Clipboard history is one catalogue kept this way: each copy is stored, and `items` sends only what was stored since its cursor:
+A handler that calls `items.invalidate()` has Dupin ask `items` again, with its cursor and `reason` `"invalidated"`, and, while the panel lists that catalogue under the keyword or in the main search, search the current query again so the change shows at once. Clipboard history is one catalogue kept this way: each copy is stored, the cursor is the newest record's ID, and `items` sends only the records listed before it, or everything again when it is gone or the catalogue expired, which also drops records storage has since deleted:
 
 ```js
 import { items as catalogue, storage } from 'dupin';
 
-async function clips() {
-	const { records } = await storage.list({ limit: 200 });
-	return [...records].reverse();
-}
-
 const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });
 
 export async function items(ctx) {
-	const all = await clips();
-	if (ctx.reason === 'load') return { items: all.map(row), cursor: String(all.length) };
-	return {
-		type: 'update',
-		append: all.slice(Number(ctx.cursor)).map(row),
-		cursor: String(all.length),
-	};
+	const { records } = await storage.list({ limit: 200 });
+	const seen = records.findIndex((record) => record.id === ctx.cursor);
+	const cursor = records[0]?.id;
+	if (ctx.reason !== 'invalidated' || seen < 0) {
+		return { items: [...records].reverse().map(row), cursor, ttl: 3600 };
+	}
+	return { type: 'update', append: records.slice(0, seen).reverse().map(row), cursor, ttl: 3600 };
 }
 
 export const events = {
@@ -294,7 +289,7 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 - An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer. Settings → Extensions lists the same requests, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
 - Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
-- While you type, an extension may use what you allowed to read: GET and HEAD, files, storage, the dictionary and calendars. Any other HTTP method, a program or script and reading or writing the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+- While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary and calendars, and its own `storage`, writes included. Any other HTTP method, a program or script and reading or writing the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 - Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
 - Calendars, and reading or watching the clipboard, also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
@@ -417,7 +412,7 @@ const bytes = await storage.readBlob(record.blobs[0].handle);
 | `delete(id)`, `clear()`   | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                 |
 | `usage()`                 | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                     |
 
-Record IDs and blob handles are opaque strings; IDs sort by when the record was stored. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
+Record IDs and blob handles are opaque strings. IDs are random, so they don't sort by when the record was stored; `list` gives that order. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
 
 - **Limits.** A record's JSON and its blobs are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
 - **Where it lives.** Each package has a [`dupin-storage`](./storage.md) namespace of its own, named by a hash of its package ID and where it was installed from, so no package reads another's data, a native feature's, or that of a bundled package it copies. Everything is sealed with the data key in your Keychain.

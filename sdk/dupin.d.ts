@@ -94,7 +94,7 @@ declare module 'dupin' {
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
 
-	/** The entry module's `search` export: answers computed for each query. It runs as the user types, so it may only read. */
+	/** The entry module's `search` export: answers computed for each query. It runs as the user types, so it may only read, and write its own `storage`. */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
 
 	/** What `items` receives. Dupin freezes it. */
@@ -143,7 +143,8 @@ declare module 'dupin' {
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
 	 * user types, asking again only on first use, after `ttl` or when an action or event handler
 	 * invalidates it. At most 10,000 items and 8 MiB of text. It may use host services as
-	 * `search` does, so it may only read.
+	 * `search` does: what reads, and `storage` writes too, but nothing that needs an action
+	 * the user chose. With `defaultSearch`, it may run as the user types in the main search.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
 
@@ -326,7 +327,7 @@ declare module 'dupin' {
 
 	/** A record as `storage` returns it. Dupin freezes it, but not `data`. */
 	export interface StoredRecord {
-		/** Opaque. IDs sort by when the record was stored. */
+		/** Opaque and random; `storage.list` gives the order records were stored in. */
 		readonly id: string;
 		/** ISO 8601, UTC. */
 		readonly createdAt: string;

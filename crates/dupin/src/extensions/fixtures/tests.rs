@@ -393,18 +393,19 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
 }
 
 /// Clipboard history as an `items()` catalogue: it lists what storage holds, and each copy the
-/// watch delivers is stored and appended to the catalogue Dupin holds.
+/// watch delivers is stored and appended to the catalogue Dupin holds. It is the recipe in
+/// docs/features/extensions.md, listing 3 records where that lists 200, so a fixture fills a
+/// page with a few.
 const CLIPS: &str = "import { storage, items as catalogue } from 'dupin';\n\
-     async function clips() {\n\
-     \tconst { records } = await storage.list();\n\
-     \treturn [...records].reverse();\n\
-     }\n\
      const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });\n\
      export async function items(ctx) {\n\
-     \tconst all = await clips();\n\
-     \tconst latest = String(all.length);\n\
-     \tif (ctx.reason === 'load') return { items: all.map(row), cursor: latest };\n\
-     \treturn { type: 'update', append: all.slice(Number(ctx.cursor)).map(row), cursor: latest };\n\
+     \tconst { records } = await storage.list({ limit: 3 });\n\
+     \tconst seen = records.findIndex((record) => record.id === ctx.cursor);\n\
+     \tconst cursor = records[0]?.id;\n\
+     \tif (ctx.reason !== 'invalidated' || seen < 0) {\n\
+     \t\treturn { items: [...records].reverse().map(row), cursor, ttl: 3600 };\n\
+     \t}\n\
+     \treturn { type: 'update', append: records.slice(0, seen).reverse().map(row), cursor, ttl: 3600 };\n\
      }\n\
      export const events = {\n\
      \tasync clipboard(change) {\n\
@@ -479,6 +480,42 @@ fn a_catalogue_is_replayed_with_its_host_requests_and_updates_and_matched_native
     assert!(
         error["message"].as_str().unwrap().contains("first"),
         "a catalogue's request needs consent as a search's does: {error}"
+    );
+}
+
+#[test]
+fn clipboard_history_keeps_appending_once_storage_holds_more_than_it_lists() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["watch"] }),
+        CLIPS,
+    );
+    let copy = |text: &str| json!({ "event": "clipboard", "data": { "type": "text", "text": text } });
+    write_fixture(
+        &package,
+        "full.json",
+        json!({
+            "fixture": 1,
+            "replies": { "storage": [{ "text": "one" }, { "text": "two" }, { "text": "three" }] },
+            "steps": [{ "query": "" }, copy("four"), copy("five"), { "query": "" }],
+        }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    assert!(report.passed, "{}\n{:#}", report.text, report.json);
+    let replayed = steps(&report, 0);
+    let titles = |step: &Value| -> Vec<String> {
+        step["outcome"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(titles(&replayed[0]), ["one", "two", "three"]);
+    assert_eq!(
+        titles(&replayed[3]),
+        ["one", "two", "three", "four", "five"],
+        "copies past a full page still reach the catalogue"
     );
 }
 
