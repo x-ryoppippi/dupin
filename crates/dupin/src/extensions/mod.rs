@@ -245,6 +245,19 @@ pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     load(folder, None).map(|loaded| loaded.extension)
 }
 
+/// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
+/// reports, and what `dupin ext build` and `dupin ext dev` require before a result is kept.
+pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    let extension = load_folder(folder)?;
+    extension
+        .check(Instant::now() + QUERY_DEADLINE)
+        .map_err(|error| match error {
+            RunError::Failed(diagnostic) => diagnostic,
+            RunError::Cancelled => Diagnostic::new("cancelled", "the check was cancelled"),
+        })?;
+    Ok(extension)
+}
+
 fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
     load_with(folder, previous, build_guest)
 }
