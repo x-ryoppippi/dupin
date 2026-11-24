@@ -24,9 +24,11 @@ struct Override {
     name: &'static str,
     /// The command that answers the package's keyword.
     command: String,
+    /// The package answers a built-in command, through its port.
+    built_in: bool,
     /// The configuration under which that command answers.
     on: Config,
-    /// One that turns a built-in command off, for a package that answers one.
+    /// One that turns the built-in command off, if a setting can.
     off: Option<Config>,
 }
 
@@ -35,19 +37,21 @@ impl Override {
         Self {
             name,
             command: format!("extension.{name}"),
+            built_in: false,
             on,
             off: None,
         }
     }
 
-    fn built_in(name: &'static str, on: Config, off: Config) -> Self {
+    fn built_in(name: &'static str, on: Config, off: Option<Config>) -> Self {
         let command = crate::features::ported_command(name)
             .unwrap_or_else(|| panic!("no built-in command is answered by {name}"));
         Self {
             name,
             command: command.to_owned(),
+            built_in: true,
             on,
-            off: Some(off),
+            off,
         }
     }
 
@@ -72,8 +76,7 @@ impl Override {
         let mut configured = crate::commands::configured(&self.on).unwrap();
         let added = add_extensions(&mut configured, &packages.active());
         let ports: HashMap<_, _> = self
-            .off
-            .is_some()
+            .built_in
             .then(|| (self.command(), Arc::new(Port::default())))
             .into_iter()
             .collect();
@@ -127,7 +130,7 @@ impl Override {
         let original = self.listed(&packages);
         assert_eq!(original.kind, Kind::Bundled);
         assert_eq!(original.package.as_str(), format!("bundled:{}", self.name));
-        assert_eq!(original.built_in, self.off.is_some());
+        assert_eq!(original.built_in, self.built_in);
         let shipped_extension = self.routed(&self.on, &packages).expect("the bundled one answers");
         let shipped_scopes = scopes(&bridge, &original);
 
@@ -148,7 +151,7 @@ impl Override {
         let modified = self.listed(&packages);
         assert_eq!(modified.kind, Kind::Modified);
         assert_eq!(modified.package.as_str(), self.name, "it has grants of its own");
-        assert_eq!(modified.built_in, self.off.is_some());
+        assert_eq!(modified.built_in, self.built_in);
         assert!(!bridge.is_enabled(&modified.package), "it waits to be turned on");
         let edited_scopes = scopes(&bridge, &modified);
         assert_eq!(
@@ -227,7 +230,7 @@ fn every_bundled_package_has_an_override_test() {
 #[test]
 fn calendar() {
     let on = Config::parse("[calendar]\nenabled = true").unwrap();
-    Override::built_in("calendar", on, Config::default()).run();
+    Override::built_in("calendar", on, Some(Config::default())).run();
 }
 
 #[test]
