@@ -20,7 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Web Search** (`web`) lists the [web searches](./web-searches.md), such as `g` for Google, that the main search reaches by their alias.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Web Search** (`web`) lists the [web searches](./web-searches.md), such as `g` for Google, that the main search reaches by their alias. Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md): each keeps its own setting as its switch and its keyword, and Settings → Extensions doesn't list it.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -77,15 +77,16 @@ Type `wc two words` to see **2 words**. Enter copies `2`. [`examples/extensions/
 
 The manifest is the `dupin` key of `package.json`, so a package keeps one file for Dupin and its own JavaScript tooling. Dupin reads it as plain JSON before running any code:
 
-| Key                   | Value                                                                                                                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                                                                         |
-| `version`             | Required. 1–32 characters without spaces.                                                                                                                                                |
-| `dupin.title`         | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                                                                                |
-| `dupin.keyword`       | Required. Up to 32 bytes, no spaces.                                                                                                                                                     |
-| `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`. |
-| `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                      |
-| `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                    |
+| Key                   | Value                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                                                                                                     |
+| `version`             | Required. 1–32 characters without spaces.                                                                                                                                                                            |
+| `dupin.title`         | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                                                                                                            |
+| `dupin.keyword`       | Required. Up to 32 bytes, no spaces.                                                                                                                                                                                 |
+| `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`.                             |
+| `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                                                  |
+| `dupin.emptyQuery`    | Optional, `false` unless set. `true` calls [`search`](#searchquery-ctx) with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed, such as upcoming events. |
+| `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                                                |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword from config.toml or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else. Web Search alone still lists its web searches without its keyword.
 
@@ -98,7 +99,7 @@ A package with both lists what `search` computes for the query first, then the c
 
 ### `search(query, ctx)`
 
-`search` receives the text typed after the keyword and a frozen `ctx` whose `limit` is the number of rows Dupin will show. It returns an array of items, or a list: `{ type: "list", items: [...] }`, or `{ sections: [{ title, items }, ...] }` for items under headings (`type` may be left out). Return `[]` for no results. It isn't called before anything is typed.
+`search` receives the text typed after the keyword and a frozen `ctx` whose `limit` is the number of rows Dupin will show. It returns an array of items, or a list: `{ type: "list", items: [...] }`, or `{ sections: [{ title, items }, ...] }` for items under headings (`type` may be left out). Return `[]` for no results. It isn't called before anything is typed, unless the manifest sets `emptyQuery`.
 
 | Item field | Value                                                                                                                                                |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -222,7 +223,7 @@ An item's `actions` adds up to eight actions, counting the ones `url` and `text`
 | Action | What it does                                                                                                                                                                      |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `copy` | Copies the text, 1 byte to 16 KiB.                                                                                                                                                |
-| `open` | Opens the `http` or `https` URL.                                                                                                                                                  |
+| `open` | Opens the `http` or `https` URL, or a [calendar event's `link`](#calendar).                                                                                                       |
 | `run`  | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. |
 
 ```js
@@ -486,7 +487,7 @@ Text the layout doesn't recognize stays in a sense's `definition` or a group's `
 
 ### Calendar
 
-`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, limit })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed:
+`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, query, limit, order })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed. With `query`, up to 200 characters, only events whose title or location holds every word of it, in any order and case, come back, so a search sends the extension only what matches:
 
 ```js
 import { calendar } from 'dupin';
@@ -502,7 +503,7 @@ export async function search() {
 }
 ```
 
-Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
+Events come earliest start first, and the limit keeps the earliest. With `order: 'latest'` they come latest start first and the limit keeps the latest, which is what a read of past events wants. `start` and `end` are ISO 8601 in UTC:
 
 ```json
 {
@@ -513,11 +514,17 @@ Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
 	"allDay": false,
 	"calendar": { "name": "Work", "color": "#1badf8" },
 	"location": "Meeting room",
-	"url": null
+	"url": null,
+	"link": "ical://ekevent/20261124T100000Z/7F3C…?method=show&options=more",
+	"labels": {
+		"day": "Tuesday 24 November",
+		"time": "10:00 – 11:00",
+		"dates": "24 Nov, 10:00 – 11:00"
+	}
 }
 ```
 
-`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading also needs macOS Calendars access, which only **Request Access** asks for.
+`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, a title comes as one line of up to 512 bytes, so it fits a row's `title` as it is, and locations and names are cut to 1 KiB. `url` is the event's own link, if its calendar holds one. `link` shows the occurrence in Calendar: give it as an [`open` action](#actions) of the `search` that read it, the only scheme besides `http` and `https` one opens. A link no read in that search returned, or one in an `items()` catalogue, fails the answer with `invalid-url`. The guest has no `Intl`, so `labels` has the event's dates as this Mac's locale and time zone write them: `day` the weekday and date it starts, `time` only its time, or `All day`, when it falls within one day and `null` otherwise, and `dates` its dates and times, each with the year when it isn't this year. Reading also needs macOS Calendars access, which only **Request Access** asks for. The bundled [Calendar search](./calendar.md) is written this way.
 
 ### Clipboard
 
@@ -727,7 +734,7 @@ Any step's outcome also has `clipboard`, the texts the package wrote to the clip
 | `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                               |
 | `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                          |
 | `dictionary`  | Each term's entries, in the [dictionary](#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                                    |
-| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range. Whole days are counted from `now` in UTC.                                                                                                                     |
+| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                              |
 | `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error. |
 
 ### Through MCP

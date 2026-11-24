@@ -6,19 +6,19 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use std::collections::HashSet;
 
-use dupin_js_runtime::row::Source;
+use dupin_js_runtime::row::{RowEffect, Source};
 use dupin_js_runtime::{
     Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Preferences, Reason, Row, RunError,
     Sources,
 };
-use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
+use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
@@ -47,6 +47,12 @@ pub trait Services: Send + Sync {
     /// `{"ok": value}` or `{"error": {"code", "message", …}}`. Runs on a thread of its own.
     /// `cancelled` is set once the call has ended, after which the reply is dropped.
     fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8>;
+    /// Whether one of this call's replies gave the guest `url`, a link not on the web such as
+    /// a calendar event's, which its rows may then open.
+    fn opens(&self, url: &str) -> bool {
+        let _ = url;
+        false
+    }
 }
 
 /// No host services: every request fails as unavailable.
@@ -105,6 +111,7 @@ pub struct Host {
 struct Shared {
     launch: Launcher,
     environment: Option<Environment>,
+    workers: Arc<Workers>,
     state: Mutex<State>,
     released: Condvar,
     next_call: AtomicU64,
@@ -172,6 +179,7 @@ impl Host {
             shared: Arc::new(Shared {
                 launch,
                 environment,
+                workers: Arc::default(),
                 state: Mutex::default(),
                 released: Condvar::new(),
                 next_call: AtomicU64::new(1),
@@ -292,6 +300,7 @@ impl Host {
         )? {
             (Answer::Rows { items }, _) => {
                 validate(&items, limit as usize).map_err(|problem| unshowable(problem, package))?;
+                issued(&items, services.as_ref(), package)?;
                 Ok(items)
             }
             _ => Err(mismatch()),
@@ -386,14 +395,7 @@ impl Host {
                 return Err(error);
             }
         }
-        let answer = helper.run(
-            id,
-            request,
-            self.shared.environment,
-            deadline,
-            is_cancelled,
-            services,
-        );
+        let answer = helper.run(id, request, &self.shared, deadline, is_cancelled, services);
         if answer.is_err() {
             lease.helper = None;
         }
@@ -418,14 +420,7 @@ impl Host {
         }
         let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
         let deadline = deadline();
-        settle(helper.run(
-            id,
-            request,
-            self.shared.environment,
-            deadline,
-            is_cancelled,
-            services,
-        ))
+        settle(helper.run(id, request, &self.shared, deadline, is_cancelled, services))
     }
 
     /// Waits for the helper to be free, unless the caller gives up first.
@@ -546,7 +541,8 @@ fn spawn_reaper(shared: Weak<Shared>) -> bool {
 
 struct Helper {
     child: Child,
-    socket: UnixStream,
+    /// Shared with the threads that answer host requests, which reply as soon as they finish.
+    socket: Arc<Mutex<UnixStream>>,
     /// Bounded, so a helper that writes without being asked stalls on its own socket instead
     /// of growing Dupin's memory.
     replies: mpsc::Receiver<(FromHelper, Vec<u8>)>,
@@ -594,7 +590,7 @@ impl Helper {
             .map_err(unavailable)?;
         Ok(Self {
             child,
-            socket: ours,
+            socket: Arc::new(Mutex::new(ours)),
             replies: received,
             started: Instant::now(),
             greeted: false,
@@ -673,7 +669,7 @@ impl Helper {
     }
 
     fn send(&mut self, message: &ToHelper, tail: &[&[u8]]) -> Result<(), RunError> {
-        wire::write(&mut self.socket, message, tail).map_err(|error| {
+        write(&self.socket, message, tail).map_err(|error| {
             RunError::Failed(if error.kind() == io::ErrorKind::InvalidInput {
                 Diagnostic::new(
                     "package-too-large",
@@ -690,7 +686,7 @@ impl Helper {
         &mut self,
         id: u64,
         request: Request<'_>,
-        environment: Option<Environment>,
+        shared: &Shared,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -702,12 +698,18 @@ impl Helper {
             entry: request.entry.into(),
             modules: request.modules,
             call: request.call,
-            environment,
+            environment: shared.environment,
         };
         self.send(&message, &request.tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + request.allowance;
         let mut cancel_by = None;
-        let mut requests = Requests::new(services.clone(), deadline);
+        let mut requests = Requests::new(
+            services.clone(),
+            deadline,
+            id,
+            self.socket.clone(),
+            shared.workers.clone(),
+        );
         loop {
             match self.replies.recv_timeout(TICK) {
                 Ok((FromHelper::Done { id: answered, answer }, tail)) if answered == id => {
@@ -730,9 +732,6 @@ impl Helper {
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(RunError::Failed(crashed().file(request.entry)));
                 }
-            }
-            for (call, json) in requests.finished() {
-                self.send(&ToHelper::Reply { id, call }, &[&json])?;
             }
             let now = Instant::now();
             if cancel_by.is_none() && is_cancelled() {
@@ -762,29 +761,37 @@ impl Helper {
     }
 }
 
-/// The host requests of one run: each runs on a thread of its own, and every reply that comes
-/// after the run ends is dropped with the channel.
+/// The host requests of one run: each runs on a worker thread of its own, which writes its
+/// reply to the helper the moment it has one, so a guest awaiting it never waits for the run's
+/// next check. A reply that comes after the run ends is dropped.
 struct Requests {
     services: Arc<dyn Services>,
     deadline: Instant,
     cancelled: Arc<AtomicBool>,
-    done: mpsc::Sender<(u32, Vec<u8>)>,
-    finished: mpsc::Receiver<(u32, Vec<u8>)>,
+    run: u64,
+    socket: Arc<Mutex<UnixStream>>,
+    workers: Arc<Workers>,
     last: u32,
-    waiting: usize,
+    waiting: Arc<AtomicUsize>,
 }
 
 impl Requests {
-    fn new(services: Arc<dyn Services>, deadline: Instant) -> Self {
-        let (done, finished) = mpsc::channel();
+    fn new(
+        services: Arc<dyn Services>,
+        deadline: Instant,
+        run: u64,
+        socket: Arc<Mutex<UnixStream>>,
+        workers: Arc<Workers>,
+    ) -> Self {
         Self {
             services,
             deadline,
             cancelled: Arc::default(),
-            done,
-            finished,
+            run,
+            socket,
+            workers,
             last: 0,
-            waiting: 0,
+            waiting: Arc::default(),
         }
     }
 
@@ -794,36 +801,127 @@ impl Requests {
         if call != self.last + 1 || call > dupin_js_runtime::MAX_CALLS {
             return Err("a request out of sequence");
         }
-        if self.waiting >= dupin_js_runtime::MAX_PENDING {
+        if self.waiting.load(Ordering::Acquire) >= dupin_js_runtime::MAX_PENDING {
             return Err("too many requests waiting");
         }
         if op.len() > dupin_js_runtime::MAX_OP_BYTES || args.len() > dupin_js_runtime::MAX_ARGS_BYTES {
             return Err("a request too large");
         }
         self.last = call;
-        self.waiting += 1;
+        self.waiting.fetch_add(1, Ordering::AcqRel);
         let services = self.services.clone();
         let cancelled = self.cancelled.clone();
-        let done = self.done.clone();
         let deadline = self.deadline;
-        let started = std::thread::Builder::new()
-            .name("extension-host-request".into())
-            .spawn(move || {
-                let reply = services.call(&op, &args, deadline, &cancelled);
-                let _ = done.send((call, reply));
-            });
+        let reply = self.reply(call);
+        let started = self.workers.run(Box::new(move || {
+            reply.send(&services.call(&op, &args, deadline, &cancelled));
+        }));
         if started.is_err() {
-            let reply = br#"{"error":{"code":"unavailable","message":"Dupin couldn't start the request"}}"#;
-            let _ = self.done.send((call, reply.to_vec()));
+            self.reply(call)
+                .send(br#"{"error":{"code":"unavailable","message":"Dupin couldn't start the request"}}"#);
         }
         Ok(())
     }
 
-    fn finished(&mut self) -> Vec<(u32, Vec<u8>)> {
-        let finished: Vec<_> = self.finished.try_iter().collect();
-        self.waiting -= finished.len();
-        finished
+    fn reply(&self, call: u32) -> Reply {
+        Reply {
+            run: self.run,
+            call,
+            socket: self.socket.clone(),
+            cancelled: self.cancelled.clone(),
+            waiting: self.waiting.clone(),
+        }
     }
+}
+
+type Job = Box<dyn FnOnce() + Send>;
+
+/// Idle workers kept for the next requests.
+const MAX_IDLE_WORKERS: usize = 4;
+
+/// The threads host requests run on, kept between requests: starting a thread takes about as
+/// long as answering a request, and a service may keep per-thread state that outlives one,
+/// such as EventKit's store and the date formatters the calendar builds.
+#[derive(Default)]
+struct Workers {
+    idle: Mutex<Vec<mpsc::Sender<Job>>>,
+}
+
+impl Workers {
+    /// Hands `job` to an idle worker, or to a new one when every worker is busy.
+    fn run(self: &Arc<Self>, job: Job) -> io::Result<()> {
+        let mut job = job;
+        loop {
+            let idle = self
+                .idle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .pop();
+            let Some(worker) = idle else { break };
+            match worker.send(job) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::SendError(returned)) => job = returned,
+            }
+        }
+        let workers = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("extension-host-request".into())
+            .spawn(move || {
+                let mut next = Some(job);
+                while let Some(job) = next.take() {
+                    job();
+                    // Only the idle list holds the sender, so the worker ends with the host.
+                    let (worker, jobs) = mpsc::channel::<Job>();
+                    let Some(workers) = workers.upgrade() else { return };
+                    {
+                        let mut idle = workers
+                            .idle
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if idle.len() >= MAX_IDLE_WORKERS {
+                            return;
+                        }
+                        idle.push(worker);
+                    }
+                    drop(workers);
+                    next = jobs.recv().ok();
+                }
+            })
+            .map(drop)
+    }
+}
+
+/// Where one host request's answer goes.
+struct Reply {
+    run: u64,
+    call: u32,
+    socket: Arc<Mutex<UnixStream>>,
+    cancelled: Arc<AtomicBool>,
+    waiting: Arc<AtomicUsize>,
+}
+
+impl Reply {
+    /// A helper that can't take the reply has died, which the run notices as its replies
+    /// channel closing.
+    fn send(self, json: &[u8]) {
+        if !self.cancelled.load(Ordering::Relaxed) {
+            let _ = write(
+                &self.socket,
+                &ToHelper::Reply {
+                    id: self.run,
+                    call: self.call,
+                },
+                &[json],
+            );
+        }
+        self.waiting.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Writes one message whole, so concurrent replies and the run's own messages never interleave.
+fn write(socket: &Mutex<UnixStream>, message: &ToHelper, tail: &[&[u8]]) -> io::Result<()> {
+    let mut socket = socket.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    wire::write(&mut *socket, message, tail)
 }
 
 impl Drop for Requests {
@@ -878,6 +976,29 @@ fn validate(items: &[Row], limit: usize) -> Result<(), String> {
         return Err("more text than an answer may carry".into());
     }
     Ok(())
+}
+
+/// Fails unless every link not on the web that `items` open came from one of the call's own
+/// replies, so only a package that read an event can show it in Calendar, and only that one.
+fn issued(items: &[Row], services: &dyn Services, package: &Compiled) -> Result<(), RunError> {
+    let stray = items
+        .iter()
+        .flat_map(|item| &item.actions)
+        .any(|action| match &action.effect {
+            RowEffect::OpenUrl { url } => !is_web_url(url) && !services.opens(url),
+            _ => false,
+        });
+    if !stray {
+        return Ok(());
+    }
+    Err(RunError::Failed(
+        Diagnostic::new(
+            "invalid-url",
+            "an `open` action names a calendar link that no `calendar.events` reply in this search gave",
+        )
+        .file(package.entry())
+        .hint("Open the `link` of an event `calendar.events` returned while answering this query."),
+    ))
 }
 
 fn unshowable(problem: String, package: &Compiled) -> RunError {

@@ -51,6 +51,8 @@ pub struct Extension {
     pub root: PathBuf,
     /// The package asked for its catalogue to answer the default search too.
     pub default_search: bool,
+    /// The package's `search` answers its keyword before anything is typed.
+    pub empty_query: bool,
     /// What the package exports, once a call has linked it.
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
@@ -241,23 +243,36 @@ fn host() -> &'static Host {
 }
 
 /// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
-/// launcher it starts. A launcher with a window never reads it.
+/// launcher it starts, or else the clock of the headless calendar fixtures, so guests see the
+/// same day the fixture events are laid out around. A launcher with a window never reads it.
 fn headless_environment() -> Option<dupin_js_runtime::Environment> {
     if !rune::tooling::is_headless() {
         return None;
     }
-    let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+    let Ok(value) = std::env::var(fixtures::HEADLESS_ENVIRONMENT) else {
+        return Some(dupin_js_runtime::Environment {
+            now: dupin_mac::FIXTURE_CLOCK,
+            seed: 1,
+        });
+    };
     serde_json::from_str::<dupin_js_runtime::Environment>(&value)
         .ok()
         .filter(dupin_js_runtime::Environment::is_valid)
 }
 
-/// Dupin's own executable as the extension host, with nothing inherited it doesn't need.
+/// Dupin's own executable as the extension host, with nothing inherited it doesn't need. A
+/// headless run's guests keep to the calendar fixtures' UTC unless it names a zone.
 fn helper_command() -> std::io::Result<std::process::Command> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.env_clear().current_dir("/");
-    if let Some(zone) = std::env::var_os("TZ") {
-        command.env("TZ", zone);
+    match std::env::var_os("TZ") {
+        Some(zone) => {
+            command.env("TZ", zone);
+        }
+        None if rune::tooling::is_headless() => {
+            command.env("TZ", "UTC");
+        }
+        None => {}
     }
     #[cfg(not(test))]
     command.arg(dupin_extension_host::FLAG);
@@ -468,6 +483,7 @@ fn load_with(
             keyword: manifest.keyword,
             root: folder.to_path_buf(),
             default_search: manifest.default_search,
+            empty_query: manifest.empty_query,
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             package,
@@ -651,6 +667,7 @@ pub(crate) mod tests {
             keyword: keyword.into(),
             root: PathBuf::from("/fixture"),
             default_search: false,
+            empty_query: false,
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             revision: Revision::new("blake3:fixture").unwrap(),

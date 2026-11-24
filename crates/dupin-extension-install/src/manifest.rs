@@ -67,16 +67,15 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
     if let Some(key) = dupin.keys().find(|key| {
         !matches!(
             key.as_str(),
-            "title" | "keyword" | "main" | "defaultSearch" | "capabilities"
+            "title" | "keyword" | "main" | "defaultSearch" | "emptyQuery" | "capabilities"
         )
     }) {
         return Err(invalid(&format!("dupin.{key}"), "is not a key Dupin reads"));
     }
-    if dupin
-        .get("defaultSearch")
-        .is_some_and(|value| !value.is_boolean())
-    {
-        return Err(invalid("dupin.defaultSearch", "must be true or false"));
+    for key in ["defaultSearch", "emptyQuery"] {
+        if dupin.get(key).is_some_and(|value| !value.is_boolean()) {
+            return Err(invalid(&format!("dupin.{key}"), "must be true or false"));
+        }
     }
     let string = |object: &Map<String, Value>, key: &str, field: &str| match object.get(key) {
         Some(Value::String(value)) => Ok(Some(value.clone())),

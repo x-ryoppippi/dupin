@@ -117,7 +117,11 @@ declare module 'dupin' {
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
 
-	/** The entry module's `search` export: answers computed for each query. It runs as the user types, so it may only read, and write its own `storage`. */
+	/**
+	 * The entry module's `search` export: answers computed for each query. It runs as the user
+	 * types, so it may only read, and write its own `storage`, and only once something is typed
+	 * unless the manifest sets `emptyQuery`.
+	 */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
 
 	/** What `items` receives. Dupin freezes it. */
@@ -239,6 +243,8 @@ declare module 'dupin' {
 		main?: `${string}.js` | `${string}.mjs` | `${string}.ts` | `${string}.mts` | `${string}.tsx`;
 		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */
 		defaultSearch?: boolean;
+		/** Call `search` with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed. */
+		emptyQuery?: boolean;
 		/** The most the extension may do. The user allows each scope separately. */
 		capabilities?: Capabilities;
 	}
@@ -425,22 +431,47 @@ declare module 'dupin' {
 	};
 
 	export interface CalendarEvent {
-		title: string;
+		/** Names one occurrence of a recurring event. */
+		readonly id: string;
+		/** One line, up to 512 bytes, so it fits an item's `title` as it comes. */
+		readonly title: string;
 		/** ISO 8601, UTC. */
-		start: string;
-		end: string;
-		allDay: boolean;
-		calendar: unknown;
-		location?: string;
-		[key: string]: unknown;
+		readonly start: string;
+		readonly end: string;
+		readonly allDay: boolean;
+		readonly calendar: {
+			readonly name: string;
+			/** `#rrggbb` in sRGB. */ readonly color: string | null;
+		};
+		readonly location: string | null;
+		/** The event's own link, as its calendar holds it. */
+		readonly url: string | null;
+		/** Shows this occurrence in Calendar, as an `open` action of the `search` that read it. */
+		readonly link: string | null;
+		/** Its dates as this Mac's locale and time zone write them, since the guest has no `Intl`. */
+		readonly labels: {
+			/** The day it starts, such as `Wednesday 25 November`, with the year when it isn't this year. */
+			readonly day: string;
+			/** Only the time, such as `10:00 – 11:00`, or `All day`, when it falls within one day. */
+			readonly time: string | null;
+			/** Its dates and times, such as `23 Nov, 10:00 – 11:00`, with the year when it isn't this year. */
+			readonly dates: string;
+		};
 	}
 
 	/** `calendar` capability, inside the declared window around today. `to` is exclusive. */
 	export const calendar: {
+		/**
+		 * Events overlapping the range, earliest start first, or latest with `order: 'latest'`:
+		 * the first `limit` (100 by default, 500 at most) in that order whose title or location
+		 * holds every word of `query`, in any order and case.
+		 */
 		events(range: {
 			from: Date | string | number;
 			to: Date | string | number;
+			query?: string;
 			limit?: number;
+			order?: 'earliest' | 'latest';
 		}): Promise<CalendarEvent[]>;
 	};
 

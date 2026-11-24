@@ -93,9 +93,33 @@ pub struct Session {
     trigger: Trigger,
     /// The package's own storage namespace, for the origin it was installed from.
     namespace: String,
+    /// The calendar event links this call's replies gave the guest, the only ones not on the
+    /// web its rows may open.
+    links: Mutex<HashSet<String>>,
+}
+
+impl Session {
+    fn issue_links(&self, events: &serde_json::Value) {
+        let links = events
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|event| event.get("link")?.as_str());
+        self.links
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend(links.map(str::to_owned));
+    }
 }
 
 impl HostServices for Session {
+    fn opens(&self, url: &str) -> bool {
+        self.links
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(url)
+    }
+
     fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8> {
         let reply = match self.dispatch(op, args, deadline, cancelled) {
             Ok(value) => serde_json::json!({ "ok": value }),
@@ -358,6 +382,7 @@ impl Bridge {
             generation,
             trigger,
             namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
+            links: Mutex::default(),
         };
         Call {
             services: Arc::new(session),

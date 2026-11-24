@@ -26,6 +26,9 @@ pub(super) struct Feature {
     pub start: fn(&mut Providers),
     pub reload: fn(&mut Ui, &Config, &mut ConfiguredCommands) -> bool,
     permissions: &'static [PermissionUse],
+    /// The bundled extension that answers the feature's command, which then never answers a
+    /// keyword of its own.
+    bundled: Option<Bundled>,
 }
 
 impl Feature {
@@ -35,7 +38,25 @@ impl Feature {
         start: |_| {},
         reload: |_, _, _| false,
         permissions: &[],
+        bundled: None,
     };
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Bundled {
+    /// The package's `name`.
+    pub package: &'static str,
+    /// The command the feature registers while it is on.
+    pub command: &'static str,
+}
+
+/// The built-in command the extension called `package` answers, if a feature ships as it.
+pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.package == package)
+        .map(|bundled| bundled.command)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
