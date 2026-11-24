@@ -1,6 +1,7 @@
 # Plugin design proposal
 
-Status: proposed contract, not an implemented API. Tracks #6, #7, #17 and #96. The [extension platform design](./design/extension-platform.md) supersedes its runtime choice: guests are JavaScript in a sandboxed extension host, and the Wasm runtime this proposal started from has been removed.
+> [!IMPORTANT]
+> **Superseded** by the [extension platform design](./design/extension-platform.md), which is the current design. This page is kept as the history of the original proposal (#6, #7, #17, #96); where the two differ, the extension platform design wins. Guests are QuickJS-ng JavaScript or erasable TypeScript in a sandboxed helper process, the manifest is the `dupin` key of `package.json`, and the Wasm runtime this proposal started from has been removed. See [Extensions](./features/extensions.md) for what ships.
 
 ## Product boundary
 
@@ -17,29 +18,7 @@ window; an always-visible tab system is not a prerequisite.
 
 ## Runtime decision gate
 
-Wasm is the first candidate, not a settled dependency. Compare the native
-calculator prototype with the same calculation compiled to Wasm. Measure the
-release executable and complete app bundle, packaged plugin bytes, cold load,
-warm query latency, cancellation and peak/idle memory. Use the repository's
-release settings and record exact runtime versions and features.
-
-A small standalone runtime host can reject a clearly unsuitable runtime, but its
-size delta does not prove the app's final bundle delta. The adoption decision
-requires an app-level measurement. Compare an interpreter with a compiled runtime
-before choosing compilation caching or shipping a compiler in the bundle.
-
-Before adoption measurements, pin the baseline commit, toolchain, architecture and
-release flags in a checked-in script. Measure stripped executable, complete `.app`
-and shipped archive bytes for: no runtime; runtime without guests; smallest guest;
-calculator guest; and a second separately packaged guest. Count duplicated guest
-libraries. A later JS/TS engine needs its own app-level measurement. JIT/executable
-memory and hardened-runtime entitlement changes are adoption criteria.
-
-The initial candidate guest target has no ambient WASI filesystem, network,
-process or environment access. Host imports provide declared operations. Fuel,
-memory limits, message limits and cancellation must be verified for the chosen
-runtime. A worker thread alone does not isolate native crashes or enforce grants.
-Guest traps are contained; native host-import bugs remain host failures.
+This proposal started with Wasm as the first runtime candidate. The decision went to QuickJS-ng in a sandboxed helper process instead; the [extension platform design](./design/extension-platform.md#runtime-comparison) records the measurements and the reasons.
 
 ## Manifest and registration
 
@@ -101,27 +80,16 @@ and grant revocation invalidate pending completions as well as visible results.
 Guest code does not own the wall clock: host budgets and fuel enforce execution
 limits, with an explicit host import if an evaluator also needs cooperative checks.
 
-The [experimental query protocol](plugin-protocol.md) exercises bounded UTF-8
-messages, versions, correlation and per-request guest-memory ownership with a
-real calculator guest. Its runtime-independent Text/Detail/Pair view type is
-shared by launcher items. [User extensions](./features/extensions.md) run it in the
-launcher: an opt-in folder of manifests, one keyword command each, guest
-cancellation and deadlines, copy/web-URL actions, and views the guest pushes
-onto a host-owned navigation stack and describes as lists or detail pages. They
-have no host imports, so they need no grants. Plugin grants, capability
-brokerage, state and transport streaming still need implementation and review
-before guests get host access.
-
-The [capability broker](capability-broker.md) validates declared capabilities,
-keeps per-revision grants over a declarative base, and issues revocable
-operation permits. It is not yet wired to the extension runtime or the launcher.
+The [experimental query protocol](plugin-protocol.md) defines the bounded items,
+views and actions that [user extensions](./features/extensions.md) answer in, and
+the [capability broker](capability-broker.md) grants and checks their host access.
 
 ## Views, actions and saved state
 
-The launcher currently renders the shared Text, Detail and Pair data model per
-item. A `push` action opens a guest-described list or detail view; the session
-keeps the stack and its context, and Esc or Backspace returns. Forms remain
-planned. Plugins supply content and stable action IDs, not native UI objects or
+The launcher renders the shared Text, Detail and Pair data model per item. A
+`push` action would open a guest-described list or detail view; the session keeps
+the stack and its context, and Esc or Backspace returns. Pushed views and Forms
+are planned; see the extension platform design's rollout. Plugins supply content and stable action IDs, not native UI objects or
 arbitrary code inside the view. Text selection and keyboard focus belong to the
 host renderer.
 
@@ -181,16 +149,7 @@ grant access to Dupin globally; each plugin still needs its own grant.
 4. Migrate app, file and dictionary providers through the same registration,
    lifecycle, view and action contracts, retaining their existing input interactions.
 
-Runtime selection, guest ABI, package format and measurable performance budgets
-remain open. More feature-specific built-ins should not ship before this boundary
-is exercised and reviewed.
-
-## Runtime references
-
-- [Rust's bare Wasm target](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html)
-- [Wasmi configuration and limits](https://docs.rs/wasmi/latest/wasmi/struct.Config.html)
-- [Wasmtime resource limits](https://docs.wasmtime.dev/api/wasmtime/runtime/limits/trait.ResourceLimiter.html)
-- [Wasmtime compilation cache](https://docs.wasmtime.dev/examples-fast-compilation.html)
+The extension platform design settles the runtime, package format and performance budgets.
 
 ## Concurrent native command queries
 

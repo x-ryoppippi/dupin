@@ -1,6 +1,6 @@
 use ../e2e-recording.nu record
 use ../e2e-script-fixtures.nu [prepare-scripts cleanup-scripts]
-use ../e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
+use ../e2e-file-fixtures.nu [prepare cleanup viewer-running]
 use keys.nu key-script
 
 export def run-suite [
@@ -33,12 +33,8 @@ export def run-suite [
     if (viewer-running) {
         error make {msg: 'Cannot establish ownership of the file-action viewer'}
     }
-    readable-trash
     if ($out | path join fixtures | path exists) {
         error make {msg: 'File-action fixtures already exist'}
-    }
-    if (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | is-not-empty) {
-        error make {msg: 'File-action Trash fixtures already exist'}
     }
     try { prepare $out } catch {|failure|
         try { cleanup $out }
