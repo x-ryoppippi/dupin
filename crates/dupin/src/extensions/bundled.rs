@@ -216,6 +216,7 @@ mod tests {
                 10,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
+                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )
             .unwrap();
         let views: Vec<_> = items.into_iter().map(|item| item.view).collect();

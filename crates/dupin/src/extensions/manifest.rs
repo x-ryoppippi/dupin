@@ -3,7 +3,6 @@
 
 use std::path::{Component, Path};
 
-use dupin_broker::Capabilities;
 use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
 use serde_json::{Map, Value};
 
@@ -23,10 +22,8 @@ pub(super) struct Manifest {
     pub keyword: String,
     /// Relative to the folder: a JavaScript or TypeScript module.
     pub entry: String,
-    /// The most the package may ask for.
-    pub capabilities: Capabilities,
-    /// The manifest file's bytes as read, so a revision covers what it declares.
-    pub digest: blake3::Hash,
+    /// The most the package may do; the user grants each scope.
+    pub capabilities: dupin_broker::Capabilities,
 }
 
 /// The manifest files in one folder, so a later scan can tell whether any appeared, changed or
@@ -70,7 +67,7 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
         .transpose()?;
     let declares_dupin = package
         .as_ref()
-        .and_then(|(package, _)| package.get("dupin"))
+        .and_then(|package| package.get("dupin"))
         .is_some_and(|dupin| !dupin.is_null());
     if stamps.wasm_leftover && !declares_dupin {
         return Err(Diagnostic::new(
@@ -82,7 +79,7 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
             "Describe the extension in package.json, with `name`, `version` and a `dupin` key holding {DUPIN_KEYS}, export `search` from main.js and delete extension.toml. `dupin ext new` writes a starting point."
         )));
     }
-    let Some((package, digest)) = package else {
+    let Some(package) = package else {
         return Err(Diagnostic::new("missing-manifest", "is missing")
             .file(PACKAGE_JSON)
             .hint(
@@ -90,7 +87,7 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
             ));
     };
     match package.get("dupin") {
-        Some(dupin) => javascript(&package, dupin, digest),
+        Some(dupin) => javascript(&package, dupin),
         None => Err(Diagnostic::new("missing-manifest", "has no `dupin` key")
             .file(PACKAGE_JSON)
             .field("dupin")
@@ -100,10 +97,9 @@ pub(super) fn read(stamps: &Stamps) -> Result<Manifest, Diagnostic> {
     }
 }
 
-fn parse_package(path: &Path) -> Result<(Map<String, Value>, blake3::Hash), Diagnostic> {
+fn parse_package(path: &Path) -> Result<Map<String, Value>, Diagnostic> {
     let invalid = |message: String| Diagnostic::new("invalid-manifest", message).file(PACKAGE_JSON);
     let bytes = read_capped(path, MAX_PACKAGE_JSON_BYTES).map_err(invalid)?;
-    let digest = blake3::hash(&bytes);
     let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
         let message = error.to_string();
         let message = message.split(" at line ").next().unwrap_or(&message).to_owned();
@@ -114,16 +110,12 @@ fn parse_package(path: &Path) -> Result<(Map<String, Value>, blake3::Hash), Diag
         }
     })?;
     match value {
-        Value::Object(package) => Ok((package, digest)),
+        Value::Object(package) => Ok(package),
         _ => Err(invalid("must be a JSON object".into())),
     }
 }
 
-fn javascript(
-    package: &Map<String, Value>,
-    dupin: &Value,
-    digest: blake3::Hash,
-) -> Result<Manifest, Diagnostic> {
+fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, Diagnostic> {
     let field = |field: &str, message: &str, hint: &str| {
         Diagnostic::new("invalid-manifest", message)
             .file(PACKAGE_JSON)
@@ -163,8 +155,7 @@ fn javascript(
         version: required(package, "version", "version", VERSION_HINT)?,
         keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
-        capabilities: Capabilities::default(),
-        digest,
+        capabilities: dupin_broker::Capabilities::default(),
     };
     validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
@@ -177,8 +168,8 @@ fn javascript(
             )
         })?;
     let capabilities = match dupin.get("capabilities") {
-        Some(capabilities) => declared(capabilities)?,
-        None => Capabilities::default(),
+        Some(capabilities) => parse_capabilities(capabilities)?,
+        None => dupin_broker::Capabilities::default(),
     };
     Ok(Manifest {
         entry,
@@ -187,15 +178,18 @@ fn javascript(
     })
 }
 
-/// The broker's own reading of `capabilities`, so what Settings lists and the broker grants
-/// is what the package was loaded with.
-fn declared(capabilities: &Value) -> Result<Capabilities, Diagnostic> {
-    Capabilities::parse(capabilities).map_err(|problems| {
+/// The capability broker's own reading of the declaration, so what Settings lists and what a
+/// call is checked against can't differ. The first problem is reported; fixing it shows the next.
+pub(super) fn parse_capabilities(capabilities: &Value) -> Result<dupin_broker::Capabilities, Diagnostic> {
+    dupin_broker::Capabilities::parse(capabilities).map_err(|problems| {
         let problem = &problems[0];
         let diagnostic = Diagnostic::new(problem.code, problem.message.clone())
             .file(PACKAGE_JSON)
             .field(format!("dupin.{}", problem.field));
-        diagnostic.hint(problem.hint.unwrap_or(CAPABILITIES_HINT))
+        match problem.hint {
+            Some(hint) => diagnostic.hint(hint),
+            None => diagnostic.hint("See the capability sections of docs/features/extensions.md."),
+        }
     })
 }
 
@@ -218,8 +212,6 @@ const TITLE_HINT: &str = "Use the name Settings and the keyword chip should show
 const VERSION_HINT: &str = "Use a version such as `0.1.0`.";
 const KEYWORD_HINT: &str = "Use a short word such as `wc`.";
 const MAIN_HINT: &str = "Leave `main` out to use main.js.";
-const CAPABILITIES_HINT: &str =
-    "docs/features/extensions.md, \"Asking for more\", shows what each capability takes.";
 
 fn validate(manifest: &Manifest) -> Result<(), Diagnostic> {
     let invalid = |field: &str, message: &str, hint: &str| {
@@ -325,19 +317,6 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(manifest.entry, "dist/index.mjs");
-        assert!(manifest.capabilities.is_empty());
-        let declaring = read_folder(&[(
-            PACKAGE_JSON,
-            &package(r#"{"title": "W", "keyword": "wc", "capabilities": {"clipboard": ["write"]}}"#),
-        )])
-        .unwrap();
-        let scopes: Vec<_> = declaring
-            .capabilities
-            .scopes()
-            .map(|scope| scope.key().to_string())
-            .collect();
-        assert_eq!(scopes, ["clipboard:write"]);
-        assert_ne!(declaring.digest, manifest.digest);
         let manifest = read_folder(&[(
             PACKAGE_JSON,
             &package(r#"{"title": "W", "keyword": "wc", "main": "src/main.ts"}"#),
@@ -389,19 +368,14 @@ mod tests {
                 "dupin.main",
             ),
             (
-                r#"{"title": "W", "keyword": "wc", "capabilities": {"http": []}}"#,
-                "empty",
-                "dupin.capabilities.http",
+                r#"{"title": "W", "keyword": "wc", "capabilities": {"http": [{"origin": "http://example.com", "methods": ["GET"]}]}}"#,
+                "invalid-origin",
+                "dupin.capabilities.http[0].origin",
             ),
             (
-                r#"{"title": "W", "keyword": "wc", "capabilities": {"teleport": true}}"#,
+                r#"{"title": "W", "keyword": "wc", "capabilities": {"camera": true}}"#,
                 "unknown-capability",
-                "dupin.capabilities.teleport",
-            ),
-            (
-                r#"{"title": "W", "keyword": "wc", "capabilities": {"clipboard": true}}"#,
-                "invalid-type",
-                "dupin.capabilities.clipboard",
+                "dupin.capabilities.camera",
             ),
             (
                 r#"{"title": "W", "keyword": "wc", "capabilities": []}"#,

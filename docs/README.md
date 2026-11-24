@@ -9,6 +9,7 @@
 - [The `http` capability](./extension-http.md): the host service that will fetch for extensions, its scope checks and limits
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
 - [Architecture](./architecture.md): crates, providers, the session and the panel
+- [Encrypted storage](./features/storage.md): how Dupin keeps data on disk, its key and its threat model
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI
 - [The name](./name.md)

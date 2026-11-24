@@ -115,7 +115,7 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
         rows[0].view,
         View::Text {
             title: "Docs for a b".into(),
-            subtitle: "v1, 7 rows".into()
+            subtitle: "v2, 7 rows".into()
         }
     );
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
@@ -406,7 +406,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
     assert_eq!(
         search(&loaded.unwrap(), "").unwrap()[0].view,
         View::Text {
-            title: "1".into(),
+            title: "2".into(),
             subtitle: String::new()
         }
     );
@@ -695,3 +695,5 @@ fn sources_from_another_process_meet_the_same_limits() {
         "too-many-files"
     );
 }
+
+mod host;

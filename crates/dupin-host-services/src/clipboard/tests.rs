@@ -12,12 +12,21 @@ fn text(text: &str) -> Content {
 }
 
 fn clipboard(access: OsAccess) -> (Arc<Fixture>, Clipboard<Arc<Fixture>>) {
+    let (board, clipboard, _) = following(access);
+    (board, clipboard)
+}
+
+/// A clipboard that follows the policy the returned cell holds, as Dupin's follows clipboard
+/// history's.
+fn following(access: OsAccess) -> (Arc<Fixture>, Clipboard<Arc<Fixture>>, Arc<Mutex<Policy>>) {
     let board = Arc::new(Fixture::new(access));
-    let policy = Policy {
+    let policy = Arc::new(Mutex::new(Policy {
         ignored_apps: vec!["com.example.passwords".into()],
         ..Policy::default()
-    };
-    (board.clone(), Clipboard::new(board, policy))
+    }));
+    let source = policy.clone();
+    let clipboard = Clipboard::new(board.clone(), move || source.lock().unwrap().clone());
+    (board, clipboard, policy)
 }
 
 #[test]
@@ -55,7 +64,7 @@ fn concealed_transient_and_generated_copies_are_never_read() {
 
 #[test]
 fn copies_from_ignored_apps_are_never_read() {
-    let (board, clipboard) = clipboard(OsAccess::Allowed);
+    let (board, clipboard, policy) = following(OsAccess::Allowed);
     board.copy(text("secret"), &[], Some("com.example.passwords"), None);
     assert_eq!(clipboard.read(Trigger::Activation), Ok(None));
     board.copy(
@@ -67,32 +76,32 @@ fn copies_from_ignored_apps_are_never_read() {
     assert_eq!(clipboard.read(Trigger::Activation), Ok(None));
     assert_eq!(board.reads(), 0);
 
-    clipboard.set_policy(Policy::default());
+    *policy.lock().unwrap() = Policy::default();
     assert!(clipboard.read(Trigger::Activation).unwrap().is_some());
 }
 
 #[test]
 fn copies_from_an_unknown_app_are_never_read_while_any_app_is_ignored() {
-    let (board, clipboard) = clipboard(OsAccess::Allowed);
+    let (board, clipboard, policy) = following(OsAccess::Allowed);
     board.copy(text("secret"), &[], Some("com.example.passwords"), None);
     board.forget_apps();
     assert_eq!(clipboard.read(Trigger::Activation), Ok(None));
     assert_eq!(board.reads(), 0);
 
-    clipboard.set_policy(Policy {
+    *policy.lock().unwrap() = Policy {
         ignored_apps: Vec::new(),
         ..Policy::default()
-    });
+    };
     assert!(clipboard.read(Trigger::Activation).unwrap().is_some());
 }
 
 #[test]
 fn copies_beyond_the_policy_limit_are_left_out() {
-    let (board, clipboard) = clipboard(OsAccess::Allowed);
-    clipboard.set_policy(Policy {
+    let (board, clipboard, policy) = following(OsAccess::Allowed);
+    *policy.lock().unwrap() = Policy {
         ignored_apps: Vec::new(),
         max_text_bytes: 4,
-    });
+    };
     board.copy(text("12345"), &[], None, None);
     assert_eq!(clipboard.read(Trigger::Activation), Ok(None));
     board.copy(text("1234"), &[], None, None);
@@ -250,6 +259,23 @@ fn a_watch_delivers_each_readable_copy_until_dropped() {
         clips.recv_timeout(QUIET),
         Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected)
     ));
+}
+
+#[test]
+fn a_watch_follows_apps_ignored_after_it_was_subscribed() {
+    let (board, clipboard, policy) = following(OsAccess::Allowed);
+    let (_watch, clips) = watching(&clipboard);
+    board.copy(text("before"), &[], Some("com.example.bank"), None);
+    assert_eq!(clips.recv_timeout(WAIT).unwrap().content, text("before"));
+
+    policy
+        .lock()
+        .unwrap()
+        .ignored_apps
+        .push("com.example.bank".into());
+    board.copy(text("account"), &[], Some("com.example.bank"), None);
+    board.copy(text("after"), &[], Some("com.apple.Safari"), None);
+    assert_eq!(clips.recv_timeout(WAIT).unwrap().content, text("after"));
 }
 
 #[test]

@@ -970,6 +970,41 @@ grant = ["dictionary"]
 }
 
 #[test]
+fn local_decisions_read_again_replace_those_in_memory() {
+    let (mut broker, package) = enabled(github());
+    broker
+        .approve(&package, &key("http:https://api.github.com"), None)
+        .unwrap();
+    let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
+    let saved = Local::parse(&broker.local_toml().unwrap()).unwrap();
+    assert!(
+        broker.replace_local(saved).is_empty(),
+        "reading back its own save changes nothing"
+    );
+    assert!(broker.validate(&in_flight));
+
+    assert_eq!(
+        broker.replace_local(Local::default()),
+        std::slice::from_ref(&package)
+    );
+    assert!(!broker.validate(&in_flight));
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        !broker.local_toml().unwrap().contains("bookmarks"),
+        "the next save keeps the removal"
+    );
+
+    assert_eq!(
+        broker.replace_local(Local::unreadable()),
+        std::slice::from_ref(&package)
+    );
+    assert_eq!(
+        denial(check(&broker, &package, &get(API), Trigger::Activation)),
+        Denial::GrantsUnreadable
+    );
+}
+
+#[test]
 fn unreadable_local_grants_fail_closed() {
     let mut broker = Broker::new(base(DECLARED), Local::unreadable());
     let package = id("bookmarks");

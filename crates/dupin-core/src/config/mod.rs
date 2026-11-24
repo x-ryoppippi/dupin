@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 pub use calendar::Calendar;
-pub use clipboard::Clipboard;
+pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::HotkeyTarget;
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;

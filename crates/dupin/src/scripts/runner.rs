@@ -201,6 +201,7 @@ struct Inner {
     home: PathBuf,
 }
 
+#[derive(Clone)]
 pub struct Runner {
     inner: Arc<Inner>,
 }

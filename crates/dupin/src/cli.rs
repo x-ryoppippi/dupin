@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -18,6 +18,8 @@ enum Action {
     ExtCheck(String),
     /// Ask an extension folder for a query.
     ExtRun(String, String),
+    /// Print the revision declared grants name for an extension folder.
+    ExtRevision(String),
     /// Install, list, update, remove or restore packages in the extensions folder.
     ExtPackages(crate::extension_install::Command),
     ExtNew(String, dupin_ext_sdk::Template),
@@ -125,6 +127,9 @@ fn parse(args: &[String]) -> Result<Action, String> {
         }
         ["ext", "eject", name] if !name.starts_with('-') => Ok(Action::ExtEject(name.to_string())),
         ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
+        ["ext", "revision", folder] if !folder.starts_with('-') => {
+            Ok(Action::ExtRevision(folder.to_string()))
+        }
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
             Ok(Action::ExtRun(folder.to_string(), query.to_string()))
         }
@@ -346,6 +351,17 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             );
             Ok(Value::Null)
         }
+        Action::ExtRevision(folder) => {
+            let (package, revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
+            if json {
+                return Ok(serde_json::json!({
+                    "package": package.to_string(),
+                    "revision": revision.to_string(),
+                }));
+            }
+            println!("{revision}");
+            Ok(Value::Null)
+        }
         Action::ExtRun(folder, query) => {
             let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
             let items = extension.query(
@@ -354,6 +370,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 dupin_js_runtime::MAX_ROWS,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
+                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )?;
             if json {
                 return serde_json::to_value(protocol::Outcome::Results { items, state: None })
@@ -507,6 +524,7 @@ fn describe_rows(items: &[dupin_plugin_protocol::PluginItem]) -> String {
                 Effect::Copy { text } => text.clone(),
                 Effect::OpenUrl { url } => url.clone(),
                 Effect::Push { view, .. } => format!("view {view}"),
+                Effect::Run { action, .. } => format!("action {action}"),
             };
             out.push_str(&format!("  {}: {target}\n", action.title));
         }
@@ -838,6 +856,10 @@ mod tests {
             Action::ExtRun("word-count".into(), "two words".into())
         );
         assert!(parse(&args(&["ext", "run", "word-count"])).is_err());
+        assert_eq!(
+            parse(&args(&["ext", "revision", "word-count"])).unwrap(),
+            Action::ExtRevision("word-count".into())
+        );
         assert_eq!(
             parse(&args(&["ext", "new", "--ts", "greeter"])).unwrap(),
             Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::TypeScript)

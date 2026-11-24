@@ -212,7 +212,7 @@ fn typescript_packages_install_as_written() {
 }
 
 #[test]
-fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
+fn updates_report_the_scopes_they_add_and_drop() {
     let fixture = Fixture::new();
     fixture.package(
         "weather",
@@ -222,11 +222,6 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     fixture.commit("one");
     fixture.tag("v1.0.0");
     fixture.install(&fixture.url()).unwrap();
-
-    let mut lock = fixture.lock();
-    let entry = lock.packages.get_mut("weather").unwrap();
-    entry.granted = vec!["clipboard:write".into(), "http:https://api.example.com".into()];
-    lock.write(&fixture.installer.lock).unwrap();
 
     let up_to_date = fixture.installer.update(Some("weather"), &|_| None).unwrap();
     assert!(up_to_date[0].1.as_ref().unwrap().unchanged());
@@ -244,8 +239,6 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     assert_eq!(change.added, ["files:notes"]);
     assert_eq!(change.removed, ["clipboard:write"]);
     let entry = &fixture.lock().packages["weather"];
-    assert_eq!(entry.granted, ["http:https://api.example.com"]);
-    assert_eq!(entry.pending_consent, ["files:notes"]);
     assert_eq!(entry.requested, ["files:notes", "http:https://api.example.com"]);
 
     assert_eq!(
@@ -389,9 +382,6 @@ fn another_source_cant_take_over_an_installed_name_or_its_grants() {
     );
     trusted.commit("one");
     let installed = trusted.install(&trusted.url()).unwrap();
-    let mut lock = trusted.lock();
-    lock.packages.get_mut("weather").unwrap().granted = vec!["http:https://api.example.com".into()];
-    lock.write(&trusted.installer.lock).unwrap();
 
     let other = Fixture::new();
     other.package(

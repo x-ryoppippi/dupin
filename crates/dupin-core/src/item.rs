@@ -48,6 +48,12 @@ pub enum Action {
         paths: Vec<PathBuf>,
     },
     CopyFiles(Vec<PathBuf>),
+    /// Put a clipboard history entry back on the clipboard as it was copied, then, with
+    /// `paste`, paste it into the frontmost app.
+    RestoreClipboardEntry {
+        entry: u64,
+        paste: bool,
+    },
     /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
     DeleteClipboardEntry(u64),
     ClearClipboardHistory,
@@ -68,6 +74,31 @@ pub enum Action {
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
     ArrangeWindow(crate::window_management::Layout),
+    /// Something only the extension `extension` (its package ID) offered on its own row.
+    Extension {
+        extension: String,
+        request: ExtensionRequest,
+    },
+}
+
+/// What a chosen extension row asks the host to do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExtensionRequest {
+    /// Run the guest's `actions[action]` with `data`.
+    Run {
+        action: String,
+        data: Option<serde_json::Value>,
+    },
+    /// Grant the scope named `scope` as `revision` declares it, which the row showed.
+    Allow { scope: String, revision: String },
+    /// Turn the scope off, so the extension stops asking for it.
+    Deny { scope: String },
+    /// Ask macOS for the access a granted scope still needs.
+    RequestAccess { scope: String },
+    /// Turn on the extension's capabilities, which it asked for while they were off.
+    TurnOn,
+    /// Show the extension in Settings, where the user picks what a scope may use.
+    Review,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
