@@ -179,12 +179,20 @@ def measure [
         cp --recursive $job.setup.extensions ($config | path join dupin extensions)
     }
     let log = $dir | path join samples.jsonl
+    let clipboard = match $job.setup.clipboard_entries? {
+        null => ($env.PWD | path join scripts/fixtures/clipboard.json)
+        $count => {
+            let path = $dir | path join clipboard.json
+            clipboard-fixture $count | to json | save --force $path
+            $path
+        }
+    }
     let env_vars = {
         HOME: $dir
         XDG_CONFIG_HOME: $config
         XDG_DATA_HOME: ($dir | path join data)
         DUPIN_LATENCY: $log
-        DUPIN_HEADLESS_CLIPBOARD: ($env.PWD | path join scripts/fixtures/clipboard.json)
+        DUPIN_HEADLESS_CLIPBOARD: $clipboard
     }
     let result = with-env $env_vars {
         ^$bin --script $script_path --realtime --fps $settings.fps --tree ($dir | path join tree.json) --at mark:end
@@ -230,6 +238,50 @@ def measure [
             | each {|stage| {$stage: ($samples | get $stage | percentiles)} }
             | into record
         )
+    }
+}
+
+# `count` clipboard history entries, oldest first, as DUPIN_HEADLESS_CLIPBOARD lists them: text of
+# a few lengths and some copied files, a few mentioning Baker Street, each copied half a minute
+# after the one before.
+export def clipboard-fixture [count: int]: nothing -> list<record> {
+    let words = [
+        alpha
+        bravo
+        charlie
+        delta
+        echo
+        foxtrot
+        golf
+        hotel
+        india
+        juliet
+        kilo
+        lima
+        mike
+        november
+        oscar
+        papa
+        quebec
+        romeo
+        sierra
+        tango
+        uniform
+        victor
+        whiskey
+        xray
+        yankee
+        zulu
+    ]
+    0..<$count | each {|index|
+        let age = ($count - $index) * 30
+        if $index mod 50 == 7 {
+            {files: [$"/Users/Shared/Fixtures/Report ($index).pdf"], age: $age}
+        } else {
+            let picked = 0..($index mod 12 + 2) | each {|offset| $words | get (($index * 7 + $offset * 3) mod ($words | length)) }
+            let street = if $index mod 37 == 0 { " Meet at Baker Street 221B." } else { "" }
+            {text: $"Note ($index): ($picked | str join ' ')($street)", age: $age}
+        }
     }
 }
 

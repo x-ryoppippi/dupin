@@ -20,6 +20,9 @@
 #   provider = "extension.snippets"
 #   extensions = "scripts/latency/snippets.extensions"
 #
+# `clipboard_entries` replaces the clipboard history's five fixture entries with that many,
+# from `clipboard-fixture` in scripts/latency.nu.
+#
 # `prefix` is typed in one go and not measured; each character of `typed` is one measured
 # keypress.
 
@@ -37,9 +40,19 @@ provider = "calendar.events"
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
 
+# 5,000 copies: the history a heavy user keeps for a week.
 [features.clipboard.native]
 config = "scripts/headless/clipboard.toml"
+settings = { clipboard = { max_entries = 10000 } }
 provider = "clipboard.history"
+clipboard_entries = 5000
+
+# Clipboard history as the bundled extension `clipboard-history`, under its own keyword while
+# the built-in is off, held to the native history before the native one goes.
+[features.clipboard.extension]
+extends = "native"
+settings = { clipboard = { enabled = false, max_entries = 10000 } }
+provider = "extension.clipboard-history"
 
 [features.web.native]
 config = "scripts/headless/config/dupin/config.toml"

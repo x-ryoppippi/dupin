@@ -79,6 +79,12 @@ pub fn open(platform: Platform) -> Bridge {
             calendar: Box::new(Calendars(calendar::Calendar::new(
                 dupin_mac::EventStore::fixtures(),
             ))),
+            storage: match crate::clipboard::headless_storage() {
+                Some(storage) => Box::new(storage),
+                None => Box::new(services::Unavailable(
+                    "a headless run couldn't make scratch storage",
+                )),
+            },
             ..Services::none()
         };
         let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
@@ -165,15 +171,12 @@ impl Pasteboard {
         self.service.get_or_init(|| {
             let history = self.history.clone();
             clipboard::Clipboard::new(dupin_mac::clipboard::GeneralPasteboard::default(), move || {
-                let ignored_apps = history
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .policy()
-                    .ignored_apps()
-                    .to_vec();
+                let history = history.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let policy = history.policy();
                 clipboard::Policy {
-                    ignored_apps,
-                    ..clipboard::Policy::default()
+                    ignored_apps: policy.ignored_apps().to_vec(),
+                    max_text_bytes: policy.max_entry_bytes,
+                    max_image_bytes: policy.max_image_bytes,
                 }
             })
         })
@@ -194,11 +197,28 @@ impl services::Clipboard for Pasteboard {
             .map_err(Failure::from)
     }
 
+    fn write_image(&self, png: &[u8]) -> Result<(), Failure> {
+        let content = clipboard::Write::image(png.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
+    fn write_files(&self, paths: &[PathBuf]) -> Result<(), Failure> {
+        let content = clipboard::Write::copied_files(paths.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
     fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
         let watch = self
             .service()
             .watch(move |clip| {
-                if let Ok(value) = serde_json::to_value(&clip.content) {
+                if let Ok(mut value) = serde_json::to_value(&clip.content) {
+                    if let Some(source) = &clip.source {
+                        value["source"] = source.clone().into();
+                    }
                     changed(value);
                 }
             })

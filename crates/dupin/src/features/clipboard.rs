@@ -58,5 +58,21 @@ fn start(providers: &mut Providers) {
 }
 
 fn reload(ui: &mut Ui, config: &Config, _: &mut ConfiguredCommands) -> bool {
+    if crate::extensions::preferences::choose(crate::clipboard::PACKAGE, preferences(&config.clipboard)) {
+        ui.preferences_changed(crate::clipboard::PACKAGE);
+    }
     ui.clipboard.apply(&config.clipboard) && ui.session.command_id().as_str() == CLIPBOARD
+}
+
+/// The history's Settings rows and `[clipboard]` keys, as the bundled package's preferences.
+fn preferences(config: &dupin_core::config::Clipboard) -> serde_json::Map<String, serde_json::Value> {
+    serde_json::Map::from_iter([
+        (
+            "retention".into(),
+            serde_json::to_value(config.retention).unwrap_or_default(),
+        ),
+        ("includeImages".into(), config.include_images.into()),
+        ("includeFiles".into(), config.include_files.into()),
+        ("maxEntries".into(), config.max_entries.into()),
+    ])
 }

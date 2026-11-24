@@ -18,7 +18,7 @@ pub struct Clipboard {
     pub(crate) ignored_apps: Vec<String>,
 }
 
-const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=1000;
+const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=10_000;
 const CLIPBOARD_ENTRY_BYTES: std::ops::RangeInclusive<usize> = 1024..=1024 * 1024;
 const CLIPBOARD_IMAGE_BYTES: std::ops::RangeInclusive<usize> = 64 * 1024..=32 * 1024 * 1024;
 
@@ -216,7 +216,7 @@ mod tests {
     fn clipboard_limits_and_unknown_keys_are_rejected() {
         for field in [
             "max_entries = 0",
-            "max_entries = 1001",
+            "max_entries = 10001",
             "max_entry_bytes = 1023",
             "max_entry_bytes = 1048577",
             "max_entries = -1",

@@ -91,6 +91,82 @@ struct FixtureEntry {
     age: u64,
 }
 
+/// The bundled clipboard history's records, as its package stores them, from
+/// `DUPIN_HEADLESS_CLIPBOARD`, a JSON list of entries, oldest first.
+fn fixture_records(now_ms: u64) -> Vec<serde_json::Value> {
+    let Some(path) = std::env::var_os("DUPIN_HEADLESS_CLIPBOARD") else {
+        return Vec::new();
+    };
+    let entries: Vec<FixtureEntry> = match std::fs::read_to_string(&path)
+        .map_err(|error| error.to_string())
+        .and_then(|source| serde_json::from_str(&source).map_err(|error| error.to_string()))
+    {
+        Ok(entries) => entries,
+        Err(error) => {
+            crate::log::warn(&format!("couldn't read the clipboard fixture: {error}"));
+            return Vec::new();
+        }
+    };
+    entries
+        .into_iter()
+        .map(|entry| {
+            let copied_at = now_ms.saturating_sub(entry.age * 1000);
+            match entry.text {
+                Some(text) => serde_json::json!({ "kind": "text", "text": text, "copiedAt": copied_at }),
+                None => {
+                    let files: Vec<_> = entry
+                        .files
+                        .iter()
+                        .map(|path| {
+                            serde_json::json!({
+                                "path": path,
+                                "name": path.file_name().map(|name| name.to_string_lossy()),
+                                "folder": path.parent().map(|parent| dupin_core::item::tilde(&parent.to_string_lossy())),
+                            })
+                        })
+                        .collect();
+                    serde_json::json!({ "kind": "files", "files": files, "copiedAt": copied_at })
+                }
+            }
+        })
+        .collect()
+}
+
+/// Storage for a headless run: a scratch store, gone with the process, holding the clipboard
+/// fixture in the bundled clipboard history's namespace, as copies it watched would have left.
+pub fn headless_storage() -> Option<dupin_extension_bridge::PackageStorage> {
+    dupin_storage::scratch_process();
+    let root = tempfile::Builder::new()
+        .prefix("dupin-headless-storage-")
+        .tempdir()
+        .ok()?
+        .keep();
+    let storage = dupin_storage::Storage::new(root, dupin_storage::MemoryKey::random());
+    let records = fixture_records(unix_now() * 1000);
+    if !records.is_empty() {
+        let package = dupin_extension_bridge::PackageId::new(format!("bundled:{PACKAGE}")).ok()?;
+        let namespace =
+            dupin_extension_bridge::storage::namespace(&package, dupin_extension_bridge::Origin::Bundled);
+        let store = storage
+            .open(&namespace, dupin_storage::Limits::default())
+            .inspect_err(|error| crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}")))
+            .ok()?;
+        for data in records {
+            if let Err(error) = store.put(dupin_storage::NewRecord {
+                data,
+                blobs: Vec::new(),
+            }) {
+                crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}"));
+                break;
+            }
+        }
+    }
+    Some(dupin_extension_bridge::PackageStorage::new(storage))
+}
+
+/// The bundled extension, in extensions/clipboard-history, that keeps and lists the history.
+pub(crate) const PACKAGE: &str = "clipboard-history";
+
 /// Seed the history from `DUPIN_HEADLESS_CLIPBOARD`, a JSON list of entries, oldest first.
 fn seed_fixture(history: &mut History) {
     let Some(path) = std::env::var_os("DUPIN_HEADLESS_CLIPBOARD") else {
