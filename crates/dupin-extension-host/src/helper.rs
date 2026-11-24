@@ -112,6 +112,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
         wire::write(&mut writer, &FromHelper::Done { id, answer }, &[])?;
+        dupin_js_runtime::prepare();
     }
     Ok(())
 }
