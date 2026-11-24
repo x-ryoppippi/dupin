@@ -48,6 +48,13 @@ impl Extensions {
         }
     }
 
+    /// The package that answers `command`, if an extension does.
+    pub(super) fn package(&self, command: &CommandId) -> Option<&str> {
+        self.registered
+            .get(command)
+            .map(|(extension, _)| extension.package.as_str())
+    }
+
     fn folder(&mut self, origin: Origin) -> &mut Folder {
         match origin {
             Origin::Bundled => &mut self.bundled,

@@ -48,6 +48,22 @@ def main [] {
     ]
     assert equal (unanswered $typed_over web.keywords 2) 0
 
+    # A port answers its built-in's own command, so only the package behind it tells the port
+    # from the stand-in that answers while the package isn't on.
+    let ported = [
+        {
+            searched: [dictionary.lookup]
+            packages: {dictionary.lookup: "bundled:dictionary"}
+            shown: {dictionary.lookup: 1}
+        }
+    ]
+    let stand_in = $ported | each { reject packages }
+    assert equal (unanswered $ported dictionary.lookup 1 --package bundled:dictionary) 0
+    assert equal (unanswered $stand_in dictionary.lookup 1 --package bundled:dictionary) 1
+    assert equal (unanswered $ported dictionary.lookup 1 --package dictionary) 1
+    assert equal (unanswered $ported dictionary.lookup 1) 1
+    assert equal (unanswered $stand_in dictionary.lookup 1) 0
+
     let ms = 1..100 | each { into float }
     assert equal ($ms | percentiles) {p50: 50.0, p95: 95.0, p99: 99.0}
     assert equal ([7.0] | percentiles) {p50: 7.0, p95: 7.0, p99: 7.0}
@@ -103,6 +119,7 @@ def main [] {
             let setup = resolve $feature.implementations $label
             assert ($setup.config | is-not-empty) $"($feature.name).($label) has no config"
             assert ($setup.provider | is-not-empty) $"($feature.name).($label) has no provider"
+            assert (($label == "native") == ($setup.package? == null)) $"($feature.name).($label) must name the package that answers it, and only an extension has one"
         }
     }
     for scenario in $catalogue.scenarios {

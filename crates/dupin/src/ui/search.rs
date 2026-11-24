@@ -80,7 +80,7 @@ impl Ui {
             }
         }
         if let Some(searcher) = self.searchers.get(&command) {
-            crate::latency::search_started(&command, generation);
+            crate::latency::search_started(&command, generation, self.extensions.package(&command));
             searcher.search(generation, query, folder, page, limit);
             self.deadlines.insert(command, (generation, due));
             tx.wake_at(due);
