@@ -2,21 +2,25 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use crate::Diagnostic;
+use crate::typescript::is_typescript;
 
 const MAX_SOURCE_FILES: usize = 256;
-/// Every JavaScript file of a package together, as read from disk.
+/// Every module of a package together, as read from disk.
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FOLDER_DEPTH: usize = 8;
 
-/// The JavaScript files of the package in `root`, as names relative to it (`lib/util.js`)
-/// and their canonical paths. A file or folder that resolves outside `root` is an error, so
-/// a symlink cannot bring outside code into the package.
-pub fn source_files(root: &Path) -> Result<Vec<(String, PathBuf)>, Diagnostic> {
+/// The modules of the package in `root` whose entry is `entry`, as names relative to it
+/// (`lib/util.js`) and their canonical paths: its JavaScript files and, when the entry is
+/// TypeScript, its TypeScript files. A package with a JavaScript entry may keep the TypeScript
+/// its bundle was built from beside it. A file or folder that resolves outside `root` is an
+/// error, so a symlink cannot bring outside code into the package.
+pub fn source_files(root: &Path, entry: &str) -> Result<Vec<(String, PathBuf)>, Diagnostic> {
     let canonical_root = root.canonicalize().map_err(|error| {
         Diagnostic::new("package-unreadable", format!("Couldn't read the folder: {error}"))
     })?;
     let mut files = Vec::new();
-    walk(&canonical_root, &canonical_root, "", 0, &mut files)?;
+    let typescript = is_typescript(entry);
+    walk(&canonical_root, &canonical_root, "", 0, typescript, &mut files)?;
     files.sort();
     Ok(files)
 }
@@ -26,6 +30,7 @@ fn walk(
     folder: &Path,
     prefix: &str,
     depth: usize,
+    typescript: bool,
     files: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), Diagnostic> {
     let entries = std::fs::read_dir(folder).map_err(|error| {
@@ -43,7 +48,7 @@ fn walk(
         }
         let relative = format!("{prefix}{name}");
         let path = entry.path();
-        let is_source = is_source_name(&name);
+        let is_source = is_javascript(&name) || (typescript && is_typescript(&name));
         let followed = path.metadata();
         let is_dir = followed.as_ref().is_ok_and(|metadata| metadata.is_dir());
         if !is_dir && !is_source {
@@ -76,7 +81,14 @@ fn walk(
                 .file(&relative)
                 .hint("Bundle the extension into fewer files with esbuild or Bun."));
             }
-            walk(root, &canonical, &format!("{relative}/"), depth + 1, files)?;
+            walk(
+                root,
+                &canonical,
+                &format!("{relative}/"),
+                depth + 1,
+                typescript,
+                files,
+            )?;
         } else {
             files.push((relative, canonical));
             if files.len() > MAX_SOURCE_FILES {
@@ -94,11 +106,11 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
-fn is_source_name(name: &str) -> bool {
+fn is_javascript(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
-/// A package's JavaScript, read from its folder within the package limits. Dupin reads it and
+/// A package's modules, read from its folder within the package limits. Dupin reads it and
 /// hands it to the extension host, which alone parses and compiles it.
 #[derive(Clone, Debug)]
 pub struct Sources {
@@ -107,11 +119,11 @@ pub struct Sources {
 }
 
 impl Sources {
-    /// Reads every JavaScript file in `root`. `entry` is the module that exports `search`,
-    /// relative to `root`.
+    /// Reads every module [`source_files`] finds in `root`. `entry` is the module that exports
+    /// `search`, relative to `root`.
     pub fn read(root: &Path, entry: &str) -> Result<Self, Diagnostic> {
-        let files = source_files(root)?;
         let entry = entry.strip_prefix("./").unwrap_or(entry);
+        let files = source_files(root, entry)?;
         if !files.iter().any(|(name, _)| name == entry) {
             return Err(missing_entry(entry));
         }
@@ -175,7 +187,7 @@ impl Sources {
 }
 
 fn missing_entry(entry: &str) -> Diagnostic {
-    Diagnostic::new("missing-entry", "is not a JavaScript file in the package folder")
+    Diagnostic::new("missing-entry", "is not a module in the package folder")
         .file(entry)
         .hint(format!(
             "Create `{}` exporting `search`, or point `dupin.main` in package.json at the module that does.",
@@ -186,7 +198,7 @@ fn missing_entry(entry: &str) -> Diagnostic {
 fn too_many_files() -> Diagnostic {
     Diagnostic::new(
         "too-many-files",
-        format!("The package has more than {MAX_SOURCE_FILES} JavaScript files"),
+        format!("The package has more than {MAX_SOURCE_FILES} modules"),
     )
     .hint("Bundle the extension into fewer files with esbuild or Bun.")
 }
@@ -195,7 +207,7 @@ fn too_large(name: &str) -> Diagnostic {
     Diagnostic::new(
         "package-too-large",
         format!(
-            "The package's JavaScript is larger than {} MiB",
+            "The package's modules are larger than {} MiB",
             MAX_SOURCE_BYTES / 1024 / 1024
         ),
     )
@@ -264,14 +276,14 @@ pub(crate) fn resolve(
     if exists(&name) {
         Ok(name)
     } else {
-        let hint = if is_source_name(&name) {
+        let hint = if is_javascript(&name) || is_typescript(&name) {
             "Check the path; imports are relative to the importing file."
         } else {
             "Write the file's extension in the import, such as `./util.js`."
         };
         Err(located(Diagnostic::new(
             "import-missing",
-            format!("names `{name}`, which is not a JavaScript file in the package"),
+            format!("names `{name}`, which is not a module in the package"),
         ))
         .hint(hint))
     }

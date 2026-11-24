@@ -13,6 +13,13 @@ dupin-plugin-protocol = { workspace = true }
 # `rust-alloc` and `allocator` stay off: QuickJS's own allocator is what enforces the heap limit.
 rquickjs = { version = "=0.14.0", default-features = false, features = ["std", "loader"] }
 serde = { workspace = true }
+# TypeScript erasure needs the parser and its AST only. The parser's `regular_expression`
+# feature stays off: QuickJS parses regular expressions itself.
+oxc_allocator = "=0.157.0"
+oxc_ast = "=0.157.0"
+oxc_ast_visit = "=0.157.0"
+oxc_parser = { version = "=0.157.0", default-features = false }
+oxc_span = "=0.157.0"
 
 [dev-dependencies]
 tempfile = "3"

@@ -2,12 +2,13 @@
 //! stack, deadline and promise-job budget, and with no APIs beyond the language itself and the
 //! host's `dupin` module: no files, network, processes or timers.
 //!
-//! Dupin itself only reads a package's [`Sources`]; compiling and running them is the extension
-//! host's work.
+//! Dupin itself only reads a package's [`Sources`]; compiling and running them, and erasing the
+//! types of TypeScript modules first, is the extension host's work.
 
 mod diagnostic;
 mod output;
 mod package;
+mod typescript;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -80,9 +81,10 @@ impl std::fmt::Debug for Package {
 }
 
 impl Package {
-    /// Compiles every module of `sources` to bytecode, within the call limits and `control`.
-    /// QuickJS links a module's static imports as it compiles it, so this also catches imports
-    /// that leave the package or name a missing file.
+    /// Compiles every module of `sources` to bytecode, within the call limits and `control`,
+    /// erasing the types of TypeScript modules first. QuickJS links a module's static imports
+    /// as it compiles it, so this also catches imports that leave the package or name a missing
+    /// file.
     pub fn compile(sources: Sources, control: Control) -> Result<Self, RunError> {
         let entry = sources.entry().to_owned();
         let modules = compile(sources, control)?;
@@ -150,11 +152,17 @@ impl Package {
 fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {
     let entry = sources.entry().to_owned();
     let names: Vec<String> = sources.files().map(|(name, _)| name.to_owned()).collect();
-    let mut sources: HashMap<String, String> = sources
-        .files()
-        .map(|(name, source)| (name.to_owned(), source.to_owned()))
-        .collect();
-    sources.insert(HOST_MODULE.into(), HOST_SOURCE.into());
+    let mut modules = HashMap::with_capacity(names.len() + 1);
+    for (name, source) in sources.files() {
+        let source = if typescript::is_typescript(name) {
+            typescript::erase(name, source)?
+        } else {
+            source.to_owned()
+        };
+        modules.insert(name.to_owned(), source);
+    }
+    modules.insert(HOST_MODULE.into(), HOST_SOURCE.into());
+    let sources = modules;
     let compiler = Compiler {
         sources: Rc::new(sources),
         compiled: Rc::default(),
@@ -302,7 +310,7 @@ fn syntax(ctx: &Ctx<'_>, error: rquickjs::Error, file: &str) -> Diagnostic {
     }
     let mut diagnostic = Diagnostic::new("syntax-error", thrown.message)
         .file(file)
-        .hint("Fix the syntax. Dupin runs plain JavaScript modules; build TypeScript or JSX first.");
+        .hint("Fix the syntax. Dupin runs JavaScript modules, and TypeScript once its types are erased; build anything else, such as JSX, with `dupin ext build`.");
     if let Some((_, line, column)) = thrown.location {
         diagnostic = diagnostic.at(line, column);
     }

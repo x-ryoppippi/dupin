@@ -165,7 +165,7 @@ fn fill(
             options,
         );
     }
-    for (name, path) in dupin_js_runtime::source_files(package_dir)? {
+    for (name, path) in dupin_js_runtime::source_files(package_dir, &package.main)? {
         copy(&path, &staging.join(name))?;
     }
     Ok(())

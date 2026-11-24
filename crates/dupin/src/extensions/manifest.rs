@@ -23,7 +23,7 @@ pub(super) struct Manifest {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// Relative to the folder: a .js or .mjs module, or a .wasm module.
+    /// Relative to the folder: a JavaScript or TypeScript module, or a .wasm module.
     pub entry: String,
 }
 
@@ -174,14 +174,16 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     fields.validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
         .filter(|entry| {
-            Path::new(entry)
-                .extension()
-                .is_some_and(|extension| extension == "js" || extension == "mjs")
+            Path::new(entry).extension().is_some_and(|extension| {
+                ["js", "mjs", "ts", "mts", "tsx"]
+                    .iter()
+                    .any(|module| extension == *module)
+            })
         })
         .ok_or_else(|| {
             field(
                 "dupin.main",
-                "must be a relative path to a .js or .mjs file inside the folder",
+                "must be a relative path to a .js, .mjs, .ts, .mts or .tsx file inside the folder",
                 MAIN_HINT,
             )
         })?;
