@@ -262,7 +262,7 @@ fn headless_environment() -> Option<dupin_js_runtime::Environment> {
     }
     let Ok(value) = std::env::var(fixtures::HEADLESS_ENVIRONMENT) else {
         return Some(dupin_js_runtime::Environment {
-            now: dupin_mac::FIXTURE_CLOCK,
+            now: crate::platform::FIXTURE_CLOCK,
             seed: 1,
         });
     };

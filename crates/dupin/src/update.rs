@@ -94,11 +94,11 @@ struct Installed {
 
 impl Installed {
     fn current() -> Result<Option<Installed>, String> {
-        let Some(feed) = dupin_mac::bundle::info_string("DupinUpdateFeed") else {
+        let Some(feed) = crate::platform::bundle::info_string("DupinUpdateFeed") else {
             return Ok(None);
         };
-        let bundle = dupin_mac::bundle::path();
-        let build = dupin_mac::bundle::info_string("CFBundleVersion")
+        let bundle = crate::platform::bundle::path();
+        let build = crate::platform::bundle::info_string("CFBundleVersion")
             .and_then(|v| v.parse().ok())
             .ok_or("CFBundleVersion is not a build number")?;
         let requirement = designated_requirement(&bundle)?;
@@ -219,7 +219,8 @@ impl Updater {
                 enabled: AtomicBool::new(enabled),
                 available: has_feed(),
                 download_only,
-                version: dupin_mac::bundle::info_string("CFBundleShortVersionString").unwrap_or_default(),
+                version: crate::platform::bundle::info_string("CFBundleShortVersionString")
+                    .unwrap_or_default(),
                 inner: Mutex::new(Inner {
                     status: if installed.is_some() {
                         Status::Idle
@@ -334,7 +335,7 @@ impl Updater {
 
 /// Whether this build has a channel to update from at all.
 pub fn has_feed() -> bool {
-    dupin_mac::bundle::info_string("DupinUpdateFeed").is_some()
+    crate::platform::bundle::info_string("DupinUpdateFeed").is_some()
 }
 
 impl Shared {
@@ -528,7 +529,20 @@ fn swap(update: &Path, installed: &Path) -> std::io::Result<()> {
     let from = CString::new(update.as_os_str().as_bytes())?;
     let to = CString::new(installed.as_os_str().as_bytes())?;
     // SAFETY: Both strings are NUL-terminated and outlive the call.
-    if unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) } != 0 {
+    #[cfg(target_os = "macos")]
+    let swapped = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) };
+    // SAFETY: Both strings are NUL-terminated and outlive the call.
+    #[cfg(target_os = "linux")]
+    let swapped = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_EXCHANGE,
+        )
+    };
+    if swapped != 0 {
         return Err(std::io::Error::last_os_error());
     }
     Ok(())

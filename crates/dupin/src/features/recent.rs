@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use crate::platform::RecentProvider;
 use dupin_core::{CommandError, CommandSpec, Config, QueryEligibility};
-use dupin_mac::RecentProvider;
 
 use super::Feature;
 use crate::commands::{Configure, Providers, id, presentation};

@@ -62,7 +62,7 @@ impl Origin {
         Ok(url.origin)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     pub(crate) fn parse_allowing_http(text: &str) -> Result<Self, String> {
         Ok(Url::parse(text, true)?.origin)
     }

@@ -4,8 +4,8 @@ use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 
+use crate::platform::{PathWatcher, watcher::canonical_root};
 use dupin_core::Config;
-use dupin_mac::{PathWatcher, watcher::canonical_root};
 
 use super::layers::Layers;
 use super::{LockedKeys, Paths};

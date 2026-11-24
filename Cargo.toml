@@ -17,6 +17,7 @@ dupin-plugin-protocol = { path = "crates/dupin-plugin-protocol" }
 dupin-core = { path = "crates/dupin-core" }
 dupin-mac = { path = "crates/dupin-mac" }
 dupin-storage = { path = "crates/dupin-storage" }
+dupin-linux = { path = "crates/dupin-linux" }
 
 # Rune is pre-release: pin a `dev` rev (`dev` is never rewritten) and patch every crate
 # Rune's own workspace patches, at the same rev. Cargo doesn't inherit a dependency's patches.

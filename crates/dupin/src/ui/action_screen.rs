@@ -17,7 +17,7 @@ pub struct ActionScreen {
 #[derive(Clone, Debug)]
 pub enum ApplicationState {
     Loading,
-    Ready(Vec<dupin_mac::workspace::Application>),
+    Ready(Vec<crate::platform::workspace::Application>),
     Failed(String),
 }
 
@@ -57,7 +57,7 @@ impl ActionScreen {
         &mut self,
         key: &str,
         token: u64,
-        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+        result: Result<Vec<crate::platform::workspace::Application>, String>,
     ) -> bool {
         if self.key != key {
             return false;
@@ -266,7 +266,7 @@ impl Ui {
             let running = self.running.clone();
             running.fetch_add(1, Ordering::AcqRel);
             std::thread::spawn(move || {
-                let result = dupin_mac::workspace::applications_for(&path);
+                let result = crate::platform::workspace::applications_for(&path);
                 me.update(move |ui, _| ui.applications_found(&key, token, result));
                 running.fetch_sub(1, Ordering::AcqRel);
             });
@@ -289,7 +289,7 @@ impl Ui {
         &mut self,
         key: &str,
         token: u64,
-        result: Result<Vec<dupin_mac::workspace::Application>, String>,
+        result: Result<Vec<crate::platform::workspace::Application>, String>,
     ) {
         let Some(screen) = self
             .action_screen
@@ -630,6 +630,7 @@ mod action_screen_tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn send_to_navigation_preserves_the_parent_selection() {
         let (_, mut screen) = fixture();

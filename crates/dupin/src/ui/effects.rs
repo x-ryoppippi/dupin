@@ -61,7 +61,7 @@ impl Ui {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;
                         self.run_native_action(move || {
-                            dupin_mac::system_commands::execute(command, enabled, run)
+                            crate::platform::system_commands::execute(command, enabled, run)
                         });
                     }
                     Action::Preview(path) => {
@@ -88,14 +88,20 @@ impl Ui {
                     }
                     Action::Duplicate(path) => self.duplicate_file(path),
                     Action::Compress(path) => self.compress_file(path),
-                    Action::OpenWith { path, application } => self
-                        .run_workspace_action(dupin_mac::workspace::Action::OpenWith { path, application }),
-                    Action::Open(path) => self.run_workspace_action(dupin_mac::workspace::Action::Open(path)),
+                    Action::OpenWith { path, application } => {
+                        self.run_workspace_action(crate::platform::workspace::Action::OpenWith {
+                            path,
+                            application,
+                        })
+                    }
+                    Action::Open(path) => {
+                        self.run_workspace_action(crate::platform::workspace::Action::Open(path))
+                    }
                     Action::Reveal(path) => {
-                        self.run_workspace_action(dupin_mac::workspace::Action::Reveal(path))
+                        self.run_workspace_action(crate::platform::workspace::Action::Reveal(path))
                     }
                     Action::OpenUrl(url) => {
-                        self.run_workspace_action(dupin_mac::workspace::Action::OpenUrl(url))
+                        self.run_workspace_action(crate::platform::workspace::Action::OpenUrl(url))
                     }
                 },
                 Effect::RunConsuming {
@@ -123,8 +129,8 @@ impl Ui {
         mark_session_query(&mut self.query, &self.session);
     }
 
-    pub(super) fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {
-        self.run_native_action(move || dupin_mac::workspace::run(&action));
+    pub(super) fn run_workspace_action(&self, action: crate::platform::workspace::Action) {
+        self.run_native_action(move || crate::platform::workspace::run(&action));
     }
 
     fn run_native_action(&self, run: impl FnOnce() -> Result<(), String> + Send + 'static) {

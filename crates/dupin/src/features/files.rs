@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use crate::platform::{FolderProvider, SpotlightProvider, Target};
 use dupin_core::{CommandError, CommandId, CommandSpec, Config, QueryEligibility};
-use dupin_mac::{FolderProvider, SpotlightProvider, Target};
 
 use super::Feature;
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};

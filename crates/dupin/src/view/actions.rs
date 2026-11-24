@@ -56,7 +56,7 @@ pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
         )
 }
 
-fn application_locations(apps: &[dupin_mac::workspace::Application]) -> Vec<Option<String>> {
+fn application_locations(apps: &[crate::platform::workspace::Application]) -> Vec<Option<String>> {
     let names: Vec<_> = apps.iter().map(|app| app.name.to_lowercase()).collect();
     let mut counts = std::collections::HashMap::new();
     for name in &names {
@@ -315,17 +315,17 @@ mod tests {
         let home = std::env::var("HOME").unwrap_or_default();
         let user_applications = std::path::Path::new(&home).join("Applications");
         let apps = vec![
-            dupin_mac::workspace::Application {
+            crate::platform::workspace::Application {
                 path: "/Applications/Viewer.app".into(),
                 name: "Viewer".into(),
                 default: false,
             },
-            dupin_mac::workspace::Application {
+            crate::platform::workspace::Application {
                 path: user_applications.join("Viewer.app"),
                 name: "viewer".into(),
                 default: false,
             },
-            dupin_mac::workspace::Application {
+            crate::platform::workspace::Application {
                 path: "/Applications/Other.app".into(),
                 name: "Other".into(),
                 default: true,

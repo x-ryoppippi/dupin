@@ -11,7 +11,7 @@ const PASTE_ACCESS_NOTICE: &str = "Copied. To paste into the front app as well, 
 
 impl Ui {
     pub(super) fn copy_files(&mut self, paths: &[PathBuf], tx: &mut Tx) {
-        if let Err(error) = dupin_mac::clipboard::copy_files(paths) {
+        if let Err(error) = crate::platform::clipboard::copy_files(paths) {
             self.show_notice(error, tx);
         }
     }
@@ -34,9 +34,9 @@ impl Ui {
         }
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
-        let key = dupin_mac::paste::key_code();
+        let key = crate::platform::paste::key_code();
         std::thread::spawn(move || {
-            if let Err(error) = dupin_mac::paste::press(key) {
+            if let Err(error) = crate::platform::paste::press(key) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);
@@ -99,7 +99,7 @@ impl Ui {
     pub(super) fn request_clipboard_access(&self) {
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
-            dupin_mac::clipboard::request_access();
+            crate::platform::clipboard::request_access();
             drop(busy);
         });
     }

@@ -19,7 +19,7 @@ impl Ui {
                 if self.shown {
                     self.dismiss(tx);
                 }
-                self.run_workspace_action(dupin_mac::workspace::Action::OpenApp {
+                self.run_workspace_action(crate::platform::workspace::Action::OpenApp {
                     bundle_id,
                     hide_if_frontmost,
                 });

@@ -1,12 +1,23 @@
 {
   lib,
   runCommand,
+  stdenv,
   rustPlatform,
   cargoVendorDir,
   resvg,
   oxipng,
   python3Packages,
   inter,
+  pkg-config,
+  libxkbcommon,
+  wayland,
+  vulkan-loader,
+  libx11,
+  libxcursor,
+  libxi,
+  libxrandr,
+  libxcb,
+  fontconfig,
 }:
 let
   root = ./.;
@@ -71,8 +82,17 @@ let
     prePatch = ''
       export NIX_RUSTFLAGS="''${NIX_RUSTFLAGS-} --remap-path-prefix=$cargoDepsCopy=/vendor"
     '';
+  }
+  // lib.optionalAttrs stdenv.hostPlatform.isLinux {
+    # Rune links libxkbcommon and libwayland-client on Linux.
+    nativeBuildInputs = [ pkg-config ];
+    buildInputs = [
+      libxkbcommon
+      wayland
+    ];
   };
-  packagingArgs = {
+  packagingArgs = if stdenv.hostPlatform.isDarwin then darwinPackaging else linuxPackaging;
+  darwinPackaging = {
     # The app icon is drawn from the logo here, so no generated image is committed. iconutil
     # ships only with macOS, outside the sandbox; icnsutil writes the same icns.
     nativeBuildInputs = [
@@ -123,6 +143,33 @@ let
       platforms = [ "aarch64-darwin" ];
     };
   };
+  # The libraries winit, wgpu, x11rb and fontique open at run time on Linux. They go on the
+  # executable's RUNPATH, here after the fixup shrinks it and in the development shell through
+  # the linker, rather than in LD_LIBRARY_PATH, which the apps Dupin launches would inherit.
+  runtimeLibraries = lib.optionals stdenv.hostPlatform.isLinux [
+    libxkbcommon
+    wayland
+    vulkan-loader
+    libx11
+    libxcursor
+    libxi
+    libxrandr
+    libxcb
+    fontconfig
+  ];
+  # A bare executable.
+  linuxPackaging = {
+    postFixup = ''
+      patchelf --add-rpath ${lib.makeLibraryPath runtimeLibraries} $out/bin/dupin
+    '';
+    meta = {
+      description = "A lightweight resident launcher";
+      homepage = "https://dupin.app";
+      license = lib.licenses.gpl3Plus;
+      mainProgram = "dupin";
+      platforms = [ "x86_64-linux" ];
+    };
+  };
 in
 rustPlatform.buildRustPackage (
   commonArgs
@@ -141,6 +188,7 @@ rustPlatform.buildRustPackage (
         cargoVendorDir
         cargoSrc
         bundleSrc
+        runtimeLibraries
         ;
     };
   }

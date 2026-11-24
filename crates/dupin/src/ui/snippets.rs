@@ -12,7 +12,7 @@ impl SnippetRun {
     fn now(text: String) -> Self {
         Self {
             text,
-            now: dupin_mac::clock::now(),
+            now: crate::platform::clock::now(),
         }
     }
 }
@@ -47,10 +47,10 @@ impl Ui {
     /// Whether Dupin may paste for the user; when it may not, `notice` explains why once the
     /// panel has closed, unless macOS is asking right now.
     pub(super) fn may_paste(&mut self, notice: &str) -> bool {
-        if dupin_mac::paste::allowed() {
+        if crate::platform::paste::allowed() {
             return true;
         }
-        if !dupin_mac::paste::request_once() {
+        if !crate::platform::paste::request_once() {
             self.notice_after_close = Some(notice.into());
         }
         false
@@ -92,9 +92,9 @@ impl Ui {
     pub(super) fn paste_text(&self, text: String) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
-        let key = dupin_mac::paste::key_code();
+        let key = crate::platform::paste::key_code();
         std::thread::spawn(move || {
-            if let Err(error) = dupin_mac::paste::paste(key, &text) {
+            if let Err(error) = crate::platform::paste::paste(key, &text) {
                 me.update(move |ui, tx| ui.show_notice(error, tx));
             }
             drop(busy);

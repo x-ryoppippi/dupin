@@ -1,6 +1,7 @@
 //! Installs `github:` sources from a loopback server that answers as GitHub's REST API and
 //! archive host do, with tarballs `git archive` makes from fixture repositories or that the tests
 //! write by hand; nothing here touches the network or needs Git to install.
+#![cfg(target_os = "macos")]
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};

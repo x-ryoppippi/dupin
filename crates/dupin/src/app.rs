@@ -11,14 +11,20 @@ use crate::{
 
 /// The panel with nothing below the field: the window's first size, before it fits its content.
 pub(crate) const HEADER_HEIGHT: f32 = view::HEADER_H;
-/// San Francisco's family, as its file names it (`dupin_mac::font::system_ui_font`).
+/// San Francisco's family, as its file names it (`crate::platform::font::system_ui_font`).
+#[cfg(target_os = "macos")]
 const FAMILIES: (&str, &str) = ("System Font", "ui-monospace");
+/// The desktop's own sans and monospace fonts, as fontconfig matches them.
+#[cfg(target_os = "linux")]
+const FAMILIES: (&str, &str) = ("system-ui", "ui-monospace");
 
 pub(crate) fn run() {
     let headless = rune::tooling::is_headless();
     if !headless {
+        #[cfg(target_os = "macos")]
         std::thread::spawn(|| {
-            if let Err(error) = dupin_mac::file_ops::FileTransfers::default().recover_abandoned_copies() {
+            if let Err(error) = crate::platform::file_ops::FileTransfers::default().recover_abandoned_copies()
+            {
                 log::warn(&format!("couldn't clean up abandoned copies: {error}"));
             }
         });
@@ -28,13 +34,17 @@ pub(crate) fn run() {
     let (config, locked_keys, config_problem) = settings::load(&paths);
     let history = store::load();
     // The system font instead of Rune's embedded Inter, which the build leaves out.
-    let fonts: &'static [&'static [u8]] = match dupin_mac::font::system_ui_font() {
+    #[cfg(target_os = "macos")]
+    let fonts: &'static [&'static [u8]] = match crate::platform::font::system_ui_font() {
         Some(font) => Box::leak(Box::new([font])),
         None => {
             log::warn("couldn't map the system font; text falls back through CoreText");
             &[]
         }
     };
+    // Rune finds FAMILIES through fontconfig.
+    #[cfg(target_os = "linux")]
+    let fonts: &'static [&'static [u8]] = &[];
 
     let spec = AppSpec {
         setup: Some(ui::Ui::setup),
@@ -91,7 +101,7 @@ pub(crate) fn run() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
-    let calendar_access = dupin_mac::privacy::CalendarAccess::new({
+    let calendar_access = crate::platform::privacy::CalendarAccess::new({
         let panel = handle.clone();
         let prefs = prefs_handle.clone();
         move || {
@@ -174,48 +184,65 @@ pub(crate) fn run() {
 
     let settings_window = prefs_handle.clone();
     let radius = config.theme.corner_radius as f32;
+    #[cfg(target_os = "macos")]
     let mut registered = false;
     let quick_look = Rc::new(RefCell::new(None));
-    let app = app
-        .init({
-            let handle = handle.clone();
-            let quick_look = quick_look.clone();
-            let configuration = ui::Configuration {
-                values: current_config,
-                locked_keys,
-                hotkey: binding.clone(),
-                files: settings.clone(),
-            };
-            move || {
-                let mut ui = ui::Ui::new(
-                    ui::Windows {
-                        panel: handle,
-                        prefs: prefs_handle,
-                        snapshots: snapshots_handle,
-                        scripts: scripts_handle,
-                    },
-                    updater,
-                    configuration,
-                    history,
-                    calendar_access,
-                    quick_look,
-                    running,
-                );
-                ui.config_problem = config_problem;
-                ui
-            }
-        })
-        .on_ready(move |window| {
+    let app = app.init({
+        let handle = handle.clone();
+        let quick_look = quick_look.clone();
+        let configuration = ui::Configuration {
+            values: current_config,
+            locked_keys,
+            hotkey: binding.clone(),
+            files: settings.clone(),
+        };
+        move || {
+            let mut ui = ui::Ui::new(
+                ui::Windows {
+                    panel: handle,
+                    prefs: prefs_handle,
+                    snapshots: snapshots_handle,
+                    scripts: scripts_handle,
+                },
+                updater,
+                configuration,
+                history,
+                calendar_access,
+                quick_look,
+                running,
+            );
+            ui.config_problem = config_problem;
+            ui
+        }
+    });
+    #[cfg(target_os = "macos")]
+    let app = app.on_ready(move |window| {
+        let panel = window.clone();
+        handle.update(move |ui, _| ui.set_panel_window(panel));
+        install_quick_look(window, &handle, &quick_look);
+        // Once per process: a launcher window is made once and kept, but be explicit.
+        if !std::mem::replace(&mut registered, true) {
+            binding.register_at_launch(&config, !welcome);
+            settings_window.update(|s, _| s.reflect_launch_hotkey());
+            settings.activate();
+        }
+    });
+    // On Linux the hidden panel's window is made when it first shows, so `on_ready` comes too
+    // late for the hotkey that shows it. An update runs on the UI thread while no window shows.
+    #[cfg(target_os = "linux")]
+    let app = {
+        let panel_handle = handle.clone();
+        handle.update(move |_, _| {
+            binding.register_at_launch(&config, !welcome);
+            settings_window.update(|s, _| s.reflect_launch_hotkey());
+            settings.activate();
+        });
+        app.on_ready(move |window| {
             let panel = window.clone();
-            handle.update(move |ui, _| ui.set_panel_window(panel));
-            install_quick_look(window, &handle, &quick_look);
-            // Once per process: a launcher window is made once and kept, but be explicit.
-            if !std::mem::replace(&mut registered, true) {
-                binding.register_at_launch(&config, !welcome);
-                settings_window.update(|s, _| s.reflect_launch_hotkey());
-                settings.activate();
-            }
+            panel_handle.update(move |ui, _| ui.set_panel_window(panel));
         })
+    };
+    let app = app
         .on_frame_encoded(|frame| {
             trace::frame(frame);
             latency::frame(frame);
@@ -252,10 +279,11 @@ pub(crate) fn run() {
     });
 }
 
+#[cfg(target_os = "macos")]
 fn install_quick_look(
     window: &rune::WindowHandle,
     app: &rune::AppHandle<ui::Ui>,
-    slot: &Rc<RefCell<Option<dupin_mac::quick_look::Previewer>>>,
+    slot: &Rc<RefCell<Option<crate::platform::quick_look::Previewer>>>,
 ) {
     if rune::tooling::headless_run().is_some() {
         return;
@@ -267,7 +295,7 @@ fn install_quick_look(
             // SAFETY: Rune lends this NSView only for the duration of `with_raw_handle`; attach
             // retains it before adding the responder proxy.
             unsafe {
-                dupin_mac::quick_look::Previewer::attach(appkit.ns_view, move || {
+                crate::platform::quick_look::Previewer::attach(appkit.ns_view, move || {
                     app.update(|state, tx| state.preview_panel_resigned(tx));
                 })
             }

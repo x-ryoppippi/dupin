@@ -877,6 +877,7 @@ dependencies = [
  "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
+ "dupin-linux",
  "dupin-mac",
  "dupin-plugin-protocol",
  "dupin-storage",
@@ -1012,6 +1013,18 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "dupin-linux"
+version = "0.0.0"
+dependencies = [
+ "dupin-core",
+ "dupin-host-services",
+ "dupin-storage",
+ "libc",
+ "rune",
+ "x11rb",
 ]
 
 [[package]]

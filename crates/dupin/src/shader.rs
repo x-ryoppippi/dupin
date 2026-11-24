@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use dupin_core::Backdrop;
 
+#[cfg(target_os = "macos")]
 mod metal;
 
 const FLOW: &str = include_str!("shaders/flow.wgsl");
@@ -301,7 +302,10 @@ fn check(user: &str) -> Result<Arc<str>, String> {
             ));
         }
     }
+    #[cfg(target_os = "macos")]
     metal::check(&module, &info)?;
+    #[cfg(not(target_os = "macos"))]
+    drop(info);
     Ok(full.into())
 }
 
@@ -396,6 +400,7 @@ mod tests {
     /// in Rune's backend. A function whose locals pass the GPU's stack is refused too, but where
     /// that limit falls depends on the GPU (a CI runner's virtual one takes 256 KB), so it has no
     /// case here.
+    #[cfg(target_os = "macos")]
     #[test]
     fn what_metal_refuses_is_an_error() {
         if !metal::available() {
@@ -443,9 +448,12 @@ mod tests {
         let user = format!("{head}{});\n}}", "+x".repeat(n));
         assert!(user.len() <= MAX_LEN);
         let checked = compile(&user);
+        #[cfg(target_os = "macos")]
         if metal::available() {
             assert!(checked.is_err_and(|e| e.contains("Metal")));
         }
+        #[cfg(not(target_os = "macos"))]
+        drop(checked);
     }
 
     #[test]

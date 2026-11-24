@@ -1,0 +1,20 @@
+[package]
+name = "dupin-linux"
+description = "Linux providers and actions for Dupin: desktop entries, xdg-open, inotify."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dupin-core = { workspace = true }
+dupin-host-services = { path = "../dupin-host-services" }
+dupin-storage = { workspace = true }
+libc = { workspace = true }
+rune = { workspace = true }
+x11rb = { version = "0.13", default-features = false, features = ["randr"] }
+
+[lints]
+workspace = true

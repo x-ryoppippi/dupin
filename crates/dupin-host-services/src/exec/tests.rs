@@ -567,6 +567,7 @@ fn script_targets_resolve_through_the_catalogue_and_inherit_the_runner_environme
     assert_eq!(spawner.launches.borrow().len(), 1);
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn output_reaches_the_guest_only_with_the_grant_flag_and_within_its_bound() {
     let make = |return_output| {

@@ -32,6 +32,11 @@ mod view;
 mod wall_clock;
 mod web;
 
+#[cfg(target_os = "linux")]
+use dupin_linux as platform;
+#[cfg(target_os = "macos")]
+use dupin_mac as platform;
+
 fn main() {
     if std::env::args_os()
         .nth(1)

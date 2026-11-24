@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use crate::platform::system_hotkey;
 use dupin_core::{Config, config::HotkeyTarget};
-use dupin_mac::system_hotkey;
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId};
 
 use crate::{scripts::catalog::Catalog, ui::Ui};
@@ -664,6 +664,7 @@ mod tests {
         assert!(configured_targets(&config).is_err());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_command_binding_needs_a_non_blank_command() {
         let mut config = Config::default();
@@ -685,6 +686,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn script_binding_is_skipped_until_its_catalogue_entry_is_available() {
         let mut config = Config::default();

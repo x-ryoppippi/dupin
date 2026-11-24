@@ -372,14 +372,17 @@ impl Prefs {
 
     /// The installed extensions that declare a scope needing `permission`, for its row in
     /// Settings → Permissions: each by name, marked when it holds no grant to use it.
-    pub(super) fn extension_consumers(&self, permission: dupin_mac::privacy::Permission) -> Vec<String> {
+    pub(super) fn extension_consumers(
+        &self,
+        permission: crate::platform::privacy::Permission,
+    ) -> Vec<String> {
         let Some(bridge) = &self.access else {
             return Vec::new();
         };
         let mut names: Vec<String> = bridge
             .os_consumers()
             .into_iter()
-            .filter(|consumer| dupin_mac::privacy::Permission::of(consumer.permission) == permission)
+            .filter(|consumer| crate::platform::privacy::Permission::of(consumer.permission) == permission)
             .map(|consumer| {
                 let name = name_of(self, &consumer.package);
                 if consumer.granted && consumer.enabled {
@@ -404,8 +407,8 @@ impl Prefs {
         let binding = match scope {
             Scope::Files { name, kind, .. } => {
                 let kind = match kind {
-                    dupin_extension_bridge::FilesKind::File => dupin_mac::pick::Kind::File,
-                    dupin_extension_bridge::FilesKind::Directory => dupin_mac::pick::Kind::Folder,
+                    dupin_extension_bridge::FilesKind::File => crate::platform::pick::Kind::File,
+                    dupin_extension_bridge::FilesKind::Directory => crate::platform::pick::Kind::Folder,
                 };
                 match pick(kind, &format!("Choose what “{name}” may read")) {
                     Some(path) => Some(path),
@@ -413,7 +416,7 @@ impl Prefs {
                 }
             }
             Scope::Exec { name, .. } => match pick(
-                dupin_mac::pick::Kind::Program,
+                crate::platform::pick::Kind::Program,
                 &format!("Choose the program “{name}” runs"),
             ) {
                 Some(path) => Some(path),
@@ -476,7 +479,7 @@ impl Prefs {
         match permission {
             OsPermission::Calendars => self.calendar_access.request(),
             OsPermission::Pasteboard => {
-                std::thread::spawn(dupin_mac::clipboard::request_access);
+                std::thread::spawn(crate::platform::clipboard::request_access);
             }
             OsPermission::Accessibility => crate::extensions::access::request_accessibility(),
         }
@@ -503,11 +506,11 @@ fn os_access_to_request(bridge: &Bridge, id: &PackageId) -> Vec<OsPermission> {
     permissions
 }
 
-fn pick(kind: dupin_mac::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
+fn pick(kind: crate::platform::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
     if cfg!(test) || rune::tooling::is_headless() {
         return None;
     }
-    dupin_mac::pick::choose(kind, message)
+    crate::platform::pick::choose(kind, message)
 }
 
 pub(super) fn problem(s: &Prefs, k: &Kit) -> Option<El> {

@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::platform::{accessibility, quick_look::Previewer, window::DisplayNotice};
 use dupin_core::{DisplaySelection, InputSource, Position};
-use dupin_mac::{accessibility, quick_look::Previewer, window::DisplayNotice};
+#[cfg(target_os = "macos")]
 use objc2_foundation::NSRect;
 use rune::raw_window_handle::RawWindowHandle;
 use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge, Tx};
@@ -11,6 +12,9 @@ use super::{PendingPaste, Ui, selection::SelectionRequest};
 
 // Match Spotlight's offset for the top position.
 const TOP_MARGIN: f32 = 180.0;
+/// How long, in seconds, the panel may be without focus before that counts as losing it.
+#[cfg(target_os = "linux")]
+const FOCUS_SETTLE: f64 = 0.15;
 
 pub struct Busy(Arc<AtomicUsize>);
 
@@ -71,6 +75,12 @@ impl Ui {
             self.selection_request = SelectionRequest::Superseded;
         }
         crate::trace::summoned();
+        #[cfg(target_os = "linux")]
+        {
+            self.focus_lost_until = None;
+            self.focus_wanted_until = Some(tx.clock() + FOCUS_SETTLE);
+            tx.wake_at(tx.clock() + FOCUS_SETTLE);
+        }
         if !self.shown && !rune::tooling::is_headless() {
             self.front.capture();
             crate::extensions::access::refresh_os_access(&self.extensions.bridge, &self.calendar_access);
@@ -94,27 +104,15 @@ impl Ui {
     fn place_panel(&mut self) {
         self.display_notice = None;
         let (display, align, inset, margin) = if !rune::tooling::is_headless()
-            && let Some(screen) = dupin_mac::window::display_geometry(self.display)
+            && let Some(native) = self.native_placement()
         {
-            self.display_notice = screen.notice;
-            let (inset, margin) = panel_offsets(
-                screen.frame,
-                screen.visible_frame,
-                self.theme.panel_width,
-                self.position,
-            );
-            (
-                DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
-                Align::Start,
-                inset,
-                margin,
-            )
+            native
         } else {
             let display = match self.display {
                 DisplaySelection::Mouse => DisplayTarget::UnderPointer,
                 DisplaySelection::Main | DisplaySelection::Active => DisplayTarget::Primary,
             };
-            (display, Align::Center, 0.0, TOP_MARGIN)
+            (display, Align::Center, 0.0, self.fallback_margin())
         };
         self.me.place(
             display,
@@ -138,8 +136,50 @@ impl Ui {
         self.dismiss(tx);
     }
 
+    /// The panel's place on the screen AppKit reports for the selected display.
+    #[cfg(target_os = "macos")]
+    fn native_placement(&mut self) -> Option<(DisplayTarget, Align, f32, f32)> {
+        let screen = crate::platform::window::display_geometry(self.display)?;
+        self.display_notice = screen.notice;
+        let (inset, margin) = panel_offsets(
+            screen.frame,
+            screen.visible_frame,
+            self.theme.panel_width,
+            self.position,
+        );
+        Some((
+            DisplayTarget::Native(rune::NativeDisplayId::MacOS(screen.native_id)),
+            Align::Start,
+            inset,
+            margin,
+        ))
+    }
+
+    /// Linux places the panel through Rune's display targets.
+    #[cfg(target_os = "linux")]
+    fn native_placement(&mut self) -> Option<(DisplayTarget, Align, f32, f32)> {
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn fallback_margin(&self) -> f32 {
+        TOP_MARGIN
+    }
+
+    /// The top margin for `position`, with the center measured on the display under the
+    /// pointer.
+    #[cfg(target_os = "linux")]
+    fn fallback_margin(&self) -> f32 {
+        match self.position {
+            Position::Top => TOP_MARGIN,
+            Position::Center => crate::platform::window::pointer_display_height().map_or(TOP_MARGIN, |h| {
+                ((h as f32 - crate::app::HEADER_HEIGHT) / 2.0).max(0.0)
+            }),
+        }
+    }
+
     fn force_input_source(&mut self) {
-        use dupin_mac::input_source::{Target, select};
+        use crate::platform::input_source::{Target, select};
         if self.restore_input.is_some() {
             return;
         }
@@ -148,6 +188,15 @@ impl Ui {
             InputSource::Ascii => Target::Ascii,
             InputSource::Id(id) => Target::Id(id.clone()),
         };
+        #[cfg(target_os = "linux")]
+        if matches!(target, Target::Id(_)) {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                crate::log::warn(
+                    "input_source applies only on macOS; the panel keeps the current input method",
+                )
+            });
+        }
         self.restore_input = select(&target);
     }
 
@@ -180,8 +229,9 @@ impl Ui {
                 if !accessibility::is_trusted() && accessibility::request_once() {
                     return;
                 }
-                let settings = dupin_mac::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
-                if let Err(error) = dupin_mac::workspace::run(&settings) {
+                let settings =
+                    crate::platform::workspace::Action::OpenUrl(accessibility::SETTINGS_URL.into());
+                if let Err(error) = crate::platform::workspace::run(&settings) {
                     me.update(move |ui, tx| ui.show_notice(error, tx));
                 }
             });
@@ -317,9 +367,48 @@ impl Ui {
         self.panel_window = Some(window);
     }
 
+    #[cfg(target_os = "macos")]
     pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        crate::trace::focus(focused);
         if !focused {
             self.dismiss_if_unfocused(tx);
+        }
+    }
+
+    /// A focus loss hides the panel from `poll` once it has lasted `FOCUS_SETTLE` without
+    /// focus coming back.
+    #[cfg(target_os = "linux")]
+    pub fn focus_changed(&mut self, focused: bool, tx: &mut Tx) {
+        crate::trace::focus(focused);
+        if focused {
+            self.focus_wanted_until = None;
+        }
+        self.focus_lost_until = (!focused).then(|| tx.clock() + FOCUS_SETTLE);
+        if let Some(due) = self.focus_lost_until {
+            tx.wake_at(due);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn poll_focus(&mut self, clock: f64, tx: &mut Tx) {
+        if let Some(due) = self.focus_lost_until {
+            if clock >= due {
+                self.focus_lost_until = None;
+                self.dismiss_if_unfocused(tx);
+            } else {
+                tx.wake_at(due);
+            }
+        }
+        if let Some(due) = self.focus_wanted_until {
+            if clock >= due {
+                self.focus_wanted_until = None;
+                if self.shown {
+                    crate::trace::panel("refocus", self.me.is_visible(), self.shown);
+                    self.me.focus();
+                }
+            } else {
+                tx.wake_at(due);
+            }
         }
     }
 
@@ -341,7 +430,7 @@ impl Ui {
                 .with_raw_handle(|handle| match handle.as_raw() {
                     // SAFETY: Rune lends this live view only for this main-thread callback.
                     RawWindowHandle::AppKit(appkit) => unsafe {
-                        dupin_mac::window::is_key_window(appkit.ns_view)
+                        crate::platform::window::is_key_window(appkit.ns_view)
                     },
                     _ => false,
                 })
@@ -349,6 +438,7 @@ impl Ui {
         })
     }
 
+    #[cfg(target_os = "macos")]
     pub fn preview_panel_resigned(&mut self, tx: &mut Tx) {
         if !self.shown {
             return;
@@ -364,6 +454,7 @@ impl Ui {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position) -> (f32, f32) {
     let inset = visible.origin.x - frame.origin.x + ((visible.size.width - f64::from(width)) / 2.0).max(0.0);
     let top = frame.max().y - visible.max().y;
@@ -376,7 +467,7 @@ fn panel_offsets(frame: NSRect, visible: NSRect, width: u16, position: Position)
     (inset as f32, (top + offset) as f32)
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use objc2_foundation::{NSPoint, NSSize};

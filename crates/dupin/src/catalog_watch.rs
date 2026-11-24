@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 
-use dupin_mac::{PathWatcher, watcher::canonical_root};
+use crate::platform::{PathWatcher, watcher::canonical_root};
 
 #[derive(Clone, Copy)]
 pub(crate) enum Depth {

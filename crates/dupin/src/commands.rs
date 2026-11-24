@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::platform::privacy::CalendarAccess;
+use crate::platform::{AppsProvider, system_commands};
 use dupin_core::{
     CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
-use dupin_mac::privacy::CalendarAccess;
-use dupin_mac::{AppsProvider, system_commands};
 
 use crate::features::{MANIFEST, apps::APPS, files::FILES};
 
@@ -165,6 +165,8 @@ pub fn register(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use crate::features::system::SYSTEM;
     use crate::features::{
         calculator::CALCULATOR,
         calendar::CALENDAR,
@@ -174,7 +176,6 @@ mod tests {
         files::{CONTENTS, MAX_FILE_CANDIDATES, query_problem, query_qualifier_ranges},
         recent::RECENT,
         snippets::SNIPPETS,
-        system::SYSTEM,
         web::WEB_KEYWORDS,
     };
 
@@ -275,6 +276,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn normal_search_dispatches_each_command_through_its_expected_activation() {
         use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session, SystemCommand};

@@ -1,10 +1,11 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { lib, pkgs, ... }:
     {
-      packages.cargo-hawk =
-        (pkgs.extend inputs.rust-overlay.overlays.default).callPackage ./cargo-hawk.nix
-          { };
+      # cargo-hawk.nix fetches the Apple silicon release.
+      packages = lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+        cargo-hawk = (pkgs.extend inputs.rust-overlay.overlays.default).callPackage ./cargo-hawk.nix { };
+      };
     };
 }

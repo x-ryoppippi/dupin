@@ -1,6 +1,6 @@
+use crate::platform::login_item::{LoginItem, Status as LoginStatus};
 use dupin_core::config::HotkeyTarget;
 use dupin_core::{DisplaySelection, InputSource, Position};
-use dupin_mac::login_item::{LoginItem, Status as LoginStatus};
 use rune::{El, Shortcut, ShortcutError, Tx, col, text};
 use rune_kit::{Button, Kit, ShortcutRecorder, Switch, shortcut_error_message};
 
@@ -261,6 +261,7 @@ pub(super) struct LoginPreference {
 }
 
 impl LoginPreference {
+    #[cfg(target_os = "macos")]
     pub(super) fn current() -> Option<Self> {
         objc2::MainThreadMarker::new()
             .and_then(LoginItem::for_current_app)
@@ -269,6 +270,12 @@ impl LoginPreference {
                 item,
                 error: None,
             })
+    }
+
+    /// Linux has no login item to register yet.
+    #[cfg(target_os = "linux")]
+    pub(super) fn current() -> Option<Self> {
+        None
     }
 }
 

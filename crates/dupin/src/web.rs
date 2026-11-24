@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use dupin_core::config::{Config, MAPS_SEARCH_TEMPLATE};
 use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSString, NSURL};
 
 const MAX_KEYWORD_BYTES: usize = 32;
@@ -176,7 +177,13 @@ fn valid_browser_template(template: &str) -> bool {
     }
 
     let probe = template.replace("{query}", QUERY_MARKER);
-    let Some(url) = NSURL::URLWithString(&NSString::from_str(&probe)) else {
+    parses_as_web_url(&probe)
+}
+
+/// Whether Foundation reads `probe` as an http or https URL with a host and no credentials.
+#[cfg(target_os = "macos")]
+fn parses_as_web_url(probe: &str) -> bool {
+    let Some(url) = NSURL::URLWithString(&NSString::from_str(probe)) else {
         return false;
     };
     let Some(parsed_scheme) = url.scheme() else {
@@ -190,6 +197,50 @@ fn valid_browser_template(template: &str) -> bool {
         && !host.to_string().is_empty()
         && url.user().is_none()
         && url.password().is_none()
+}
+
+/// Whether `probe`, already known to start `http://` or `https://` with an authority that has
+/// no `@`, is a URL by RFC 3986: only its unreserved and reserved characters and
+/// percent-encodings, and a non-empty host with no colon, or an IPv6 literal in brackets,
+/// with at most a numeric port.
+/// <https://www.rfc-editor.org/rfc/rfc3986#appendix-A>
+#[cfg(not(target_os = "macos"))]
+fn parses_as_web_url(probe: &str) -> bool {
+    let bytes = probe.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' => {
+                if !(bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                    && bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit))
+                {
+                    return false;
+                }
+                i += 3;
+                continue;
+            }
+            b if b.is_ascii_alphanumeric() => {}
+            b'-' | b'.' | b'_' | b'~' | b':' | b'/' | b'?' | b'#' | b'[' | b']' | b'@' | b'!' | b'$'
+            | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' => {}
+            _ => return false,
+        }
+        i += 1;
+    }
+    let Some((_, after_scheme)) = probe.split_once("://") else {
+        return false;
+    };
+    let authority = after_scheme.split(['/', '?', '#']).next().unwrap_or_default();
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !authority.ends_with(']') => (host, Some(port)),
+        _ => (authority, None),
+    };
+    let host_is_valid = match host.strip_prefix('[') {
+        Some(literal) => literal
+            .strip_suffix(']')
+            .is_some_and(|ip| ip.parse::<std::net::Ipv6Addr>().is_ok()),
+        None => !host.is_empty() && !host.contains(['[', ']', ':']),
+    };
+    host_is_valid && port.is_none_or(|port| port.bytes().all(|b| b.is_ascii_digit()))
 }
 
 fn keyword_item(catalog: &WebCatalog, raw: &str) -> Option<Item> {
@@ -384,6 +435,7 @@ mod tests {
         assert_eq!(item.display_title(), "Search Apple Maps for Baker Street & 東京");
         assert_eq!(item.actions[0].title, "Open in Maps");
         assert_eq!(url(&item), "maps://?q=Baker%20Street%20%26%20%E6%9D%B1%E4%BA%AC");
+        #[cfg(target_os = "macos")]
         assert!(NSURL::URLWithString(&NSString::from_str(url(&item))).is_some());
     }
 
@@ -487,6 +539,30 @@ mod tests {
             let (catalog, notice) = compile(&config);
             assert!(catalog.searches.is_empty());
             assert!(notice.is_some());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn hosts_follow_rfc3986() {
+        for valid in [
+            "https://example.com/?q=x",
+            "https://[::1]/?q=x",
+            "https://[::1]:8080/?q=x",
+            "https://example.com:8080/?q=x",
+        ] {
+            assert!(super::parses_as_web_url(valid), "{valid}");
+        }
+        for invalid in [
+            "https://[]/?q=x",
+            "https://[nonsense]/?q=x",
+            "https://[::1/?q=x",
+            "https://exa]mple.com/?q=x",
+            "https://example.com:80a/?q=x",
+            "https://example.com:bad:80/?q=x",
+            "https://example.com::80/?q=x",
+        ] {
+            assert!(!super::parses_as_web_url(invalid), "{invalid}");
         }
     }
 

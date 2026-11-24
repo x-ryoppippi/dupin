@@ -1,6 +1,7 @@
 //! `DUPIN_TRACE=1`: print when the launch hotkey is registered, how long each summon takes,
-//! from the hotkey handler to the first frame drawn after it, every drawn frame's offset, and
-//! each key and edit the query field sees, to stderr. Off, it costs one branch.
+//! from the hotkey handler to the first frame drawn after it, every drawn frame's offset,
+//! each key and edit the query field sees, and each focus change, to stderr. Off, it costs
+//! one branch.
 
 use std::cell::Cell;
 use std::sync::OnceLock;
@@ -40,6 +41,12 @@ pub fn snapshot(event: &str) {
 pub fn control(kind: &str, ok: bool) {
     if on() {
         eprintln!("dupin-trace: control {kind} ok={ok}");
+    }
+}
+
+pub fn focus(focused: bool) {
+    if on() {
+        eprintln!("dupin-trace: focus {focused} wall={:.3}", wall_ms());
     }
 }
 

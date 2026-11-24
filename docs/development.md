@@ -1,6 +1,6 @@
 # Development
 
-Dupin targets Apple silicon macOS only. It builds with Nix; the Rust toolchain is nixpkgs' own, which matches the version Rune's `rust-toolchain.toml` pins.
+Dupin targets Apple silicon macOS, and x86_64 Linux on X11 (see [Linux](#linux)). It builds with Nix; the Rust toolchain is nixpkgs' own, which matches the version Rune's `rust-toolchain.toml` pins.
 
 ## Build and run
 
@@ -33,6 +33,17 @@ cargo run -p dupin-mac --example search -- in invoice # a provider from the term
 ```
 
 For rebuild times and the sccache decision, see [Build caching](#build-caching).
+
+## Linux
+
+On x86_64 Linux, `nix build .#dupin` builds a bare `result/bin/dupin`, with the libraries winit, wgpu (Vulkan) and fontconfig open at run time on its RUNPATH; in the development shell, `cargo run -p dupin` links them onto the RUNPATH the same way. Start it from the X session; ⌘Space is Super+Space.
+
+```sh
+nix build .#dupin
+result/bin/dupin
+```
+
+`dupin-linux` takes the place of `dupin-mac`: apps are the desktop entries in the XDG data directories' `applications` folders, found by their localized, untranslated and generic names and their keywords; opening one runs its `Exec` (a terminal app's in `$TERMINAL -e`, `xdg-terminal-exec` or XFCE's `exo-open`), and other targets go to the system's `xdg-open`. The history and the log are in `$XDG_STATE_HOME/dupin` (`~/.local/state/dupin`), and the settings overlay and extension data in `$XDG_DATA_HOME/dupin` (`~/.local/share/dupin`). Quick Look, `input_source`, self-update and the Metal check of backdrop shaders are macOS's, and Linux builds leave them out. File and content search, folders, the dictionary, calendars, System Settings search, recent items, system commands, the clipboard, pasting, the selection, file operations, image thumbnails, sharing, window management, the login item and the Keychain keep their macOS shape in `dupin-linux` but find nothing or report that Linux doesn't support them yet, and their permissions read as restricted. Extensions don't run, since the extension host has no Linux sandbox, and Calendar search, Clipboard history, Dictionary and Snippets, which bundled extensions answer, say they aren't available. Rune's Wayland path is untested.
 
 ## Remote development with Testbox
 

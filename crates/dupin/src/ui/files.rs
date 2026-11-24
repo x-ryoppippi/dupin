@@ -10,7 +10,7 @@ use super::{
 
 impl Ui {
     pub(super) fn select_rename_stem(&mut self, path: &Path, tx: &mut Tx) {
-        let extension = dupin_mac::file_ops::has_extension(path);
+        let extension = crate::platform::file_ops::has_extension(path);
         let end = dupin_core::file_name::stem_len(&self.query.text, extension);
         tx.focus("query", false);
         self.query.set_selection(0, end);
@@ -21,8 +21,8 @@ impl Ui {
             FileAction::Rename,
             path,
             move |path| {
-                dupin_mac::file_ops::rename(path, &name)
-                    .map(|renamed| dupin_mac::file_actions::item(renamed, name, Vec::new()))
+                crate::platform::file_ops::rename(path, &name)
+                    .map(|renamed| crate::platform::file_actions::item(renamed, name, Vec::new()))
             },
             move |ui, _, item| {
                 let notice = format!("Renamed to “{}”", item.display_title());
@@ -84,7 +84,7 @@ impl Ui {
         self.on_file_worker(
             FileAction::Compress,
             path,
-            dupin_mac::file_ops::compress,
+            crate::platform::file_ops::compress,
             |_, _, archive| format!("Compressed to “{}”", file_name(&archive)),
         );
     }
@@ -94,7 +94,9 @@ impl Ui {
         self.on_file_worker(
             FileAction::Trash,
             path,
-            |path| dupin_mac::workspace::run(&dupin_mac::workspace::Action::Trash(path.to_owned())),
+            |path| {
+                crate::platform::workspace::run(&crate::platform::workspace::Action::Trash(path.to_owned()))
+            },
             move |ui, path, ()| {
                 ui.session.forget(&id);
                 format!("Moved “{}” to the Trash", file_name(path))

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use crate::platform::privacy::Permission;
 use dupin_core::{CommandId, CommandSpec, Config, Provider, QueryEligibility};
 use dupin_extension_bridge::OsPermission;
 use dupin_host_services::{calendar, clipboard};
-use dupin_mac::privacy::Permission;
 
 use super::apps::APPS;
 use super::{Capability, Feature, PermissionUse};

@@ -28,10 +28,10 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
+use crate::platform::{AppsProvider, AppsWatcher, quick_look::Previewer, window::DisplayNotice};
 use dupin_core::{
     Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Searcher, Session,
 };
-use dupin_mac::{AppsProvider, AppsWatcher, quick_look::Previewer, window::DisplayNotice};
 use rune::{AppHandle, Image, ImageCache, TextEdit, Tx};
 
 use crate::scripts::catalog::Catalog;
@@ -126,13 +126,13 @@ pub struct Ui {
     paste_after_close: Option<PendingPaste>,
     /// Why something wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
-    sharing: dupin_mac::sharing::Picker,
+    sharing: crate::platform::sharing::Picker,
     panel_window: Option<rune::WindowHandle>,
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
-    pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
+    pub(crate) system_provider: Arc<crate::platform::system_commands::SystemProvider>,
     deadlines: HashMap<CommandId, (u64, f64)>,
     extensions: Extensions,
-    calendar_access: dupin_mac::privacy::CalendarAccess,
+    calendar_access: crate::platform::privacy::CalendarAccess,
     _apps_watcher: Option<AppsWatcher>,
     pub(crate) clipboard: crate::clipboard::Clipboard,
     saver: crate::store::Saver,
@@ -140,19 +140,25 @@ pub struct Ui {
     display: DisplaySelection,
     pub display_notice: Option<DisplayNotice>,
     input_source: InputSource,
+    /// When a focus loss that hasn't been undone counts: X11 reports a panel being shown as
+    /// losing and gaining focus within a few milliseconds.
+    #[cfg(target_os = "linux")]
+    focus_lost_until: Option<f64>,
+    #[cfg(target_os = "linux")]
+    focus_wanted_until: Option<f64>,
     /// The input source to put back when the panel hides, if showing it switched one.
-    restore_input: Option<dupin_mac::input_source::Previous>,
+    restore_input: Option<crate::platform::input_source::Previous>,
     /// An update was staged while the panel showed: restart into it when the panel hides.
     relaunch: Option<Restart>,
     settings_after_close: bool,
     snapshots_after_close: bool,
     accessibility_after_close: bool,
     /// The app the panel opened over, whose focused window extensions may read and move.
-    front: Arc<dupin_mac::window_management::Front>,
-    system_runner: dupin_mac::system_commands::Runner,
+    front: Arc<crate::platform::window_management::Front>,
+    system_runner: crate::platform::system_commands::Runner,
     /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
-    file_transfers: dupin_mac::file_ops::FileTransfers,
+    file_transfers: crate::platform::file_ops::FileTransfers,
     updater: crate::update::Updater,
     me: AppHandle<Ui>,
     prefs: AppHandle<crate::prefs::Prefs>,
@@ -167,7 +173,7 @@ impl Ui {
         updater: crate::update::Updater,
         configuration: Configuration,
         history: History,
-        calendar_access: dupin_mac::privacy::CalendarAccess,
+        calendar_access: crate::platform::privacy::CalendarAccess,
         quick_look: Rc<RefCell<Option<Previewer>>>,
         running: Arc<AtomicUsize>,
     ) -> Ui {
@@ -209,7 +215,7 @@ impl Ui {
             }),
         );
         let scripts_watcher = crate::scripts::watch(me.clone());
-        let front = Arc::new(dupin_mac::window_management::Front::default());
+        let front = Arc::new(crate::platform::window_management::Front::default());
         let bridge = crate::extensions::access::open(crate::extensions::access::Platform {
             scripts: registration.scripts.clone(),
             runner: runner.clone(),
@@ -290,7 +296,7 @@ impl Ui {
             web: registration.web,
             paste_after_close: None,
             notice_after_close: None,
-            sharing: dupin_mac::sharing::Picker::default(),
+            sharing: crate::platform::sharing::Picker::default(),
             panel_window: None,
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
@@ -304,6 +310,10 @@ impl Ui {
             display_notice: None,
             input_source: config.input_source.clone(),
             configuration,
+            #[cfg(target_os = "linux")]
+            focus_lost_until: None,
+            #[cfg(target_os = "linux")]
+            focus_wanted_until: None,
             restore_input: None,
             relaunch: None,
             settings_after_close: false,
@@ -313,10 +323,10 @@ impl Ui {
             system_runner: if cfg!(test) || rune::tooling::is_headless() {
                 |_| Err("System commands are unavailable in headless runs.".into())
             } else {
-                dupin_mac::system_commands::run
+                crate::platform::system_commands::run
             },
             running,
-            file_transfers: dupin_mac::file_ops::FileTransfers::default(),
+            file_transfers: crate::platform::file_ops::FileTransfers::default(),
             updater,
             quick_look,
             me,
@@ -328,6 +338,8 @@ impl Ui {
     }
 
     pub fn poll(&mut self, clock: f64, tx: &mut Tx) -> bool {
+        #[cfg(target_os = "linux")]
+        self.poll_focus(clock, tx);
         self.poll_picker(clock, tx);
         let notice_expired = self.notices.expire(clock);
         self.poll_searches(clock, tx) || notice_expired

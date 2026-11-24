@@ -73,7 +73,7 @@ let
     env = checkEnv;
     CARGO_PROFILE = "dev";
     cargoExtraArgs = "--offline --locked --workspace";
-    nativeBuildInputs = [ pkgs.clippy ];
+    nativeBuildInputs = (baseArgs.nativeBuildInputs or [ ]) ++ [ pkgs.clippy ];
   };
   latencyArgs = baseArgs // {
     pname = "dupin-latency";

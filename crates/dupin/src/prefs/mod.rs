@@ -16,8 +16,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::platform::privacy::{CalendarAccess, PermissionStatus};
 use dupin_core::Config;
-use dupin_mac::privacy::{CalendarAccess, PermissionStatus};
 use rune::{AppHandle, Cx, El, Icon, ScrollSpec, Shortcut, ShortcutError, Tx, col, el, icon, row, text};
 use rune_kit::{Kit, ShortcutRecorderState};
 
@@ -456,7 +456,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         if let Some(path) = crate::settings::path()
             && path.exists()
         {
-            std::thread::spawn(move || dupin_mac::workspace::open(&path));
+            std::thread::spawn(move || crate::platform::workspace::open(&path));
         }
     });
     col()

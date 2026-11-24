@@ -25,15 +25,26 @@ pub fn is_sandboxed() -> bool {
     sandbox::inherited()
 }
 
+/// Whether the extension host has a sandbox to confine itself with on this platform.
+pub const CAN_CONFINE: bool = cfg!(target_os = "macos");
+
 /// Returns from the test it is in when this process is already sandboxed, where the extension
-/// host can't confine itself, such as inside the Nix build sandbox. A run with
-/// `DUPIN_REQUIRE_EXTENSION_HOST` set exists to exercise the host, so there it fails instead.
+/// host can't confine itself, such as inside the Nix build sandbox, or when the platform has no
+/// sandbox for it at all. A run with `DUPIN_REQUIRE_EXTENSION_HOST` set exists to exercise the
+/// host, so inside a sandbox it fails instead.
 #[cfg(any(test, feature = "testing"))]
 #[macro_export]
 macro_rules! skip_inside_a_sandbox {
     () => {{
         fn here() {}
         let test = ::std::any::type_name_of_val(&here).trim_end_matches("::here");
+        if !$crate::CAN_CONFINE {
+            let _ = ::std::io::Write::write_all(
+                &mut ::std::io::stderr(),
+                format!("skipped {test}: the extension host has no sandbox on this platform\n").as_bytes(),
+            );
+            return;
+        }
         if $crate::is_sandboxed() {
             assert!(
                 ::std::env::var_os("DUPIN_REQUIRE_EXTENSION_HOST").is_none(),

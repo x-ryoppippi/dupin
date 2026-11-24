@@ -17,7 +17,7 @@ mod address;
 mod transport;
 mod url;
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests;
 
 pub use address::PrivateNetworks;
@@ -374,7 +374,7 @@ impl HttpService {
     }
 
     /// Lets tests reach a local server through a fixed resolver. Never compiled into Dupin.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "macos"))]
     fn for_tests(config: HttpConfig, resolve: Arc<Resolve>) -> Self {
         Self {
             config,

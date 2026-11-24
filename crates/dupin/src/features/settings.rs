@@ -25,5 +25,5 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
 }
 
 fn start(providers: &mut Providers) {
-    providers.add(SETTINGS, Arc::new(dupin_mac::SettingsProvider::default()));
+    providers.add(SETTINGS, Arc::new(crate::platform::SettingsProvider::default()));
 }

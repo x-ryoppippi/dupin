@@ -6,13 +6,13 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock, RwLock};
 
+use crate::platform::privacy::CalendarAccess;
 use dupin_extension_bridge::services::{self, Services, Subscription};
 use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
 };
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
 use dupin_host_services::{calendar, clipboard, dictionary, exec, windows};
-use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
 use crate::scripts::catalog::Catalog;
@@ -41,7 +41,7 @@ pub fn storage_path() -> Option<PathBuf> {
 pub fn storage() -> Option<dupin_storage::Storage> {
     Some(dupin_storage::Storage::new(
         storage_path()?,
-        dupin_mac::keychain::KeychainKey,
+        crate::platform::keychain::KeychainKey,
     ))
 }
 
@@ -53,7 +53,7 @@ pub struct Platform {
     /// Clipboard history's settings, whose ignored apps and limits every extension follows.
     pub clipboard: Arc<RwLock<dupin_core::config::Clipboard>>,
     /// The app the panel opened over, whose focused window the `windows` capability moves.
-    pub front: Arc<dupin_mac::window_management::Front>,
+    pub front: Arc<crate::platform::window_management::Front>,
 }
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
@@ -80,7 +80,7 @@ pub fn open(platform: Platform) -> Bridge {
         }
         let services = Services {
             calendar: Box::new(Calendars(calendar::Calendar::new(
-                dupin_mac::EventStore::fixtures(),
+                crate::platform::EventStore::fixtures(),
             ))),
             dictionary: fixed_dictionary(),
             storage: match crate::clipboard::headless_storage() {
@@ -121,13 +121,13 @@ pub fn open(platform: Platform) -> Bridge {
             service: OnceLock::new(),
         }),
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
-            dupin_mac::SystemDictionary::default(),
+            crate::platform::SystemDictionary::default(),
         ))),
-        calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
-            platform.calendar_access,
-        )))),
+        calendar: Box::new(Calendars(calendar::Calendar::new(
+            crate::platform::EventStore::new(platform.calendar_access),
+        ))),
         windows: Box::new(Windows(windows::Service::new(
-            dupin_mac::window_management::Windows(platform.front),
+            crate::platform::window_management::Windows(platform.front),
         ))),
     };
     let bridge = match (base_path(), local_path()) {
@@ -155,7 +155,7 @@ pub fn refresh_os_access(bridge: &Bridge, calendar: &CalendarAccess) {
 
 /// The broker's view of the Settings → Permissions row `permission` joins.
 pub fn os_access(permission: OsPermission, calendar: &CalendarAccess) -> OsAccess {
-    use dupin_mac::privacy::Permission;
+    use crate::platform::privacy::Permission;
     match Permission::of(permission) {
         Permission::Calendars => calendar.status().os_access(),
         row => row.status().os_access(),
@@ -168,8 +168,10 @@ pub fn request_accessibility() {
     if cfg!(test) || rune::tooling::is_headless() {
         return;
     }
-    if dupin_mac::privacy::Permission::Accessibility.status() == dupin_mac::privacy::Access::NotDetermined {
-        dupin_mac::accessibility::request_once();
+    if crate::platform::privacy::Permission::Accessibility.status()
+        == crate::platform::privacy::Access::NotDetermined
+    {
+        crate::platform::accessibility::request_once();
     }
 }
 
@@ -181,21 +183,24 @@ fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
 /// copy. It is opened on first use, since opening it keeps the clipboard monitor running.
 struct Pasteboard {
     settings: Arc<RwLock<dupin_core::config::Clipboard>>,
-    service: OnceLock<clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard>>,
+    service: OnceLock<clipboard::Clipboard<crate::platform::clipboard::GeneralPasteboard>>,
 }
 
 impl Pasteboard {
-    fn service(&self) -> &clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard> {
+    fn service(&self) -> &clipboard::Clipboard<crate::platform::clipboard::GeneralPasteboard> {
         self.service.get_or_init(|| {
             let settings = self.settings.clone();
-            clipboard::Clipboard::new(dupin_mac::clipboard::GeneralPasteboard::default(), move || {
-                let settings = settings.read().unwrap_or_else(|poisoned| poisoned.into_inner());
-                clipboard::Policy {
-                    ignored_apps: settings.ignored_apps().to_vec(),
-                    max_text_bytes: settings.max_entry_bytes(),
-                    max_image_bytes: settings.max_image_bytes(),
-                }
-            })
+            clipboard::Clipboard::new(
+                crate::platform::clipboard::GeneralPasteboard::default(),
+                move || {
+                    let settings = settings.read().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    clipboard::Policy {
+                        ignored_apps: settings.ignored_apps().to_vec(),
+                        max_text_bytes: settings.max_entry_bytes(),
+                        max_image_bytes: settings.max_image_bytes(),
+                    }
+                },
+            )
         })
     }
 }
@@ -244,13 +249,13 @@ impl services::Clipboard for Pasteboard {
     }
 }
 
-struct Dictionaries(dictionary::Dictionary<dupin_mac::SystemDictionary>);
+struct Dictionaries(dictionary::Dictionary<crate::platform::SystemDictionary>);
 
 /// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
 /// depend on the dictionaries this Mac has.
 fn fixed_dictionary() -> Box<dyn services::Dictionary> {
     Box::new(Dictionaries(dictionary::Dictionary::new(
-        dupin_mac::SystemDictionary::fixtures(),
+        crate::platform::SystemDictionary::fixtures(),
     )))
 }
 
@@ -261,7 +266,7 @@ impl services::Dictionary for Dictionaries {
     }
 }
 
-struct Calendars(calendar::Calendar<dupin_mac::EventStore>);
+struct Calendars(calendar::Calendar<crate::platform::EventStore>);
 
 impl services::Calendar for Calendars {
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure> {
@@ -288,7 +293,7 @@ impl services::Calendar for Calendars {
     }
 }
 
-struct Windows(windows::Service<dupin_mac::window_management::Windows>);
+struct Windows(windows::Service<crate::platform::window_management::Windows>);
 
 impl services::Windows for Windows {
     fn displays(&self) -> Result<Value, Failure> {

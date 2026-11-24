@@ -1318,6 +1318,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn extension_commands_get_literal_argv_a_minimal_environment_and_their_working_folder() {
         let fixture = Fixture::new("printf '%s\\n' \"$@\"\npwd -P\n");
@@ -1355,6 +1356,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn extension_timeouts_kill_the_whole_process_group() {
         let fixture = Fixture::new("sleep 60 &\nprintf '%s\\n' $! > child\nwait\n");
@@ -1382,6 +1384,7 @@ mod tests {
         assert_gone(&fixture, "child");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn extension_commands_stop_on_cancellation_and_refuse_after_shutdown() {
         let fixture = Fixture::new("printf '%s\\n' $$ > leader\nexec sleep 60\n");
@@ -1402,6 +1405,7 @@ mod tests {
         assert_eq!(spawn(&runner, &run).unwrap_err(), "Dupin is shutting down.");
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn extension_commands_killed_by_shutdown_report_the_shutdown() {
         let fixture = Fixture::new("printf '%s\\n' $$ > leader\nexec sleep 60\n");

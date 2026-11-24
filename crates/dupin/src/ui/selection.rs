@@ -1,4 +1,4 @@
-use dupin_mac::{accessibility, selection::Selection};
+use crate::platform::{accessibility, selection::Selection};
 use rune::{TextEdit, Tx};
 
 use super::Ui;
@@ -25,7 +25,7 @@ impl Ui {
         if std::thread::Builder::new()
             .name("selected-text".into())
             .spawn(move || {
-                let result = dupin_mac::selection::read(|| {
+                let result = crate::platform::selection::read(|| {
                     accessibility::request_once();
                 });
                 panel.update(move |s, tx| s.apply_selection(result, tx));

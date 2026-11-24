@@ -1,7 +1,12 @@
 { inputs, ... }:
 {
   perSystem =
-    { config, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       native = pkgs.callPackage ../package.nix {
         cargoVendorDir = import ./cargo-vendor.nix { craneLib = inputs.crane.mkLib pkgs; };
@@ -31,14 +36,12 @@
     in
     {
       packages = {
-        inherit
-          dupin
-          dmg-background
-          blacksmith
-          rolldown
-          ;
+        inherit dupin rolldown;
         dupin-latency = dupin.latencyBinary;
         default = dupin;
+      }
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
+        inherit dmg-background blacksmith;
       };
     };
 }

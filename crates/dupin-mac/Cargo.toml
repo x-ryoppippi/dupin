@@ -8,7 +8,7 @@ publish.workspace = true
 homepage.workspace = true
 license.workspace = true
 
-[dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 dupin-core = { workspace = true }
 dupin-storage = { workspace = true }
 dupin-host-services = { path = "../dupin-host-services" }

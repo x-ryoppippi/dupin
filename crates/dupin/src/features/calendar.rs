@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::platform::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 use dupin_core::{
     Action, Batch, CommandError, CommandSpec, Config, Item, ItemAction, Payload, Provider, ProviderError,
     QueryEligibility, Request, View,
 };
-use dupin_mac::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 
 use super::extensions::Port;
 use super::{Bundled, Capability, Feature, PermissionUse};

@@ -30,7 +30,6 @@ dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
 dupin-storage = { workspace = true }
 dupin-core = { workspace = true }
-dupin-mac = { workspace = true }
 libc = { workspace = true }
 rune = { workspace = true }
 rune-notify = { workspace = true }
@@ -42,6 +41,9 @@ tempfile = "3"
 toml = { workspace = true, features = ["display"] }
 wgpu = { workspace = true }
 naga = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dupin-mac = { workspace = true }
 # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
 # Rune's backend will draw it.
 objc2 = { workspace = true }
@@ -65,6 +67,9 @@ dupin-extension-install = { path = "../dupin-extension-install" }
 
 [dev-dependencies]
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dupin-linux = { workspace = true }
 
 [lints]
 workspace = true

@@ -178,8 +178,8 @@ fn thumbnail(bridge: &Bridge, job: &Job) -> Option<Vec<u8>> {
     };
     let fit = job.size.pixels();
     let made = bridge.read_image(&job.package, &image, |data| match data {
-        ImageData::Bytes(bytes) => dupin_mac::thumbnail::from_bytes(bytes, fit),
-        ImageData::File(path) => dupin_mac::thumbnail::from_file(path, fit),
+        ImageData::Bytes(bytes) => crate::platform::thumbnail::from_bytes(bytes, fit),
+        ImageData::File(path) => crate::platform::thumbnail::from_file(path, fit),
     });
     match made {
         Ok(png) => png,

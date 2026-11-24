@@ -275,7 +275,7 @@ fn window_management_setting(k: &Kit) -> El {
 }
 
 fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {
-    if !s.config.snippet_paste || dupin_mac::paste::allowed() {
+    if !s.config.snippet_paste || crate::platform::paste::allowed() {
         return None;
     }
     let open = value_button(
@@ -286,8 +286,10 @@ fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {
     )
     .on_press(|_: &mut Prefs| {
         std::thread::spawn(|| {
-            let action = dupin_mac::workspace::Action::OpenUrl(dupin_mac::accessibility::SETTINGS_URL.into());
-            if let Err(error) = dupin_mac::workspace::run(&action) {
+            let action = crate::platform::workspace::Action::OpenUrl(
+                crate::platform::accessibility::SETTINGS_URL.into(),
+            );
+            if let Err(error) = crate::platform::workspace::run(&action) {
                 crate::log::warn(&error);
             }
         });

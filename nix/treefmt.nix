@@ -1,4 +1,4 @@
-{ inputs, ... }:
+_:
 let
   treefmt =
     { lib, pkgs, ... }:
@@ -76,8 +76,4 @@ let
 in
 {
   perSystem.treefmt = treefmt;
-
-  # The flake targets only aarch64-darwin, but the autofix.ci workflow formats on a Linux
-  # runner, which costs far less than macOS.
-  flake.formatter.x86_64-linux = inputs.treefmt-nix.lib.mkWrapper inputs.nixpkgs.legacyPackages.x86_64-linux treefmt;
 }

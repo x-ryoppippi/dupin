@@ -1,5 +1,5 @@
+use crate::platform::privacy::Permission;
 use dupin_core::config::DisplaySelection;
-use dupin_mac::privacy::Permission;
 
 use super::{Capability, Feature, PermissionUse};
 

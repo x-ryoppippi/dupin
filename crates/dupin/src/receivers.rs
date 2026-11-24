@@ -10,7 +10,7 @@ pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
     }
     let paths = &payload.paths;
     if !paths.is_empty() {
-        receivers.extend(dupin_mac::sharing::targets().map(|(id, title, target)| {
+        receivers.extend(crate::platform::sharing::targets().map(|(id, title, target)| {
             let keep_open = target == ShareTarget::Picker;
             let action = ItemAction::new(
                 id,
@@ -46,7 +46,7 @@ pub fn for_payload(payload: &Payload, web: &WebCatalog) -> Vec<ItemAction> {
     receivers
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use dupin_core::Item;
@@ -82,7 +82,7 @@ mod tests {
             item.action("copy-path"),
             Some(&Action::Copy("/tmp/file.txt\n/tmp/another file.txt".into()))
         );
-        for (id, _, target) in dupin_mac::sharing::targets() {
+        for (id, _, target) in crate::platform::sharing::targets() {
             assert_eq!(
                 item.action(id),
                 Some(&Action::Share {

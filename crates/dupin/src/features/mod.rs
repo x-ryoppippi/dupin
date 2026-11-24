@@ -13,9 +13,9 @@ pub(super) mod snippets;
 pub(super) mod system;
 pub(super) mod web;
 
+use crate::platform::privacy::Permission;
 use dupin_core::{CommandError, Config};
 use dupin_extension_bridge::PackageId;
-use dupin_mac::privacy::Permission;
 
 use crate::commands::{Configure, ConfiguredCommands, Providers};
 use crate::extensions::BUNDLED_PREFIX;

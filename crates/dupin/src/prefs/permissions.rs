@@ -1,8 +1,8 @@
 //! Settings → Permissions: each macOS permission a Dupin feature can use, what uses it, and
 //! whether macOS grants it, with controls to request or manage access.
 
+use crate::platform::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 use dupin_core::Config;
-use dupin_mac::privacy::{Access, CalendarAccess, Permission, PermissionStatus};
 use rune::{El, Icon, row};
 use rune_kit::{Badge, BadgeVariant, Button, Kit};
 
@@ -96,18 +96,18 @@ fn request_access(calendar: &CalendarAccess, capability: Capability) {
         Capability::Permission(Permission::Calendars) => calendar.request(),
         Capability::Permission(permission @ Permission::Accessibility) => {
             if permission.status() == Access::NotDetermined {
-                dupin_mac::accessibility::request_once();
+                crate::platform::accessibility::request_once();
             }
         }
         Capability::Permission(permission @ Permission::Pasteboard) => {
             if permission.status() == Access::NotDetermined {
                 // The read that raises the prompt blocks until it is answered.
-                std::thread::spawn(dupin_mac::clipboard::request_access);
+                std::thread::spawn(crate::platform::clipboard::request_access);
             }
         }
         Capability::PostEvent => {
-            if !dupin_mac::paste::allowed() {
-                dupin_mac::paste::request_once();
+            if !crate::platform::paste::allowed() {
+                crate::platform::paste::request_once();
             }
         }
     }

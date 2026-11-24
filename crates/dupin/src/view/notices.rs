@@ -1,4 +1,4 @@
-use dupin_mac::window::DisplayNotice;
+use crate::platform::window::DisplayNotice;
 use rune::tok::type_;
 use rune::{Color, El, col, row, text};
 

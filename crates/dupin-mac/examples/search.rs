@@ -1,13 +1,19 @@
 //! Run a provider from the command line, through a `Searcher` as the app does:
 //! `cargo run -p dupin-mac --example search -- apps saf`, `-- files invoice` or `-- in invoice`.
 
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
+#[cfg(target_os = "macos")]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 use dupin_core::{Delivery, Provider, Searcher};
+#[cfg(target_os = "macos")]
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 
+#[cfg(target_os = "macos")]
 fn main() {
     let mut args = std::env::args().skip(1);
     let kind = args.next().unwrap_or_default();
@@ -40,4 +46,9 @@ fn main() {
             }
         }
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("this example runs on macOS only");
 }

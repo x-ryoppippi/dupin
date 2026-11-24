@@ -1,8 +1,10 @@
 //! Switch to the ASCII input source for a moment and back, printing the active source's
 //! identifier at each step: `cargo run -p dupin-mac --example input_source`.
 
+#[cfg(target_os = "macos")]
 use dupin_mac::input_source::{Target, select};
 
+#[cfg(target_os = "macos")]
 fn main() {
     let before = current();
     let previous = select(&Target::Ascii);
@@ -17,6 +19,7 @@ fn main() {
     println!("after: {}", current());
 }
 
+#[cfg(target_os = "macos")]
 fn current() -> String {
     std::process::Command::new("defaults")
         .args(["read", "com.apple.HIToolbox", "AppleSelectedInputSources"])
@@ -30,4 +33,9 @@ fn current() -> String {
                 .join(" ")
         })
         .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("this example runs on macOS only");
 }

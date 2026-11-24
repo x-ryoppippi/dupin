@@ -639,6 +639,7 @@ fn cancelling_stops_the_running_step_and_every_fixture_after_it() {
     );
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn a_cancelled_headless_run_is_stopped() {
     let mut command = Command::new("/bin/sleep");

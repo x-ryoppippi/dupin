@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use crate::platform::privacy::Permission;
 use dupin_core::{
     Batch, CommandError, CommandSpec, Config, Item, Payload, Provider, ProviderError, QueryEligibility,
     Request, View,
 };
-use dupin_mac::privacy::Permission;
 
 use super::extensions::Port;
 use super::{Bundled, Capability, Feature, PermissionUse};
@@ -60,9 +60,9 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
 fn start(providers: &mut Providers) {
     let port = providers.port(CLIPBOARD);
     let access = if rune::tooling::is_headless() {
-        || dupin_mac::clipboard::Access::Allowed
+        || crate::platform::clipboard::Access::Allowed
     } else {
-        dupin_mac::clipboard::access
+        crate::platform::clipboard::access
     };
     providers.add(CLIPBOARD, Arc::new(ClipboardHistory { access, port }));
 }
@@ -93,7 +93,7 @@ fn preferences(config: &dupin_core::config::Clipboard) -> serde_json::Map<String
 /// is being recorded while macOS doesn't let Dupin read the clipboard in the background. That
 /// access is Dupin's, not the extension's, so Dupin explains it and asks for it itself.
 struct ClipboardHistory {
-    access: fn() -> dupin_mac::clipboard::Access,
+    access: fn() -> crate::platform::clipboard::Access,
     port: Arc<Port>,
 }
 
@@ -106,7 +106,7 @@ impl Provider for ClipboardHistory {
         if request.limit == 0 || request.is_cancelled() {
             return Ok(());
         }
-        if let Some(row) = dupin_mac::clipboard::access_item((self.access)()) {
+        if let Some(row) = crate::platform::clipboard::access_item((self.access)()) {
             emit(vec![row].into());
         }
         match self.port.provider() {
@@ -141,7 +141,7 @@ fn unavailable() -> Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dupin_mac::clipboard::Access;
+    use crate::platform::clipboard::Access;
 
     struct Answers;
 
@@ -174,17 +174,20 @@ mod tests {
         assert_eq!(titles(&history), ["Clipboard history isn't available"]);
         history.port.set(Some(Arc::new(Answers)));
         assert_eq!(titles(&history), ["The game is afoot."]);
-        let unasked = ClipboardHistory {
-            access: || Access::Unasked,
-            port: history.port.clone(),
-        };
-        assert_eq!(
-            titles(&unasked),
-            [
-                "Clipboard history needs permission to read the clipboard",
-                "The game is afoot."
-            ]
-        );
+        #[cfg(target_os = "macos")]
+        {
+            let unasked = ClipboardHistory {
+                access: || Access::Unasked,
+                port: history.port.clone(),
+            };
+            assert_eq!(
+                titles(&unasked),
+                [
+                    "Clipboard history needs permission to read the clipboard",
+                    "The game is afoot."
+                ]
+            );
+        }
     }
 
     #[test]

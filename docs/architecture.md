@@ -1,6 +1,6 @@
 # Architecture
 
-The search and ranking model must remain independent of UI frameworks and operating-system APIs. Native providers own the macOS boundary; the thin UI layer adapts input and renders results so that the UI framework can change without replacing the model.
+The search and ranking model must remain independent of UI frameworks and operating-system APIs. Native providers own the operating-system boundary (`dupin-mac` on macOS, `dupin-linux` on Linux); the thin UI layer adapts input and renders results so that the UI framework can change without replacing the model.
 
 ## Providers
 

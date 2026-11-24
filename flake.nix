@@ -24,8 +24,11 @@
   outputs =
     inputs@{ flake-parts, ... }:
     flake-parts.lib.mkFlake { inherit inputs; } {
-      # Apple silicon macOS is the only target.
-      systems = [ "aarch64-darwin" ];
+      # Apple silicon macOS, and x86_64 Linux on X11.
+      systems = [
+        "aarch64-darwin"
+        "x86_64-linux"
+      ];
 
       imports = [
         inputs.treefmt-nix.flakeModule

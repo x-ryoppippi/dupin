@@ -1,5 +1,5 @@
+use crate::platform::system_commands;
 use dupin_core::{CommandError, CommandSpec, Config};
-use dupin_mac::system_commands;
 
 use super::{Feature, default_query};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
