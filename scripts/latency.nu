@@ -225,6 +225,7 @@ def "main baseline" [
         results: ($kept ++ $recorded | sort-by id)
     }
     | to json --tabs 1
+    | $in + "\n"
     | save --force $out
     print --stderr $"recorded ($recorded | length) scenarios of ($feature) from ($commits.0) in ($out)"
 }
