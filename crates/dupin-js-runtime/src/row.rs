@@ -28,8 +28,8 @@ const MAX_DATA_DEPTH: usize = 16;
 
 /// Rows one `items()` answer may add or replace, and IDs it may remove.
 pub const MAX_PAGE_ROWS: usize = 500;
-/// Text in one `items()` answer.
-pub(crate) const MAX_PAGE_BYTES: usize = 1024 * 1024;
+/// Text in one `items()` answer, the largest any answer carries.
+pub const MAX_PAGE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_CURSOR_BYTES: usize = 256;
 /// A day: a catalogue that changes less often can wait for an action to invalidate it.
 pub(crate) const MAX_TTL_SECONDS: u32 = 24 * 60 * 60;
