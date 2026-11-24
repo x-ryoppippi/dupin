@@ -65,13 +65,23 @@ fn extension(k: &Kit, listed: &Listed) -> El {
                 .update(move |ui, tx| ui.set_extension_enabled(id, !enabled, tx));
         })
         .build(k);
+    setting(k, &icons::PUZZLE, &listed.title, Some(&detail(listed)), switch)
+        .key(format!("extension-{}", listed.id))
+}
+
+fn detail(listed: &Listed) -> String {
     let origin = match listed.kind {
         Kind::Bundled => "Bundled with Dupin",
         Kind::Copy => "Your copy of a bundled extension, unchanged",
-        Kind::Modified => "Your changed copy of a bundled extension, without its bundled grants",
+        Kind::Modified => "Replaces a bundled extension of the same name, without its grants",
         Kind::User => "From the extensions folder",
     };
-    let mut detail = format!("{origin}. Type {} then Space.", listed.keyword);
+    let keyword = &listed.keyword;
+    let mut detail = match (listed.enabled, listed.answering) {
+        (true, true) => format!("{origin}. Type {keyword} then Space."),
+        (true, false) => format!("{origin}. Not answering: another command already uses {keyword}."),
+        (false, _) => format!("{origin}. Off."),
+    };
     if !listed.scopes.is_empty() {
         let scopes: Vec<_> = listed
             .scopes
@@ -80,7 +90,7 @@ fn extension(k: &Kit, listed: &Listed) -> El {
             .collect();
         detail.push_str(&format!(" Asks for {}.", scopes.join(", ")));
     }
-    setting(k, &icons::PUZZLE, &listed.title, Some(&detail), switch).key(format!("extension-{}", listed.id))
+    detail
 }
 
 fn standing(state: &ConsentState) -> &'static str {
@@ -111,4 +121,31 @@ fn problems(s: &Prefs, k: &Kit) -> Option<El> {
                     .w_full()
             }))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_row_says_whether_its_keyword_reaches_it() {
+        let listed = |enabled, answering| Listed {
+            id: "help".into(),
+            title: "Help".into(),
+            keyword: "help".into(),
+            kind: Kind::User,
+            enabled,
+            answering,
+            scopes: Vec::new(),
+        };
+        assert_eq!(
+            detail(&listed(true, true)),
+            "From the extensions folder. Type help then Space."
+        );
+        assert_eq!(
+            detail(&listed(true, false)),
+            "From the extensions folder. Not answering: another command already uses help."
+        );
+        assert_eq!(detail(&listed(false, false)), "From the extensions folder. Off.");
+    }
 }

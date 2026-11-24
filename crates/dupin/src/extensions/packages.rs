@@ -1,11 +1,12 @@
 //! Which loaded extensions run, by origin and by the user's choices, which the capability broker
 //! keeps in grants.toml in the data directory.
 //!
-//! A user extension whose `name` matches a bundled one replaces it. A bundled package is
-//! registered with the broker at its own revision, so the broker turns it on and pre-grants its
-//! scopes exactly while the active copy has that revision; a changed copy has another revision
-//! and gets neither. Extensions from the user's folder run while it is switched on, unless the
-//! user turned one off.
+//! A user extension whose `name` matches a bundled one replaces it. A bundled package is known
+//! to the broker as `bundled:<name>`, a name no package.json can have, so grants and choices
+//! made for it never pass to a package from the extensions folder that reuses its name. A user
+//! copy that is byte for byte the shipped revision is the bundled package; any other copy is a
+//! package of its own, with no bundled pre-grants. Extensions from the user's folder run while
+//! it is switched on, unless the user turned one off.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -17,13 +18,16 @@ use super::{Extension, Origin};
 
 pub const GRANTS_FILE: &str = "grants.toml";
 
+const BUNDLED_PREFIX: &str = "bundled:";
+
 /// How Settings describes where an extension came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Bundled,
     /// The user's copy of a bundled extension, byte for byte the same.
     Copy,
-    /// The user's copy of a bundled extension, changed: a third-party package.
+    /// A package in the extensions folder with a bundled extension's name, changed from it: a
+    /// third-party package.
     Modified,
     User,
 }
@@ -35,7 +39,11 @@ pub struct Listed {
     pub title: String,
     pub keyword: String,
     pub kind: Kind,
+    /// The user's choice, which the switch shows.
     pub enabled: bool,
+    /// Whether its keyword reaches it now; an enabled extension can lose its keyword to
+    /// another command.
+    pub answering: bool,
     /// Each declared scope, as grant files name it, and where it stands.
     pub scopes: Vec<(String, ConsentState)>,
 }
@@ -45,7 +53,9 @@ pub struct Packages {
     grants: Option<PathBuf>,
     /// Why the grants couldn't be read or saved.
     pub problem: Option<String>,
-    bundled: Vec<Arc<Extension>>,
+    /// `None` while the bundled folder's scan is on its way: until it lands, a user extension
+    /// could take a bundled keyword or pass for a package of its own.
+    bundled: Option<Vec<Arc<Extension>>>,
     user: Vec<Arc<Extension>>,
 }
 
@@ -70,50 +80,86 @@ impl Packages {
             broker: Broker::new(Base::default(), local),
             grants,
             problem,
-            bundled: Vec::new(),
+            bundled: None,
             user: Vec::new(),
         }
+    }
+
+    /// Holds back every extension until the next bundled scan lands.
+    pub fn await_bundled(&mut self) {
+        self.bundled = None;
     }
 
     /// Takes a folder's latest scan and tells the broker which revision of each package is
     /// active and which revisions shipped with Dupin.
     pub fn set(&mut self, origin: Origin, extensions: Vec<Arc<Extension>>) {
         match origin {
-            Origin::Bundled => self.bundled = extensions,
+            Origin::Bundled => self.bundled = Some(extensions),
             Origin::User => self.user = extensions,
         }
-        for extension in &self.bundled {
-            if let Ok(id) = PackageId::new(&extension.id) {
+        for extension in self.bundled.iter().flatten() {
+            if let Some(id) = bundled_id(extension) {
                 self.broker.set_bundled(id, extension.revision.clone());
             }
         }
-        let present: Vec<_> = self.present().map(|(_, extension)| extension.clone()).collect();
-        for extension in present {
-            if let Ok(id) = PackageId::new(&extension.id) {
-                let _ = self
-                    .broker
-                    .install(id, extension.revision.clone(), extension.capabilities.clone());
-            }
+        let present: Vec<_> = self
+            .present()
+            .filter_map(|(origin, extension)| Some((self.package_id(origin, extension)?, extension.clone())))
+            .collect();
+        for (id, extension) in present {
+            let _ = self
+                .broker
+                .install(id, extension.revision.clone(), extension.capabilities.clone());
         }
     }
 
-    /// Every loaded extension that isn't replaced, bundled ones first.
+    /// Every loaded extension that isn't replaced, bundled ones first, once the bundled ones
+    /// are known.
     fn present(&self) -> impl Iterator<Item = (Origin, &Arc<Extension>)> {
+        let bundled = self.bundled.as_deref();
         let replaced: HashSet<&str> = self.user.iter().map(|extension| extension.id.as_str()).collect();
-        self.bundled
+        let user = bundled.map(|_| self.user.as_slice()).unwrap_or_default();
+        bundled
+            .unwrap_or_default()
             .iter()
             .filter(move |extension| !replaced.contains(extension.id.as_str()))
             .map(|extension| (Origin::Bundled, extension))
-            .chain(self.user.iter().map(|extension| (Origin::User, extension)))
+            .chain(user.iter().map(|extension| (Origin::User, extension)))
+    }
+
+    fn shipped(&self, extension: &Extension) -> Option<&Arc<Extension>> {
+        self.bundled
+            .iter()
+            .flatten()
+            .find(|bundled| bundled.id == extension.id)
+    }
+
+    /// Whether the broker knows this extension as the bundled package.
+    fn is_bundled(&self, origin: Origin, extension: &Extension) -> bool {
+        match origin {
+            Origin::Bundled => true,
+            Origin::User => self
+                .shipped(extension)
+                .is_some_and(|shipped| shipped.revision == extension.revision),
+        }
+    }
+
+    fn package_id(&self, origin: Origin, extension: &Extension) -> Option<PackageId> {
+        if self.is_bundled(origin, extension) {
+            bundled_id(extension)
+        } else {
+            PackageId::new(&extension.id).ok()
+        }
     }
 
     fn enabled(&self, origin: Origin, extension: &Extension) -> bool {
-        let Ok(id) = PackageId::new(&extension.id) else {
+        let Some(id) = self.package_id(origin, extension) else {
             return false;
         };
-        match origin {
-            Origin::Bundled => self.broker.is_enabled(&id),
-            Origin::User => !self.broker.is_turned_off(&id),
+        if self.is_bundled(origin, extension) {
+            self.broker.is_enabled(&id)
+        } else {
+            !self.broker.is_turned_off(&id)
         }
     }
 
@@ -126,17 +172,18 @@ impl Packages {
             .collect()
     }
 
-    pub fn listing(&self) -> Vec<Listed> {
+    /// Each present extension, with `answering` telling which ones were registered.
+    pub fn listing(&self, answering: impl Fn(&Extension) -> bool) -> Vec<Listed> {
         self.present()
             .map(|(origin, extension)| {
-                let bundled = self.bundled.iter().find(|bundled| bundled.id == extension.id);
-                let kind = match (origin, bundled) {
+                let kind = match (origin, self.shipped(extension)) {
                     (Origin::Bundled, _) => Kind::Bundled,
-                    (Origin::User, Some(bundled)) if bundled.revision == extension.revision => Kind::Copy,
+                    (Origin::User, Some(_)) if self.is_bundled(origin, extension) => Kind::Copy,
                     (Origin::User, Some(_)) => Kind::Modified,
                     (Origin::User, None) => Kind::User,
                 };
-                let scopes = PackageId::new(&extension.id)
+                let scopes = self
+                    .package_id(origin, extension)
                     .map(|id| {
                         self.broker
                             .consents(&id)
@@ -145,29 +192,43 @@ impl Packages {
                             .collect()
                     })
                     .unwrap_or_default();
+                let enabled = self.enabled(origin, extension);
                 Listed {
                     id: extension.id.clone(),
                     title: extension.name.clone(),
                     keyword: extension.keyword.clone(),
                     kind,
-                    enabled: self.enabled(origin, extension),
+                    enabled,
+                    answering: enabled && answering(extension),
                     scopes,
                 }
             })
             .collect()
     }
 
-    /// Turns a package on or off and saves the choice.
+    /// Turns the present extension `id` on or off and saves the choice. A choice that can't be
+    /// saved isn't made.
     pub fn set_enabled(&mut self, id: &str, enabled: bool) -> Result<(), String> {
-        let id = PackageId::new(id)?;
-        self.broker
-            .set_enabled(&id, enabled)
-            .map_err(|error| error.to_string())?;
-        let Some(path) = &self.grants else {
-            return Ok(());
-        };
-        self.broker.save(path).map_err(|error| error.to_string())
+        let package = self
+            .present()
+            .find(|(_, extension)| extension.id == id)
+            .and_then(|(origin, extension)| self.package_id(origin, extension))
+            .ok_or_else(|| format!("`{id}` isn't loaded"))?;
+        match &self.grants {
+            Some(path) => self
+                .broker
+                .change_saved(path, |broker| broker.set_enabled(&package, enabled))
+                .map_err(|error| error.to_string()),
+            None => self
+                .broker
+                .set_enabled(&package, enabled)
+                .map_err(|error| error.to_string()),
+        }
     }
+}
+
+fn bundled_id(extension: &Extension) -> Option<PackageId> {
+    PackageId::new(format!("{BUNDLED_PREFIX}{}", extension.id)).ok()
 }
 
 #[cfg(test)]
@@ -189,6 +250,10 @@ mod tests {
         extensions.iter().map(|extension| extension.id.as_str()).collect()
     }
 
+    fn listing(packages: &Packages) -> Vec<Listed> {
+        packages.listing(|_| true)
+    }
+
     fn listed<'a>(listing: &'a [Listed], id: &str) -> &'a Listed {
         listing.iter().find(|listed| listed.id == id).unwrap()
     }
@@ -199,7 +264,7 @@ mod tests {
         let mut packages = Packages::load(Some(dir.path().join(GRANTS_FILE)));
         packages.set(Origin::Bundled, vec![package("About", "about", "blake3:shipped")]);
         assert_eq!(ids(&packages.active()), ["about"]);
-        let about = listed(&packages.listing(), "about").clone();
+        let about = listed(&listing(&packages), "about").clone();
         assert_eq!((about.kind, about.enabled), (Kind::Bundled, true));
         assert_eq!(
             about.scopes,
@@ -213,7 +278,7 @@ mod tests {
         );
 
         packages.set(Origin::User, vec![package("About", "about", "blake3:shipped")]);
-        let copy = listed(&packages.listing(), "about").clone();
+        let copy = listed(&listing(&packages), "about").clone();
         assert_eq!((copy.kind, copy.enabled), (Kind::Copy, true));
         assert_eq!(copy.scopes, about.scopes);
 
@@ -225,7 +290,7 @@ mod tests {
             ],
         );
         assert_eq!(ids(&packages.active()), ["about", "words"]);
-        let modified = listed(&packages.listing(), "about").clone();
+        let modified = listed(&listing(&packages), "about").clone();
         assert_eq!((modified.kind, modified.enabled), (Kind::Modified, true));
         assert!(
             modified
@@ -235,11 +300,65 @@ mod tests {
             "{:?}",
             modified.scopes
         );
-        assert_eq!(listed(&packages.listing(), "words").kind, Kind::User);
+        assert_eq!(listed(&listing(&packages), "words").kind, Kind::User);
 
         packages.set(Origin::User, Vec::new());
-        let restored = listed(&packages.listing(), "about").clone();
+        let restored = listed(&listing(&packages), "about").clone();
         assert_eq!(restored, about);
+    }
+
+    #[test]
+    fn a_package_reusing_a_bundled_name_gets_none_of_the_choices_made_for_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let grants = dir.path().join(GRANTS_FILE);
+        let mut packages = Packages::load(Some(grants.clone()));
+        packages.set(Origin::Bundled, vec![package("About", "about", "blake3:shipped")]);
+        packages.set_enabled("about", false).unwrap();
+        packages.set(
+            Origin::User,
+            vec![package("About", "about", "blake3:third-party")],
+        );
+        let replaced = listed(&listing(&packages), "about").clone();
+        assert_eq!((replaced.kind, replaced.enabled), (Kind::Modified, true));
+
+        packages.set_enabled("about", false).unwrap();
+        packages.set(Origin::User, Vec::new());
+        packages.set_enabled("about", true).unwrap();
+        packages.set(
+            Origin::User,
+            vec![package("About", "about", "blake3:third-party")],
+        );
+        assert!(!listed(&listing(&packages), "about").enabled);
+
+        let saved = std::fs::read_to_string(&grants).unwrap();
+        assert!(saved.contains("\"bundled:about\""), "{saved}");
+    }
+
+    #[test]
+    fn user_extensions_wait_for_the_bundled_scan() {
+        let mut packages = Packages::load(None);
+        packages.set(Origin::User, vec![package("Help", "help", "blake3:user")]);
+        assert!(packages.active().is_empty());
+        assert!(listing(&packages).is_empty());
+
+        packages.set(Origin::Bundled, vec![package("Dupin", "help", "blake3:shipped")]);
+        assert_eq!(ids(&packages.active()), ["dupin", "help"]);
+
+        packages.await_bundled();
+        assert!(packages.active().is_empty());
+        packages.set(Origin::Bundled, Vec::new());
+        assert_eq!(ids(&packages.active()), ["help"]);
+    }
+
+    #[test]
+    fn the_listing_says_which_enabled_extensions_lost_their_keyword() {
+        let mut packages = Packages::load(None);
+        packages.set(Origin::Bundled, vec![package("Dupin", "help", "blake3:shipped")]);
+        packages.set(Origin::User, vec![package("Help", "help", "blake3:user")]);
+        let listing = packages.listing(|extension| extension.id == "dupin");
+        let help = listed(&listing, "help");
+        assert_eq!((help.enabled, help.answering), (true, false));
+        assert!(listed(&listing, "dupin").answering);
     }
 
     #[test]
@@ -257,7 +376,7 @@ mod tests {
         restarted.set(Origin::Bundled, vec![package("About", "about", "blake3:shipped")]);
         restarted.set(Origin::User, vec![package("Words", "wc", "blake3:words")]);
         assert!(restarted.active().is_empty());
-        assert!(restarted.listing().iter().all(|listed| !listed.enabled));
+        assert!(listing(&restarted).iter().all(|listed| !listed.enabled));
         restarted.set_enabled("about", true).unwrap();
         assert_eq!(ids(&restarted.active()), ["about"]);
 
@@ -268,5 +387,16 @@ mod tests {
         assert!(unreadable.active().is_empty());
         assert!(unreadable.problem.is_some());
         assert!(unreadable.set_enabled("about", true).is_err());
+    }
+
+    #[test]
+    fn a_choice_that_cannot_be_saved_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut packages = Packages::load(Some(dir.path().join(GRANTS_FILE)));
+        packages.set(Origin::Bundled, vec![package("About", "about", "blake3:shipped")]);
+        std::fs::create_dir(dir.path().join(format!("{GRANTS_FILE}.tmp"))).unwrap();
+        assert!(packages.set_enabled("about", false).is_err());
+        assert_eq!(ids(&packages.active()), ["about"]);
+        assert!(listed(&listing(&packages), "about").enabled);
     }
 }

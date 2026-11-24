@@ -579,6 +579,7 @@ mod tests {
             keyword: id.into(),
             kind,
             enabled,
+            answering: enabled,
             scopes: Vec::new(),
         };
         state.reflect_extensions(

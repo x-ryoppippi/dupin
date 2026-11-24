@@ -88,7 +88,12 @@ impl Ui {
         match crate::extensions::watch(directory, origin, move |catalog| {
             me.update(move |s, tx| s.extensions_scanned(origin, epoch, catalog, tx));
         }) {
-            Ok(watch) => self.extensions.folder(origin).watch = Some(watch),
+            Ok(watch) => {
+                self.extensions.folder(origin).watch = Some(watch);
+                if origin == Origin::Bundled {
+                    self.extensions.packages.await_bundled();
+                }
+            }
             Err(error) => {
                 let problem = format!("Couldn't start the extension scanner: {error}");
                 crate::log::warn(&problem);
@@ -156,7 +161,11 @@ impl Ui {
             self.searchers.insert(id.clone(), searcher);
             self.extensions.registered.insert(id, extension);
         }
-        let listing = self.extensions.packages.listing();
+        let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
+        let listing = self
+            .extensions
+            .packages
+            .listing(|extension| routed.iter().any(|routed| std::ptr::eq(&**routed, extension)));
         let problems: Vec<_> = self
             .extensions
             .packages
