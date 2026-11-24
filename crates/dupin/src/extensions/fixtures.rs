@@ -458,10 +458,10 @@ fn item_row(extension: &Extension, item: &dupin_core::Item) -> Row {
                 },
                 _ => return None,
             };
-            Some(dupin_js_runtime::row::RowAction {
-                title: action.title.clone(),
+            Some(dupin_js_runtime::row::RowAction::new(
+                action.title.clone(),
                 effect,
-            })
+            ))
         })
         .collect();
     Row {
@@ -469,6 +469,9 @@ fn item_row(extension: &Extension, item: &dupin_core::Item) -> Row {
         title: item.display_title().to_owned(),
         subtitle,
         keywords: Vec::new(),
+        match_text: None,
+        time: None,
+        file: None,
         icon: None,
         section: None,
         detail: None,

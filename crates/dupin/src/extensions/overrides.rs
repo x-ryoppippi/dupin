@@ -52,6 +52,7 @@ fn case(name: &str) -> Option<Override> {
             "emoji",
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        "web-search" => Override::extension("web-search", None),
         _ => return None,
     })
 }
