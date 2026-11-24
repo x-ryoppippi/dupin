@@ -1004,6 +1004,12 @@ impl Store {
         RecordId(self.keys.key_id(key))
     }
 
+    /// A tag only the host can make for `value` in this namespace, for `purpose`: no record ID,
+    /// whatever key its owner stores it under, is ever one.
+    pub fn host_tag(&self, purpose: &str, value: &str) -> String {
+        hex(&self.keys.host_tag(purpose, value))
+    }
+
     /// Seals and stores a new record under a random ID. Blobs already stored in this
     /// namespace are shared, not written again. The plaintext buffers are zeroized before
     /// this returns.

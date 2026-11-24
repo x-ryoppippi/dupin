@@ -132,8 +132,8 @@ struct FileWrite {
 
 /// What a stored key may be: the guest's own name for a record.
 const MAX_KEY_BYTES: usize = 256;
-/// Keys a package's file handles derive from, apart from any key the package stores under.
-const FILE_HANDLE_KEY: &str = "dupin clipboard file\0";
+/// What a copied file's handle vouches for, in the namespace's host tags.
+const FILE_HANDLE_PURPOSE: &str = "clipboard file";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -738,7 +738,7 @@ impl Session {
 
 /// The handle of the copied file at `path` in `store`'s namespace.
 fn handle_for(store: &dupin_storage::Store, path: &str) -> String {
-    store.key_id(&format!("{FILE_HANDLE_KEY}{path}")).to_string()
+    store.host_tag(FILE_HANDLE_PURPOSE, path)
 }
 
 /// The record to store, refused whole when the JSON and blobs the guest sent are larger than
