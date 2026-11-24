@@ -436,7 +436,7 @@ export const actions = {
 };
 ```
 
-Programs and scripts run with your own access, without a shell, as the [exec capability](../extension-capabilities.md#exec) describes; consent shows the program and every argument.
+Programs and scripts run with your own access, without a shell, as the [exec capability](../extension-capabilities.md#exec) describes; consent shows the program and every argument, each in quotes, in full. An argument may not hold control or invisible formatting characters, which could hide or reorder what consent shows.
 
 ### Storage
 

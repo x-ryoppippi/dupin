@@ -468,8 +468,9 @@ impl fmt::Display for Scope {
             }
             Self::Exec { name, args, output } => {
                 write!(f, "run the program you pick for “{name}”")?;
-                if !args.is_empty() {
-                    write!(f, " with `{}`", args.join(" "))?;
+                for (index, arg) in args.iter().enumerate() {
+                    f.write_str(if index == 0 { " with " } else { " " })?;
+                    write!(f, "{arg:?}")?;
                 }
                 if *output {
                     f.write_str(" and read its output")?;
@@ -589,4 +590,35 @@ impl From<ScopeKey> for String {
     fn from(value: ScopeKey) -> String {
         value.to_string()
     }
+}
+
+/// Whether `text` shows as itself in the consent text: control, line-separator and invisible
+/// formatting characters such as bidi overrides could forge or reorder the lines a user approves.
+pub fn displayable(text: &str) -> bool {
+    !text.chars().any(|ch| {
+        ch.is_control()
+            || matches!(
+                ch,
+                '\u{ad}'
+                    | '\u{600}'..='\u{605}'
+                    | '\u{61c}'
+                    | '\u{6dd}'
+                    | '\u{70f}'
+                    | '\u{890}'..='\u{891}'
+                    | '\u{8e2}'
+                    | '\u{180e}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{206f}'
+                    | '\u{feff}'
+                    | '\u{fff9}'..='\u{fffb}'
+                    | '\u{110bd}'
+                    | '\u{110cd}'
+                    | '\u{13430}'..='\u{1343f}'
+                    | '\u{1bca0}'..='\u{1bca3}'
+                    | '\u{1d173}'..='\u{1d17a}'
+                    | '\u{e0001}'
+                    | '\u{e0020}'..='\u{e007f}'
+            )
+    })
 }

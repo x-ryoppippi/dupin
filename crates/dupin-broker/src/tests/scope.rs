@@ -183,6 +183,23 @@ fn windows_scopes_need_accessibility_and_describe_themselves() {
 }
 
 #[test]
+fn exec_consent_shows_where_each_argument_starts_and_ends() {
+    let exec = |args: &[&str]| {
+        Scope::Exec {
+            name: ScopeName::new("run").unwrap(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            output: false,
+        }
+        .to_string()
+    };
+    assert_ne!(exec(&["a b"]), exec(&["a", "b"]));
+    assert_eq!(
+        exec(&["a`, and nothing else", "--install-extension", "x"]),
+        "run the program you pick for “run” with \"a`, and nothing else\" \"--install-extension\" \"x\""
+    );
+}
+
+#[test]
 fn scopes_describe_themselves_for_consent() {
     let described: Vec<_> = everything().scopes().map(ToString::to_string).collect();
     assert_eq!(
@@ -190,7 +207,7 @@ fn scopes_describe_themselves_for_consent() {
         [
             "GET and POST requests to https://api.github.com",
             "read and list the folder you pick for “notes”",
-            "run the program you pick for “git-status” with `status --short {path}` and read its output",
+            "run the program you pick for “git-status” with \"status\" \"--short\" \"{path}\" and read its output",
             "run your script command “open-in-zed”",
             "keep up to 1024 bytes of encrypted data for 30 days",
             "read the clipboard",

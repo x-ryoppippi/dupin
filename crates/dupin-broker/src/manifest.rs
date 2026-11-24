@@ -470,11 +470,13 @@ impl Parser {
                 self.wrong_type(&field, "a string", item);
                 continue;
             };
-            if arg.len() > MAX_ARG_BYTES || arg.contains('\0') {
+            if arg.len() > MAX_ARG_BYTES || !crate::displayable(arg) {
                 self.report(
                     "invalid-value",
                     field,
-                    format!("must be at most {MAX_ARG_BYTES} bytes with no NUL"),
+                    format!(
+                        "must be at most {MAX_ARG_BYTES} bytes with no control or invisible formatting characters"
+                    ),
                     None,
                 );
                 continue;
