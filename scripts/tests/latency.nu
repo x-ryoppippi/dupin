@@ -1,5 +1,6 @@
 use std/assert
 use ../latency.nu [
+    PARITY_FLOOR
     parity-pairs
     percentiles
     resolve
@@ -28,6 +29,17 @@ def main [] {
     assert equal (verdict (result a native 20.0) (result a native 22.1)) regressed
     assert equal (verdict (result a native 20.0) (result a extension 3.0)) ok
     assert equal (verdict null (result a extension 3.0)) new
+
+    # Parity allows 10% or half a millisecond, which catches Dictionary's port before its call
+    # overhead was cut: its p95 was 2.33 ms at best, against native's recorded 1.38 ms.
+    let parity = {|baseline: record, candidate: record|
+        verdicts [
+            {baseline: $baseline, candidate: $candidate}
+        ] 10.0 $PARITY_FLOOR | get 0.verdict
+    }
+    assert equal (do $parity (result a native 1.38) (result a extension 1.85)) ok
+    assert equal (do $parity (result a native 1.38) (result a extension 2.33)) regressed
+    assert equal (do $parity (result a native 20.0) (result a extension 21.9)) ok
 
     # A feature with no native implementation is held to its own budget instead.
     let budgeted = {|p95|

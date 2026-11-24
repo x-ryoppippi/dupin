@@ -119,6 +119,11 @@ def "main compare" [
     judge $pairs $tolerance $floor $report $summary "Keypress latency"
 }
 
+# The least regression `parity` allows. Native p95 varies by about a quarter of a millisecond
+# between CI runs, so `compare`'s 1 ms would let a port of a scenario that takes 1.4 ms be 70%
+# slower and pass.
+export const PARITY_FLOOR = 500us
+
 # Hold every implementation other than `native` against the native one of the same scenario:
 # the run's own, or, for a feature whose native implementation is gone, the one recorded in
 # `--baseline` from the last commit that had it. One that never had a native implementation is
@@ -127,7 +132,7 @@ def "main parity" [
     results: path
     --baseline: path # Native results recorded from earlier commits; scripts/latency/native-baseline.json
     --tolerance: float = 10.0 # Percent of native's p95
-    --floor: duration = 1ms # The least regression ever allowed
+    --floor: duration = $PARITY_FLOOR # The least regression ever allowed
     --summary: path # Also append the comparison to this Markdown file
 ]: nothing -> nothing {
     let all = open $results | get results

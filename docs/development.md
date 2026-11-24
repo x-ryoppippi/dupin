@@ -267,7 +267,7 @@ provider = "<the extension's command id>"
 extensions = "scripts/latency/dictionary-extension.extensions"
 ```
 
-Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's does. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's by more than 10% or 0.5 ms, whichever is larger. Its floor is half `compare`'s because native's p95 varies by only about a quarter of a millisecond between CI runs, and 1 ms would let a port of a 1.4 ms scenario be 70% slower. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's does. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
 
 ```toml
 [features.snippets.extension]
