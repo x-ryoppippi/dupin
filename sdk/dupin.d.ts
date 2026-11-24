@@ -36,6 +36,8 @@ declare module 'dupin' {
 		text?: string;
 		/** An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to `package.json`. */
 		icon?: string;
+		/** An image the package keeps, drawn scaled down as the row's icon in place of `icon`. */
+		image?: HostImage;
 		/** The heading the item is listed under; a section's items get its title. Up to 128 bytes. */
 		section?: string;
 		/** Shown while the item is selected. */
@@ -77,8 +79,8 @@ declare module 'dupin' {
 		time?: number;
 		/**
 		 * The file the item stands for, by absolute path: it shows the file's Finder icon unless
-		 * it has an `icon`, and while the file is gone it shows as Unavailable, without the
-		 * actions that need it.
+		 * it has an `icon` or an `image`, and while the file is gone it shows as Unavailable,
+		 * without its icon or image and the actions that need it.
 		 */
 		file?: string;
 	}
@@ -90,7 +92,20 @@ declare module 'dupin' {
 		text: string;
 	}
 
+	/**
+	 * An image Dupin draws from what the package keeps, by a handle and never by its bytes: a
+	 * stored blob's `handle`, or a file its clipboard watch delivered, as `{ path, handle }` with
+	 * the handle it came with. Dupin reads it from the package's own storage alone, decodes it
+	 * only when it is PNG, TIFF, HEIC, HEIF or JPEG, up to 64 MiB and 64 megapixels, and scales
+	 * it down off the panel's thread, only for the rows in view. While the package may not read
+	 * its storage, the handle names nothing of its own, or the image is of another format or
+	 * doesn't decode, the image is left out, and a detail keeps no space for it.
+	 */
+	export type HostImage = string | { path: string; handle: string };
+
 	export interface DetailPane {
+		/** Shown large above the metadata. */
+		image?: HostImage;
 		/** Up to 32 KiB: headings, paragraphs, emphasis, lists, inline and fenced code and HTTP(S) links. */
 		markdown?: string;
 		/** Up to 12 entries, above the Markdown. */

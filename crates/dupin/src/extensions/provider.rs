@@ -3,12 +3,12 @@ use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
 use dupin_core::{
-    Action, Batch, Detail, ExtensionRequest, Icon, Item, ItemAction, Page, Payload, Provider, ProviderError,
-    Request, View, snippets,
+    Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page,
+    Payload, Provider, ProviderError, Request, View, snippets,
 };
 use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_js_runtime::RunError;
-use dupin_js_runtime::row::{Row, RowEffect};
+use dupin_js_runtime::row::{Row, RowEffect, RowImage};
 
 use super::Extension;
 use super::catalogue::Convert;
@@ -218,12 +218,16 @@ pub(super) fn row_item(
         time: _,
         file,
         icon,
+        image,
         section,
         detail,
         actions: offered,
     } = row;
     let detail = detail.map(|detail| {
         let mut shown = Detail::new(title.clone(), &detail.markdown);
+        if let Some(image) = detail.image {
+            shown = shown.with_image(host_image(extension, image));
+        }
         for entry in detail.metadata {
             shown = shown.with_metadata(entry.label, entry.text);
         }
@@ -316,8 +320,9 @@ pub(super) fn row_item(
         // A catalogue matched by words keeps its own order, as a history does, so picks never
         // rank it.
         record_usage: catalogue && extension.matching == dupin_core::catalogue::Matching::Fuzzy,
-        icon: icon
-            .map(|icon| Icon::Image(extension.root.join(icon)))
+        icon: image
+            .map(|image| Icon::Host(host_image(extension, image)))
+            .or_else(|| icon.map(|icon| Icon::Image(extension.root.join(icon))))
             .or_else(|| file.map(|file| Icon::File(file.into()))),
         matched: Vec::new(),
         completion: None,
@@ -334,6 +339,20 @@ pub(super) fn row_item(
         actions,
     };
     (item, detail, section)
+}
+
+/// The image a row of the extension names, which Dupin resolves in that package's storage.
+fn host_image(extension: &Extension, image: RowImage) -> HostImage {
+    HostImage {
+        extension: extension.id.clone(),
+        source: match image {
+            RowImage::Blob(handle) => HostImageSource::Blob(handle),
+            RowImage::File(file) => HostImageSource::File {
+                path: file.path.into(),
+                handle: file.handle,
+            },
+        },
+    }
 }
 
 impl Provider for ExtensionProvider {

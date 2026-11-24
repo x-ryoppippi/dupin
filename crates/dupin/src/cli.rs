@@ -642,8 +642,14 @@ pub(crate) fn answer_json(batches: &[dupin_core::Batch]) -> Value {
             if let Some(section) = &batch.section {
                 row["section"] = section.as_str().into();
             }
-            if let Some(icon) = &item.icon {
-                row["icon"] = icon.path().to_string_lossy().into_owned().into();
+            match &item.icon {
+                Some(dupin_core::Icon::Host(image)) => row["image"] = host_image_json(image),
+                Some(icon) => {
+                    if let Some(path) = icon.path() {
+                        row["icon"] = path.to_string_lossy().into_owned().into();
+                    }
+                }
+                None => {}
             }
             if let Some(detail) = batch.details.get(&item.id) {
                 row["detail"] = serde_json::json!({
@@ -653,11 +659,24 @@ pub(crate) fn answer_json(batches: &[dupin_core::Batch]) -> Value {
                     })).collect::<Vec<_>>(),
                     "blocks": detail.body.blocks.len(),
                 });
+                if let Some(image) = &detail.image {
+                    row["detail"]["image"] = host_image_json(image);
+                }
             }
             row
         })
         .collect();
     serde_json::json!({"kind": "results", "items": items})
+}
+
+/// An image a row names, as its package gave it.
+fn host_image_json(image: &dupin_core::HostImage) -> Value {
+    match &image.source {
+        dupin_core::HostImageSource::Blob(handle) => handle.as_str().into(),
+        dupin_core::HostImageSource::File { path, handle } => {
+            serde_json::json!({ "path": path, "handle": handle })
+        }
+    }
 }
 
 /// An answer as plain text: each section's heading, each row's text, then its actions,

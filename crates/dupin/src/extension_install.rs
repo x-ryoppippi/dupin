@@ -1,11 +1,12 @@
 //! `dupin ext install|list|update|remove|sync`: `dupin-extension-install` pointed at Dupin's
 //! directories and at the keywords the launcher already routes.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use dupin_broker::{Base, Broker, ConsentState, Local, PackageId};
 use dupin_extension_install::{Change, Error, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State};
 use dupin_js_runtime::Diagnostic;
+use dupin_storage::Storage;
 use serde_json::{Value, json};
 
 #[derive(Debug, PartialEq)]
@@ -149,7 +150,7 @@ fn forget_grants(name: &str) -> Result<(), Diagnostic> {
 }
 
 /// [`forget_grants`] over the local grant file at `path`.
-pub(crate) fn forget_grants_in(path: &std::path::Path, name: &str) -> Result<(), Diagnostic> {
+fn forget_grants_in(path: &Path, name: &str) -> Result<(), Diagnostic> {
     let Ok(id) = PackageId::new(name) else {
         return Ok(());
     };
@@ -178,8 +179,31 @@ pub fn eject(name: &str) -> Result<PathBuf, Diagnostic> {
             "couldn't find the extensions folder beside config.toml",
         )
     })?;
-    let copy = crate::extensions::bundled::eject(&bundled, &user, name)?;
-    if let Err(failure) = forget_grants(name).and_then(|()| delete_data(name)) {
+    eject_into(
+        &bundled,
+        &user,
+        crate::extensions::access::local_path().as_deref(),
+        crate::extensions::access::storage().as_ref(),
+        name,
+    )
+}
+
+/// [`eject`] from the bundled packages in `bundled` to the extensions folder `user`,
+/// forgetting `name`'s decisions in the grant file `grants` and its data in `storage`. A copy
+/// whose earlier decisions or data can't be forgotten is removed again, so it never runs with
+/// them.
+pub(crate) fn eject_into(
+    bundled: &Path,
+    user: &Path,
+    grants: Option<&Path>,
+    storage: Option<&Storage>,
+    name: &str,
+) -> Result<PathBuf, Diagnostic> {
+    let copy = crate::extensions::bundled::eject(bundled, user, name)?;
+    let forgotten = grants
+        .map_or(Ok(()), |grants| forget_grants_in(grants, name))
+        .and_then(|()| storage.map_or(Ok(()), |storage| delete_data_in(storage, name)));
+    if let Err(failure) = forgotten {
         let _ = std::fs::remove_dir_all(&copy);
         return Err(Diagnostic::new(
             failure.code.clone(),
@@ -197,10 +221,15 @@ pub fn eject(name: &str) -> Result<PathBuf, Diagnostic> {
 /// package's namespace is named after its package name; revoking its `storage` in Settings
 /// keeps it. A running Dupin that has the package's data open deletes it itself.
 fn delete_data(name: &str) -> Result<(), Diagnostic> {
+    match crate::extensions::access::storage() {
+        Some(storage) => delete_data_in(&storage, name),
+        None => Ok(()),
+    }
+}
+
+/// [`delete_data`] from `storage`.
+fn delete_data_in(storage: &Storage, name: &str) -> Result<(), Diagnostic> {
     let Ok(id) = PackageId::new(name) else {
-        return Ok(());
-    };
-    let Some(storage) = crate::extensions::access::storage() else {
         return Ok(());
     };
     let namespace = dupin_extension_bridge::storage::namespace(&id, dupin_extension_bridge::Origin::User);

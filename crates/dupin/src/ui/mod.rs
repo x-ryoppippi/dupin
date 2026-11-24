@@ -20,6 +20,7 @@ mod search;
 mod selection;
 mod snapshots;
 mod snippets;
+mod thumbnails;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -39,6 +40,7 @@ pub use action_screen::{ActionStage, ApplicationState, SEND_TO};
 pub use control::pick_indices;
 pub use lifecycle::Busy;
 pub use search::ICON_SIZE;
+pub use thumbnails::{PREVIEW_HEIGHT, Preview};
 
 use action_screen::ActionScreen;
 use control::{CallerHold, Picker};
@@ -105,6 +107,10 @@ pub struct Ui {
     acknowledged_config: Config,
     bindings_applied: bool,
     pub icons: HashMap<dupin_core::Icon, Image>,
+    /// The images extension rows name, made off the panel's thread.
+    pub(crate) thumbnails: thumbnails::Thumbnails,
+    /// The rows the windowed result list last showed.
+    visible_rows: std::ops::Range<usize>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -270,6 +276,8 @@ impl Ui {
             selection_permission_required: false,
             selection_request: SelectionRequest::Idle,
             icons: HashMap::new(),
+            thumbnails: thumbnails::Thumbnails::new(),
+            visible_rows: 0..0,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),

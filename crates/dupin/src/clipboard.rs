@@ -84,16 +84,26 @@ struct FixtureEntry {
     text: Option<String>,
     #[serde(default)]
     files: Vec<std::path::PathBuf>,
+    /// A PNG, relative to the fixture, stored beside the entry as a copied image is.
+    #[serde(default)]
+    image: Option<std::path::PathBuf>,
+    /// The app it was copied from.
+    #[serde(default)]
+    source: Option<String>,
     /// Seconds before the render.
     age: u64,
 }
 
 /// The bundled clipboard history's records, as its package stores them, from
 /// `DUPIN_HEADLESS_CLIPBOARD`, a JSON list of entries, oldest first.
-fn fixture_records(now_ms: u64) -> Vec<serde_json::Value> {
+fn fixture_records(now_ms: u64) -> Vec<dupin_storage::NewRecord> {
     let Some(path) = std::env::var_os("DUPIN_HEADLESS_CLIPBOARD") else {
         return Vec::new();
     };
+    let folder = std::path::Path::new(&path)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_default();
     let entries: Vec<FixtureEntry> = match std::fs::read_to_string(&path)
         .map_err(|error| error.to_string())
         .and_then(|source| serde_json::from_str(&source).map_err(|error| error.to_string()))
@@ -106,11 +116,28 @@ fn fixture_records(now_ms: u64) -> Vec<serde_json::Value> {
     };
     entries
         .into_iter()
-        .map(|entry| {
+        .filter_map(|entry| {
             let copied_at = now_ms.saturating_sub(entry.age * 1000);
-            match entry.text {
-                Some(text) => serde_json::json!({ "kind": "text", "text": text, "copiedAt": copied_at }),
-                None => {
+            let mut blobs = Vec::new();
+            let mut data = match (entry.text, entry.image) {
+                (Some(text), _) => serde_json::json!({ "kind": "text", "text": text, "copiedAt": copied_at }),
+                (None, Some(image)) => {
+                    let png = std::fs::read(folder.join(&image))
+                        .inspect_err(|error| {
+                            crate::log::warn(&format!(
+                                "couldn't read the clipboard fixture's {}: {error}",
+                                image.display()
+                            ));
+                        })
+                        .ok()?;
+                    let (width, height) = png_size(&png)?;
+                    let size = png.len();
+                    blobs.push(png);
+                    serde_json::json!({
+                        "kind": "image", "width": width, "height": height, "size": size, "copiedAt": copied_at,
+                    })
+                }
+                (None, None) => {
                     let files: Vec<_> = entry
                         .files
                         .iter()
@@ -124,9 +151,23 @@ fn fixture_records(now_ms: u64) -> Vec<serde_json::Value> {
                         .collect();
                     serde_json::json!({ "kind": "files", "files": files, "copiedAt": copied_at })
                 }
+            };
+            if let Some(source) = entry.source {
+                data["source"] = source.into();
             }
+            Some(dupin_storage::NewRecord { data, blobs })
         })
         .collect()
+}
+
+/// The width and height a PNG's header states.
+fn png_size(png: &[u8]) -> Option<(u32, u32)> {
+    let header = png.strip_prefix(b"\x89PNG\r\n\x1a\n")?.get(8..16)?;
+    let (width, height) = header.split_at(4);
+    Some((
+        u32::from_be_bytes(width.try_into().ok()?),
+        u32::from_be_bytes(height.try_into().ok()?),
+    ))
 }
 
 /// Storage for a headless run: a scratch store, gone with the process, holding the clipboard
@@ -148,11 +189,8 @@ pub fn headless_storage() -> Option<dupin_extension_bridge::PackageStorage> {
             .open(&namespace, dupin_storage::Limits::default())
             .inspect_err(|error| crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}")))
             .ok()?;
-        for data in records {
-            if let Err(error) = store.put(dupin_storage::NewRecord {
-                data,
-                blobs: Vec::new(),
-            }) {
+        for record in records {
+            if let Err(error) = store.put(record) {
                 crate::log::warn(&format!("couldn't seed the clipboard fixture: {error}"));
                 break;
             }

@@ -349,6 +349,57 @@ fn search_rows_may_carry_sections_details_icons_and_actions() {
 }
 
 #[test]
+fn rows_and_details_name_images_by_handle_only() {
+    let handle = "a".repeat(64);
+    let rows = run(
+        &format!(
+            r#"export function search() {{
+                 return [{{ title: 'Stored', image: '{handle}', detail: {{ image: '{handle}' }} }},
+                         {{ title: 'Copied', image: {{ path: '/Users/Shared/a.png', handle: '{handle}' }} }}];
+               }}"#
+        ),
+        "x",
+    )
+    .unwrap();
+    assert_eq!(rows[0].image, Some(row::RowImage::Blob(handle.clone())));
+    assert_eq!(
+        rows[0].detail.as_ref().unwrap().image,
+        Some(row::RowImage::Blob(handle.clone()))
+    );
+    assert_eq!(
+        rows[1].image,
+        Some(row::RowImage::File(row::CopiedFileImage {
+            path: "/Users/Shared/a.png".into(),
+            handle: handle.clone(),
+        }))
+    );
+    for shown in &rows {
+        shown.validate(row::Source::Search).unwrap();
+    }
+
+    for (image, field) in [
+        ("42", "items[0].image"),
+        ("'not a handle'", "items[0].image"),
+        ("''", "items[0].image"),
+        ("{ path: 'a.png', handle: 'h' }", "items[0].image"),
+        ("{ path: '/a.png' }", "items[0].image"),
+        (
+            "{ path: '/a.png', handle: 'h', bytes: 'AA==' }",
+            "items[0].image.bytes",
+        ),
+    ] {
+        let diagnostic = match run(
+            &format!("export function search() {{ return [{{ title: 'a', image: {image} }}]; }}"),
+            "x",
+        ) {
+            Err(RunError::Failed(diagnostic)) => diagnostic,
+            other => panic!("{image}: {other:?}"),
+        };
+        assert_eq!(diagnostic.field.as_deref(), Some(field), "{image}");
+    }
+}
+
+#[test]
 fn rows_from_another_process_are_checked_again() {
     let row = |edit: &dyn Fn(&mut Row)| {
         let mut row = Row {
@@ -361,6 +412,7 @@ fn rows_from_another_process_are_checked_again() {
             time: None,
             file: None,
             icon: None,
+            image: None,
             section: None,
             detail: None,
             actions: Vec::new(),
@@ -376,6 +428,13 @@ fn rows_from_another_process_are_checked_again() {
         row(&|row| row.icon = Some("/etc/hosts.png".into())),
         row(&|row| row.icon = Some("a/../../b.png".into())),
         row(&|row| row.icon = Some("icon.exe".into())),
+        row(&|row| row.image = Some(crate::row::RowImage::Blob("a b".into()))),
+        row(&|row| {
+            row.image = Some(crate::row::RowImage::File(crate::row::CopiedFileImage {
+                path: "relative.png".into(),
+                handle: "h".into(),
+            }))
+        }),
         row(&|row| {
             row.actions = vec![action(RowEffect::OpenUrl {
                 url: "file:///".into(),

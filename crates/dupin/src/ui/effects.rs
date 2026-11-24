@@ -118,6 +118,8 @@ impl Ui {
                 }
             }
         }
+        // The selected row may have changed, and with it the preview its detail shows.
+        self.fetch_icons();
         mark_session_query(&mut self.query, &self.session);
     }
 

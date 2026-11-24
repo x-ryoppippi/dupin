@@ -1168,6 +1168,97 @@ fn an_effect_dupin_performs_for_a_package_is_decided_like_its_own_requests() {
 }
 
 #[test]
+fn a_row_draws_only_images_from_its_own_package() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let capabilities = serde_json::json!({ "storage": { "quotaBytes": 4096 } });
+    let world = world(
+        capabilities.clone(),
+        &guest(
+            "export async function search() {
+               const stored = await storage.put({}, { blobs: [new Uint8Array([1, 2, 3])] });
+               return [{ title: stored.blobs[0].handle }];
+             }",
+        ),
+    );
+    let draw = |id: &PackageId, image: ImageRef<'_>| {
+        world.bridge.read_image(id, &image, |data| match data {
+            ImageData::Bytes(bytes) => format!("bytes {bytes:?}"),
+            ImageData::File(path) => format!("file {}", path.display()),
+        })
+    };
+    world.enable();
+    let refused = draw(&world.id, ImageRef::Blob(&"0".repeat(64))).unwrap_err();
+    assert_eq!(refused.code(), "needs-consent");
+    assert!(
+        world.bridge.pending(Some(&world.id)).is_empty(),
+        "drawing a row never asks for consent"
+    );
+
+    world.grant("storage");
+    let handle = world.first("");
+    assert_eq!(
+        draw(&world.id, ImageRef::Blob(&handle)).unwrap(),
+        "bytes [1, 2, 3]"
+    );
+
+    let other = PackageId::new("other").unwrap();
+    world
+        .bridge
+        .install(&other, revision(), Capabilities::parse(&capabilities).unwrap());
+    world.bridge.set_enabled(&other, true).unwrap();
+    let scope = world.bridge.scopes(&other).remove(0).scope;
+    world.bridge.allow(&other, &revision(), &scope, None).unwrap();
+    assert_eq!(
+        draw(&other, ImageRef::Blob(&handle)).unwrap_err().code(),
+        "not-found",
+        "another package's handle names nothing in its own storage"
+    );
+    assert_eq!(
+        draw(&world.id, ImageRef::Blob("../key.check"))
+            .unwrap_err()
+            .code(),
+        "invalid"
+    );
+
+    let path = world.folder.path().join("Screenshot.png");
+    let path = path.to_string_lossy().into_owned();
+    let handle_of = |id: &PackageId| {
+        world
+            .bridge
+            .session(id, Trigger::Background)
+            .and_then(|session| session.file_handle(&path))
+            .unwrap()
+    };
+    let delivered = handle_of(&world.id);
+    assert_eq!(
+        draw(
+            &world.id,
+            ImageRef::File {
+                path: &path,
+                handle: &delivered
+            }
+        )
+        .unwrap(),
+        format!("file {path}")
+    );
+    let others = handle_of(&other);
+    for (id, handle) in [(&other, delivered.as_str()), (&world.id, others.as_str())] {
+        assert_eq!(
+            draw(id, ImageRef::File { path: &path, handle })
+                .unwrap_err()
+                .code(),
+            "out-of-scope"
+        );
+    }
+    assert_eq!(
+        draw(&PackageId::new("missing").unwrap(), ImageRef::Blob(&handle))
+            .unwrap_err()
+            .code(),
+        "not-installed"
+    );
+}
+
+#[test]
 fn a_search_may_read_windows_but_only_a_chosen_action_moves_one() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let world = world(

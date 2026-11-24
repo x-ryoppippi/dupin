@@ -4,8 +4,10 @@ import type {
 	ActionEffect,
 	CatalogueItem,
 	ClipboardChange,
+	HostImage,
 	ItemsContext,
 	ItemsResult,
+	Metadata,
 	StoredRecord,
 } from 'dupin';
 
@@ -70,6 +72,7 @@ const TITLE_BYTES = 512;
 const SUBTITLE_BYTES = 2048;
 const MATCH_BYTES = 64 * 1024;
 const FILE_BYTES = 4096;
+const METADATA_BYTES = 512;
 /** A title is cut no shorter than this to make room for the rows after it. */
 const MIN_TITLE_BYTES = 48;
 /**
@@ -220,9 +223,15 @@ interface View {
 	subtitle: string;
 	match: string;
 	file?: string;
+	/** Dupin draws it from the package's storage, as the row's icon and, selected, large. */
+	image?: HostImage;
+	metadata?: Metadata[];
 }
 
-function view(copy: Copy): View {
+/** Files Dupin draws as pictures, by their extension. */
+const PICTURE = /\.(png|jpe?g|heic|heif|tiff?)$/iu;
+
+function view(record: StoredRecord, copy: Copy): View {
 	switch (copy.kind) {
 		case 'text': {
 			const count = lines(copy.text);
@@ -238,6 +247,7 @@ function view(copy: Copy): View {
 		case 'image': {
 			const dimensions = `${copy.width}×${copy.height}`;
 			const shown = size(copy.size);
+			const blob = record.blobs[0]?.handle;
 			return {
 				title: `Image · ${dimensions} PNG`,
 				subtitle: [shown, copy.source].filter(Boolean).join(' · '),
@@ -247,28 +257,83 @@ function view(copy: Copy): View {
 					shown,
 					copy.source ?? '',
 				].join('\n'),
+				...(blob
+					? {
+							image: blob,
+							metadata: details([
+								['Dimensions', dimensions],
+								['Size', shown],
+								['Copied from', copy.source],
+							]),
+						}
+					: {}),
 			};
 		}
 		case 'files': {
 			const [first] = copy.files;
+			const file = utf8(first.path) <= FILE_BYTES ? first.path : undefined;
+			const picture =
+				file && first.handle && PICTURE.test(first.name)
+					? { path: first.path, handle: first.handle }
+					: undefined;
+			const shown = first.size === undefined ? undefined : size(first.size);
+			const alone = copy.files.length === 1;
 			return {
 				title: copy.files.map((file) => file.name).join(', '),
-				subtitle:
-					copy.files.length === 1
-						? [first.folder, first.size === undefined ? undefined : size(first.size)]
-								.filter(Boolean)
-								.join(' · ')
-						: plural(copy.files.length, 'file', 'files'),
+				subtitle: alone
+					? [first.folder, shown].filter(Boolean).join(' · ')
+					: plural(copy.files.length, 'file', 'files'),
 				match: copy.files.map((file) => file.path).join('\n'),
-				file: utf8(first.path) <= FILE_BYTES ? first.path : undefined,
+				file,
+				...(picture ? { image: picture } : {}),
+				...(picture && alone
+					? {
+							metadata: details([
+								['Folder', first.folder],
+								['Size', shown],
+							]),
+						}
+					: {}),
 			};
 		}
 	}
 }
 
-/** What a row costs whatever its title and match text: the file shows twice, once to reveal. */
+/** A detail's metadata from the entries that have a value, each one line within its limit. */
+function details(entries: [string, string | undefined][]): Metadata[] {
+	return entries.flatMap(([label, text]) => {
+		const shown = text && clip(text.replace(/\p{Cc}/gu, ' '), METADATA_BYTES);
+		return shown ? [{ label, text: shown }] : [];
+	});
+}
+
+/** What Dupin counts of an image a row or its detail names. */
+function imageCost(image: HostImage | undefined): number {
+	if (image === undefined) return 0;
+	return typeof image === 'string' ? utf8(image) : utf8(image.path) + utf8(image.handle);
+}
+
+/** The detail shown while the row is selected: its image again, and its metadata. */
+function detailCost(image: HostImage | undefined, metadata: Metadata[] | undefined): number {
+	if (!metadata) return 0;
+	return (
+		imageCost(image) +
+		metadata.reduce((sum, entry) => sum + utf8(entry.label) + utf8(entry.text), 0)
+	);
+}
+
+/**
+ * What a row costs whatever its title and match text: the file shows twice, once to reveal, and
+ * an image once as the icon and once in the detail.
+ */
 function fixedCost(shown: View): number {
-	return ROW_BYTES + utf8(clip(shown.subtitle, SUBTITLE_BYTES)) + 2 * utf8(shown.file ?? '');
+	return (
+		ROW_BYTES +
+		utf8(clip(shown.subtitle, SUBTITLE_BYTES)) +
+		2 * utf8(shown.file ?? '') +
+		imageCost(shown.image) +
+		detailCost(shown.image, shown.metadata)
+	);
 }
 
 function minCost(shown: View): number {
@@ -281,7 +346,9 @@ function cost(item: CatalogueItem): number {
 		utf8(item.title) +
 		utf8(item.subtitle ?? '') +
 		utf8(item.matchText ?? '') +
-		2 * utf8(item.file ?? '')
+		2 * utf8(item.file ?? '') +
+		imageCost(item.image) +
+		detailCost(item.detail?.image, item.detail?.metadata)
 	);
 }
 
@@ -312,6 +379,10 @@ function row(record: StoredRecord, copy: Copy, shown: View, room: number): Catal
 		subtitle: clip(shown.subtitle, SUBTITLE_BYTES),
 		...(matchText ? { matchText } : {}),
 		...(shown.file ? { file: shown.file } : {}),
+		...(shown.image ? { image: shown.image } : {}),
+		...(shown.image && shown.metadata
+			? { detail: { image: shown.image, metadata: shown.metadata } }
+			: {}),
 		actions,
 	};
 }
@@ -363,7 +434,7 @@ async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResul
 			const stored = data(record);
 			seq = Math.max(seq, stored.seq ?? 0);
 			if (kept(stored, prefs, cutoff) && listed + shown.length < prefs.maxEntries) {
-				const copyView = view(stored);
+				const copyView = view(record, stored);
 				shown.push({ record, copy: stored, view: copyView, min: minCost(copyView) });
 			} else if (deletes < MAX_DELETES && (isCopy(stored) || record.id !== newest)) {
 				await storage.delete(record.id);
@@ -440,7 +511,7 @@ async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult 
 		}
 		remove.push(record.id);
 		if (kept(stored, prefs, cutoff)) {
-			const copyView = view(stored);
+			const copyView = view(record, stored);
 			shown.push({ record, copy: stored, view: copyView, min: minCost(copyView) });
 		}
 	}

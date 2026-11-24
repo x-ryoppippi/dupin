@@ -26,7 +26,8 @@ pub use detail::Detail;
 pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{
-    Action, ExtensionRequest, Icon, Item, ItemAction, Page, Payload, ShareTarget, SystemCommand, View,
+    Action, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page, Payload, ShareTarget,
+    SystemCommand, View,
 };
 pub use provider::{Batch, Cancellation, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};

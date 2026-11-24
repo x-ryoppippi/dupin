@@ -1,6 +1,6 @@
 {
 	"fixture": 1,
-	"description": "Kept copies list newest first with how long ago they were copied; every typed word must appear, ignoring case; Enter copies the entry back and hides the panel, and ⌘Enter's Paste pastes it.",
+	"description": "Kept copies list newest first with how long ago they were copied, a copied picture file drawn from the file by its handle, large while selected; every typed word must appear, ignoring case; Enter copies the entry back and hides the panel, and ⌘Enter's Paste pastes it.",
 	"environment": {
 		"now": "2026-11-24T09:00:00Z",
 		"seed": 1,
@@ -33,6 +33,19 @@
 				"kind": "files"
 			},
 			{
+				"copiedAt": 1796024000000,
+				"files": [
+					{
+						"folder": "/Users/Shared/Fixtures",
+						"handle": "fixture",
+						"name": "Screenshot 2026-11-24.png",
+						"path": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png",
+						"size": 482000
+					}
+				],
+				"kind": "files"
+			},
+			{
 				"copiedAt": 1796027300000,
 				"kind": "text",
 				"text": "Meeting moved to Thursday at 14:00.\nRoom: Baker Street 221B\nBring the printed agenda."
@@ -57,6 +70,47 @@
 			"query": "",
 			"expect": {
 				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "e03959e3b5a1484f8493a68674300f1b"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "e03959e3b5a1484f8493a68674300f1b"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "e03959e3b5a1484f8493a68674300f1b"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "e03959e3b5a1484f8493a68674300f1b",
+						"subtitle": "18 characters",
+						"title": "The game is afoot."
+					},
 					{
 						"actions": [
 							{
@@ -95,8 +149,8 @@
 							}
 						],
 						"id": "bca59a873ff65311d20bba851caa152e",
-						"subtitle": "18 characters",
-						"title": "The game is afoot."
+						"subtitle": "912 KB · Preview",
+						"title": "Image · 1280×720 PNG"
 					},
 					{
 						"actions": [
@@ -136,8 +190,8 @@
 							}
 						],
 						"id": "a40b9a43d1d967952561aae565c7120f",
-						"subtitle": "912 KB · Preview",
-						"title": "Image · 1280×720 PNG"
+						"subtitle": "3 lines",
+						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
 					},
 					{
 						"actions": [
@@ -160,6 +214,10 @@
 								"title": "Paste"
 							},
 							{
+								"reveal": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png",
+								"title": "Reveal in Finder"
+							},
+							{
 								"run": {
 									"action": "remove",
 									"data": {
@@ -176,9 +234,29 @@
 								"title": "Clear History"
 							}
 						],
+						"detail": {
+							"image": {
+								"handle": "fixture",
+								"path": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png"
+							},
+							"metadata": [
+								{
+									"label": "Folder",
+									"text": "/Users/Shared/Fixtures"
+								},
+								{
+									"label": "Size",
+									"text": "482 KB"
+								}
+							]
+						},
 						"id": "5b4299e38a29b6e5e60f5b9a139e8fe1",
-						"subtitle": "3 lines",
-						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
+						"image": {
+							"handle": "fixture",
+							"path": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png"
+						},
+						"subtitle": "/Users/Shared/Fixtures · 482 KB",
+						"title": "Screenshot 2026-11-24.png"
 					},
 					{
 						"actions": [
@@ -280,55 +358,6 @@
 								"run": {
 									"action": "copy",
 									"data": {
-										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
-									}
-								},
-								"title": "Copy"
-							},
-							{
-								"run": {
-									"action": "paste",
-									"data": {
-										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
-									}
-								},
-								"title": "Paste"
-							},
-							{
-								"run": {
-									"action": "remove",
-									"data": {
-										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
-									}
-								},
-								"title": "Delete from History"
-							},
-							{
-								"run": {
-									"action": "clear",
-									"data": null
-								},
-								"title": "Clear History"
-							}
-						],
-						"id": "5b4299e38a29b6e5e60f5b9a139e8fe1",
-						"subtitle": "3 lines",
-						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
-					}
-				],
-				"selected": 0
-			}
-		},
-		{
-			"query": "1280x720 preview",
-			"expect": {
-				"rows": [
-					{
-						"actions": [
-							{
-								"run": {
-									"action": "copy",
-									"data": {
 										"id": "a40b9a43d1d967952561aae565c7120f"
 									}
 								},
@@ -361,6 +390,55 @@
 							}
 						],
 						"id": "a40b9a43d1d967952561aae565c7120f",
+						"subtitle": "3 lines",
+						"title": "Meeting moved to Thursday at 14:00. Room: Baker Street 221B Bring the printed agenda."
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "1280x720 preview",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "bca59a873ff65311d20bba851caa152e"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "bca59a873ff65311d20bba851caa152e",
 						"subtitle": "912 KB · Preview",
 						"title": "Image · 1280×720 PNG"
 					}
@@ -372,6 +450,71 @@
 			"query": "shared",
 			"expect": {
 				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"reveal": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png",
+								"title": "Reveal in Finder"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "5b4299e38a29b6e5e60f5b9a139e8fe1"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"detail": {
+							"image": {
+								"handle": "fixture",
+								"path": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png"
+							},
+							"metadata": [
+								{
+									"label": "Folder",
+									"text": "/Users/Shared/Fixtures"
+								},
+								{
+									"label": "Size",
+									"text": "482 KB"
+								}
+							]
+						},
+						"id": "5b4299e38a29b6e5e60f5b9a139e8fe1",
+						"image": {
+							"handle": "fixture",
+							"path": "/Users/Shared/Fixtures/Screenshot 2026-11-24.png"
+						},
+						"subtitle": "/Users/Shared/Fixtures · 482 KB",
+						"title": "Screenshot 2026-11-24.png"
+					},
 					{
 						"actions": [
 							{
@@ -431,7 +574,7 @@
 								"run": {
 									"action": "copy",
 									"data": {
-										"id": "bca59a873ff65311d20bba851caa152e"
+										"id": "e03959e3b5a1484f8493a68674300f1b"
 									}
 								},
 								"title": "Copy"
@@ -440,7 +583,7 @@
 								"run": {
 									"action": "paste",
 									"data": {
-										"id": "bca59a873ff65311d20bba851caa152e"
+										"id": "e03959e3b5a1484f8493a68674300f1b"
 									}
 								},
 								"title": "Paste"
@@ -449,7 +592,7 @@
 								"run": {
 									"action": "remove",
 									"data": {
-										"id": "bca59a873ff65311d20bba851caa152e"
+										"id": "e03959e3b5a1484f8493a68674300f1b"
 									}
 								},
 								"title": "Delete from History"
@@ -462,7 +605,7 @@
 								"title": "Clear History"
 							}
 						],
-						"id": "bca59a873ff65311d20bba851caa152e",
+						"id": "e03959e3b5a1484f8493a68674300f1b",
 						"subtitle": "18 characters",
 						"title": "The game is afoot."
 					}
@@ -478,7 +621,7 @@
 					"run": {
 						"action": "copy",
 						"data": {
-							"id": "bca59a873ff65311d20bba851caa152e"
+							"id": "e03959e3b5a1484f8493a68674300f1b"
 						}
 					}
 				},
@@ -493,7 +636,7 @@
 					"run": {
 						"action": "paste",
 						"data": {
-							"id": "bca59a873ff65311d20bba851caa152e"
+							"id": "e03959e3b5a1484f8493a68674300f1b"
 						}
 					}
 				},
