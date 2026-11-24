@@ -534,3 +534,45 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         2
     );
 }
+
+#[test]
+fn a_query_matches_the_items_catalogue_as_the_launcher_does() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({}),
+        "export function items(ctx) {\n\
+         \tconst rows = [\n\
+         \t\t{ id: 'tea', title: 'Green tea', keywords: ['matcha'], actions: [{ title: 'Paste', paste: 'tea' }] },\n\
+         \t\t{ id: 'coffee', title: 'Coffee', keywords: ['espresso'] },\n\
+         \t];\n\
+         \treturn ctx.reason === 'more'\n\
+         \t\t? { type: 'update', append: [{ id: 'cocoa', title: 'Cocoa' }] }\n\
+         \t\t: { items: rows, cursor: '2', more: true };\n\
+         }\n",
+    );
+    write_fixture(
+        &package,
+        "items.json",
+        json!({ "fixture": 1, "steps": [
+            { "query": "" },
+            { "query": "matcha" },
+            { "activate": "paste" },
+            { "query": "coco" },
+        ] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    let steps = steps(&report, 0);
+    let titles = |step: usize| -> Vec<&str> {
+        steps[step]["outcome"]["rows"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}", report.text))
+            .iter()
+            .map(|row| row["title"].as_str().unwrap())
+            .collect()
+    };
+    assert_eq!(titles(0), ["Green tea", "Coffee", "Cocoa"]);
+    assert_eq!(titles(1), ["Green tea"]);
+    assert_eq!(steps[1]["outcome"]["rows"][0]["keywords"], json!(["matcha"]));
+    assert_eq!(steps[2]["outcome"], json!({ "effect": { "paste": "tea" } }));
+    assert_eq!(titles(3), ["Cocoa"]);
+}

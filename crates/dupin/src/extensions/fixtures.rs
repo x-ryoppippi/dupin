@@ -3,18 +3,23 @@
 //! zone instead of the machine's. `snap` renders a step's panel with the launcher itself,
 //! headless, in a scratch home that holds only the package.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use dupin_core::catalogue::Entry;
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::Trigger;
-use dupin_extension_host::{ActionEffect, Host};
+use dupin_extension_host::{ActionEffect, Host, Services};
 use dupin_js_runtime::row::{Row, RowEffect};
 use dupin_js_runtime::{Diagnostic, RunError};
 use serde_json::{Map, Value, json};
 
+use super::catalogue::{Cached, Convert};
 use super::provider::row_item;
 use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
 
@@ -124,6 +129,7 @@ fn replay(
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger).services;
+    let catalogue = Kept::new(extension);
     let mut rows: Vec<Row> = Vec::new();
     let mut selected: Option<usize> = None;
     let mut steps = Vec::new();
@@ -133,14 +139,7 @@ fn replay(
         let mut problem = None;
         match action {
             Action::Query(query) => {
-                let answer = host.search(
-                    &extension.compiled,
-                    query,
-                    dupin_js_runtime::MAX_ROWS,
-                    Instant::now() + QUERY_DEADLINE,
-                    cancelled,
-                    &call(Trigger::Query),
-                );
+                let answer = query_rows(&host, &catalogue, query, cancelled, &call(Trigger::Query));
                 rows = match answer {
                     Ok(items) => items,
                     Err(error) => {
@@ -251,6 +250,75 @@ fn replay(
         }
     }
     Ok(Replay { steps })
+}
+
+/// What a query step answers, as the launcher would under the keyword: what `search` computes
+/// once there is a query, then the `items()` catalogue's matches, loaded on the first step.
+fn query_rows(
+    host: &Host,
+    catalogue: &Kept<'_>,
+    query: &str,
+    cancelled: &dyn Fn() -> bool,
+    services: &Arc<dyn Services>,
+) -> Result<Vec<Row>, RunError> {
+    let extension = catalogue.extension;
+    let deadline = Instant::now() + QUERY_DEADLINE;
+    let exports = host.check(&extension.compiled, deadline, cancelled)?;
+    let mut rows = Vec::new();
+    if exports.search && !query.trim().is_empty() {
+        rows = host.search(
+            &extension.compiled,
+            query,
+            dupin_js_runtime::MAX_ROWS,
+            deadline,
+            cancelled,
+            services,
+        )?;
+    }
+    if exports.items {
+        let left = dupin_js_runtime::MAX_ROWS.saturating_sub(rows.len());
+        let mut fetch = |cursor: Option<&str>, reason| {
+            host.items(&extension.compiled, cursor, reason, deadline, cancelled)
+        };
+        let batches = catalogue.cached.search(query, left, &mut fetch, catalogue)?;
+        let held = catalogue.rows.borrow();
+        rows.extend(
+            batches
+                .iter()
+                .flat_map(|batch| &batch.items)
+                .filter_map(|item| held.get(&item.id).cloned()),
+        );
+    }
+    Ok(rows)
+}
+
+/// A fixture's own catalogue, held across its steps as the launcher holds one, which also keeps
+/// each row as the package sent it, so a step reports the rows and not what Dupin made of them.
+struct Kept<'a> {
+    extension: &'a Extension,
+    cached: Cached,
+    rows: RefCell<HashMap<String, Row>>,
+}
+
+impl<'a> Kept<'a> {
+    fn new(extension: &'a Extension) -> Self {
+        Self {
+            extension,
+            cached: Cached::default(),
+            rows: RefCell::default(),
+        }
+    }
+}
+
+impl Convert for Kept<'_> {
+    fn entry(&self, row: Row) -> Entry {
+        self.rows.borrow_mut().insert(self.entry_id(&row.id), row.clone());
+        self.extension.entry(row)
+    }
+
+    fn entry_id(&self, id: &str) -> String {
+        self.extension.entry_id(id)
+    }
 }
 
 /// A failed call is the step's outcome; a cancelled one means the step never ran.
