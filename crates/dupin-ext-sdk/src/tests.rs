@@ -180,10 +180,50 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
 }
 
 #[test]
-fn typescript_scaffold_builds_with_rolldown() {
+fn typescript_scaffold_runs_as_written_without_a_build() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("greeter");
     let mut files = scaffold(&dir, Template::TypeScript).unwrap();
+    files.sort();
+    assert_eq!(
+        files,
+        [
+            ".gitignore",
+            "README.md",
+            "dupin.d.ts",
+            "fixtures/search.json",
+            "package.json",
+            "src/main.ts",
+            "tsconfig.json",
+        ]
+        .map(std::path::PathBuf::from)
+    );
+    let manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).unwrap()).unwrap();
+    assert!(manifest.get("source").is_none());
+    assert_eq!(manifest["dupin"]["main"], "src/main.ts");
+    let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
+    assert!(
+        readme.contains("## TypeScript")
+            && readme.contains("dupin ext new --bundle")
+            && !readme.contains("## Build")
+            && !readme.contains("{{"),
+        "{readme}"
+    );
+    let tsconfig = std::fs::read_to_string(dir.join("tsconfig.json")).unwrap();
+    assert!(tsconfig.contains("\"erasableSyntaxOnly\": true"), "{tsconfig}");
+
+    validate(&dir).unwrap();
+    assert_fixture_matches(&dir);
+    let built = build(&dir, None, BuildOptions::default(), &validate).unwrap();
+    assert_eq!((built.rolldown, built.output.as_str()), (None, "src/main.ts"));
+}
+
+#[test]
+fn bundled_scaffold_builds_with_rolldown() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("greeter");
+    let mut files = scaffold(&dir, Template::Bundled).unwrap();
     files.sort();
     assert_eq!(
         files,
@@ -298,7 +338,7 @@ fn scaffolding_names_a_package_after_the_folder_a_dot_path_leads_to() {
 fn bundling_a_package_named_by_a_relative_path_writes_its_own_entry() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("relative");
-    scaffold(&dir, Template::TypeScript).unwrap();
+    scaffold(&dir, Template::Bundled).unwrap();
     let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
     let mut relative: std::path::PathBuf = cwd.components().skip(1).map(|_| "..").collect();
     relative.push(dir.canonicalize().unwrap().strip_prefix("/").unwrap());

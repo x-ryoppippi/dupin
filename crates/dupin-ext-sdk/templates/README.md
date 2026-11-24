@@ -17,8 +17,8 @@ dupin ext run . --query Dupin
 
 `fixtures/search.json` holds a query and the items `search` should answer with.
 
-[`dupin.d.ts`](./dupin.d.ts) describes the API. Dupin runs JavaScript only: no Node built-ins, files, network or processes.
+[`dupin.d.ts`](./dupin.d.ts) describes the API. Dupin runs JavaScript, and TypeScript once it has erased the types: no Node built-ins, files, network or processes.
 {{build_section}}
 ## Share
 
-Push the repository to GitHub and add the `dupin-extension` topic, which Dupin's discovery lists. Dupin installs from Git, pinned to a commit, and never runs a build or a package manager, so commit the JavaScript that `dupin.main` names.
+Push the repository to GitHub and add the `dupin-extension` topic, which Dupin's discovery lists. Dupin installs from Git, pinned to a commit, and never runs a build or a package manager, so commit the module that `dupin.main` names.

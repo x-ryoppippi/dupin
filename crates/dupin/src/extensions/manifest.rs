@@ -4,7 +4,7 @@
 use std::path::{Component, Path};
 
 use dupin_broker::Capabilities;
-use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic};
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -22,7 +22,7 @@ pub(super) struct Manifest {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// Relative to the folder: a .js or .mjs module, or a .wasm module.
+    /// Relative to the folder: a JavaScript or TypeScript module, or a .wasm module.
     pub entry: String,
     /// The most the package may ask for; a Wasm module declares nothing.
     pub capabilities: Capabilities,
@@ -183,15 +183,11 @@ fn javascript(
     };
     fields.validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
-        .filter(|entry| {
-            Path::new(entry)
-                .extension()
-                .is_some_and(|extension| extension == "js" || extension == "mjs")
-        })
+        .filter(|entry| is_module(entry))
         .ok_or_else(|| {
             field(
                 "dupin.main",
-                "must be a relative path to a .js or .mjs file inside the folder",
+                "must be a relative path to a .js, .mjs, .ts, .mts or .tsx file inside the folder",
                 MAIN_HINT,
             )
         })?;
@@ -433,6 +429,12 @@ mod tests {
             .collect();
         assert_eq!(scopes, ["clipboard:write"]);
         assert_ne!(declaring.digest, manifest.digest);
+        let manifest = read_folder(&[(
+            PACKAGE_JSON,
+            &package(r#"{"title": "W", "keyword": "wc", "main": "src/main.ts"}"#),
+        )])
+        .unwrap();
+        assert_eq!(manifest.entry, "src/main.ts");
         for main in ["dist/./index.js", ".//dist/index.js", "./dist//index.js"] {
             let manifest = read_folder(&[(
                 PACKAGE_JSON,
@@ -469,6 +471,11 @@ mod tests {
             ),
             (
                 r#"{"title": "W", "keyword": "wc", "main": "guest.wasm"}"#,
+                "invalid-manifest",
+                "dupin.main",
+            ),
+            (
+                r#"{"title": "W", "keyword": "wc", "main": "dupin.d.ts"}"#,
                 "invalid-manifest",
                 "dupin.main",
             ),
