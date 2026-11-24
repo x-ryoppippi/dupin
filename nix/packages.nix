@@ -3,11 +3,14 @@
   perSystem =
     { config, pkgs, ... }:
     let
-      native = pkgs.callPackage ../package.nix { };
+      native = pkgs.callPackage ../package.nix {
+        cargoVendorDir = import ./cargo-vendor.nix { craneLib = inputs.crane.mkLib pkgs; };
+      };
+      rolldown = pkgs.callPackage ./rolldown.nix { };
       dupin = import ./cargo-artifacts.nix {
         inherit pkgs;
         inherit (inputs) crane;
-        inherit native;
+        inherit native rolldown;
         inherit (config.packages) cargo-hawk;
       };
       blacksmith = pkgs.callPackage ./blacksmith.nix { };
@@ -28,7 +31,12 @@
     in
     {
       packages = {
-        inherit dupin dmg-background blacksmith;
+        inherit
+          dupin
+          dmg-background
+          blacksmith
+          rolldown
+          ;
         dupin-latency = dupin.latencyBinary;
         default = dupin;
       };

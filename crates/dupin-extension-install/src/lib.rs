@@ -468,7 +468,7 @@ fn validate(folder: &Path) -> Result<Package, Error> {
         .file(manifest::PACKAGE_JSON)
         .field("dupin.main");
         return Err(if unbuilt {
-            error.hint("Dupin runs built JavaScript only: build the entry (for example with esbuild), commit the output and point `dupin.main` at it.")
+            error.hint("Dupin runs built JavaScript only: build the entry with `dupin ext build`, commit the output and point `dupin.main` at it.")
         } else {
             error
         });

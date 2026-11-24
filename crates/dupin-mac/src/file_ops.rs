@@ -222,13 +222,9 @@ fn rename_across_parents(
     }
 
     // Moving a directory to another parent needs write access to update its `..`.
-    // Read access lets us keep a descriptor to restore the mode even if the name changes.
-    fs::set_permissions(source, fs::Permissions::from_mode(original.mode() | 0o600))?;
-    let (result, restoration) = match open_directory(source) {
-        Ok(entry) => (rename(source, destination), entry.set_permissions(original)),
-        Err(error) => (Err(error), fs::set_permissions(source, original)),
-    };
-    if let Err(error) = restoration {
+    let entry = unlock_directory(source, &metadata)?;
+    let result = rename(source, destination);
+    if let Err(error) = entry.set_permissions(original) {
         return Err(io::Error::other(match result {
             Ok(()) => format!(
                 "The folder is at “{}”, but its permissions couldn't be restored ({error}).",
@@ -240,6 +236,30 @@ fn rename_across_parents(
         }));
     }
     result
+}
+
+/// Give the owner write and search access to the folder `checked` describes, returning a
+/// descriptor to restore its mode by. The mode changes only through a descriptor whose
+/// identity matches `checked`: another user who can rename entries in the parent could have
+/// put a link, file or folder where the folder was.
+fn unlock_directory(source: &Path, checked: &fs::Metadata) -> io::Result<fs::File> {
+    let open = |access| {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(access | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(source)
+    };
+    let entry = open(libc::O_SEARCH).or_else(|_| open(0)).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("The folder couldn't be opened to unlock it ({error})."),
+        )
+    })?;
+    if file_identity(&entry.metadata()?) != file_identity(checked) {
+        return Err(io::Error::other("The folder changed during the move."));
+    }
+    entry.set_permissions(fs::Permissions::from_mode(checked.permissions().mode() | 0o300))?;
+    Ok(entry)
 }
 
 #[derive(PartialEq, Eq)]
@@ -403,40 +423,60 @@ pub fn compress(path: &Path) -> Result<PathBuf, String> {
     if !path.exists() {
         return Err(format!("“{name}” no longer exists."));
     }
-    // ditto replaces whatever is at its destination, so claim the name first.
+    // Claim the name before writing, so an existing entry is never replaced.
+    let mut archive = None;
     let destination = claim(
         parent_folder(path)?,
         file_name::archive_names(name),
         |destination| {
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(destination)
-                .map(drop)
-                .map_err(Attempt::from)
+            archive = Some(
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(destination)?,
+            );
+            Ok(())
         },
     )?;
+    let archive = archive.ok_or("The archive couldn't be created.")?;
+    write_archive(path, &destination, archive)?;
+    Ok(destination)
+}
+
+/// Zip `path` into `archive`, the file claimed as `destination`. ditto writes to standard
+/// output, not to the name: it follows a link there, and another user who can rename
+/// entries in the folder could swap the claimed name for one.
+fn write_archive(path: &Path, destination: &Path, archive: fs::File) -> Result<(), String> {
+    let identity = file_identity(&archive.metadata().map_err(|error| error.to_string())?);
+    let still_ours = || {
+        destination
+            .symlink_metadata()
+            .is_ok_and(|entry| file_identity(&entry) == identity)
+    };
     let mut ditto = Command::new("/usr/bin/ditto");
     ditto.args(["-c", "-k", "--sequesterRsrc"]);
     // A folder's archive holds the folder itself; a file's would otherwise hold its parent.
     if path.is_dir() {
         ditto.arg("--keepParent");
     }
-    let output = ditto.arg(path).arg(&destination).output();
-    match output {
-        Ok(output) if output.status.success() => Ok(destination),
-        failed => {
-            let _ = std::fs::remove_file(&destination);
-            Err(match failed {
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let reason = stderr.lines().find(|line| !line.trim().is_empty());
-                    reason.unwrap_or("ditto failed").trim().to_owned()
-                }
-                Err(error) => error.to_string(),
-            })
+    let output = ditto.arg(path).arg("-").stdout(archive).output();
+    let problem = match output {
+        Ok(output) if output.status.success() && still_ours() => return Ok(()),
+        Ok(output) if output.status.success() => {
+            let name = destination.file_name().unwrap_or_default().to_string_lossy();
+            return Err(format!("“{name}” was replaced while it was being written."));
         }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let reason = stderr.lines().find(|line| !line.trim().is_empty());
+            reason.unwrap_or("ditto failed").trim().to_owned()
+        }
+        Err(error) => error.to_string(),
+    };
+    if still_ours() {
+        let _ = fs::remove_file(destination);
     }
+    Err(problem)
 }
 
 enum Attempt {
@@ -658,6 +698,65 @@ mod tests {
         assert!(!staged.exists());
         assert_eq!(destination.metadata().unwrap().mode() & 0o7777, 0o555);
         assert_eq!(fs::read_to_string(destination.join("child")).unwrap(), "original");
+    }
+
+    #[test]
+    fn unlocking_a_read_only_folder_never_changes_an_entry_put_in_its_place() {
+        let dir = Scratch::new("unlock-swap");
+        let aside = dir.0.join("aside");
+        fs::create_dir(&aside).unwrap();
+        fs::set_permissions(&aside, fs::Permissions::from_mode(0o555)).unwrap();
+        let secret = dir.file("secret", "s");
+        fs::set_permissions(&secret, fs::Permissions::from_mode(0o600)).unwrap();
+        let private = dir.0.join("private");
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let checked = aside.symlink_metadata().unwrap();
+        let folder = dir.0.join("folder");
+
+        for target in [&secret, &private] {
+            std::os::unix::fs::symlink(target, &folder).unwrap();
+            assert!(unlock_directory(&folder, &checked).is_err());
+            fs::remove_file(&folder).unwrap();
+        }
+        for target in [&secret, &private] {
+            fs::rename(target, &folder).unwrap();
+            assert!(unlock_directory(&folder, &checked).is_err());
+            fs::rename(&folder, target).unwrap();
+        }
+        assert_eq!(secret.metadata().unwrap().mode() & 0o7777, 0o600);
+        assert_eq!(private.metadata().unwrap().mode() & 0o7777, 0o700);
+        assert_eq!(aside.metadata().unwrap().mode() & 0o7777, 0o555);
+        fs::set_permissions(&aside, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn unlocking_a_folder_opens_it_by_whichever_access_its_owner_has() {
+        let dir = Scratch::new("unlock-access");
+        for mode in [0o555, 0o444, 0o111] {
+            let folder = dir.0.join(format!("folder-{mode:o}"));
+            fs::create_dir(&folder).unwrap();
+            fs::set_permissions(&folder, fs::Permissions::from_mode(mode)).unwrap();
+            let checked = folder.symlink_metadata().unwrap();
+
+            let entry = unlock_directory(&folder, &checked).unwrap();
+            assert_eq!(folder.metadata().unwrap().mode() & 0o7777, mode | 0o300);
+            entry.set_permissions(checked.permissions()).unwrap();
+            fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_folder_its_owner_cannot_open_is_left_locked() {
+        let dir = Scratch::new("unlock-closed");
+        let folder = dir.0.join("folder");
+        fs::create_dir(&folder).unwrap();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+        let checked = folder.symlink_metadata().unwrap();
+
+        assert!(unlock_directory(&folder, &checked).is_err());
+        assert_eq!(folder.symlink_metadata().unwrap().mode() & 0o7777, 0o000);
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
@@ -1047,6 +1146,25 @@ mod tests {
             entries.lines().any(|entry| entry == "Docs/inner.txt"),
             "{entries}"
         );
+    }
+
+    #[test]
+    fn compress_writes_only_the_claimed_file_when_its_name_becomes_a_link() {
+        let dir = Scratch::new("compress-link");
+        let source = dir.file("report.pdf", "r");
+        let victim = dir.file("victim", "keep");
+        let destination = dir.0.join("report.pdf.zip");
+        let archive = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)
+            .unwrap();
+        fs::remove_file(&destination).unwrap();
+        std::os::unix::fs::symlink(&victim, &destination).unwrap();
+
+        assert!(write_archive(&source, &destination, archive).is_err());
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(destination.symlink_metadata().unwrap().is_symlink());
     }
 
     #[test]

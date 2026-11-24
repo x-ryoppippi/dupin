@@ -37,6 +37,9 @@ impl Ui {
         if self.picker.is_some() {
             return self.picker_key(ev, tx);
         }
+        if ev.key == Key::Enter && self.caller_hold.holds(tx.clock()) {
+            return true;
+        }
         if self.script_entry.is_some() {
             return self.script_entry_key(ev, tx);
         }
@@ -153,7 +156,7 @@ impl Ui {
 
     /// A click on a result row.
     pub fn open(&mut self, id: &str, tx: &mut Tx) {
-        if self.picker.is_some() {
+        if self.picker.is_some() || self.caller_hold.holds(tx.clock()) {
             return;
         }
         if self.session.select_key(id) {

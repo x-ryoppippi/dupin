@@ -3,8 +3,8 @@
 //! The release packaging writes the channel's feed URL into Info.plist (`DupinUpdateFeed`);
 //! a build without one (Nix, `cargo run`) never updates, since Nix owns its store paths. The
 //! feed is a small JSON file beside the release's zip. A newer build is unpacked beside the
-//! installed bundle, in `.Dupin-update-<build>`, and kept only when it satisfies the running
-//! bundle's own designated requirement (same bundle identifier, same Developer ID team) and
+//! installed bundle, in a `.Dupin-update-` folder of its own, and kept only when it satisfies
+//! the running bundle's own designated requirement (same bundle identifier, same Developer ID team) and
 //! Gatekeeper accepts it. The installed bundle stays untouched until Dupin restarts into the
 //! update or quits: then one `renamex_np(RENAME_SWAP)` exchanges the two, so the install path
 //! is never empty, and the replaced bundle waits in the staging folder for the next launch to
@@ -444,9 +444,7 @@ fn stage(installed: &Installed, feed: &Feed) -> Result<Staged, String> {
         .bundle
         .parent()
         .ok_or("the app bundle has no parent folder")?;
-    let folder = parent.join(format!("{PREFIX}{}", feed.build));
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir(&folder).map_err(|e| format!("couldn't create {}: {e}", folder.display()))?;
+    let folder = staging_folder(parent)?;
     match unpack_and_verify(installed, feed, &folder) {
         Ok(update) => Ok(Staged {
             update,
@@ -458,6 +456,16 @@ fn stage(installed: &Installed, feed: &Feed) -> Result<Staged, String> {
             Err(e)
         }
     }
+}
+
+/// A new folder under a name nobody can claim first: the parent may be a shared folder
+/// another user can create entries in.
+fn staging_folder(parent: &Path) -> Result<PathBuf, String> {
+    tempfile::Builder::new()
+        .prefix(PREFIX)
+        .tempdir_in(parent)
+        .map(tempfile::TempDir::keep)
+        .map_err(|e| format!("couldn't create a staging folder in {}: {e}", parent.display()))
 }
 
 fn unpack_and_verify(installed: &Installed, feed: &Feed, folder: &Path) -> Result<PathBuf, String> {
@@ -770,6 +778,25 @@ mod tests {
         remove_beside(&installed);
         assert!(!folder.exists());
         assert_eq!(marker(&installed), "new");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn staging_ignores_folders_planted_under_predictable_names() {
+        let root = temporary("planted");
+        for build in 0..64 {
+            std::fs::create_dir(root.join(format!("{PREFIX}{build}"))).unwrap();
+        }
+
+        let first = staging_folder(&root).unwrap();
+        let second = staging_folder(&root).unwrap();
+        assert_ne!(first, second);
+        for folder in [&first, &second] {
+            assert_eq!(folder.parent(), Some(root.as_path()));
+            let name = folder.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with(PREFIX), "{name}");
+            assert!(std::fs::read_dir(folder).unwrap().next().is_none());
+        }
         let _ = std::fs::remove_dir_all(root);
     }
 

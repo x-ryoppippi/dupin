@@ -372,23 +372,27 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtBuild(folder, options) => {
+            let folder = std::path::Path::new(&folder);
             let built = dupin_ext_sdk::build(
-                std::path::Path::new(&folder),
-                dupin_ext_sdk::Bundler::find().as_ref(),
+                folder,
+                dupin_ext_sdk::Rolldown::find(folder).as_ref(),
                 options,
                 &check_package,
             )?;
-            let bundler = built.bundler.map(dupin_ext_sdk::BundlerKind::name);
+            let rolldown = built
+                .rolldown
+                .as_ref()
+                .map(|program| program.display().to_string());
             if json {
                 return Ok(serde_json::json!({
                     "name": built.package.name,
                     "output": built.output,
-                    "bundler": bundler,
+                    "rolldown": rolldown,
                     "sourcemap": built.sourcemap,
                 }));
             }
-            match bundler {
-                Some(bundler) => println!("Built {} with {bundler}", built.output),
+            match rolldown {
+                Some(rolldown) => println!("Built {} with {rolldown}", built.output),
                 None => println!(
                     "{} is plain JavaScript, needs no build and passes the check",
                     built.output
@@ -399,11 +403,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         Action::ExtDev(folder, options) => {
             let extensions = crate::extensions::directory()
                 .ok_or("couldn't find the extensions folder beside config.toml")?;
-            let bundler = dupin_ext_sdk::Bundler::find();
+            let package_dir = std::path::Path::new(&folder);
+            let rolldown = dupin_ext_sdk::Rolldown::find(package_dir);
             let copy = dupin_ext_sdk::dev::DevCopy {
-                package_dir: std::path::Path::new(&folder),
+                package_dir,
                 extensions: &extensions,
-                bundler: bundler.as_ref(),
+                rolldown: rolldown.as_ref(),
                 options,
                 validate: &check_package,
             };
@@ -608,7 +613,7 @@ mod tests {
             dupin_ext_sdk::dev::DevCopy {
                 package_dir: &package,
                 extensions: extensions.path(),
-                bundler: None,
+                rolldown: None,
                 options: dupin_ext_sdk::BuildOptions::default(),
                 validate: &check_package,
             }

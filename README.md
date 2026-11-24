@@ -70,7 +70,8 @@ Dupin is licensed under [GPL-3.0-or-later](./LICENSE). Contributions need the [C
 ## Local CLI
 
 With a resident Dupin instance, `dupin open --query 'Safari'` shows the panel without
-activating a result. `printf 'red\nblue\n' | dupin pick` opens a transient picker;
+activating a result; Enter does nothing for half a second after it appears, so a key meant
+for another app can't choose one. `printf 'red\nblue\n' | dupin pick` opens a transient picker;
 Enter prints the original value and Esc exits unsuccessfully. For structured values,
 use `dupin pick --input-json` with a JSON array. Values are displayed as data, including
 objects containing paths or action names. Picker sessions never add history entries.

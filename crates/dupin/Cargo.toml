@@ -32,6 +32,7 @@ rune-kit = { workspace = true }
 rune-theme-opencode = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = "3"
 toml = { workspace = true, features = ["display"] }
 wgpu = { workspace = true }
 naga = { workspace = true }
@@ -55,7 +56,6 @@ objc2-metal = { workspace = true, features = [
 
 [dev-dependencies]
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
-tempfile = "3"
 
 [lints]
 workspace = true
