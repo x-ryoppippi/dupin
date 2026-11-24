@@ -107,7 +107,7 @@ Ports of native features keep their existing feature switches and command IDs; e
 | Dupin               | Bundled extension, on                           | Links to Dupin's documentation, issues and source, with nothing native to replace.                                                                                                                                                                                         |
 | Window management   | Optional bundled extension, off until turned on | The owner decided it isn't core. Its commands are actions, not per-keystroke search, so frames are computed in the guest and only reading and moving the focused window is native, through the `windows` service, with Accessibility asked for when the user turns it on.  |
 
-A port that answers typing is held to the latency of the native feature it replaces. Before the native implementation is removed, `scripts/latency/native-baseline.json` records what the Latency workflow measured of it at its last commit, and the workflow fails when the bundled extension's p95 exceeds that baseline by more than its tolerance (10% by default). Window management runs only when a command is chosen, so it has no latency scenario.
+A port that answers typing is held to the latency of the native feature it replaces. Before the native implementation is removed, `scripts/latency/native-baseline.json` records what the Latency workflow measured of it at its last commit, and the workflow fails when the bundled extension's p95 exceeds that baseline by more than the larger of 10% and 0.5 ms. Window management runs only when a command is chosen, so it has no latency scenario.
 
 ## Example extensions
 
