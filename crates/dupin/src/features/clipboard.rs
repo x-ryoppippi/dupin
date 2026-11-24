@@ -124,7 +124,7 @@ fn unavailable() -> Item {
         id: "unavailable".into(),
         view: View::Text {
             title: "Clipboard history isn't available".into(),
-            subtitle: "Its bundled extension didn't load; Settings → Extensions says why.".into(),
+            subtitle: "Its extension is off or didn't load; Settings → Extensions says why.".into(),
         },
         record_usage: false,
         icon: None,

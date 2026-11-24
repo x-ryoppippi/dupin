@@ -39,6 +39,9 @@ pub struct Listed {
     pub registered: bool,
     /// Its catalogue answers the main search too.
     pub main_search: bool,
+    /// It answers a built-in command, under that command's keywords and behind its setting,
+    /// rather than its own keyword.
+    pub built_in: bool,
 }
 
 pub struct Packages {
@@ -134,6 +137,7 @@ impl Packages {
                 kind,
                 registered: registered(&extension),
                 main_search: extension.default_search,
+                built_in: crate::features::ported_command(&extension.id).is_some(),
             })
             .collect()
     }

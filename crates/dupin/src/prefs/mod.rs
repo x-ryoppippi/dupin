@@ -642,6 +642,7 @@ mod tests {
             kind,
             registered: true,
             main_search: false,
+            built_in: false,
         };
         state.reflect_extensions(
             vec![
@@ -724,6 +725,7 @@ mod tests {
                 kind: crate::extensions::packages::Kind::User,
                 registered: true,
                 main_search: false,
+                built_in: false,
             }],
             Vec::new(),
         );

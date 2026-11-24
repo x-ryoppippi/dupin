@@ -127,7 +127,8 @@ export const PARITY_FLOOR = 500us
 # Hold every implementation other than `native` against the native one of the same scenario:
 # the run's own, or, for a feature whose native implementation is gone, the one recorded in
 # `--baseline` from the last commit that had it. One that never had a native implementation is
-# held to its own `budget_ms`. Passes when nothing has a native or a budget to match.
+# held to its own `budget_ms`. One with none of these fails, so a port can't skip the gate by
+# deleting its native implementation without recording a baseline.
 def "main parity" [
     results: path
     --baseline: path # Native results recorded from earlier commits; scripts/latency/native-baseline.json
@@ -145,6 +146,12 @@ def "main parity" [
         }
     }
     let pairs = parity-pairs $all $recorded
+    let unheld = unheld $pairs
+    if ($unheld | is-not-empty) {
+        error make {
+            msg: $"($unheld | str join ', ') has no native result, recorded native baseline or budget_ms to be held to; record the baseline of the native implementation it replaces, or declare a budget for a feature that never had one"
+        }
+    }
     if ($pairs | is-empty) {
         print --stderr "no feature declares an implementation besides native; nothing to hold to parity"
         return
@@ -163,6 +170,15 @@ export def parity-pairs [results: list<record>, recorded: list<record>]: nothing
         | if $in != null { upsert implementation $"native at ($in.commit | str substring 0..<7)" } else { $in }
         {candidate: $result, baseline: ($native | default $earlier)}
     }
+}
+
+# The scenarios of `pairs` with nothing to hold them to: no native result, no recorded one and no
+# `budget_ms`. `compare` reports such a scenario as `new`, but for `parity` it is a port whose
+# native implementation went without its baseline being recorded.
+export def unheld [pairs: list<record>]: nothing -> list<string> {
+    $pairs
+    | where {|pair| $pair.baseline == null and $pair.candidate.budget_ms? == null }
+    | each {|pair| $"($pair.candidate.id) [($pair.candidate.implementation)]" }
 }
 
 # The recorded scenarios `results` has no result for. In CI that is a port whose scenario was

@@ -2,6 +2,34 @@
 	"schema": 1,
 	"results": [
 		{
+			"id": "calendar.rev",
+			"feature": "calendar",
+			"implementation": "native",
+			"commit": "840fc1c733b66dabc5b7e5f94f6364f805c903c2",
+			"runs": 2,
+			"p50_ms": 1.1260835,
+			"p95_ms": 1.3290834999999999,
+			"p99_ms": 1.4338745,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.01725,
+					"p95": 0.0226255
+				},
+				"provider_ms": {
+					"p50": 0.49443750000000003,
+					"p95": 0.61625
+				},
+				"merge_ms": {
+					"p50": 0.3796045,
+					"p95": 0.567021
+				},
+				"layout_ms": {
+					"p50": 0.205979,
+					"p95": 0.26510449999999997
+				}
+			}
+		},
+		{
 			"id": "clipboard.bak",
 			"feature": "clipboard",
 			"implementation": "native",
@@ -54,6 +82,62 @@
 				"layout_ms": {
 					"p50": 0.154896,
 					"p95": 0.351729
+				}
+			}
+		},
+		{
+			"id": "snippets.sig",
+			"feature": "snippets",
+			"implementation": "native",
+			"commit": "bbad7a381ebe5559e5a60d689dc5109d5d16035f",
+			"runs": 2,
+			"p50_ms": 1.122125,
+			"p95_ms": 1.4695420000000001,
+			"p99_ms": 1.619813,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.019646,
+					"p95": 0.025687500000000002
+				},
+				"provider_ms": {
+					"p50": 0.030896,
+					"p95": 0.0464375
+				},
+				"merge_ms": {
+					"p50": 0.882687,
+					"p95": 1.1631465
+				},
+				"layout_ms": {
+					"p50": 0.179021,
+					"p95": 0.294479
+				}
+			}
+		},
+		{
+			"id": "web.rust",
+			"feature": "web",
+			"implementation": "native",
+			"commit": "bbad7a381ebe5559e5a60d689dc5109d5d16035f",
+			"runs": 2,
+			"p50_ms": 1.4991880000000002,
+			"p95_ms": 2.1009165000000003,
+			"p99_ms": 2.2837709999999998,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.06281250000000001,
+					"p95": 0.082
+				},
+				"provider_ms": {
+					"p50": 0.0616665,
+					"p95": 0.103229
+				},
+				"merge_ms": {
+					"p50": 0.983,
+					"p95": 1.2870415
+				},
+				"layout_ms": {
+					"p50": 0.3829585,
+					"p95": 0.7302915
 				}
 			}
 		}
