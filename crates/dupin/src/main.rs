@@ -9,6 +9,7 @@ mod cli;
 mod clipboard;
 mod commands;
 mod control;
+mod extension_install;
 mod extensions;
 mod features;
 mod hotkey;
