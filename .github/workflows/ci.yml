@@ -99,7 +99,8 @@ jobs:
 
   # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
   # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
-  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure.
+  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure. Every crate with such a test
+  # runs, found by skip_inside_a_sandbox!, so a crate that gains one can't stay untested.
   extension-host:
     needs: changes
     if: needs.changes.outputs.app == 'true'
@@ -117,7 +118,10 @@ jobs:
       - name: Test the extension host outside the Nix sandbox
         env:
           DUPIN_REQUIRE_EXTENSION_HOST: '1'
-        run: nix develop --command cargo test --locked -p dupin-extension-host -p dupin
+        run: |
+          mapfile -t crates < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
+          echo "Testing ${crates[*]}"
+          nix develop --command cargo test --locked "${crates[@]/#/--package=}"
 
   # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
   # a required check, so e2e runs whenever the app could have changed and fails itself when the
