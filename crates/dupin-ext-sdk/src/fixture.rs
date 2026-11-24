@@ -184,7 +184,7 @@ pub struct Replies {
     pub storage: Map<String, Value>,
     /// What a clipboard read returns: content such as `{ "type": "text", "text": … }`, or
     /// `null` for an empty clipboard. Left out, reading fails as `unavailable`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "present")]
     pub clipboard: Option<Value>,
     /// Each term's entries, in the dictionary service's shape.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -196,6 +196,12 @@ pub struct Replies {
     /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub consent: BTreeMap<String, Consent>,
+}
+
+/// Keeps a `null` that is written apart from a key that is left out, which serde would
+/// otherwise read alike.
+fn present<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(deserializer).map(Some)
 }
 
 impl Replies {

@@ -387,6 +387,45 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
 }
 
 #[test]
+fn an_empty_clipboard_reply_reads_as_empty_and_a_missing_one_fails() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "clipboard": ["read"] }),
+        "import { clipboard } from 'dupin';\n\
+         export function search() {\n\
+         \treturn [{ title: 'Paste', actions: [{ title: 'Paste', run: 'paste' }] }];\n\
+         }\n\
+         export const actions = {\n\
+         \tasync paste() {\n\
+         \t\ttry { return { type: 'toast', text: (await clipboard.readText()) ?? 'empty' }; }\n\
+         \t\tcatch (error) { return { type: 'toast', text: error.code }; }\n\
+         \t},\n\
+         };\n",
+    );
+    for (replies, toast) in [
+        (json!({ "clipboard": null }), "empty"),
+        (
+            json!({ "clipboard": { "type": "text", "text": "copied" } }),
+            "copied",
+        ),
+        (json!({}), "unavailable"),
+    ] {
+        write_fixture(
+            &package,
+            "paste.json",
+            json!({ "fixture": 1, "replies": replies, "steps": [{ "query": "x" }, { "activate": "Paste" }] }),
+        );
+        let report = test(&package, false).unwrap();
+        assert_eq!(
+            steps(&report, 0)[1]["outcome"]["toasts"],
+            json!([toast]),
+            "{}",
+            report.text
+        );
+    }
+}
+
+#[test]
 fn a_linked_fixture_is_refused() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);

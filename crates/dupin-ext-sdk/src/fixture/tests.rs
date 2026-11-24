@@ -186,6 +186,20 @@ fn replies_events_and_their_paths_are_checked() {
 }
 
 #[test]
+fn an_empty_clipboard_is_not_a_missing_reply_and_survives_a_rewrite() {
+    let empty =
+        fixture(json!({ "fixture": 1, "replies": { "clipboard": null }, "steps": [{ "query": "x" }] }))
+            .unwrap();
+    assert_eq!(empty.replies.clipboard, Some(Value::Null));
+    assert!(to_json(&empty).contains(r#""clipboard": null"#));
+    assert_eq!(
+        parse("fixtures/x.json", to_json(&empty).as_bytes()).unwrap(),
+        empty
+    );
+    assert_eq!(fixture(minimal()).unwrap().replies.clipboard, None);
+}
+
+#[test]
 fn discovery_refuses_links_and_needs_a_fixture() {
     let package = tempfile::tempdir().unwrap();
     assert_eq!(discover(package.path()).unwrap_err().code, "no-fixtures");
