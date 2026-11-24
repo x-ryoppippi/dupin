@@ -8,6 +8,7 @@ impl Ui {
     pub fn activate_hotkey(&mut self, shortcut: &rune::Shortcut, tx: &mut Tx) {
         use crate::hotkey::{LauncherShortcut, Target};
         use dupin_core::config::HotkeyTarget;
+        crate::trace::hotkey(&shortcut.to_string());
 
         match self.configuration.hotkey.target(shortcut) {
             Some(Target::Launcher(LauncherShortcut::Panel)) => self.toggle(tx),

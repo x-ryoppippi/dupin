@@ -98,6 +98,13 @@ fn wall_ms() -> f64 {
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
 }
 
+/// A global hotkey reached Dupin.
+pub fn hotkey(shortcut: &str) {
+    if on() {
+        eprintln!("dupin-trace: hotkey fired {shortcut} wall={:.3}", wall_ms());
+    }
+}
+
 /// A key the query field saw, before Dupin's handler decides on it.
 pub fn key(ev: &rune::KeyEvent) {
     if on() {
