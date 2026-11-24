@@ -1,6 +1,6 @@
 {
 	"fixture": 1,
-	"description": "Each copy the watch delivers is stored and shows at the top; copying something kept again moves it there; text cut short and blank copies are skipped; Delete from History forgets one entry and Clear History every one.",
+	"description": "Each copy the watch delivers is stored and shows at the top; copying something kept again moves it there; text cut short and blank copies are skipped; Delete from History forgets one entry and Clear History every one, and a copy after clearing shows again.",
 	"environment": {
 		"now": "2026-11-24T09:00:00Z",
 		"seed": 1,
@@ -32,6 +32,7 @@
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 1,
 						"source": "Notes",
 						"text": "hello world"
 					}
@@ -50,12 +51,14 @@
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 1,
 						"source": "Notes",
 						"text": "hello world"
 					},
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 2,
 						"text": "https://dupin.app/download"
 					}
 				]
@@ -87,12 +90,14 @@
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 1,
 						"source": "Notes",
 						"text": "hello world"
 					},
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 2,
 						"text": "https://dupin.app/download"
 					},
 					{
@@ -112,7 +117,8 @@
 								"path": "/Users/Shared/Fixtures/b.txt"
 							}
 						],
-						"kind": "files"
+						"kind": "files",
+						"seq": 3
 					}
 				]
 			}
@@ -146,6 +152,7 @@
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 2,
 						"text": "https://dupin.app/download"
 					},
 					{
@@ -165,11 +172,13 @@
 								"path": "/Users/Shared/Fixtures/b.txt"
 							}
 						],
-						"kind": "files"
+						"kind": "files",
+						"seq": 3
 					},
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 4,
 						"text": "hello world"
 					}
 				]
@@ -332,17 +341,20 @@
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 2,
 						"text": "https://dupin.app/download"
 					},
 					{
 						"copiedAt": 1795510800000,
 						"kind": "text",
+						"seq": 4,
 						"text": "hello world"
 					},
 					{
 						"copiedAt": 1795510800000,
 						"ids": ["5dde063d2e15c307e8182d0dfe7348c8"],
-						"kind": "removed"
+						"kind": "removed",
+						"seq": 5
 					}
 				]
 			}
@@ -434,19 +446,7 @@
 						"title": "https://dupin.app/download"
 					}
 				],
-				"selected": 0,
-				"storage": [
-					{
-						"copiedAt": 1795510800000,
-						"kind": "text",
-						"text": "https://dupin.app/download"
-					},
-					{
-						"copiedAt": 1795510800000,
-						"kind": "text",
-						"text": "hello world"
-					}
-				]
+				"selected": 0
 			}
 		},
 		{
@@ -462,7 +462,8 @@
 				"storage": [
 					{
 						"copiedAt": 1795510800000,
-						"kind": "cleared"
+						"kind": "cleared",
+						"seq": 6
 					}
 				],
 				"toasts": ["Cleared the clipboard history"]
@@ -471,8 +472,79 @@
 		{
 			"query": "",
 			"expect": {
-				"rows": [],
-				"storage": []
+				"rows": []
+			}
+		},
+		{
+			"event": "clipboard",
+			"data": {
+				"text": "after clearing",
+				"type": "text"
+			},
+			"expect": {
+				"invalidated": true,
+				"storage": [
+					{
+						"copiedAt": 1795510800000,
+						"kind": "cleared",
+						"seq": 6
+					},
+					{
+						"copiedAt": 1795510800000,
+						"kind": "text",
+						"seq": 7,
+						"text": "after clearing"
+					}
+				]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "copy",
+									"data": {
+										"id": "909b75a0ad718f0a8a5db069cbd1f812"
+									}
+								},
+								"title": "Copy"
+							},
+							{
+								"run": {
+									"action": "paste",
+									"data": {
+										"id": "909b75a0ad718f0a8a5db069cbd1f812"
+									}
+								},
+								"title": "Paste"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "909b75a0ad718f0a8a5db069cbd1f812"
+									}
+								},
+								"title": "Delete from History"
+							},
+							{
+								"run": {
+									"action": "clear",
+									"data": null
+								},
+								"title": "Clear History"
+							}
+						],
+						"id": "909b75a0ad718f0a8a5db069cbd1f812",
+						"subtitle": "14 characters",
+						"title": "after clearing"
+					}
+				],
+				"selected": 0
 			}
 		}
 	]

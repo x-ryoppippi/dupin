@@ -24,33 +24,36 @@ type CopiedFile = {
 	handle?: string;
 };
 
-/** A record of the package's storage: a copy, or a note that copies went, for `items`. */
-type Stored =
-	| { kind: 'text'; text: string; copiedAt: number; source?: string }
-	| {
-			kind: 'image';
-			width: number;
-			height: number;
-			size: number;
-			copiedAt: number;
-			source?: string;
-	  }
-	| { kind: 'files'; files: CopiedFile[]; copiedAt: number; source?: string }
-	| { kind: 'removed'; ids: string[]; copiedAt: number }
-	| { kind: 'cleared'; copiedAt: number };
+/**
+ * A record of the package's storage: a copy, or a note that copies went, for `items`. `seq` is
+ * one more than the newest record's before it, so `items` can tell what was stored since it
+ * last listed even when a copy made again keeps its record's ID. The newest record always holds
+ * the highest `seq` given, so the next one's stays above every one `items` has seen: a note that
+ * is the newest is never deleted, and a note takes the place of a newest copy deleted unseen.
+ */
+type Stored = (
+	| { kind: 'text'; text: string; source?: string }
+	| { kind: 'image'; width: number; height: number; size: number; source?: string }
+	| { kind: 'files'; files: CopiedFile[]; source?: string }
+	| { kind: 'removed'; ids: string[] }
+	| { kind: 'cleared' }
+) & { copiedAt: number; seq?: number };
 
 type Copy = Extract<Stored, { kind: 'text' | 'image' | 'files' }>;
 
 /**
- * Where `items` is: the newest record it listed, which storage lists before everything stored
- * after it, whatever the clock said; the oldest copy it kept; and while it pages, where.
+ * Where `items` is, in short keys to fit the 256 bytes Dupin keeps: `s` the newest `seq` it
+ * listed, `o` the oldest copy it kept, `b` the bytes its rows cost by `cost`, and while it pages,
+ * `n` the rows it expects, `l` the rows listed, `p` the parts sent and `c` storage's cursor.
  */
 interface Cursor {
-	newestId?: string;
-	oldest: number;
-	before?: string;
-	part?: number;
-	listed?: number;
+	s: number;
+	o: number;
+	b: number;
+	n?: number;
+	l?: number;
+	p?: number;
+	c?: string;
 }
 
 const DAY_MS = 864e5;
@@ -62,19 +65,43 @@ const RETENTION_MS: Record<Preferences['retention'], number> = {
 	forever: Infinity,
 };
 const TITLE_CHARS = 200;
+/** What Dupin takes in a title, a subtitle, a match text and a file path, in UTF-8 bytes. */
+const TITLE_BYTES = 512;
+const SUBTITLE_BYTES = 2048;
+const MATCH_BYTES = 64 * 1024;
+const FILE_BYTES = 4096;
+/** A title is cut no shorter than this to make room for the rows after it. */
+const MIN_TITLE_BYTES = 48;
+/**
+ * What a row costs beyond its title, subtitle, match text and file, as Dupin counts a
+ * catalogue's text: its ID and its actions' IDs, titles, handlers and data, with room to spare.
+ */
+const ROW_BYTES = 480;
+/** What a typical row costs at least, reserved for each row a load has yet to list. */
+const TYPICAL_MIN_ROW = ROW_BYTES + MIN_TITLE_BYTES + 32;
+/** What any row costs at least: a page is never larger than its part has room for. */
+const LARGEST_MIN_ROW = ROW_BYTES + MIN_TITLE_BYTES + SUBTITLE_BYTES + 2 * FILE_BYTES;
+/** Dupin takes 1 MiB of text in one answer and holds 8 MiB of a catalogue. */
+const PART_BYTES = 960 * 1024;
+const CATALOGUE_BYTES = 8 * 1024 * 1024 - 256 * 1024;
+/** What a load lists into, leaving the rest for copies prepended before the next load. */
+const LOAD_BYTES = 6.5 * 1024 * 1024;
 const PAGE = 200;
 const PART_ROWS = 500;
 /** Deletes one call makes, well inside the 256 host requests a call may make. */
 const MAX_DELETES = 150;
-/** Parts one load asks for, inside the 21 Dupin takes. */
-const MAX_PARTS = 18;
+const MAX_TRIM = 100;
+/** Copies given up to make room for a new one, before it is skipped. */
+const MAX_EVICTIONS = 32;
 /** Retention is checked again an hour after the last load. */
 const TTL = 3600;
-/** Images given up to make room for a new one, before it is skipped. */
-const MAX_EVICTIONS = 32;
 
 function preferences(context: { preferences: Readonly<Record<string, unknown>> }): Preferences {
 	return context.preferences as unknown as Preferences;
+}
+
+function data(record: StoredRecord): Stored {
+	return record.data as unknown as Stored;
 }
 
 function isCopy(stored: Stored): stored is Copy {
@@ -108,16 +135,61 @@ function hash(text: string): string {
 	return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
+/**
+ * The UTF-8 length of `text`; a lone surrogate becomes U+FFFD on its way to Dupin. ASCII is
+ * counted by the regular expression engine, since copies run to 64 KiB.
+ */
+function utf8(text: string): number {
+	const wide = text.replace(/[^\u0080-￿]+/g, '');
+	let bytes = text.length - wide.length;
+	for (let index = 0; index < wide.length; index++) {
+		const code = wide.charCodeAt(index);
+		if (code < 0x800) bytes += 2;
+		else if (code >= 0xd800 && code < 0xdc00 && (wide.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
+			bytes += 4;
+			index++;
+		} else bytes += 3;
+	}
+	return bytes;
+}
+
+/**
+ * `text` in at most `bytes` UTF-8 bytes and `chars` characters, whole characters only, ending in
+ * `more` when it is cut.
+ */
+function clip(text: string, bytes: number, chars = Infinity, more = ''): string {
+	let end = text.length;
+	if (chars < text.length) {
+		let count = 0;
+		end = 0;
+		for (const char of text) {
+			if (count === chars) break;
+			end += char.length;
+			count++;
+		}
+	}
+	if (end === text.length && utf8(text) <= bytes) return text;
+	const room = bytes - utf8(more);
+	let low = 0;
+	let high = end;
+	while (low < high) {
+		const middle = Math.ceil((low + high) / 2);
+		if (utf8(text.slice(0, middle)) <= room) low = middle;
+		else high = middle - 1;
+	}
+	if (low > 0 && (text.charCodeAt(low - 1) & 0xfc00) === 0xd800) low--;
+	return low === 0 ? '' : `${text.slice(0, low)}${more}`;
+}
+
 /** The first words of `text`, on one line. */
-function title(text: string): string {
-	let line = '';
+function line(text: string): string {
+	let shown = '';
 	for (const word of text.split(/\s+/u)) {
 		if (!word) continue;
-		line = line ? `${line} ${word}` : word;
-		if (Array.from(line).length >= TITLE_CHARS) break;
+		shown = shown ? `${shown} ${word}` : word;
+		if (shown.length >= TITLE_CHARS && Array.from(shown).length >= TITLE_CHARS) break;
 	}
-	const chars = Array.from(line);
-	return chars.length > TITLE_CHARS ? `${chars.slice(0, TITLE_CHARS).join('')}…` : line;
+	return shown;
 }
 
 function plural(count: number, one: string, many: string): string {
@@ -142,104 +214,190 @@ function lines(text: string): number {
 	return parts.at(-1) === '' ? parts.length - 1 : parts.length;
 }
 
-function row(record: StoredRecord, copy: Copy): CatalogueItem {
-	const data = { id: record.id };
-	const needsFile = copy.kind === 'files' ? { needsFile: true } : {};
-	const actions: Action[] = [
-		{ title: 'Copy', run: 'copy', data, ...needsFile },
-		{ title: 'Paste', run: 'paste', data, alternate: true, ...needsFile },
-	];
-	const item = { id: record.id, time: copy.copiedAt, actions };
-	const ending: Action[] = [
-		{ title: 'Delete from History', run: 'remove', data },
-		{ title: 'Clear History', run: 'clear', confirm: 'Clear the whole clipboard history?' },
-	];
+/** What a copy's row shows and is found by, before it is cut to the room it has. */
+interface View {
+	title: string;
+	subtitle: string;
+	match: string;
+	file?: string;
+}
+
+function view(copy: Copy): View {
 	switch (copy.kind) {
 		case 'text': {
 			const count = lines(copy.text);
 			return {
-				...item,
-				title: title(copy.text),
+				title: line(copy.text),
 				subtitle:
 					count > 1
 						? plural(count, 'line', 'lines')
 						: plural(Array.from(copy.text).length, 'character', 'characters'),
-				matchText: copy.text,
-				actions: [...actions, ...ending],
+				match: copy.text,
 			};
 		}
 		case 'image': {
 			const dimensions = `${copy.width}×${copy.height}`;
 			const shown = size(copy.size);
 			return {
-				...item,
 				title: `Image · ${dimensions} PNG`,
 				subtitle: [shown, copy.source].filter(Boolean).join(' · '),
-				matchText: [
+				match: [
 					'image png',
 					`${dimensions} ${copy.width}x${copy.height}`,
 					shown,
 					copy.source ?? '',
 				].join('\n'),
-				actions: [...actions, ...ending],
 			};
 		}
 		case 'files': {
 			const [first] = copy.files;
-			const subtitle =
-				copy.files.length === 1
-					? [first.folder, first.size === undefined ? undefined : size(first.size)]
-							.filter(Boolean)
-							.join(' · ')
-					: plural(copy.files.length, 'file', 'files');
 			return {
-				...item,
 				title: copy.files.map((file) => file.name).join(', '),
-				subtitle,
-				matchText: copy.files.map((file) => file.path).join('\n'),
-				file: first.path,
-				actions: [...actions, { title: 'Reveal in Finder', reveal: first.path }, ...ending],
+				subtitle:
+					copy.files.length === 1
+						? [first.folder, first.size === undefined ? undefined : size(first.size)]
+								.filter(Boolean)
+								.join(' · ')
+						: plural(copy.files.length, 'file', 'files'),
+				match: copy.files.map((file) => file.path).join('\n'),
+				file: utf8(first.path) <= FILE_BYTES ? first.path : undefined,
 			};
 		}
 	}
+}
+
+/** What a row costs whatever its title and match text: the file shows twice, once to reveal. */
+function fixedCost(shown: View): number {
+	return ROW_BYTES + utf8(clip(shown.subtitle, SUBTITLE_BYTES)) + 2 * utf8(shown.file ?? '');
+}
+
+function minCost(shown: View): number {
+	return fixedCost(shown) + Math.min(MIN_TITLE_BYTES, utf8(shown.title));
+}
+
+function cost(item: CatalogueItem): number {
+	return (
+		ROW_BYTES +
+		utf8(item.title) +
+		utf8(item.subtitle ?? '') +
+		utf8(item.matchText ?? '') +
+		2 * utf8(item.file ?? '')
+	);
+}
+
+/**
+ * The row of a copy in at most `room` bytes by `cost`: its title is cut to fit, then its match
+ * text, which only finds it. Null when not even its shortest title fits.
+ */
+function row(record: StoredRecord, copy: Copy, shown: View, room: number): CatalogueItem | null {
+	const fixed = fixedCost(shown);
+	if (room < minCost(shown)) return null;
+	const title = clip(shown.title, Math.min(TITLE_BYTES, room - fixed), TITLE_CHARS, '…');
+	const matchText = clip(shown.match, Math.min(MATCH_BYTES, room - fixed - utf8(title)));
+	const ref = { id: record.id };
+	const needsFile = copy.kind === 'files' ? { needsFile: true } : {};
+	const actions: Action[] = [
+		{ title: 'Copy', run: 'copy', data: ref, ...needsFile },
+		{ title: 'Paste', run: 'paste', data: ref, alternate: true, ...needsFile },
+	];
+	if (shown.file) actions.push({ title: 'Reveal in Finder', reveal: shown.file });
+	actions.push(
+		{ title: 'Delete from History', run: 'remove', data: ref },
+		{ title: 'Clear History', run: 'clear', confirm: 'Clear the whole clipboard history?' },
+	);
+	return {
+		id: record.id,
+		time: copy.copiedAt,
+		title,
+		subtitle: clip(shown.subtitle, SUBTITLE_BYTES),
+		...(matchText ? { matchText } : {}),
+		...(shown.file ? { file: shown.file } : {}),
+		actions,
+	};
 }
 
 function parse(cursor: string | null): Cursor | null {
 	if (!cursor) return null;
 	try {
-		return JSON.parse(cursor) as Cursor;
+		const parsed = JSON.parse(cursor) as Cursor;
+		return typeof parsed.s === 'number' && typeof parsed.b === 'number' ? parsed : null;
 	} catch {
 		return null;
 	}
 }
 
+function seqOf(record: StoredRecord): number {
+	return data(record).seq ?? 0;
+}
+
 /**
- * The whole history, or the part after `from`, newest first. Copies the preferences no longer
- * keep, and notes left for an update, are deleted on the way, a bounded number per part.
+ * The whole history, or the part after `from`, newest first, in parts Dupin takes and within
+ * the text a catalogue may hold: the newest copies are found by all their text, and older ones
+ * by less once room runs short. Copies the preferences no longer keep, and notes left for an
+ * update, are deleted on the way, a bounded number per part.
  */
 async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResult> {
 	const cutoff = cutoffOf(prefs);
-	const part = (from?.part ?? 0) + 1;
-	let before = from?.before;
-	let newestId = from?.newestId;
-	let oldest = from?.oldest ?? Number.MAX_SAFE_INTEGER;
-	let listed = from?.listed ?? 0;
+	const expected = from?.n ?? Math.min(prefs.maxEntries, (await storage.usage()).entries);
+	let seq = from?.s ?? 0;
+	let oldest = from?.o ?? Number.MAX_SAFE_INTEGER;
+	let bytes = from?.b ?? 0;
+	let listed = from?.l ?? 0;
+	let before = from?.c;
+	const part = (from?.p ?? 0) + 1;
 	const rows: CatalogueItem[] = [];
+	let partBytes = 0;
 	let deletes = 0;
 	let done = false;
-	while (rows.length < PART_ROWS && deletes < MAX_DELETES) {
-		const page = await storage.list({ before, limit: Math.min(PAGE, PART_ROWS - rows.length) });
+	listing: for (;;) {
+		const limit = Math.min(
+			PAGE,
+			PART_ROWS - rows.length,
+			Math.floor((PART_BYTES - partBytes) / LARGEST_MIN_ROW),
+		);
+		if (limit <= 0) break;
+		const page = await storage.list({ before, limit });
+		const newest = before === undefined ? page.records[0]?.id : undefined;
+		const shown: { record: StoredRecord; copy: Copy; view: View; min: number }[] = [];
 		for (const record of page.records) {
-			const stored = record.data as unknown as Stored;
-			if (kept(stored, prefs, cutoff) && listed < prefs.maxEntries) {
-				listed++;
-				rows.push(row(record, stored));
-				newestId ??= record.id;
-				oldest = Math.min(oldest, stored.copiedAt);
-			} else if (deletes < MAX_DELETES) {
+			const stored = data(record);
+			seq = Math.max(seq, stored.seq ?? 0);
+			if (kept(stored, prefs, cutoff) && listed + shown.length < prefs.maxEntries) {
+				const copyView = view(stored);
+				shown.push({ record, copy: stored, view: copyView, min: minCost(copyView) });
+			} else if (deletes < MAX_DELETES && (isCopy(stored) || record.id !== newest)) {
 				await storage.delete(record.id);
 				deletes++;
+				if (record.id === newest) {
+					await storage.put({
+						kind: 'removed',
+						ids: [],
+						copiedAt: Date.now(),
+						seq: stored.seq ?? 0,
+					});
+				}
 			}
+		}
+		let pageReserve = shown.reduce((sum, entry) => sum + entry.min, 0);
+		const later = Math.max(0, expected - listed - shown.length) * TYPICAL_MIN_ROW;
+		for (const entry of shown) {
+			pageReserve -= entry.min;
+			const room = Math.min(
+				PART_BYTES - partBytes - pageReserve,
+				Math.max(entry.min, LOAD_BYTES - bytes - pageReserve - later),
+				CATALOGUE_BYTES - bytes - pageReserve,
+			);
+			const item = row(entry.record, entry.copy, entry.view, room);
+			if (!item) {
+				done = true;
+				break listing;
+			}
+			const spent = cost(item);
+			rows.push(item);
+			partBytes += spent;
+			bytes += spent;
+			listed++;
+			oldest = Math.min(oldest, entry.copy.copiedAt);
 		}
 		before = page.next;
 		if (!before) {
@@ -247,34 +405,33 @@ async function load(from: Cursor | null, prefs: Preferences): Promise<ItemsResul
 			break;
 		}
 	}
-	const more = !done && part < MAX_PARTS;
-	const cursor: Cursor = more ? { newestId, oldest, before, part, listed } : { newestId, oldest };
-	const answer = { cursor: JSON.stringify(cursor), more, ttl: TTL };
+	const cursor: Cursor = done
+		? { s: seq, o: oldest, b: bytes }
+		: { s: seq, o: oldest, b: bytes, n: expected, l: listed, p: part, c: before };
+	const answer = { cursor: JSON.stringify(cursor), more: !done, ttl: TTL };
 	return from ? { ...answer, type: 'update', append: rows } : { ...answer, items: rows };
 }
 
-/** Copies stored since the catalogue's newest, and copies deleted since, or null to load. */
+/** Copies stored since the catalogue last listed, and copies deleted since, or null to load. */
 async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult | null> {
 	const page = await storage.list({ limit: PAGE });
 	if (page.records.length === 0) {
 		return {
 			items: [],
-			cursor: JSON.stringify({ oldest: Number.MAX_SAFE_INTEGER }),
+			cursor: JSON.stringify({ s: 0, o: Number.MAX_SAFE_INTEGER, b: 0 }),
 			ttl: TTL,
 		};
 	}
+	const fresh = page.records.filter((record) => seqOf(record) > cursor.s);
+	if (fresh.length === page.records.length && page.next) return null;
 	const cutoff = cutoffOf(prefs);
-	const prepend: CatalogueItem[] = [];
+	const shown: { record: StoredRecord; copy: Copy; view: View; min: number }[] = [];
 	const remove: string[] = [];
 	const notes: string[] = [];
-	let newestId = cursor.newestId;
-	let caughtUp = false;
-	for (const record of page.records) {
-		const stored = record.data as unknown as Stored;
-		if (record.id === cursor.newestId) {
-			caughtUp = true;
-			break;
-		}
+	let seq = cursor.s;
+	for (const record of fresh) {
+		const stored = data(record);
+		seq = Math.max(seq, stored.seq ?? 0);
 		if (stored.kind === 'cleared') return null;
 		if (stored.kind === 'removed') {
 			remove.push(...stored.ids);
@@ -283,20 +440,28 @@ async function changes(cursor: Cursor, prefs: Preferences): Promise<ItemsResult 
 		}
 		remove.push(record.id);
 		if (kept(stored, prefs, cutoff)) {
-			prepend.push(row(record, stored));
-			if (prepend.length === 1) newestId = record.id;
+			const copyView = view(stored);
+			shown.push({ record, copy: stored, view: copyView, min: minCost(copyView) });
 		}
 	}
-	if (!caughtUp && page.next) return null;
-	for (const id of notes) await storage.delete(id);
-	const next: Cursor = { newestId, oldest: cursor.oldest };
-	return {
-		type: 'update',
-		prepend,
-		remove: [...new Set(remove)],
-		cursor: JSON.stringify(next),
-		ttl: TTL,
-	};
+	const removed = [...new Set(remove)];
+	if (removed.length > PART_ROWS || shown.length > PART_ROWS) return null;
+	const prepend: CatalogueItem[] = [];
+	let reserve = shown.reduce((sum, entry) => sum + entry.min, 0);
+	let used = 0;
+	let oldest = cursor.o;
+	for (const entry of shown) {
+		reserve -= entry.min;
+		const room = Math.min(PART_BYTES - used, CATALOGUE_BYTES - cursor.b - used) - reserve;
+		const item = row(entry.record, entry.copy, entry.view, room);
+		if (!item) return null;
+		used += cost(item);
+		prepend.push(item);
+		oldest = Math.min(oldest, entry.copy.copiedAt);
+	}
+	for (const id of notes) if (id !== page.records[0].id) await storage.delete(id);
+	const next: Cursor = { s: seq, o: oldest, b: cursor.b + used };
+	return { type: 'update', prepend, remove: removed, cursor: JSON.stringify(next), ttl: TTL };
 }
 
 export async function items(ctx: ItemsContext): Promise<ItemsResult> {
@@ -308,7 +473,7 @@ export async function items(ctx: ItemsContext): Promise<ItemsResult> {
 		if (update) return update;
 	}
 	// Nothing has aged out since the catalogue was listed: keep it.
-	if (ctx.reason === 'expired' && cursor && cursor.oldest >= cutoffOf(prefs)) {
+	if (ctx.reason === 'expired' && cursor && cursor.o >= cutoffOf(prefs)) {
 		return { type: 'update', cursor: ctx.cursor ?? undefined, ttl: TTL };
 	}
 	return load(null, prefs);
@@ -374,28 +539,59 @@ async function everything(): Promise<StoredRecord[]> {
 	return records;
 }
 
-/** Deletes the oldest copies past `maxEntries`, and returns their IDs. */
-async function trim(prefs: Preferences): Promise<string[]> {
-	if ((await storage.usage()).entries <= prefs.maxEntries) return [];
-	const copies = (await everything()).filter((record) => isCopy(record.data as unknown as Stored));
-	const extra = copies.slice(prefs.maxEntries, prefs.maxEntries + MAX_DELETES);
+async function newestSeq(): Promise<number> {
+	const [newest] = (await storage.list({ limit: 1 })).records;
+	return newest ? seqOf(newest) : 0;
+}
+
+/**
+ * The copies to give up, in order, when storage has no room for `kind`: the oldest images
+ * first, as they went from memory before, then for text or files the oldest of every other
+ * copy. Text and files are never given up for an image.
+ */
+function evictable(records: StoredRecord[], kind: Copy['kind']): StoredRecord[] {
+	const oldestFirst = [...records].reverse().filter((record) => isCopy(data(record)));
+	const images = oldestFirst.filter((record) => data(record).kind === 'image');
+	if (kind === 'image') return images;
+	return [...images, ...oldestFirst.filter((record) => data(record).kind !== 'image')];
+}
+
+/** Deletes the oldest copies past `maxEntries` of `records`, newest first, and returns their IDs. */
+async function trim(records: StoredRecord[], prefs: Preferences): Promise<string[]> {
+	const extra = records
+		.filter((record) => isCopy(data(record)))
+		.slice(prefs.maxEntries, prefs.maxEntries + MAX_TRIM);
 	for (const record of extra) await storage.delete(record.id);
 	return extra.map((record) => record.id);
 }
 
-/** Deletes the oldest image other than `keep`, and returns its ID. */
-async function evictImage(keep: string | undefined): Promise<string | null> {
-	const images = (await everything()).filter(
-		(record) => (record.data as unknown as Stored).kind === 'image' && record.id !== keep,
-	);
-	const oldest = images.at(-1);
-	if (!oldest) return null;
-	await storage.delete(oldest.id);
-	return oldest.id;
+/** What a copy has given up so far to make room for itself, and what is left to give up. */
+interface Room {
+	kind: Copy['kind'];
+	gone: Set<string>;
+	records?: StoredRecord[];
+	victims?: StoredRecord[];
 }
 
-async function note(ids: string[]): Promise<void> {
-	if (ids.length > 0) await storage.put({ kind: 'removed', ids, copiedAt: Date.now() });
+function quotaExceeded(error: unknown): boolean {
+	return (error as { code?: string }).code === 'quota-exceeded';
+}
+
+/** Runs `write`, giving up the next copy `room` allows each time storage has no room for it. */
+async function withRoom<T>(room: Room, write: () => Promise<T>): Promise<T> {
+	for (;;) {
+		try {
+			return await write();
+		} catch (error) {
+			if (!quotaExceeded(error) || room.gone.size >= MAX_EVICTIONS) throw error;
+			room.records ??= await everything();
+			room.victims ??= evictable(room.records, room.kind);
+			const victim = room.victims.shift();
+			if (!victim) throw error;
+			await storage.delete(victim.id);
+			room.gone.add(victim.id);
+		}
+	}
 }
 
 export const events = {
@@ -406,35 +602,45 @@ export const events = {
 		const prefs = preferences(ctx);
 		const copy = stored(change, prefs);
 		if (!copy) return;
-		const evicted: string[] = [];
-		for (let attempt = 0; ; attempt++) {
+		let seq = (await newestSeq()) + 1;
+		const room: Room = { kind: copy.data.kind, gone: new Set() };
+		try {
+			let added: StoredRecord;
 			try {
-				await storage.put(copy.data, { key: copy.key, blobs: copy.blob ? [copy.blob] : [] });
-				break;
+				added = await withRoom(room, () =>
+					storage.put(
+						{ ...copy.data, seq },
+						{ key: copy.key, blobs: copy.blob ? [copy.blob] : [] },
+					),
+				);
 			} catch (error) {
-				const full = (error as { code?: string }).code === 'quota-exceeded';
-				// Images share the quota: the oldest go to make room for a new one, as they did
-				// in memory. Text and files are never dropped to make room for images.
-				const id =
-					full && copy.data.kind === 'image' && attempt < MAX_EVICTIONS
-						? await evictImage(undefined)
-						: null;
-				if (!id) {
-					await note(evicted);
-					throw error;
-				}
-				evicted.push(id);
+				// An image the copies older than it can't make room for is skipped, as it was in
+				// memory.
+				if (copy.data.kind === 'image' && quotaExceeded(error)) return;
+				throw error;
 			}
+			seq++;
+			let records = room.records && [
+				added,
+				...room.records.filter((record) => record.id !== added.id && !room.gone.has(record.id)),
+			];
+			if (!records && (await storage.usage()).entries > prefs.maxEntries)
+				records = await everything();
+			if (records) for (const id of await trim(records, prefs)) room.gone.add(id);
+		} finally {
+			if (room.gone.size > 0) {
+				await withRoom(room, () =>
+					storage.put({ kind: 'removed', ids: [...room.gone], copiedAt: Date.now(), seq }),
+				);
+			}
+			catalogue.invalidate();
 		}
-		evicted.push(...(await trim(prefs)));
-		await note(evicted);
-		catalogue.invalidate();
 	},
 };
 
 async function putBack(id: string): Promise<ActionEffect | null> {
 	const record = await storage.get(id);
-	const copy = record?.data as unknown as Stored | undefined;
+	const copy = record ? data(record) : undefined;
 	if (!record || !copy || !isCopy(copy))
 		return { type: 'toast', text: 'That copy is no longer in the clipboard history.' };
 	switch (copy.kind) {
@@ -462,13 +668,16 @@ export const actions = {
 		return (await putBack(id)) ?? { type: 'paste' };
 	},
 	async remove({ id }: { id: string }): Promise<void> {
+		const seq = (await newestSeq()) + 1;
 		await storage.delete(id);
-		await note([id]);
+		await storage.put({ kind: 'removed', ids: [id], copiedAt: Date.now(), seq });
 		catalogue.invalidate();
 	},
 	async clear(): Promise<ActionEffect> {
+		// The marker follows every record the catalogue may have listed, even once they are gone.
+		const seq = (await newestSeq()) + 1;
 		await storage.clear();
-		await storage.put({ kind: 'cleared', copiedAt: Date.now() });
+		await storage.put({ kind: 'cleared', copiedAt: Date.now(), seq });
 		catalogue.invalidate();
 		return { type: 'toast', text: 'Cleared the clipboard history' };
 	},
