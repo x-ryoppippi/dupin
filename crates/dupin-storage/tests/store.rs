@@ -10,6 +10,10 @@ use dupin_storage::{
 use serde_json::json;
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+/// Where a record file's sealed header starts: magic, format version, key tag, origin device
+/// ID, header length and header nonce come first.
+const HEADER_CIPHERTEXT: usize = 4 + 1 + 21 + 16 + 4 + 24;
+const KEY_TAG: usize = 5;
 
 #[derive(Clone, Default)]
 struct FakeClock(Arc<AtomicU64>);
@@ -50,8 +54,16 @@ impl Fixture {
         }
     }
 
+    fn root(&self) -> PathBuf {
+        self.dir.path().join("storage")
+    }
+
     fn storage(&self) -> Storage {
-        Storage::new(self.dir.path(), MemoryKey::new(self.key.clone())).with_clock(self.clock.clone())
+        Storage::new(self.root(), MemoryKey::new(self.key.clone())).with_clock(self.clock.clone())
+    }
+
+    fn other_key(&self) -> Storage {
+        Storage::new(self.root(), MemoryKey::random())
     }
 
     fn open(&self, limits: Limits) -> Store {
@@ -59,7 +71,11 @@ impl Fixture {
     }
 
     fn namespace(&self) -> PathBuf {
-        self.dir.path().join("clipboard")
+        self.root().join("clipboard")
+    }
+
+    fn state_path(&self) -> PathBuf {
+        self.dir.path().join("storage.state")
     }
 }
 
@@ -89,6 +105,24 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Gives a sealed file a vault key tag (kind 1, a vault ID and epoch 1); returns its bytes.
+fn retag_as_vault(path: &Path) -> Vec<u8> {
+    let mut bytes = fs::read(path).unwrap();
+    bytes[KEY_TAG] = 1;
+    bytes[KEY_TAG + 1..KEY_TAG + 17].fill(0x42);
+    bytes[KEY_TAG + 17..KEY_TAG + 21].copy_from_slice(&1u32.to_le_bytes());
+    fs::write(path, &bytes).unwrap();
+    bytes
+}
+
+/// Marks a sealed file as written in the next format; returns its bytes.
+fn bump_format(path: &Path) -> Vec<u8> {
+    let mut bytes = fs::read(path).unwrap();
+    bytes[4] += 1;
+    fs::write(path, &bytes).unwrap();
+    bytes
+}
+
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|window| window == needle)
 }
@@ -115,7 +149,7 @@ fn records_and_blobs_round_trip_across_reopening() {
     assert_eq!(got.created_at(), fixture.clock.now());
     assert_eq!(*store.read_blob(&got.blobs[0].handle).unwrap(), image);
     assert_eq!(&**store.read_blob(&got.blobs[1].handle).unwrap(), b"thumbnail");
-    assert_eq!(store.get(&"0".repeat(24).parse().unwrap()).unwrap(), None);
+    assert_eq!(store.get(&"0".repeat(32).parse().unwrap()).unwrap(), None);
 }
 
 #[test]
@@ -156,6 +190,7 @@ fn files_and_directories_are_private_to_the_user() {
             assert_eq!(mode(&file), 0o600, "{}", file.display());
         }
     }
+    assert_eq!(mode(&fixture.dir.path().join("storage.state")), 0o600);
 }
 
 #[test]
@@ -274,7 +309,7 @@ fn opening_drops_records_with_tampered_headers_or_swapped_names() {
     let file = |id: &dupin_storage::RecordId| records.join(format!("{id}.rec"));
 
     let mut bytes = fs::read(file(&ids[0])).unwrap();
-    bytes[20] ^= 0x80;
+    bytes[HEADER_CIPHERTEXT + 4] ^= 0x80;
     fs::write(file(&ids[0]), bytes).unwrap();
     // A sealed record moved under another record's name fails: the name is authenticated.
     fs::rename(file(&ids[1]), file(&ids[2])).unwrap();
@@ -406,7 +441,7 @@ fn a_damaged_key_check_is_rewritten_when_the_records_open() {
     bytes[last] ^= 1;
     fs::write(&check, &bytes).unwrap();
 
-    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    let other = fixture.other_key();
     assert!(matches!(
         other.open("clipboard", Limits::default()),
         Err(Error::WrongKey)
@@ -434,7 +469,7 @@ fn an_intact_key_check_refuses_another_key_even_with_no_records_left() {
     let check = fixture.namespace().join("key.check");
     let bytes = fs::read(&check).unwrap();
 
-    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    let other = fixture.other_key();
     assert!(matches!(
         other.open("clipboard", Limits::default()),
         Err(Error::WrongKey)
@@ -457,14 +492,19 @@ fn records_keep_their_real_time_after_the_clock_ran_ahead() {
     store.put(text("future")).unwrap();
     fixture.clock.set(now);
     let secret = store.put(text("secret")).unwrap();
+    assert_eq!(before.created_at(), now);
     assert_eq!(secret.created_at(), now);
-    assert!(secret.id > before.id);
+    assert_eq!(
+        texts(&store),
+        ["secret", "future", "before"],
+        "the clock never goes back"
+    );
     drop(store);
 
     let store = fixture.open(limits);
     let reopened = store.put(text("reopened")).unwrap();
     assert_eq!(reopened.created_at(), now);
-    assert!(reopened.id > secret.id);
+    assert_eq!(texts(&store)[0], "reopened");
 
     fixture.clock.advance(DAY * 30);
     assert_eq!(store.sweep().unwrap(), 3);
@@ -480,7 +520,7 @@ fn a_different_key_is_refused_without_touching_the_data() {
     drop(store);
     let before: Vec<_> = files_in(&fixture.namespace().join("records"));
 
-    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    let other = fixture.other_key();
     assert!(matches!(
         other.open("clipboard", Limits::default()),
         Err(Error::WrongKey)
@@ -514,8 +554,8 @@ fn namespaces_are_isolated() {
     drop(b);
 
     // a's sealed files copied into b's directory don't open there.
-    let from = fixture.dir.path().join("ext.a");
-    let to = fixture.dir.path().join("ext.b");
+    let from = fixture.root().join("ext.a");
+    let to = fixture.root().join("ext.b");
     for dir in ["records", "blobs"] {
         for file in files_in(&from.join(dir)) {
             fs::copy(&file, to.join(dir).join(file.file_name().unwrap())).unwrap();
@@ -544,7 +584,7 @@ fn one_store_per_namespace() {
 fn discard_removes_a_namespace_sealed_with_a_lost_key() {
     let fixture = Fixture::new();
     fixture.open(Limits::default()).put(text("x")).unwrap();
-    let other = Storage::new(fixture.dir.path(), MemoryKey::random());
+    let other = fixture.other_key();
     assert!(matches!(
         other.open("clipboard", Limits::default()),
         Err(Error::WrongKey)
@@ -744,11 +784,20 @@ fn concurrent_writers_lose_nothing() {
     let all = store.list(None, 200).unwrap();
     assert_eq!(all.records.len(), threads * per_thread);
     assert_eq!(all.next, None);
-    let mut ids: Vec<_> = all.records.iter().map(|record| record.id).collect();
-    let mut sorted = ids.clone();
-    sorted.sort_by(|a, b| b.cmp(a));
-    assert_eq!(ids, sorted, "newest first");
-    ids.dedup();
+    for thread in 0..threads {
+        let indices: Vec<_> = all
+            .records
+            .iter()
+            .filter(|record| record.data["thread"] == thread)
+            .map(|record| record.data["index"].as_u64().unwrap())
+            .collect();
+        assert_eq!(
+            indices,
+            (0..per_thread as u64).rev().collect::<Vec<_>>(),
+            "newest first"
+        );
+    }
+    let ids: std::collections::HashSet<_> = all.records.iter().map(|record| record.id).collect();
     assert_eq!(ids.len(), threads * per_thread);
     assert_eq!(
         files_in(&fixture.namespace().join("blobs")).len(),
@@ -843,4 +892,390 @@ fn a_key_provider_failure_is_not_cached() {
         Err(Error::Key(_))
     ));
     storage.open("clipboard", Limits::default()).unwrap();
+}
+
+#[test]
+fn upsert_replaces_the_record_for_a_key_and_keeps_its_creation_time() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let first = store
+        .upsert(
+            "theme",
+            NewRecord {
+                data: json!({ "text": "light" }),
+                blobs: vec![b"old icon".to_vec()],
+            },
+        )
+        .unwrap();
+    assert_eq!(first.id, store.key_id("theme"));
+    store.put(text("other")).unwrap();
+    fixture.clock.advance(DAY);
+    let second = store
+        .upsert(
+            "theme",
+            NewRecord {
+                data: json!({ "text": "dark" }),
+                blobs: vec![b"new icon".to_vec()],
+            },
+        )
+        .unwrap();
+    assert_eq!(second.id, first.id);
+    assert_eq!(second.created_at(), first.created_at());
+    assert_eq!(
+        texts(&store),
+        ["dark", "other"],
+        "a replaced record is the newest version"
+    );
+    assert_eq!(files_in(&fixture.namespace().join("records")).len(), 2);
+    assert_eq!(files_in(&fixture.namespace().join("blobs")).len(), 1);
+    assert_eq!(store.usage().entries, 2);
+    drop(store);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report(), Default::default());
+    assert_eq!(store.get(&first.id).unwrap(), Some(second));
+    let other = fixture.storage().open("settings", Limits::default()).unwrap();
+    assert_ne!(other.key_id("theme"), store.key_id("theme"));
+}
+
+#[test]
+fn logical_keys_never_reach_the_disk() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    store.upsert("PRIVATE-LOGICAL-KEY", text("x")).unwrap();
+    for file in files_in(&fixture.namespace().join("records")) {
+        assert!(!contains(&fs::read(&file).unwrap(), b"PRIVATE-LOGICAL-KEY"));
+        assert!(!file.to_string_lossy().contains("PRIVATE"));
+    }
+}
+
+#[test]
+fn the_same_blob_is_sealed_to_the_same_bytes() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let blob_file = |record: &dupin_storage::Record| {
+        fixture
+            .namespace()
+            .join("blobs")
+            .join(format!("{}.blob", record.blobs[0].handle))
+    };
+    let image = || NewRecord {
+        data: json!(null),
+        blobs: vec![b"image bytes".to_vec()],
+    };
+    let first = store.put(image()).unwrap();
+    let sealed = fs::read(blob_file(&first)).unwrap();
+    store.delete(&first.id).unwrap();
+    assert!(!blob_file(&first).exists());
+    let again = store.put(image()).unwrap();
+    assert_eq!(fs::read(blob_file(&again)).unwrap(), sealed);
+}
+
+#[test]
+fn delete_and_clear_leave_no_tombstones_in_a_local_namespace() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let gone = store.put(text("gone")).unwrap();
+    store.put(text("kept")).unwrap();
+    assert!(store.delete(&gone.id).unwrap());
+    assert_eq!(files_in(&fixture.namespace().join("records")).len(), 1);
+    store.clear().unwrap();
+    assert!(files_in(&fixture.namespace().join("records")).is_empty());
+    let after = store.upsert("k", text("after")).unwrap();
+    assert_eq!(texts(&store), ["after"]);
+    drop(store);
+    assert_eq!(
+        fixture.open(Limits::default()).get(&after.id).unwrap(),
+        Some(after)
+    );
+}
+
+#[test]
+fn a_page_cursor_survives_its_record_being_deleted() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    for index in 0..4 {
+        store.put(text(&index.to_string())).unwrap();
+    }
+    let first = store.list(None, 2).unwrap();
+    store.delete(&first.records[1].id).unwrap();
+    let cursor: dupin_storage::Cursor = first.next.unwrap().to_string().parse().unwrap();
+    let rest = store.list(Some(&cursor), 10).unwrap();
+    let names: Vec<_> = rest
+        .records
+        .iter()
+        .map(|record| record.data["text"].clone())
+        .collect();
+    assert_eq!(names, [json!("1"), json!("0")]);
+}
+
+#[test]
+fn files_under_a_key_this_device_lacks_are_skipped_not_deleted() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let foreign = store
+        .put(NewRecord {
+            data: json!({ "text": "foreign" }),
+            blobs: vec![b"foreign blob".to_vec()],
+        })
+        .unwrap();
+    store.put(text("mine")).unwrap();
+    drop(store);
+    let record = fixture
+        .namespace()
+        .join("records")
+        .join(format!("{}.rec", foreign.id));
+    let bytes = retag_as_vault(&record);
+    let blobs = files_in(&fixture.namespace().join("blobs"));
+
+    let store = fixture.open(Limits::default());
+    let report = store.open_report();
+    assert_eq!(report.skipped_records, 1);
+    assert_eq!(report.corrupt_records, 0);
+    assert_eq!(texts(&store), ["mine"]);
+    assert_eq!(fs::read(&record).unwrap(), bytes);
+    assert_eq!(files_in(&fixture.namespace().join("blobs")), blobs);
+    store.clear().unwrap();
+    assert!(
+        record.exists(),
+        "clearing this key's records leaves another key's alone"
+    );
+}
+
+#[test]
+fn blobs_a_skipped_record_may_use_outlive_this_keys_records_and_count_against_quota() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let shared = b"shared blob".to_vec();
+    let only = b"only the skipped record's".to_vec();
+    let foreign = store
+        .put(NewRecord {
+            data: json!({ "text": "foreign" }),
+            blobs: vec![shared.clone(), only.clone()],
+        })
+        .unwrap();
+    let mine = store
+        .put(NewRecord {
+            data: json!({ "text": "mine" }),
+            blobs: vec![shared.clone()],
+        })
+        .unwrap();
+    drop(store);
+    retag_as_vault(
+        &fixture
+            .namespace()
+            .join("records")
+            .join(format!("{}.rec", foreign.id)),
+    );
+    let blob_dir = fixture.namespace().join("blobs");
+    let blobs = files_in(&blob_dir);
+    assert_eq!(blobs.len(), 2);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    let kept = (shared.len() + only.len()) as u64;
+    assert_eq!(store.usage().entries, 1);
+    assert!(store.usage().bytes > kept);
+    assert!(matches!(
+        store.read_blob(&foreign.blobs[1].handle),
+        Err(Error::NotFound)
+    ));
+
+    store.delete(&mine.id).unwrap();
+    let again = store
+        .put(NewRecord {
+            data: json!({ "text": "again" }),
+            blobs: vec![only.clone(), b"written this run".to_vec()],
+        })
+        .unwrap();
+    assert_eq!(again.blobs[0].handle, foreign.blobs[1].handle);
+    assert_eq!(&**store.read_blob(&again.blobs[0].handle).unwrap(), &only[..]);
+    store.delete(&again.id).unwrap();
+    assert_eq!(files_in(&blob_dir), blobs, "only the blob written this run goes");
+    assert_eq!(store.usage().bytes, kept);
+
+    let tight = Limits {
+        max_total_bytes: kept + 8,
+        max_item_bytes: kept + 8,
+        ..Limits::default()
+    };
+    store.set_limits(tight).unwrap();
+    store.put(text("x")).unwrap();
+    assert!(
+        texts(&store).is_empty(),
+        "kept blobs take their share of the quota"
+    );
+    assert_eq!(files_in(&blob_dir), blobs);
+}
+
+#[test]
+fn files_in_a_newer_format_are_skipped_not_deleted() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let newer = store.put(text("newer")).unwrap();
+    drop(store);
+    let record = fixture
+        .namespace()
+        .join("records")
+        .join(format!("{}.rec", newer.id));
+    let bytes = bump_format(&record);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    assert!(texts(&store).is_empty());
+    assert_eq!(fs::read(&record).unwrap(), bytes);
+}
+
+#[test]
+fn a_key_check_in_a_newer_format_is_kept_and_the_records_judge_the_key() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let older = store.put(text("older")).unwrap();
+    let newer = store.put(text("newer")).unwrap();
+    drop(store);
+    let records = fixture.namespace().join("records");
+    let check = fixture.namespace().join("key.check");
+    let check_bytes = bump_format(&check);
+    bump_format(&records.join(format!("{}.rec", newer.id)));
+    let record_files = files_in(&records);
+
+    assert!(matches!(
+        fixture.other_key().open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(files_in(&records), record_files);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    assert_eq!(store.open_report().corrupt_records, 0);
+    assert_eq!(texts(&store), ["older"]);
+    store.delete(&older.id).unwrap();
+    drop(store);
+    assert_eq!(fs::read(&check).unwrap(), check_bytes);
+
+    // Only files this build can't judge are left: the namespace opens, and nothing changes.
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    assert!(texts(&store).is_empty());
+    drop(store);
+    assert_eq!(fs::read(&check).unwrap(), check_bytes);
+    assert_eq!(files_in(&records).len(), 1);
+}
+
+#[test]
+fn a_state_in_a_newer_format_refuses_every_open_and_is_kept() {
+    let fixture = Fixture::new();
+    let device = fixture.open(Limits::default()).device_id();
+    let state = fixture.state_path();
+    let bytes = bump_format(&state);
+
+    let storage = fixture.storage();
+    assert!(matches!(
+        storage.open("clipboard", Limits::default()),
+        Err(Error::NewerFormat)
+    ));
+    assert!(matches!(
+        storage.open("fresh", Limits::default()),
+        Err(Error::NewerFormat)
+    ));
+    assert_eq!(fs::read(&state).unwrap(), bytes);
+    assert!(!fixture.root().join("fresh/key.check").exists());
+
+    fs::write(&state, {
+        let mut restored = bytes;
+        restored[4] -= 1;
+        restored
+    })
+    .unwrap();
+    assert_eq!(fixture.open(Limits::default()).device_id(), device);
+}
+
+#[test]
+fn a_new_namespace_under_another_key_leaves_the_device_state_alone() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let device = store.device_id();
+    let before = store.put(text("before")).unwrap();
+    drop(store);
+    let state = fixture.state_path();
+    let bytes = fs::read(&state).unwrap();
+
+    let other = fixture.other_key();
+    assert!(matches!(
+        other.open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert!(matches!(
+        other.open("ext.new", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(fs::read(&state).unwrap(), bytes);
+    assert!(!fixture.root().join("ext.new/key.check").exists());
+
+    let storage = fixture.storage();
+    let fresh = storage.open("ext.new", Limits::default()).unwrap();
+    assert_eq!(fresh.device_id(), device);
+    let after = fresh.put(text("after")).unwrap();
+    assert_eq!(after.device(), device);
+    drop(fresh);
+    let store = storage.open("clipboard", Limits::default()).unwrap();
+    assert_eq!(store.get(&before.id).unwrap(), Some(before));
+}
+
+#[test]
+fn a_damaged_state_is_replaced_when_a_namespace_proves_the_key() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let device = store.device_id();
+    store.put(text("kept")).unwrap();
+    drop(store);
+    let state = fixture.state_path();
+    let mut bytes = fs::read(&state).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&state, &bytes).unwrap();
+
+    let store = fixture.storage().open("ext.new", Limits::default()).unwrap();
+    assert_ne!(store.device_id(), device);
+    assert_ne!(fs::read(&state).unwrap(), bytes);
+    drop(store);
+    assert_eq!(texts(&fixture.open(Limits::default())), ["kept"]);
+}
+
+#[test]
+fn records_carry_the_device_that_wrote_them() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let put = store.put(text("x")).unwrap();
+    assert_eq!(put.device(), store.device_id());
+    let device = store.device_id();
+    drop(store);
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.device_id(), device);
+    assert_eq!(store.get(&put.id).unwrap().unwrap().device(), device);
+    assert_eq!(
+        device.to_string().parse::<dupin_storage::DeviceId>().unwrap(),
+        device
+    );
+}
+
+#[test]
+fn a_data_directory_moved_to_other_hardware_writes_as_a_new_device() {
+    let fixture = Fixture::new();
+    let open = |hardware: &[u8]| {
+        Storage::new(fixture.root(), MemoryKey::new(fixture.key.clone()))
+            .with_hardware_id(hardware)
+            .open("clipboard", Limits::default())
+            .unwrap()
+    };
+    let store = open(b"machine-a");
+    let written = store.put(text("x")).unwrap();
+    let here = store.device_id();
+    drop(store);
+    assert_eq!(open(b"machine-a").device_id(), here);
+
+    let store = open(b"machine-b");
+    assert_ne!(store.device_id(), here);
+    assert_eq!(store.get(&written.id).unwrap().unwrap().device(), here);
+    assert_eq!(store.put(text("y")).unwrap().device(), store.device_id());
 }

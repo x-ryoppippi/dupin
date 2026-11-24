@@ -15,7 +15,14 @@ dupin ext dev .
 dupin ext run . --query Dupin
 ```
 
-`fixtures/search.json` holds a query and the items `search` should answer with.
+## Test
+
+```sh
+dupin ext test .
+dupin ext snap . fixtures/search.json search.png
+```
+
+`fixtures/search.json` types a query, chooses an action and states what the extension should answer. `test` replays every fixture in `fixtures/` through the extension host, with the fixture's fixed clock, random seed, locale and time zone, and shows what differs; `--update` rewrites the expectations from what the extension answers now. `snap` renders the panel after a fixture's last step as a PNG.
 
 [`dupin.d.ts`](./dupin.d.ts) describes the API. Dupin runs JavaScript, and TypeScript once it has erased the types: no Node built-ins, files, network or processes.
 {{build_section}}

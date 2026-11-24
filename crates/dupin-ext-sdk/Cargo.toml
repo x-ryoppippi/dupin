@@ -1,6 +1,6 @@
 [package]
 name = "dupin-ext-sdk"
-description = "Author-side tooling for Dupin extensions: scaffolding, bundling and the development copy."
+description = "Author-side tooling for Dupin extensions: scaffolding, bundling, the development copy and fixtures."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ license.workspace = true
 
 [dependencies]
 dupin-js-runtime = { path = "../dupin-js-runtime" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]

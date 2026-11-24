@@ -927,6 +927,7 @@ name = "dupin-ext-sdk"
 version = "0.0.0"
 dependencies = [
  "dupin-js-runtime",
+ "serde",
  "serde_json",
  "tempfile",
 ]

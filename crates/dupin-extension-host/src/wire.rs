@@ -8,12 +8,12 @@
 use std::io::{self, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Exports, Reason, Row};
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -32,6 +32,8 @@ pub enum ToHelper {
         entry: String,
         modules: Vec<ModuleSpan>,
         call: Call,
+        /// A fixture's fixed clock and seed; the launcher's own runs carry none.
+        environment: Option<Environment>,
     },
     /// Stop run `id` if it is still running.
     Cancel { id: u64 },
@@ -210,6 +212,7 @@ mod tests {
             entry: "main.js".into(),
             modules,
             call: Call::Compile,
+            environment: None,
         };
         write(&mut bytes, &message, &tail).unwrap();
         write(&mut bytes, &ToHelper::Cancel { id: 2 }, &[]).unwrap();

@@ -177,7 +177,11 @@ impl Convert for Extension {
     }
 }
 
-fn row_item(extension: &Extension, row: Row, catalogue: bool) -> (Item, Option<Arc<Detail>>, Option<String>) {
+pub(super) fn row_item(
+    extension: &Extension,
+    row: Row,
+    catalogue: bool,
+) -> (Item, Option<Arc<Detail>>, Option<String>) {
     let Row {
         id,
         title,
