@@ -1,6 +1,6 @@
-//! Dupin's side: starts a helper for each package to compile and one shared helper, on first
-//! use, for the calls that run them, and stops a helper when a call outlives its deadline, ignores a cancellation, outgrows its memory
-//! or dies.
+//! Dupin's side: starts one shared helper, on first use, for searches, and a helper of its own
+//! for each compile, action and event, and stops a helper when a call outlives its deadline,
+//! ignores a cancellation, outgrows its memory or dies.
 
 use std::io;
 use std::os::fd::OwnedFd;
@@ -89,8 +89,8 @@ impl Compiled {
     }
 }
 
-/// One helper process shared by every JavaScript extension, used by one call at a time, and a
-/// helper of its own for each compile.
+/// One helper process shared by every JavaScript extension's searches, used by one call at a
+/// time, and a helper of its own for each compile, action and event.
 pub struct Host {
     shared: Arc<Shared>,
 }
@@ -177,14 +177,13 @@ impl Host {
             work: Work::Compile,
             allowance,
         };
-        let mut helper = Helper::start(&self.shared.launch)?;
-        match helper.greet(&request, helper.started + HANDSHAKE, is_cancelled) {
-            Greeting::Ready => {}
-            Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
-        }
-        let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
-        let deadline = Instant::now() + limit;
-        let (answer, tail) = settle(helper.run(id, request, deadline, is_cancelled, &no_services()))?;
+        let (answer, tail) = self.alone(
+            request,
+            |helper| helper.started + HANDSHAKE,
+            || Instant::now() + limit,
+            is_cancelled,
+            &no_services(),
+        )?;
         let Answer::Compiled { modules } = answer else {
             return Err(mismatch());
         };
@@ -248,7 +247,8 @@ impl Host {
     }
 
     /// Calls `actions[name](data)` in `package`, which the user chose, answering its host
-    /// requests with `services`.
+    /// requests with `services`. An action may wait on the network or a program for far longer
+    /// than a search may wait for the shared helper, so it runs in a helper of its own.
     pub fn action(
         &self,
         package: &Compiled,
@@ -262,9 +262,10 @@ impl Host {
             name: name.into(),
             data: data.clone(),
         };
-        match self.call(
+        match self.alone(
             Request::run(package, call, Work::Action),
-            deadline,
+            |_| deadline,
+            || deadline,
             is_cancelled,
             services,
         )? {
@@ -273,7 +274,8 @@ impl Host {
         }
     }
 
-    /// Calls `events[name](event)` in `package`, answering its host requests with `services`.
+    /// Calls `events[name](event)` in `package`, answering its host requests with `services`,
+    /// in a helper of its own so that background work never holds up typing.
     pub fn event(
         &self,
         package: &Compiled,
@@ -287,9 +289,10 @@ impl Host {
             name: name.into(),
             event: event.clone(),
         };
-        match self.call(
+        match self.alone(
             Request::run(package, call, Work::Event),
-            deadline,
+            |_| deadline,
+            || deadline,
             is_cancelled,
             services,
         )? {
@@ -336,6 +339,27 @@ impl Host {
             lease.helper = None;
         }
         settle(answer)
+    }
+
+    /// Runs `request` in a helper started for it alone and stopped when it ends, which neither
+    /// waits for nor holds the shared helper. `greet_by` is read from the new helper as it
+    /// starts and `deadline` once it is ready.
+    fn alone(
+        &self,
+        request: Request<'_>,
+        greet_by: impl FnOnce(&Helper) -> Instant,
+        deadline: impl FnOnce() -> Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<(Answer, Vec<u8>), RunError> {
+        let mut helper = Helper::start(&self.shared.launch)?;
+        match helper.greet(&request, greet_by(&helper), is_cancelled) {
+            Greeting::Ready => {}
+            Greeting::Waiting(error) | Greeting::Failed(error) => return Err(error),
+        }
+        let id = self.shared.next_call.fetch_add(1, Ordering::Relaxed);
+        let deadline = deadline();
+        settle(helper.run(id, request, deadline, is_cancelled, services))
     }
 
     /// Waits for the helper to be free, unless the caller gives up first.

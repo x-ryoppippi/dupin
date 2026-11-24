@@ -161,3 +161,54 @@ fn a_service_slower_than_the_call_has_its_late_reply_dropped() {
         .unwrap();
     assert_eq!(titles(&rows), ["stored \"x\""]);
 }
+
+#[test]
+fn actions_and_events_waiting_on_a_service_never_hold_up_searches() {
+    skip_inside_a_sandbox!();
+    let host = Arc::new(host());
+    let package = package(
+        r#"import { storage } from 'dupin';
+           export const search = (query) => [{ title: query }];
+           export const actions = { async wait() { await storage.get('slow'); } };
+           export const events = { async clipboard() { await storage.get('slow'); } };"#,
+    );
+    let slow = Arc::new(Fixture {
+        delay: Duration::from_secs(3),
+        ..Fixture::default()
+    });
+    let background: Vec<_> = [true, false]
+        .into_iter()
+        .map(|action| {
+            let (host, package, slow) = (host.clone(), package.clone(), services(&slow));
+            std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let none = serde_json::Value::Null;
+                if action {
+                    host.action(&package, "wait", &none, deadline, &|| false, &slow)
+                        .map(drop)
+                } else {
+                    host.event(&package, "clipboard", &none, deadline, &|| false, &slow)
+                }
+            })
+        })
+        .collect();
+    while slow.seen.lock().unwrap().len() < 2 {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let started = Instant::now();
+    let rows = host
+        .search(
+            &package,
+            "typed",
+            10,
+            Instant::now() + Duration::from_secs(2),
+            &|| false,
+            &services(&Arc::new(Fixture::default())),
+        )
+        .unwrap();
+    assert_eq!(titles(&rows), ["typed"]);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    for call in background {
+        call.join().unwrap().unwrap();
+    }
+}
