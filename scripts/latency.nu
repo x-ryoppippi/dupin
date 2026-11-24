@@ -6,7 +6,8 @@
 # `run` measures each scenario in scripts/latency/scenarios.toml headless, with fixtures,
 # and writes the percentiles as JSON. `compare` holds one result set against another (main
 # against a pull request), and `parity` holds each feature's other implementations against
-# its native one within a result set. See docs/development.md, "Keypress latency".
+# its native one: the same run's, or the one `baseline` recorded from the last commit that had
+# it. See docs/development.md, "Keypress latency".
 def main []: nothing -> nothing {
     help main
 }
@@ -118,26 +119,114 @@ def "main compare" [
     judge $pairs $tolerance $floor $report $summary "Keypress latency"
 }
 
-# Hold every implementation other than `native` against the native one of the same feature,
-# within one result set. Passes when no feature declares a second implementation.
+# Hold every implementation other than `native` against the native one of the same scenario:
+# the run's own, or, for a feature whose native implementation is gone, the one recorded in
+# `--baseline` from the last commit that had it. Passes when nothing has a native to match.
 def "main parity" [
     results: path
+    --baseline: path # Native results recorded from earlier commits; scripts/latency/native-baseline.json
     --tolerance: float = 10.0 # Percent of native's p95
     --floor: duration = 1ms # The least regression ever allowed
     --summary: path # Also append the comparison to this Markdown file
 ]: nothing -> nothing {
     let all = open $results | get results
-    let pairs = $all | where implementation != "native" | each {|result|
-        {
-            candidate: $result
-            baseline: ($all | where id == $result.id and implementation == "native" | get 0?)
+    let recorded = open ($baseline | default ($env.FILE_PWD | path join latency native-baseline.json))
+    | get results
+    let unmeasured = unmeasured $all $recorded
+    if ($unmeasured | is-not-empty) {
+        error make {
+            msg: $"($unmeasured | str join ', ') has a recorded native baseline but no result in ($results); a port must be measured against it"
         }
     }
+    let pairs = parity-pairs $all $recorded
     if ($pairs | is-empty) {
         print --stderr "no feature declares an implementation besides native; nothing to hold to parity"
         return
     }
     judge $pairs $tolerance $floor false $summary "Extension parity"
+}
+
+# Each implementation other than `native` in `results`, paired with the run's native result of
+# its scenario or, failing that, the one `recorded` from the last commit that had it.
+export def parity-pairs [results: list<record>, recorded: list<record>]: nothing -> list<record> {
+    $results | where implementation != "native" | each {|result|
+        let native = $results | where id == $result.id and implementation == "native" | get 0?
+        let earlier = $recorded
+        | where id == $result.id
+        | get 0?
+        | if $in != null { upsert implementation $"native at ($in.commit | str substring 0..<7)" } else { $in }
+        {candidate: $result, baseline: ($native | default $earlier)}
+    }
+}
+
+# The recorded scenarios `results` has no result for. In CI that is a port whose scenario was
+# dropped or renamed, which would otherwise go unmeasured.
+export def unmeasured [results: list<record>, recorded: list<record>]: nothing -> list<string> {
+    let ids = $results | get id
+    $recorded | get id | where {|id| $id not-in $ids }
+}
+
+# Record the native results of `feature` in the native baseline that `parity` holds its port
+# to once the native implementation is deleted. `results` are `run` outputs of the last commit
+# that has it, measured by the Latency workflow (see docs/development.md, "Native baselines");
+# each figure is the median of theirs.
+def "main baseline" [
+    feature: string
+    ...results: path
+    --out: path # scripts/latency/native-baseline.json
+]: nothing -> nothing {
+    let out = $out | default ($env.FILE_PWD | path join latency native-baseline.json)
+    if ($results | is-empty) {
+        error make {msg: "name at least one results.json"}
+    }
+    let reports = $results | each { open }
+    let commits = $reports | get commit | uniq
+    if ($commits | length) != 1 {
+        error make {
+            msg: $"the results come from more than one commit: ($commits | str join ', ')"
+        }
+    }
+    let measured = $reports
+    | each {|report| $report.results | where feature == $feature and implementation == "native" }
+    | flatten
+    if ($measured | is-empty) {
+        error make {msg: $"the results have no native ($feature)"}
+    }
+    let median = {|rows: list<record>, get_value: closure|
+        $rows | each $get_value | math median
+    }
+    let recorded = $measured | group-by id | items {|id, rows|
+        {
+            id: $id
+            feature: $feature
+            implementation: "native"
+            commit: $commits.0
+            runs: ($rows | length)
+            p50_ms: (do $median $rows {|row| $row.p50_ms })
+            p95_ms: (do $median $rows {|row| $row.p95_ms })
+            p99_ms: (do $median $rows {|row| $row.p99_ms })
+            stages: (stage-names | each {|stage|
+                {
+                    $stage: {
+                        p50: (do $median $rows {|row| $row.stages | get $stage | get p50 })
+                        p95: (do $median $rows {|row| $row.stages | get $stage | get p95 })
+                    }
+                }
+            } | into record)
+        }
+    }
+    let kept = if ($out | path exists) {
+        open $out | get results | where feature != $feature
+    } else {
+        []
+    }
+    {
+        schema: 1
+        results: ($kept ++ $recorded | sort-by id)
+    }
+    | to json --indent 2
+    | save --force $out
+    print --stderr $"recorded ($recorded | length) scenarios of ($feature) from ($commits.0) in ($out)"
 }
 
 # The implementation `label` of a feature, with what it `extends` filled in: a port names only

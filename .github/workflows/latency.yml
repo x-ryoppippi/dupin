@@ -3,7 +3,9 @@ name: Latency
 # Keypress-to-results latency (scripts/latency.nu). Main's runs are the baseline pull requests
 # are compared with; a pull request only reports against it, because a shared runner's noise
 # is larger than many real changes. A feature whose bundled extension is declared beside its
-# native implementation must match it, so that comparison fails the job.
+# native implementation must match it, or, once the native one is deleted, match what this job
+# measured of it at its last commit (scripts/latency/native-baseline.json), so that comparison
+# fails the job. Dispatching with `ref` measures that commit instead, to record such a baseline.
 on:
   push:
     branches: [main]
@@ -33,9 +35,14 @@ on:
       - 'nix/cargo-vendor.nix'
       - '.github/workflows/latency.yml'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit to measure instead of the branch's head
+        type: string
+        required: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -50,6 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref }}
           persist-credentials: false
 
       - uses: ./.github/actions/setup-nix-cache

@@ -1,5 +1,13 @@
 use std/assert
-use ../latency.nu [percentiles resolve typing-script unanswered verdicts]
+use ../latency.nu [
+    parity-pairs
+    percentiles
+    resolve
+    typing-script
+    unanswered
+    unmeasured
+    verdicts
+]
 
 def result [id: string, implementation: string, p95: float]: nothing -> record {
     {id: $id, implementation: $implementation, p95_ms: $p95}
@@ -20,6 +28,41 @@ def main [] {
     assert equal (verdict (result a native 20.0) (result a native 22.1)) regressed
     assert equal (verdict (result a native 20.0) (result a extension 3.0)) ok
     assert equal (verdict null (result a extension 3.0)) new
+
+    # A port is held to its run's native implementation or, once that is deleted, to the one
+    # recorded from the last commit that had it; a recorded scenario must still be measured.
+    let recorded = [
+        (
+            {
+                id: b
+                feature: b
+                commit: "b11a968d0"
+                p95_ms: 1.5
+            }
+            | insert implementation native
+        )
+    ]
+    let run = [
+        (result a native 2.0)
+        (result a extension 2.5)
+        (result b extension 2.4)
+        (result c extension 1.0)
+    ]
+    let pairs = parity-pairs $run $recorded
+    assert equal ($pairs | each { $in.baseline?.implementation? | default none }) [native "native at b11a968" none]
+    assert equal ($pairs | get candidate.id) [a b c]
+    assert equal (verdicts $pairs 10.0 1ms | get verdict) [ok ok new]
+    assert equal (
+        parity-pairs [
+            (result b native 1.0)
+            (result b extension 2.4)
+        ] $recorded
+        | get 0.baseline.p95_ms
+    ) 1.0
+    assert equal (unmeasured $run $recorded) []
+    assert equal (unmeasured [
+        (result a extension 2.5)
+    ] $recorded) [b]
 
     # Every keypress must search the feature's provider; only a pass's last must show its rows.
     let pass = [

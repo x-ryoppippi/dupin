@@ -279,6 +279,22 @@ extensions = "scripts/latency/snippets.extensions"
 
 The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity.
 
+### Native baselines
+
+Once a port lands and its native implementation is deleted, CI has no native run to hold it to. `parity` then holds each scenario to the native results recorded in `scripts/latency/native-baseline.json`, which come from the last commit that had the native implementation, measured by the Latency workflow on the same runner class, with the same tolerance. A scenario recorded there that the run doesn't measure fails the check, so a port can't go unmeasured by dropping or renaming its scenario.
+
+Record a feature's baseline in the pull request that deletes its native implementation, and refresh it whenever the runner class, the benchmark (`scripts/latency.nu`, the scenarios or the headless fixtures) or what a fair comparison means changes:
+
+```sh
+# Measure the last commit with the native implementation; each run is the median of three.
+gh workflow run latency.yml --ref <your branch> -f ref=<last native commit>
+gh run download <run id> --name latency --dir target/latency/native-1
+# Repeat for more runs if you like, then record the median of each figure:
+nu scripts/latency.nu baseline dictionary target/latency/native-*/results.json
+```
+
+`baseline` replaces only that feature's entries and records the commit they came from, which `parity` names in its table. Commit the file with the change that needs it.
+
 The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
 
 Scripts in this repository are written in Nushell.
