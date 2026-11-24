@@ -1,0 +1,944 @@
+[
+	{
+		"run": 45287577176,
+		"branch": "feat/files-exec-services",
+		"setup_seconds": 31,
+		"build_step_seconds": 145,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (8.4 MiB in 4.0s, 13.5 MiB/s); manifest m3#228",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45286665071,
+		"branch": "feat/clipboard-images-files",
+		"setup_seconds": 32,
+		"build_step_seconds": 181,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 46 already cached (8.4 MiB in 5.1s, 5.1 MiB/s); manifest m3#228",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45286440200,
+		"branch": "feat/latency-bench",
+		"setup_seconds": 31,
+		"build_step_seconds": 292,
+		"fetched": "these 163 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 9 paths, 45 already cached (964.6 MiB in 7.0s, 253.7 MiB/s); manifest m3#230",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45286046109,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 29,
+		"build_step_seconds": 331,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 48 already cached (8.3 MiB in 3.9s, 13.4 MiB/s); manifest m3#223",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-6852978dc2195920-vendor",
+			"dupin-vendor-6852978dc2195920-vendor-staging"
+		],
+		"unservable_nars": 2
+	},
+	{
+		"run": 45285921808,
+		"branch": "main",
+		"setup_seconds": 31,
+		"build_step_seconds": 159,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (8.3 MiB in 3.5s, 14.0 MiB/s); manifest m3#226",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45285529813,
+		"branch": "feat/extension-sdk",
+		"setup_seconds": 31,
+		"build_step_seconds": 336,
+		"fetched": "these 180 paths will be fetched (3.4 GiB download, 3.7 GiB unpacked)",
+		"drain": "hestia drain: pushed 12 paths, 43 already cached (966.3 MiB in 7.1s, 250.3 MiB/s); manifest m3#226",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-c884abf439c80676-vendor",
+			"dupin-vendor-c884abf439c80676-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45285306920,
+		"branch": "feat/http-service",
+		"setup_seconds": 31,
+		"build_step_seconds": 342,
+		"fetched": "these 179 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (965.8 MiB in 8.1s, 203.0 MiB/s); manifest m3#226",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-f74d978e20065c08-vendor",
+			"dupin-vendor-f74d978e20065c08-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45285198900,
+		"branch": "feat/encrypted-storage",
+		"setup_seconds": 29,
+		"build_step_seconds": 322,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 13 paths, 43 already cached (978.1 MiB in 8.4s, 193.1 MiB/s); manifest m3#225",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-0a8a62bd94e70fc6-vendor",
+			"dupin-vendor-0a8a62bd94e70fc6-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45285145469,
+		"branch": "feat/extension-install",
+		"setup_seconds": 31,
+		"build_step_seconds": 338,
+		"fetched": "these 218 paths will be fetched (3.5 GiB download, 3.8 GiB unpacked)",
+		"drain": "hestia drain: pushed 12 paths, 43 already cached (965.4 MiB in 8.4s, 197.6 MiB/s); manifest m3#225",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-971c135fc8d0a694-vendor",
+			"dupin-vendor-971c135fc8d0a694-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45284956533,
+		"branch": "feat/files-exec-services",
+		"setup_seconds": 31,
+		"build_step_seconds": 342,
+		"fetched": "these 178 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 12 paths, 43 already cached (965.0 MiB in 6.8s, 273.5 MiB/s); manifest m3#225",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-a35983daceb8e5c8-vendor",
+			"dupin-vendor-a35983daceb8e5c8-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45284582336,
+		"branch": "feat/extension-package-json",
+		"setup_seconds": 32,
+		"build_step_seconds": 182,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.7 MiB in 3.9s, 11.2 MiB/s); manifest m3#228",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45284042054,
+		"branch": "fix/sections-detail-polish",
+		"setup_seconds": 31,
+		"build_step_seconds": 145,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.7 MiB in 4.0s, 12.5 MiB/s); manifest m3#228",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45283635757,
+		"branch": "docs/js-runtime-gate-decision",
+		"setup_seconds": 30,
+		"build_step_seconds": 107,
+		"fetched": "these 4 paths will be fetched (59.4 MiB download, 59.4 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#228",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45281985809,
+		"branch": "fix/sections-detail-polish",
+		"setup_seconds": 31,
+		"build_step_seconds": 153,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (8.4 MiB in 3.7s, 13.2 MiB/s); manifest m3#225",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45281382917,
+		"branch": "docs/js-runtime-gate-decision",
+		"setup_seconds": 32,
+		"build_step_seconds": 122,
+		"fetched": "these 4 paths will be fetched (59.4 MiB download, 59.4 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#225",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45281064210,
+		"branch": "feat/extension-package-json",
+		"setup_seconds": 31,
+		"build_step_seconds": 175,
+		"fetched": "these 156 paths will be fetched (4.9 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (8.5 MiB in 3.7s, 14.0 MiB/s); manifest m3#225",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45278762981,
+		"branch": "main",
+		"setup_seconds": 33,
+		"build_step_seconds": 341,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 12 paths, 43 already cached (970.7 MiB in 7.4s, 234.1 MiB/s); manifest m3#222",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-6852978dc2195920-vendor",
+			"dupin-vendor-6852978dc2195920-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45276725338,
+		"branch": "feat/js-extensions",
+		"setup_seconds": 31,
+		"build_step_seconds": 359,
+		"fetched": "these 178 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (966.7 MiB in 8.0s, 206.5 MiB/s); manifest m3#223",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-6852978dc2195920-vendor",
+			"dupin-vendor-6852978dc2195920-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45276461749,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 32,
+		"build_step_seconds": 344,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (950.1 MiB in 8.1s, 198.9 MiB/s); manifest m3#217",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-c0a3d9dff55f9524-vendor",
+			"dupin-vendor-c0a3d9dff55f9524-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45276311601,
+		"branch": "main",
+		"setup_seconds": 33,
+		"build_step_seconds": 345,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (949.9 MiB in 7.5s, 206.2 MiB/s); manifest m3#220",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-c0a3d9dff55f9524-vendor",
+			"dupin-vendor-c0a3d9dff55f9524-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45273641962,
+		"branch": "feat/js-runtime-experiment",
+		"setup_seconds": 31,
+		"build_step_seconds": 148,
+		"fetched": "these 4 paths will be fetched (58.6 MiB download, 58.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#217",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45273483100,
+		"branch": "feat/js-extensions",
+		"setup_seconds": 33,
+		"build_step_seconds": 353,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 12 paths, 43 already cached (1.1 GiB in 7.7s, 242.3 MiB/s); manifest m3#217",
+		"built": [
+			"Cargo.toml",
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-b7f9857f70f269ad-vendor",
+			"dupin-vendor-b7f9857f70f269ad-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45272612673,
+		"branch": "docs/extension-packaging",
+		"setup_seconds": 33,
+		"build_step_seconds": 123,
+		"fetched": "these 4 paths will be fetched (58.6 MiB download, 58.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#217",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45272040585,
+		"branch": "feat/list-sections-detail",
+		"setup_seconds": 31,
+		"build_step_seconds": 303,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (950.1 MiB in 7.4s, 227.5 MiB/s); manifest m3#217",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-c0a3d9dff55f9524-vendor",
+			"dupin-vendor-c0a3d9dff55f9524-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45264467235,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 32,
+		"build_step_seconds": 237,
+		"fetched": "these 4 paths will be fetched (58.6 MiB download, 58.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 48 already cached; manifest m3#211",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging"
+		],
+		"unservable_nars": 3
+	},
+	{
+		"run": 45264332052,
+		"branch": "main",
+		"setup_seconds": 31,
+		"build_step_seconds": 133,
+		"fetched": "these 4 paths will be fetched (58.6 MiB download, 58.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#214",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45262891122,
+		"branch": "docs/extension-platform-design",
+		"setup_seconds": 32,
+		"build_step_seconds": 132,
+		"fetched": "these 4 paths will be fetched (58.6 MiB download, 58.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 3 already cached; manifest m3#218",
+		"built": ["dupin-0.1.0", "dupin-0.1.0"],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45258643717,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 31,
+		"build_step_seconds": 356,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 48 already cached (7.3 MiB in 3.7s, 9.7 MiB/s); manifest m3#209",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging"
+		],
+		"unservable_nars": 2
+	},
+	{
+		"run": 45256538363,
+		"branch": "main",
+		"setup_seconds": 33,
+		"build_step_seconds": 191,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.3 MiB in 4.2s, 10.9 MiB/s); manifest m3#210",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45256196289,
+		"branch": "feat/add-system-theme",
+		"setup_seconds": 30,
+		"build_step_seconds": 143,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (6.8 MiB in 3.5s, 11.4 MiB/s); manifest m3#211",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45251469652,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 31,
+		"build_step_seconds": 305,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 48 already cached (7.0 MiB in 4.1s, 6.8 MiB/s); manifest m3#205",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging"
+		],
+		"unservable_nars": 2
+	},
+	{
+		"run": 45251330924,
+		"branch": "main",
+		"setup_seconds": 31,
+		"build_step_seconds": 143,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.0 MiB in 3.9s, 6.8 MiB/s); manifest m3#208",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45247116732,
+		"branch": "main",
+		"setup_seconds": 31,
+		"build_step_seconds": 155,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (8.2 MiB in 3.4s, 12.9 MiB/s); manifest m3#206",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45246917424,
+		"branch": "fix/locked-settings-rows",
+		"setup_seconds": 32,
+		"build_step_seconds": 304,
+		"fetched": "these 155 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 47 already cached (8.2 MiB in 3.6s, 13.6 MiB/s); manifest m3#207",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45245316944,
+		"branch": "feat/layered-config",
+		"setup_seconds": 30,
+		"build_step_seconds": 315,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 10 paths, 43 already cached (1.0 GiB in 7.3s, 228.9 MiB/s); manifest m3#203",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45244663415,
+		"branch": "refactor/feature-manifest",
+		"setup_seconds": 32,
+		"build_step_seconds": 333,
+		"fetched": "these 170 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 9 paths, 43 already cached (1.1 GiB in 7.8s, 222.4 MiB/s); manifest m3#205",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45243569580,
+		"branch": "fix/request-access-on-enable",
+		"setup_seconds": 31,
+		"build_step_seconds": 300,
+		"fetched": "these 177 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 10 paths, 43 already cached (1.0 GiB in 8.4s, 196.9 MiB/s); manifest m3#202",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-80114ecb68b574fb-vendor",
+			"dupin-vendor-80114ecb68b574fb-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45239549297,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 31,
+		"build_step_seconds": 319,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 48 already cached (7.7 MiB in 9.3s, 2.2 MiB/s); manifest m3#194",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-89442f7ea44694e9-vendor",
+			"dupin-vendor-89442f7ea44694e9-vendor-staging"
+		],
+		"unservable_nars": 2
+	},
+	{
+		"run": 45239334324,
+		"branch": "main",
+		"setup_seconds": 32,
+		"build_step_seconds": 150,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.7 MiB in 3.4s, 12.6 MiB/s); manifest m3#197",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45237672205,
+		"branch": "refactor/e2e-stages",
+		"setup_seconds": 33,
+		"build_step_seconds": 160,
+		"fetched": "these 156 paths will be fetched (5.0 GiB download, 5.2 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 1 already cached (7.5 MiB in 3.6s, 10.6 MiB/s); manifest m3#188",
+		"built": ["dupin-0.1.0", "dupin-0.1.0", "dupin-hawk-0.1.0", "dupin-lint-and-test-0.1.0"],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45212721984,
+		"branch": "feat/window-management",
+		"setup_seconds": 31,
+		"build_step_seconds": 395,
+		"fetched": "these 169 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 9 paths, 43 already cached (1.0 GiB in 7.8s, 201.5 MiB/s); manifest m3#144",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-e0e0fb82197e229d-vendor",
+			"dupin-vendor-e0e0fb82197e229d-vendor-staging"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45211333283,
+		"branch": "feat/script-hotkeys",
+		"setup_seconds": 31,
+		"build_step_seconds": 17,
+		"fetched": "these 4 paths will be fetched (63.9 MiB download, 63.9 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#146",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45211315831,
+		"branch": "feat/permissions-onboarding",
+		"setup_seconds": 32,
+		"build_step_seconds": 18,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#145",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45211301858,
+		"branch": "feat/send-to",
+		"setup_seconds": 32,
+		"build_step_seconds": 16,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#146",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45211275853,
+		"branch": "feat/script-commands",
+		"setup_seconds": 32,
+		"build_step_seconds": 17,
+		"fetched": "these 4 paths will be fetched (63.8 MiB download, 63.8 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#159",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45209412579,
+		"branch": "feat/extension-views",
+		"setup_seconds": 30,
+		"build_step_seconds": 203,
+		"fetched": "these 155 paths will be fetched (5.0 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 46 already cached (9.4 MiB in 3.3s, 11.0 MiB/s); manifest m3#143",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45209399572,
+		"branch": "feat/extensions",
+		"setup_seconds": 32,
+		"build_step_seconds": 216,
+		"fetched": "these 155 paths will be fetched (5.0 GiB download, 5.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 4 paths, 46 already cached (9.6 MiB in 3.6s, 10.0 MiB/s); manifest m3#146",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 1
+	},
+	{
+		"run": 45207113126,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 32,
+		"build_step_seconds": 335,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 49 already cached; manifest m3#140",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-vendor-b45d59840458cba8-vendor",
+			"dupin-vendor-b45d59840458cba8-vendor-staging"
+		],
+		"unservable_nars": 4
+	},
+	{
+		"run": 45206956973,
+		"branch": "main",
+		"setup_seconds": 32,
+		"build_step_seconds": 17,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#139",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45206626621,
+		"branch": "feat/extension-views",
+		"setup_seconds": 33,
+		"build_step_seconds": 391,
+		"fetched": "these 176 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (1.0 GiB in 8.5s, 179.0 MiB/s); manifest m3#140",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-2680be05d98a38c5-vendor",
+			"dupin-vendor-2680be05d98a38c5-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45203673606,
+		"branch": "perf/dev-profile-debuginfo",
+		"setup_seconds": 31,
+		"build_step_seconds": 282,
+		"fetched": "these 162 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 8 paths, 45 already cached (571.3 MiB in 5.4s, 187.8 MiB/s); manifest m3#143",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45191481257,
+		"branch": "perf/dev-profile-debuginfo",
+		"setup_seconds": 30,
+		"build_step_seconds": 331,
+		"fetched": "these 162 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 8 paths, 45 already cached (636.3 MiB in 5.5s, 215.9 MiB/s); manifest m3#140",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45191173285,
+		"branch": "tagpr-from-v0.0.0",
+		"setup_seconds": 32,
+		"build_step_seconds": 287,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths, 49 already cached; manifest m3#138",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-vendor-b45d59840458cba8-vendor",
+			"dupin-vendor-b45d59840458cba8-vendor-staging"
+		],
+		"unservable_nars": 4
+	},
+	{
+		"run": 45191047121,
+		"branch": "main",
+		"setup_seconds": 31,
+		"build_step_seconds": 18,
+		"fetched": "these 4 paths will be fetched (63.6 MiB download, 63.6 MiB unpacked)",
+		"drain": "hestia drain: pushed 0 paths; manifest m3#137",
+		"built": [],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45190890999,
+		"branch": "feat/display-target",
+		"setup_seconds": 31,
+		"build_step_seconds": 378,
+		"fetched": "these 154 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 6 paths, 46 already cached (191.7 MiB in 4.6s, 81.8 MiB/s); manifest m3#122",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-e0e0fb82197e229d-vendor",
+			"dupin-vendor-e0e0fb82197e229d-vendor-staging"
+		],
+		"unservable_nars": 2
+	},
+	{
+		"run": 45190890346,
+		"branch": "feat/selected-text",
+		"setup_seconds": 32,
+		"build_step_seconds": 444,
+		"fetched": "these 176 paths will be fetched (3.4 GiB download, 3.6 GiB unpacked)",
+		"drain": "hestia drain: pushed 11 paths, 43 already cached (1.0 GiB in 8.7s, 174.9 MiB/s); manifest m3#144",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-cargo-vendor-config",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"dupin-vendor-31b06780ad8577c0-vendor",
+			"dupin-vendor-31b06780ad8577c0-vendor-staging",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45187453893,
+		"branch": "feat/snippets",
+		"setup_seconds": 32,
+		"build_step_seconds": 345,
+		"fetched": "these 162 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 8 paths, 45 already cached (1.0 GiB in 7.8s, 214.1 MiB/s); manifest m3#147",
+		"built": [
+			"Cargo.toml",
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0",
+			"source"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45187448667,
+		"branch": "feat/clipboard-history",
+		"setup_seconds": 31,
+		"build_step_seconds": 360,
+		"fetched": "these 154 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 6 paths, 45 already cached (1.0 GiB in 7.1s, 239.1 MiB/s); manifest m3#144",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 0
+	},
+	{
+		"run": 45187435806,
+		"branch": "feat/calendar",
+		"setup_seconds": 30,
+		"build_step_seconds": 334,
+		"fetched": "these 154 paths will be fetched (3.9 GiB download, 4.1 GiB unpacked)",
+		"drain": "hestia drain: pushed 6 paths, 45 already cached (184.5 MiB in 5.1s, 73.8 MiB/s); manifest m3#147",
+		"built": [
+			"dupin-0.1.0",
+			"dupin-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-deps-0.1.0",
+			"dupin-hawk-0.1.0",
+			"dupin-lint-and-test-0.1.0"
+		],
+		"unservable_nars": 0
+	}
+]

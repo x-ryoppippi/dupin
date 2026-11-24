@@ -4,8 +4,8 @@ The flake keeps separate compiled dependency outputs for the release binary and
 the debug Clippy/test check, then bundles the binary independently of Rust
 compilation. Both profiles use the existing vendored sources, audited
 Cargo, compiler, target linker and frame-pointer setting. The non-flake
-`default.nix` build remains available as the native baseline. `package.nix`
-owns the shared vendor hash; the flake exposes that builder as `dupin.baseline`.
+`default.nix` build remains available as the native baseline. Both builders
+share `nix/cargo-vendor.nix`; the flake exposes the native one as `dupin.baseline`.
 
 Both builders map their vendor source locations to `/vendor`. The baseline
 uses cargoSetupHook's writable copy, while the cached builder maps its vendor

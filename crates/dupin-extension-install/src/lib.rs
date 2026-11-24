@@ -1,12 +1,14 @@
-//! Installs Dupin extension packages from Git or a local folder into the extensions directory,
+//! Installs Dupin extension packages from GitHub, Git or a local folder into the extensions directory,
 //! pins each one in `extensions.lock`, and detects a package whose files changed after install.
 //!
 //! The launcher calls [`Integrity::check`] while it scans the extensions directory; `dupin ext`
 //! drives an [`Installer`]; the capability broker reads [`grants::effective`]. Nothing here runs
-//! package code, a package manager, or anything a repository supplies.
+//! package code, a package manager, or anything a repository supplies, and a `github:` source
+//! needs no Git.
 
 mod error;
 mod git;
+mod github;
 pub mod grants;
 mod hash;
 mod integrity;
@@ -14,13 +16,16 @@ mod lock;
 mod manifest;
 mod place;
 mod source;
+mod tarball;
 mod tree;
+mod version;
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub use error::Error;
 pub use git::Git;
+pub use github::GitHub;
 pub use hash::content_hash;
 pub use integrity::Integrity;
 pub use lock::{Entry, LOCK_FILE, Lock};
@@ -42,7 +47,9 @@ pub struct Installer {
     pub extensions: PathBuf,
     /// `extensions.lock` in Dupin's data directory.
     pub lock: PathBuf,
+    /// For Git URLs other than `github:`.
     pub git: Git,
+    pub github: GitHub,
 }
 
 /// What an install, update or sync did to one package.
@@ -223,21 +230,31 @@ impl Installer {
 
     fn place(&self, target: Target<'_>, taken: Taken<'_>) -> Result<Change, Error> {
         let stage = Stage::new(&self.extensions, "install")?;
-        let fetched = match (&target.source, target.source.git_url()) {
-            (Source::Path(folder), _) => {
+        // Downloads go outside the extensions folder, so the launcher's watcher doesn't rescan
+        // on every object Git writes.
+        let fetched = match &target.source {
+            Source::Path(folder) => {
                 copy_folder(folder, &stage)?;
                 None
             }
-            (_, Some(url)) => {
-                // Outside the extensions folder, so the launcher's watcher doesn't rescan on
-                // every object Git writes.
+            Source::GitHub { owner, repo, rev } => {
+                let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
+                let repo = github::Repo {
+                    owner,
+                    name: repo,
+                    scratch: &scratch.root,
+                };
+                let fetched = self.github.resolve(&repo, rev.as_deref())?;
+                self.github.export(&repo, &fetched.commit, &stage)?;
+                Some(fetched)
+            }
+            Source::Git { url, rev } => {
                 let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
                 let repo = scratch.root.join("repo.git");
-                let fetched = self.git.resolve(&repo, &url, target.source.rev())?;
+                let fetched = self.git.resolve(&repo, url, rev.as_deref())?;
                 self.git.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
-            (_, None) => unreachable!("only a folder source has no Git URL"),
         };
         let staged = stage.package();
         std::fs::create_dir_all(&staged)
@@ -433,8 +450,8 @@ fn next_entry(
     (entry, added, removed)
 }
 
-/// Checks a staged package before it is placed: its manifest, and that its entry is a built
-/// JavaScript module.
+/// Checks a staged package before it is placed: its manifest, and that its entry is a module
+/// the extension host runs without a build: JavaScript, or TypeScript it erases the types of.
 fn validate(folder: &Path) -> Result<Package, Error> {
     let package = manifest::read(folder)?;
     let main = Path::new(&package.main);
@@ -442,18 +459,21 @@ fn validate(folder: &Path) -> Result<Package, Error> {
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or_default();
-    let unbuilt = matches!(extension, "ts" | "mts" | "tsx" | "jsx");
-    if tree::check_path(&package.main).is_err() || !matches!(extension, "js" | "mjs") {
+    let declaration = [".d.ts", ".d.mts", ".d.tsx"]
+        .iter()
+        .any(|suffix| package.main.ends_with(suffix));
+    let module = matches!(extension, "js" | "mjs" | "ts" | "mts" | "tsx") && !declaration;
+    if tree::check_path(&package.main).is_err() || !module {
         let error = Error::new(
             "invalid-manifest",
-            "must be a relative path to a .js or .mjs file inside the package",
+            "must be a relative path to a .js, .mjs, .ts, .mts or .tsx module inside the package",
         )
         .file(manifest::PACKAGE_JSON)
         .field("dupin.main");
-        return Err(if unbuilt {
-            error.hint("Dupin runs built JavaScript only: build the entry (for example with esbuild), commit the output and point `dupin.main` at it.")
-        } else {
-            error
+        return Err(match extension {
+            "jsx" => error.hint("Dupin runs JavaScript and erasable TypeScript only: build the entry with `dupin ext build`, commit the output and point `dupin.main` at it."),
+            _ if declaration => error.hint("A declaration file only describes types: point `dupin.main` at the module itself."),
+            _ => error,
         });
     }
     let entry = folder.join(main);
@@ -461,12 +481,12 @@ fn validate(folder: &Path) -> Result<Package, Error> {
     if !is_file {
         return Err(Error::new("missing-entry", "is not in the package")
             .file(package.main.clone())
-            .hint("Commit the built JavaScript entry: Dupin never runs a build or a package manager when it installs."));
+            .hint("Commit the entry, built if the package has a build: Dupin never runs a build or a package manager when it installs."));
     }
     let source = std::fs::read(&entry)
         .map_err(|error| Error::io("io-error", format!("read {}", package.main), error))?;
     if std::str::from_utf8(&source).is_err() {
-        return Err(Error::new("invalid-entry", "is not UTF-8 JavaScript").file(package.main.clone()));
+        return Err(Error::new("invalid-entry", "is not UTF-8").file(package.main.clone()));
     }
     Ok(package)
 }

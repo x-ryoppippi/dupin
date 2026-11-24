@@ -3,7 +3,7 @@
 
 use std::path::{Component, Path};
 
-use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic};
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -23,7 +23,7 @@ pub(super) struct Manifest {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// Relative to the folder: a .js or .mjs module, or a .wasm module.
+    /// Relative to the folder: a JavaScript or TypeScript module, or a .wasm module.
     pub entry: String,
 }
 
@@ -173,15 +173,11 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     };
     fields.validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
-        .filter(|entry| {
-            Path::new(entry)
-                .extension()
-                .is_some_and(|extension| extension == "js" || extension == "mjs")
-        })
+        .filter(|entry| is_module(entry))
         .ok_or_else(|| {
             field(
                 "dupin.main",
-                "must be a relative path to a .js or .mjs file inside the folder",
+                "must be a relative path to a .js, .mjs, .ts, .mts or .tsx file inside the folder",
                 MAIN_HINT,
             )
         })?;
@@ -389,7 +385,7 @@ mod tests {
 
     fn package(dupin: &str) -> String {
         format!(
-            r#"{{"name": "word-count", "version": "0.1.0", "scripts": {{"build": "esbuild"}}, "dependencies": {{"x": "1"}}, "dupin": {dupin}}}"#
+            r#"{{"name": "word-count", "version": "0.1.0", "scripts": {{"build": "rolldown -c"}}, "dependencies": {{"x": "1"}}, "dupin": {dupin}}}"#
         )
     }
 
@@ -418,6 +414,12 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(manifest.entry, "dist/index.mjs");
+        let manifest = read_folder(&[(
+            PACKAGE_JSON,
+            &package(r#"{"title": "W", "keyword": "wc", "main": "src/main.ts"}"#),
+        )])
+        .unwrap();
+        assert_eq!(manifest.entry, "src/main.ts");
         for main in ["dist/./index.js", ".//dist/index.js", "./dist//index.js"] {
             let manifest = read_folder(&[(
                 PACKAGE_JSON,
@@ -458,6 +460,11 @@ mod tests {
                 "dupin.main",
             ),
             (
+                r#"{"title": "W", "keyword": "wc", "main": "dupin.d.ts"}"#,
+                "invalid-manifest",
+                "dupin.main",
+            ),
+            (
                 r#"{"title": "W", "keyword": "wc", "capabilities": {"http": []}}"#,
                 "unsupported-capability",
                 "dupin.capabilities.http",
@@ -477,7 +484,7 @@ mod tests {
             let diagnostic = problem(&[(PACKAGE_JSON, &package(dupin))]);
             assert_eq!(
                 (
-                    diagnostic.code,
+                    diagnostic.code.as_ref(),
                     diagnostic.file.as_deref(),
                     diagnostic.field.as_deref()
                 ),
@@ -503,7 +510,7 @@ mod tests {
 
         let syntax = problem(&[(PACKAGE_JSON, "{\n  \"name\": \"w\",\n}")]);
         assert_eq!(
-            (syntax.code, syntax.line, syntax.file.as_deref()),
+            (syntax.code.as_ref(), syntax.line, syntax.file.as_deref()),
             ("invalid-manifest", Some(3), Some(PACKAGE_JSON))
         );
         assert!(!syntax.message.contains("line"), "{syntax}");
@@ -539,18 +546,18 @@ mod tests {
             (WASM_MANIFEST, WASM),
         ]);
         assert_eq!(
-            (both.code, both.file.as_deref()),
+            (both.code.as_ref(), both.file.as_deref()),
             ("ambiguous-manifest", Some(WASM_MANIFEST))
         );
 
         let plain = problem(&[(PACKAGE_JSON, r#"{"name": "plain", "version": "1.0.0"}"#)]);
         assert_eq!(
-            (plain.code, plain.file.as_deref(), plain.field.as_deref()),
+            (plain.code.as_ref(), plain.file.as_deref(), plain.field.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON), Some("dupin"))
         );
         let empty = problem(&[]);
         assert_eq!(
-            (empty.code, empty.file.as_deref()),
+            (empty.code.as_ref(), empty.file.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON))
         );
 
@@ -561,7 +568,7 @@ mod tests {
         ] {
             let javascript = problem(&[(WASM_MANIFEST, &toml)]);
             assert_eq!(
-                (javascript.code, javascript.field.as_deref()),
+                (javascript.code.as_ref(), javascript.field.as_deref()),
                 ("invalid-manifest", Some("entry")),
                 "{toml}"
             );

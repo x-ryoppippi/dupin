@@ -2,21 +2,25 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use crate::Diagnostic;
+use crate::typescript::is_typescript;
 
 const MAX_SOURCE_FILES: usize = 256;
-/// Every JavaScript file of a package together, as read from disk.
+/// Every module of a package together, as read from disk.
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_FOLDER_DEPTH: usize = 8;
 
-/// The JavaScript files of the package in `root`, as names relative to it (`lib/util.js`)
-/// and their canonical paths. A file or folder that resolves outside `root` is an error, so
-/// a symlink cannot bring outside code into the package.
-pub fn source_files(root: &Path) -> Result<Vec<(String, PathBuf)>, Diagnostic> {
+/// The modules of the package in `root` whose entry is `entry`, as names relative to it
+/// (`lib/util.js`) and their canonical paths: its JavaScript files and, when the entry is
+/// TypeScript, its TypeScript files. A package with a JavaScript entry may keep the TypeScript
+/// its bundle was built from beside it. A file or folder that resolves outside `root` is an
+/// error, so a symlink cannot bring outside code into the package.
+pub fn source_files(root: &Path, entry: &str) -> Result<Vec<(String, PathBuf)>, Diagnostic> {
     let canonical_root = root.canonicalize().map_err(|error| {
         Diagnostic::new("package-unreadable", format!("Couldn't read the folder: {error}"))
     })?;
     let mut files = Vec::new();
-    walk(&canonical_root, &canonical_root, "", 0, &mut files)?;
+    let typescript = is_typescript(entry);
+    walk(&canonical_root, &canonical_root, "", 0, typescript, &mut files)?;
     files.sort();
     Ok(files)
 }
@@ -26,6 +30,7 @@ fn walk(
     folder: &Path,
     prefix: &str,
     depth: usize,
+    typescript: bool,
     files: &mut Vec<(String, PathBuf)>,
 ) -> Result<(), Diagnostic> {
     let entries = std::fs::read_dir(folder).map_err(|error| {
@@ -43,7 +48,7 @@ fn walk(
         }
         let relative = format!("{prefix}{name}");
         let path = entry.path();
-        let is_source = is_source_name(&name);
+        let is_source = is_source_name(&name) || (typescript && is_typescript(&name));
         let followed = path.metadata();
         let is_dir = followed.as_ref().is_ok_and(|metadata| metadata.is_dir());
         if !is_dir && !is_source {
@@ -74,17 +79,20 @@ fn walk(
                     format!("nests folders more than {MAX_FOLDER_DEPTH} deep"),
                 )
                 .file(&relative)
-                .hint("Bundle the extension into fewer files with esbuild or Bun."));
+                .hint("Bundle the extension into one module with `dupin ext build`."));
             }
-            walk(root, &canonical, &format!("{relative}/"), depth + 1, files)?;
+            walk(
+                root,
+                &canonical,
+                &format!("{relative}/"),
+                depth + 1,
+                typescript,
+                files,
+            )?;
         } else {
             files.push((relative, canonical));
             if files.len() > MAX_SOURCE_FILES {
-                return Err(Diagnostic::new(
-                    "too-many-files",
-                    format!("The package has more than {MAX_SOURCE_FILES} JavaScript files"),
-                )
-                .hint("Bundle the extension into fewer files with esbuild or Bun."));
+                return Err(too_many_files());
             }
         }
     }
@@ -98,47 +106,127 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
-fn is_source_name(name: &str) -> bool {
+/// Whether the loader reads a file of this name as part of the package's code, whatever its
+/// entry. TypeScript files are read too when the entry is TypeScript.
+pub fn is_source_name(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
-/// Reads every source file of the package, within [`MAX_SOURCE_BYTES`] in total.
-pub(crate) fn read_sources(files: &[(String, PathBuf)]) -> Result<Vec<(String, String)>, Diagnostic> {
-    let mut remaining = MAX_SOURCE_BYTES;
-    let mut sources = Vec::with_capacity(files.len());
-    for (name, path) in files {
-        let too_large = || {
-            Diagnostic::new(
-                "package-too-large",
-                format!(
-                    "The package's JavaScript is larger than {} MiB",
-                    MAX_SOURCE_BYTES / 1024 / 1024
-                ),
-            )
-            .file(name)
-            .hint("Bundle and minify the extension, and leave out code it doesn't run.")
-        };
-        let file = std::fs::File::open(path).map_err(|error| {
-            Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
-        })?;
-        let mut bytes = Vec::new();
-        file.take(remaining as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| {
-                Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
-            })?;
-        if bytes.len() > remaining {
-            return Err(too_large());
+/// Whether the file `name` can be a package's entry: JavaScript, or TypeScript other than a
+/// declaration file.
+pub fn is_module(name: &str) -> bool {
+    is_source_name(name) || is_typescript(name)
+}
+
+/// A package's modules, read from its folder within the package limits. Dupin reads it and
+/// hands it to the extension host, which alone parses and compiles it.
+#[derive(Clone, Debug)]
+pub struct Sources {
+    entry: String,
+    files: Vec<(String, String)>,
+}
+
+impl Sources {
+    /// Reads every module [`source_files`] finds in `root`. `entry` is the module that exports
+    /// `search`, relative to `root`.
+    pub fn read(root: &Path, entry: &str) -> Result<Self, Diagnostic> {
+        let entry = entry.strip_prefix("./").unwrap_or(entry);
+        let files = source_files(root, entry)?;
+        if !files.iter().any(|(name, _)| name == entry) {
+            return Err(missing_entry(entry));
         }
-        remaining -= bytes.len();
-        let source = String::from_utf8(bytes).map_err(|_| {
-            Diagnostic::new("not-utf8", "is not UTF-8 text")
-                .file(name)
-                .hint("Save the file as UTF-8.")
-        })?;
-        sources.push((name.clone(), source));
+        let mut remaining = MAX_SOURCE_BYTES;
+        let mut sources = Vec::with_capacity(files.len());
+        for (name, path) in &files {
+            let unreadable = |error: std::io::Error| {
+                Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
+            };
+            let file = std::fs::File::open(path).map_err(unreadable)?;
+            let mut bytes = Vec::new();
+            file.take(remaining as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(unreadable)?;
+            if bytes.len() > remaining {
+                return Err(too_large(name));
+            }
+            remaining -= bytes.len();
+            let source = String::from_utf8(bytes).map_err(|_| not_utf8(name))?;
+            sources.push((name.clone(), source));
+        }
+        Ok(Self {
+            entry: entry.to_owned(),
+            files: sources,
+        })
     }
-    Ok(sources)
+
+    /// Sources that crossed a process boundary, held to the limits [`Sources::read`] applies.
+    pub fn new(entry: String, files: Vec<(String, Vec<u8>)>) -> Result<Self, Diagnostic> {
+        if files.len() > MAX_SOURCE_FILES {
+            return Err(too_many_files());
+        }
+        let mut remaining = MAX_SOURCE_BYTES;
+        let mut sources = Vec::with_capacity(files.len());
+        for (name, bytes) in files {
+            remaining = remaining
+                .checked_sub(bytes.len())
+                .ok_or_else(|| too_large(&name))?;
+            let source = String::from_utf8(bytes).map_err(|_| not_utf8(&name))?;
+            sources.push((name, source));
+        }
+        if !sources.iter().any(|(name, _)| *name == entry) {
+            return Err(missing_entry(&entry));
+        }
+        Ok(Self {
+            entry,
+            files: sources,
+        })
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    /// Each file's name, relative to the package folder, and its text.
+    pub fn files(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.files
+            .iter()
+            .map(|(name, source)| (name.as_str(), source.as_str()))
+    }
+}
+
+fn missing_entry(entry: &str) -> Diagnostic {
+    Diagnostic::new("missing-entry", "is not a module in the package folder")
+        .file(entry)
+        .hint(format!(
+            "Create `{}` exporting `search`, or point `dupin.main` in package.json at the module that does.",
+            crate::DEFAULT_ENTRY
+        ))
+}
+
+fn too_many_files() -> Diagnostic {
+    Diagnostic::new(
+        "too-many-files",
+        format!("The package has more than {MAX_SOURCE_FILES} modules"),
+    )
+    .hint("Bundle the extension into one module with `dupin ext build`.")
+}
+
+fn too_large(name: &str) -> Diagnostic {
+    Diagnostic::new(
+        "package-too-large",
+        format!(
+            "The package's modules are larger than {} MiB",
+            MAX_SOURCE_BYTES / 1024 / 1024
+        ),
+    )
+    .file(name)
+    .hint("Bundle and minify the extension, and leave out code it doesn't run.")
+}
+
+fn not_utf8(name: &str) -> Diagnostic {
+    Diagnostic::new("not-utf8", "is not UTF-8 text")
+        .file(name)
+        .hint("Save the file as UTF-8.")
 }
 
 /// Resolves `specifier`, imported by the module `base`, to a module name: the host module, or a
@@ -163,7 +251,7 @@ pub(crate) fn resolve(
             "is neither a relative path nor `dupin`",
         ))
         .hint(
-            "Import package files with `./`, and bundle dependencies with esbuild or Bun before installing.",
+            "Import package files with `./`, and bundle dependencies with `dupin ext build` before installing.",
         ));
     }
     let mut parts: Vec<&str> = base.split('/').collect();
@@ -196,14 +284,14 @@ pub(crate) fn resolve(
     if exists(&name) {
         Ok(name)
     } else {
-        let hint = if is_source_name(&name) {
+        let hint = if is_module(&name) {
             "Check the path; imports are relative to the importing file."
         } else {
             "Write the file's extension in the import, such as `./util.js`."
         };
         Err(located(Diagnostic::new(
             "import-missing",
-            format!("names `{name}`, which is not a JavaScript file in the package"),
+            format!("names `{name}`, which is not a module in the package"),
         ))
         .hint(hint))
     }

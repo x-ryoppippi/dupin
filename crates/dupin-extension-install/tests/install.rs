@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use dupin_extension_install::{Change, Error, Git, Installer, Integrity, LOCK_FILE, Lock, State};
+use dupin_extension_install::{Change, Error, Git, GitHub, Installer, Integrity, LOCK_FILE, Lock, State};
 
 /// Keeps the developer's own Git configuration out of the fixtures and the installer.
 const ISOLATION: [(&str, &str); 7] = [
@@ -60,6 +60,10 @@ impl Fixture {
                     .map(|(key, value)| ((*key).into(), (*value).into()))
                     .collect(),
                 ..Git::default()
+            },
+            github: GitHub {
+                token: None,
+                ..GitHub::default()
             },
         };
         Self {
@@ -186,6 +190,27 @@ fn without_version_tags_the_default_branch_is_installed() {
 }
 
 #[test]
+fn typescript_packages_install_as_written() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "package.json",
+        r#"{"name":"greeter","version":"0.1.0","dupin":{"title":"Greeter","keyword":"hi","main":"src/main.ts"}}"#,
+    );
+    fixture.write(
+        "src/main.ts",
+        "import type { Item } from './dupin.d.ts';\nexport function search(query: string): Item[] { return [{ title: query }]; }\n",
+    );
+    fixture.write("src/dupin.d.ts", "export interface Item { title: string }\n");
+    fixture.commit("typescript");
+
+    let change = fixture.install(&fixture.url()).unwrap();
+    assert_eq!(change.name, "greeter");
+    let folder = fixture.installed("greeter");
+    assert!(folder.join("src/main.ts").is_file());
+    assert!(folder.join("src/dupin.d.ts").is_file());
+}
+
+#[test]
 fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     let fixture = Fixture::new();
     fixture.package(
@@ -264,12 +289,23 @@ fn unsafe_or_unbuilt_packages_are_refused_before_anything_is_placed() {
 
     fixture.write(
         "package.json",
-        r#"{"name":"word-count","version":"1.0.0","dupin":{"title":"Word Count","keyword":"wc","main":"src/main.ts"}}"#,
+        r#"{"name":"word-count","version":"1.0.0","dupin":{"title":"Word Count","keyword":"wc","main":"src/main.jsx"}}"#,
     );
-    fixture.commit("typescript");
+    fixture.write("src/main.jsx", "export const view = <div />;\n");
+    fixture.commit("jsx");
     let error = fixture.install(&fixture.url()).unwrap_err();
     assert_eq!(error.field.as_deref(), Some("dupin.main"));
-    assert!(error.hint.unwrap().contains("built JavaScript"));
+    assert!(error.hint.unwrap().contains("dupin ext build"));
+
+    fixture.write(
+        "package.json",
+        r#"{"name":"word-count","version":"1.0.0","dupin":{"title":"Word Count","keyword":"wc","main":"dupin.d.ts"}}"#,
+    );
+    fixture.write("dupin.d.ts", "export declare function search(): [];\n");
+    fixture.commit("declaration");
+    let error = fixture.install(&fixture.url()).unwrap_err();
+    assert_eq!(error.field.as_deref(), Some("dupin.main"));
+    assert!(error.hint.unwrap().contains("declaration file"));
 
     fixture.write(
         "package.json",

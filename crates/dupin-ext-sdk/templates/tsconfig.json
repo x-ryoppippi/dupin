@@ -8,7 +8,9 @@
 		"strict": true,
 		"noEmit": true,
 		"isolatedModules": true,
-		"verbatimModuleSyntax": true
+		"verbatimModuleSyntax": true,
+		"erasableSyntaxOnly": true,
+		"allowImportingTsExtensions": true
 	},
 	"include": ["src", "dupin.d.ts"]
 }

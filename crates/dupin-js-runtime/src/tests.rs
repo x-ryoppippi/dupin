@@ -1,6 +1,6 @@
 use std::fs;
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -24,6 +24,14 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn load(root: &Path) -> Result<Package, Diagnostic> {
+    let sources = Sources::read(root, DEFAULT_ENTRY)?;
+    Package::compile(sources, timeout(DEADLINE)).map_err(|error| match error {
+        RunError::Failed(diagnostic) => diagnostic,
+        RunError::Cancelled => panic!("nothing cancels a test's compile"),
+    })
+}
+
 fn package(files: &[(&str, &str)]) -> (tempfile::TempDir, Result<Package, Diagnostic>) {
     let folder = tempfile::tempdir().unwrap();
     for (name, source) in files {
@@ -31,7 +39,7 @@ fn package(files: &[(&str, &str)]) -> (tempfile::TempDir, Result<Package, Diagno
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, source).unwrap();
     }
-    let loaded = Package::load(folder.path(), DEFAULT_ENTRY);
+    let loaded = load(folder.path());
     (folder, loaded)
 }
 
@@ -54,7 +62,7 @@ fn run(source: &str, query: &str) -> Result<Vec<PluginItem>, RunError> {
 #[test]
 fn the_word_count_example_counts_words_and_copies_the_count() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
-    let package = Package::load(&root, DEFAULT_ENTRY).unwrap();
+    let package = load(&root).unwrap();
     package.check(timeout(DEADLINE)).unwrap();
     let rows = search(&package, "two words").unwrap();
     assert_eq!(rows.len(), 1);
@@ -149,7 +157,7 @@ fn the_row_limit_keeps_the_first_rows() {
 
 #[test]
 fn a_busy_loop_stops_at_the_deadline() {
-    let package = Package::load(&fixture("busy-loop"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("busy-loop")).unwrap();
     let started = Instant::now();
     let diagnostic = failure(package.search("", MAX_ROWS, timeout(Duration::from_millis(100))));
     assert_eq!(diagnostic.code, "deadline");
@@ -183,7 +191,7 @@ fn native_backed_work_stops_at_the_deadline() {
 
 #[test]
 fn cancelling_stops_a_busy_loop_without_an_error() {
-    let package = Package::load(&fixture("busy-loop"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("busy-loop")).unwrap();
     let cancelled = Arc::new(AtomicBool::new(false));
     let flag = cancelled.clone();
     let canceler = std::thread::spawn(move || {
@@ -206,28 +214,28 @@ fn cancelling_stops_a_busy_loop_without_an_error() {
 
 #[test]
 fn an_allocation_spike_hits_the_heap_limit() {
-    let package = Package::load(&fixture("allocation-spike"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("allocation-spike")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
 #[test]
 fn deep_recursion_hits_the_stack_limit() {
-    let package = Package::load(&fixture("deep-recursion"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("deep-recursion")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "stack-limit", "{diagnostic:?}");
 }
 
 #[test]
 fn a_promise_storm_spends_the_job_budget() {
-    let package = Package::load(&fixture("promise-storm"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("promise-storm")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "job-limit", "{diagnostic:?}");
 }
 
 #[test]
 fn a_promise_that_never_settles_is_reported_at_once() {
-    let package = Package::load(&fixture("unsettled-promise"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("unsettled-promise")).unwrap();
     let started = Instant::now();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "unsettled", "{diagnostic:?}");
@@ -236,7 +244,7 @@ fn a_promise_that_never_settles_is_reported_at_once() {
 
 #[test]
 fn oversized_output_is_refused() {
-    let package = Package::load(&fixture("oversized-output"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("oversized-output")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "output-too-large", "{diagnostic:?}");
     assert_eq!(diagnostic.file.as_deref(), Some("main.js"));
@@ -245,7 +253,7 @@ fn oversized_output_is_refused() {
 
 #[test]
 fn invalid_rows_name_the_field_at_fault() {
-    let package = Package::load(&fixture("invalid-rows"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("invalid-rows")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "invalid-field");
     assert_eq!(diagnostic.field.as_deref(), Some("items[1].title"));
@@ -261,7 +269,7 @@ fn invalid_rows_name_the_field_at_fault() {
 
 #[test]
 fn an_import_outside_the_package_is_refused() {
-    let diagnostic = Package::load(&fixture("path-escape"), DEFAULT_ENTRY).unwrap_err();
+    let diagnostic = load(&fixture("path-escape")).unwrap_err();
     assert_eq!(diagnostic.code, "import-escape", "{diagnostic:?}");
     assert_eq!(diagnostic.file.as_deref(), Some("main.js"));
     assert_eq!(diagnostic.field.as_deref(), Some("import \"../outside.js\""));
@@ -285,23 +293,17 @@ fn a_symlink_out_of_the_package_is_refused_when_loading() {
     fs::create_dir(&package).unwrap();
     fs::write(package.join("main.js"), "export function search() { return []; }").unwrap();
     symlink(fixture("outside.js"), package.join("outside.js")).unwrap();
-    let diagnostic = Package::load(&package, DEFAULT_ENTRY).unwrap_err();
+    let diagnostic = load(&package).unwrap_err();
     assert_eq!(diagnostic.code, "symlink-escape");
     assert_eq!(diagnostic.file.as_deref(), Some("outside.js"));
 
     fs::remove_file(package.join("outside.js")).unwrap();
     symlink(root.path(), package.join("parent")).unwrap();
-    assert_eq!(
-        Package::load(&package, DEFAULT_ENTRY).unwrap_err().code,
-        "symlink-escape"
-    );
+    assert_eq!(load(&package).unwrap_err().code, "symlink-escape");
 
     fs::remove_file(package.join("parent")).unwrap();
     symlink(&package, package.join("again")).unwrap();
-    assert_eq!(
-        Package::load(&package, DEFAULT_ENTRY).unwrap_err().code,
-        "symlink-loop"
-    );
+    assert_eq!(load(&package).unwrap_err().code, "symlink-loop");
 }
 
 #[test]
@@ -353,7 +355,7 @@ fn text_a_guest_chooses_stays_one_short_line_in_diagnostics() {
 
 #[test]
 fn a_throwing_search_reports_the_error_and_where_it_was_thrown() {
-    let package = Package::load(&fixture("throwing-search"), DEFAULT_ENTRY).unwrap();
+    let package = load(&fixture("throwing-search")).unwrap();
     let diagnostic = failure(search(&package, "it"));
     assert_eq!(diagnostic.code, "search-threw");
     assert_eq!(diagnostic.message, "search threw Error: no answer for it");
@@ -495,7 +497,7 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
     ] {
         let diagnostic = failure(run(source, ""));
         assert_eq!(
-            (diagnostic.code, diagnostic.field.as_deref()),
+            (diagnostic.code.as_ref(), diagnostic.field.as_deref()),
             (code, field),
             "{source}: {diagnostic:?}"
         );
@@ -523,7 +525,7 @@ fn syntax_errors_and_missing_entries_are_reported_when_loading() {
     let (_folder, loaded) = package(&[("index.js", "export function search() { return []; }")]);
     let diagnostic = loaded.unwrap_err();
     assert_eq!(
-        (diagnostic.code, diagnostic.file.as_deref()),
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
         ("missing-entry", Some("main.js"))
     );
 
@@ -531,10 +533,7 @@ fn syntax_errors_and_missing_entries_are_reported_when_loading() {
     assert!(loaded.is_ok());
     let folder = tempfile::tempdir().unwrap();
     fs::write(folder.path().join("main.js"), [0xff, 0xfe]).unwrap();
-    assert_eq!(
-        Package::load(folder.path(), DEFAULT_ENTRY).unwrap_err().code,
-        "not-utf8"
-    );
+    assert_eq!(load(folder.path()).unwrap_err().code, "not-utf8");
 }
 
 #[test]
@@ -567,4 +566,115 @@ fn the_location_parser_reads_quickjs_frames() {
         Some(("lib/a.js".into(), 10, 2))
     );
     assert_eq!(location("    at search (native)\n"), None);
+}
+
+#[test]
+fn compiling_stops_at_its_deadline_or_when_cancelled() {
+    let folder = tempfile::tempdir().unwrap();
+    fs::write(
+        folder.path().join(DEFAULT_ENTRY),
+        "export function search() { return []; }",
+    )
+    .unwrap();
+    let sources = Sources::read(folder.path(), DEFAULT_ENTRY).unwrap();
+    let expired = Control {
+        deadline: Instant::now(),
+        is_cancelled: Box::new(|| false),
+    };
+    match Package::compile(sources.clone(), expired) {
+        Err(RunError::Failed(diagnostic)) => assert_eq!(
+            (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+            ("deadline", Some("main.js"))
+        ),
+        other => panic!("expected a deadline, got {other:?}"),
+    }
+    let cancelled = Control {
+        deadline: Instant::now() + DEADLINE,
+        is_cancelled: Box::new(|| true),
+    };
+    assert_eq!(
+        Package::compile(sources, cancelled).unwrap_err(),
+        RunError::Cancelled
+    );
+}
+
+#[test]
+fn source_nested_too_deeply_to_compile_is_reported_where_it_is() {
+    let depth = 200_000;
+    let source = format!(
+        "export const nested = {}0{};",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    );
+    let (_folder, loaded) = package(&[
+        ("lib.js", &source),
+        (
+            "main.js",
+            "import './lib.js'; export function search() { return []; }",
+        ),
+    ]);
+    let diagnostic = loaded.unwrap_err();
+    assert_eq!(
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+        ("stack-limit", Some("lib.js")),
+        "{diagnostic:?}"
+    );
+
+    let typescript = format!(
+        "export const nested: unknown = {}0{};",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    );
+    let sources = Sources::new(
+        "main.ts".into(),
+        vec![
+            ("lib.ts".to_owned(), typescript.into_bytes()),
+            (
+                "main.ts".to_owned(),
+                b"import './lib.ts'; export function search(): [] { return []; }".to_vec(),
+            ),
+        ],
+    )
+    .unwrap();
+    let Err(RunError::Failed(diagnostic)) = Package::compile(sources, timeout(DEADLINE)) else {
+        panic!("a TypeScript module nested {depth} deep compiled");
+    };
+    assert_eq!(
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+        ("stack-limit", Some("lib.ts")),
+        "{diagnostic:?}"
+    );
+}
+
+#[test]
+fn sources_from_another_process_meet_the_same_limits() {
+    let file = |name: &str, bytes: &[u8]| (name.to_owned(), bytes.to_vec());
+    assert!(Sources::new("main.js".into(), vec![file("main.js", b"export {};")]).is_ok());
+    assert_eq!(
+        Sources::new("main.js".into(), vec![file("other.js", b"")])
+            .unwrap_err()
+            .code,
+        "missing-entry"
+    );
+    assert_eq!(
+        Sources::new("main.js".into(), vec![file("main.js", &[0xff])])
+            .unwrap_err()
+            .code,
+        "not-utf8"
+    );
+    let half = vec![b' '; 2 * 1024 * 1024 + 1];
+    assert_eq!(
+        Sources::new(
+            "main.js".into(),
+            vec![file("main.js", &half), file("lib.js", &half)]
+        )
+        .unwrap_err()
+        .code,
+        "package-too-large"
+    );
+    let many = (0..=256).map(|index| file(&format!("{index}.js"), b"")).collect();
+    assert_eq!(
+        Sources::new("0.js".into(), many).unwrap_err().code,
+        "too-many-files"
+    );
 }
