@@ -1,6 +1,6 @@
 [package]
 name = "dupin-host-services"
-description = "Scoped file reads, executable profiles and the OS-backed dictionary, calendar and clipboard that the extension broker exposes to guests."
+description = "Scoped file reads, executable profiles and the OS-backed dictionary, calendar, clipboard and windows that the extension broker exposes to guests."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -17,7 +17,6 @@ pub mod script;
 pub mod searcher;
 pub mod session;
 pub mod snippets;
-pub mod window_management;
 
 pub use command::{
     CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,

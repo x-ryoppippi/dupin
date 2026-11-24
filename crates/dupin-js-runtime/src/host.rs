@@ -245,6 +245,19 @@ export const calendar = Object.freeze({
 		return events.map((event) => Object.freeze({ ...event, start: iso(event.start), end: iso(event.end) }));
 	},
 });
+
+export const windows = Object.freeze({
+	async displays() {
+		return (await call('windows.displays', {})).displays;
+	},
+	async focused() {
+		return (await call('windows.focused', {})).window;
+	},
+	async setFrame(frame) {
+		const { x, y, width, height } = frame ?? {};
+		return (await call('windows.setFrame', { x, y, width, height })).frame;
+	},
+});
 "#;
 
 /// Carries a call's host requests to Dupin and its replies back.

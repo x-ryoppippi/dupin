@@ -78,7 +78,7 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
     if let Some(card) = &s.script_card {
         return panel.child(divider(t)).child(scripts::script_inline(card, t));
     }
-    panel = notices::search_notices(panel, s, t, accent);
+    panel = notices::search_notices(panel, s, t);
     let items = s.session.items();
     if let Some(renaming) = s.session.renaming() {
         panel = panel

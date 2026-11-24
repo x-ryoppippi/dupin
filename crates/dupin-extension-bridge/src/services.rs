@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec};
+use dupin_host_services::{calendar, exec, windows};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -163,6 +163,15 @@ pub trait Calendar: Send + Sync {
     ) -> Result<Value, Failure>;
 }
 
+pub trait Windows: Send + Sync {
+    /// Every display, the primary one first, as a JSON array.
+    fn displays(&self) -> Result<Value, Failure>;
+    /// The focused window of the app in front of Dupin and that app, or `null`.
+    fn focused(&self) -> Result<Value, Failure>;
+    /// Moves and resizes that window to `frame`, returning the frame it took.
+    fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure>;
+}
+
 /// What a host service is missing, such as one a headless run has no use for.
 pub struct Unavailable(pub &'static str);
 
@@ -242,6 +251,18 @@ impl Calendar for Unavailable {
     }
 }
 
+impl Windows for Unavailable {
+    fn displays(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn focused(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn set_frame(&self, _frame: windows::Frame) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+}
+
 impl From<dupin_host_services::ServiceError> for Failure {
     fn from(error: dupin_host_services::ServiceError) -> Self {
         Failure {
@@ -259,6 +280,7 @@ pub struct Services {
     pub clipboard: Box<dyn Clipboard>,
     pub dictionary: Box<dyn Dictionary>,
     pub calendar: Box<dyn Calendar>,
+    pub windows: Box<dyn Windows>,
 }
 
 impl Services {
@@ -271,14 +293,15 @@ impl Services {
             clipboard: Box::new(Unavailable("the clipboard isn't available")),
             dictionary: Box::new(Unavailable("the dictionary isn't available")),
             calendar: Box::new(Unavailable("calendars aren't available")),
+            windows: Box::new(Unavailable("windows aren't available")),
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod fixture {
-    //! In-memory services for tests: nothing here touches the network, the clipboard, calendars
-    //! or the file system.
+    //! In-memory services for tests: nothing here touches the network, the clipboard, calendars,
+    //! windows or the file system.
 
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -432,6 +455,32 @@ pub(crate) mod fixture {
                 "sections": [],
                 "truncated": false,
             }]))
+        }
+    }
+
+    /// One display, and a focused window that each move records.
+    #[derive(Default)]
+    pub(crate) struct Windows {
+        pub(crate) moves: Mutex<Vec<super::windows::Frame>>,
+    }
+
+    impl super::Windows for Arc<Windows> {
+        fn displays(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!([{
+                "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+                "visibleFrame": { "x": 0, "y": 25, "width": 1440, "height": 875 },
+                "scale": 2,
+            }]))
+        }
+        fn focused(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!({
+                "frame": { "x": 10, "y": 40, "width": 300, "height": 200 },
+                "app": { "name": "Notes", "bundleId": "com.apple.Notes" },
+            }))
+        }
+        fn set_frame(&self, frame: super::windows::Frame) -> Result<Value, Failure> {
+            self.moves.lock().unwrap().push(frame);
+            Ok(serde_json::to_value(frame).unwrap())
         }
     }
 

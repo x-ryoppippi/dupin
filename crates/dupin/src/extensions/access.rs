@@ -11,7 +11,7 @@ use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
 };
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
-use dupin_host_services::{calendar, clipboard, dictionary, exec};
+use dupin_host_services::{calendar, clipboard, dictionary, exec, windows};
 use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
@@ -52,6 +52,8 @@ pub struct Platform {
     pub calendar_access: CalendarAccess,
     /// Clipboard history's settings, whose ignored apps and limits every extension follows.
     pub clipboard: Arc<RwLock<dupin_core::config::Clipboard>>,
+    /// The app the panel opened over, whose focused window the `windows` capability moves.
+    pub front: Arc<dupin_mac::window_management::Front>,
 }
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
@@ -124,6 +126,9 @@ pub fn open(platform: Platform) -> Bridge {
         calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
             platform.calendar_access,
         )))),
+        windows: Box::new(Windows(windows::Service::new(
+            dupin_mac::window_management::Windows(platform.front),
+        ))),
     };
     let bridge = match (base_path(), local_path()) {
         (Some(base), Some(local)) => Bridge::open(&base, &local, services),
@@ -157,8 +162,8 @@ pub fn os_access(permission: OsPermission, calendar: &CalendarAccess) -> OsAcces
     }
 }
 
-/// Asks macOS to trust Dupin with Accessibility, which pasting for an extension needs, on a
-/// deliberate press. macOS shows its prompt only while it hasn't been asked.
+/// Asks macOS to trust Dupin with Accessibility, which pasting or arranging windows for an
+/// extension needs, on a deliberate press. macOS shows its prompt only while it hasn't been asked.
 pub fn request_accessibility() {
     if cfg!(test) || rune::tooling::is_headless() {
         return;
@@ -280,6 +285,22 @@ impl services::Calendar for Calendars {
         let bounds = calendar::Bounds::of(scope)
             .ok_or_else(|| Failure::new("failed", "the permit isn't for calendars"))?;
         encoded(self.0.events(&query, bounds).map_err(Failure::from)?)
+    }
+}
+
+struct Windows(windows::Service<dupin_mac::window_management::Windows>);
+
+impl services::Windows for Windows {
+    fn displays(&self) -> Result<Value, Failure> {
+        encoded(self.0.displays().map_err(Failure::from)?)
+    }
+
+    fn focused(&self) -> Result<Value, Failure> {
+        encoded(self.0.focused().map_err(Failure::from)?)
+    }
+
+    fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
+        encoded(self.0.set_frame(frame).map_err(Failure::from)?)
     }
 }
 

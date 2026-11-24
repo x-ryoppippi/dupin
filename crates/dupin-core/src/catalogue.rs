@@ -573,10 +573,7 @@ fn action_bytes(action: &Action) -> usize {
                     ExtensionRequest::TurnOn | ExtensionRequest::Review => 0,
                 }
         }
-        Action::System(_)
-        | Action::RequestClipboardAccess
-        | Action::OpenPreferences
-        | Action::ArrangeWindow(_) => 0,
+        Action::System(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,
     }
 }
 

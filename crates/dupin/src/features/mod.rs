@@ -12,7 +12,6 @@ mod settings;
 pub(super) mod snippets;
 pub(super) mod system;
 pub(super) mod web;
-pub(super) mod windows;
 
 use dupin_core::{CommandError, Config};
 use dupin_mac::privacy::Permission;
@@ -124,7 +123,6 @@ pub(super) const MANIFEST: &[Feature] = &[
     web::FEATURE,
     snippets::FEATURE,
     recent::FEATURE,
-    windows::FEATURE,
 ];
 
 pub(super) fn permission_uses() -> impl Iterator<Item = &'static PermissionUse> {

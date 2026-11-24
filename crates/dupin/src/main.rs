@@ -31,7 +31,6 @@ mod update;
 mod view;
 mod wall_clock;
 mod web;
-mod window_management;
 
 fn main() {
     if std::env::args_os()

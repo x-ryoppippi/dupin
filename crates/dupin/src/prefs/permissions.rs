@@ -225,9 +225,6 @@ mod tests {
         );
 
         on = off.clone();
-        on.window_management = true;
-        request_enabled(&off, &on, |request| requests.push(request));
-        on = off.clone();
         on.selection_hotkey = "alt+shift+space".into();
         let blank = Config {
             selection_hotkey: "  ".into(),
@@ -241,7 +238,6 @@ mod tests {
             &requests[1..],
             [
                 Capability::Permission(Permission::Accessibility),
-                Capability::Permission(Permission::Accessibility),
                 Capability::PostEvent,
             ]
         );
@@ -252,7 +248,6 @@ mod tests {
         let off = Config::default();
         let mut on = off.clone();
         on.calendar.enabled = true;
-        on.window_management = true;
         on.snippet_paste = true;
         on.selection_hotkey = "alt+shift+space".into();
         let unexpected = |_| panic!("asked for access without enabling a feature");
@@ -274,7 +269,6 @@ mod tests {
         on.calendar.enabled = true;
         on.selection_hotkey = "alt+shift+space".into();
         on.snippet_paste = true;
-        on.window_management = true;
         let mut requests = Vec::new();
         request_enabled(&off, &on, |request| requests.push(request));
         assert_eq!(
@@ -301,11 +295,10 @@ mod tests {
                 (
                     Permission::Accessibility,
                     vec![
-                        "extensions that paste",
+                        "extensions that paste or arrange windows",
                         "focused window display",
                         "selected-text search",
                         "snippet pasting",
-                        "window management",
                     ],
                 ),
                 (

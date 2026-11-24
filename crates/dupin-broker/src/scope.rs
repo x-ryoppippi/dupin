@@ -245,6 +245,24 @@ impl ClipboardAccess {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowsAccess {
+    /// Listing displays and reading the focused window's frame and app.
+    Read,
+    /// Moving and resizing the focused window.
+    Arrange,
+}
+
+impl WindowsAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Arrange => "arrange",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StorageOp {
     Read,
@@ -261,7 +279,8 @@ pub enum OsPermission {
     Calendars,
     /// Reading the general pasteboard without the system's paste prompt.
     Pasteboard,
-    /// Posting key events, such as ⌘V into the front app.
+    /// Posting key events, such as ⌘V into the front app, and reading and moving other apps'
+    /// windows.
     Accessibility,
 }
 
@@ -312,6 +331,9 @@ pub enum Scope {
         past_days: u32,
         future_days: u32,
     },
+    Windows {
+        access: WindowsAccess,
+    },
 }
 
 impl Scope {
@@ -325,6 +347,7 @@ impl Scope {
             Self::Clipboard { access } => ScopeKey::Clipboard(*access),
             Self::Dictionary => ScopeKey::Dictionary,
             Self::Calendar { .. } => ScopeKey::Calendar,
+            Self::Windows { access } => ScopeKey::Windows(*access),
         }
     }
 
@@ -387,6 +410,7 @@ impl Scope {
                     future_days: f,
                 },
             ) => past_days >= p && future_days >= f,
+            (Self::Windows { access }, Self::Windows { access: a }) => access == a,
             _ => false,
         }
     }
@@ -399,7 +423,8 @@ impl Scope {
             } => Some(OsPermission::Pasteboard),
             Self::Clipboard {
                 access: ClipboardAccess::Paste,
-            } => Some(OsPermission::Accessibility),
+            }
+            | Self::Windows { .. } => Some(OsPermission::Accessibility),
             _ => None,
         }
     }
@@ -484,14 +509,18 @@ impl fmt::Display for Scope {
                 days(*past_days),
                 days(*future_days)
             ),
+            Self::Windows { access } => match access {
+                WindowsAccess::Read => f.write_str("see your displays and the focused window"),
+                WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
+            },
         }
     }
 }
 
 /// The name of one grant: an HTTP origin, a named files or exec scope, a script target, or a
 /// single-valued capability. Written as `http:https://example.com`, `files:notes`,
-/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary` or
-/// `calendar` in grant files.
+/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`,
+/// `calendar` or `windows:arrange` in grant files.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum ScopeKey {
@@ -503,6 +532,7 @@ pub enum ScopeKey {
     Clipboard(ClipboardAccess),
     Dictionary,
     Calendar,
+    Windows(WindowsAccess),
 }
 
 impl fmt::Display for ScopeKey {
@@ -516,6 +546,7 @@ impl fmt::Display for ScopeKey {
             Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
             Self::Dictionary => f.write_str("dictionary"),
             Self::Calendar => f.write_str("calendar"),
+            Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
         }
     }
 }
@@ -540,6 +571,8 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "write")) => Self::Clipboard(ClipboardAccess::Write),
             Some(("clipboard", "watch")) => Self::Clipboard(ClipboardAccess::Watch),
             Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
+            Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
+            Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
             Some(_) => return Err(unknown()),
         })
     }
