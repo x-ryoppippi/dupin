@@ -22,7 +22,7 @@ mod tests;
 
 pub use broker::{
     Broker, BrokerError, ConsentNeeded, ConsentReason, ConsentState, Decision, Denial, Generation,
-    GrantSource, OsAccess, OsConsumer, Permit, Reconciliation, Trigger,
+    GrantSource, OsAccess, OsConsumer, Permit, Reconciliation, SaveError, Trigger,
 };
 pub use manifest::{Capabilities, Diagnostic};
 pub use request::Request;

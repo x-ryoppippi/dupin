@@ -8,13 +8,16 @@ Turning on **Calendar search**, **Window Management** or **Paste snippets**, or 
 
 macOS grants access to Dupin as a whole, but that never lets an extension use it. Each extension also needs your own grant for each thing it declares, such as one website, a folder you pick or reading the clipboard. Dupin keeps these grants itself, separate from macOS:
 
-- An extension you add starts off, with nothing granted. Turning it on lists what it asks for so you can grant each item.
-- Dupin asks only when you turn an extension on, choose Request Access, or deliberately use something that needs a grant, never at startup, on opening Settings, on reload or while you type.
-- Turning an extension off or revoking a grant takes effect at once: work it was doing is cancelled and its results are dropped. Granting again doesn't bring them back.
+- An extension you add starts off, with nothing granted. When it first asks for something, the panel offers to turn it on; turning it on grants nothing.
+- When it asks for something you haven't decided on, its request fails and the panel shows **Allow _Name_ to …?** with **Allow** and **Deny** above its results. Settings → Extensions lists the same requests, and each extension's declared scopes with whether each is allowed, with **Allow**, **Revoke** and, for those that need macOS access, **Request Access**. A file, folder or program is picked there. Allowing never runs again what was refused; use the extension again.
+- Dupin never shows a prompt of its own: not at startup, on opening Settings, on reload or for background work. A request row appears only beside the results of the extension that asked, and only your choice of Allow, Deny or Request Access changes anything.
+- Only an action you choose lets an extension send anything but GET or HEAD, run a program or script, or read or write the clipboard. Dupin attaches that to the call; the extension can't claim it.
+- Turning an extension off or revoking a grant takes effect at once: an extension turned off stops answering its keyword, its results in flight are dropped, its clipboard watch stops and allowing again doesn't bring them back.
 - A grant covers the exact version you approved. An update that asks for more asks you again; anything it no longer needs is dropped.
-- Extensions that ship with Dupin are on by default with their own grants in place, but still ask macOS for access on first use. A copy you change is treated like any other extension.
+- Grants are kept in `grants.toml` in Dupin's data directory. Home Manager can declare grants and denials ahead of time in `extension-grants.toml` beside `config.toml`; a choice made in Dupin can take a declared grant away but never widen it. [Extensions](./extensions.md#declaring-them-with-nix) has the format.
+- [Extensions that ship with Dupin](./extensions.md#bundled-extensions) are on by default with their own grants in place, but still need macOS access. A copy you change, such as one `dupin ext eject` made, is treated like any other extension and loses those grants.
 
-An extension that reads calendar events needs Calendars access, and one that reads or watches the clipboard needs Dupin allowed to paste from other apps. Settings → Permissions lists extensions among the uses of Calendars and Paste from Other Apps, and will name each extension that declares them. Turning on the Extensions setting itself never asks macOS for either. Extensions can't use any of this yet; [Capability broker](../capability-broker.md) describes the rules.
+An extension that reads calendar events needs Calendars access, and one that reads or watches the clipboard needs Dupin allowed to paste from other apps. Until macOS allows it, the extension's request fails and asks for it with **Request Access**, the only thing that asks macOS. Settings → Permissions lists extensions among the uses of Calendars and Paste from Other Apps, and names each installed extension that declares them, marked when you haven't allowed it. Turning on the extensions folder itself never asks macOS for either. [Capability broker](../capability-broker.md) describes the rules.
 
 ## Paste from Other Apps
 

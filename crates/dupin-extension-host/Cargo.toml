@@ -16,7 +16,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [features]
-# Lets other crates' tests skip where the extension host can't start.
+# Lets other crates' tests skip where the extension host can't start, and stand in for a
+# compiled package where they never run one.
 testing = []
 
 [dev-dependencies]

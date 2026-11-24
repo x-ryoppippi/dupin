@@ -1,14 +1,16 @@
+use dupin_core::config::Retention;
 use rune::{El, Tx, col, text};
 use rune_kit::{Kit, Switch};
 
 use super::Prefs;
 use super::controls::{
-    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button,
+    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button,
 };
 use crate::icons;
 
 const FILE_LIMITS: [usize; 4] = [50, 100, 200, 500];
 const FILE_LIMIT: &str = "file-limit";
+const CLIPBOARD_RETENTION: &str = "clipboard-retention";
 
 pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     let mut rows = vec![
@@ -18,11 +20,12 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         file_limit_setting(s, k),
         calendar_setting(s, k),
         clipboard_setting(s, k),
+        clipboard_retention_setting(s, k),
+        clipboard_images_setting(s, k),
+        clipboard_files_setting(s, k),
         snippet_paste_setting(s, k),
         window_management_setting(s, k),
-        extensions_setting(s, k),
     ];
-    rows.extend(extension_problems(s, k));
     rows.extend(snippet_accessibility(s, k));
     let mut body = vec![card(k, hair, rows)];
     body.extend(
@@ -161,6 +164,80 @@ fn clipboard_setting(s: &Prefs, k: &Kit) -> El {
     )
 }
 
+fn clipboard_retention_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("clipboard");
+    let retention = menu_value(
+        locked || !s.config.clipboard.enabled,
+        k,
+        CLIPBOARD_RETENTION,
+        "Keep copies for",
+        s.config.clipboard.retention.label(),
+        pick_clipboard_retention,
+    );
+    setting_with_lock(
+        k,
+        &icons::CLOCK,
+        "Keep copies for",
+        Some("Older entries are deleted from the history"),
+        retention,
+        s.lock_note(locked),
+    )
+}
+
+fn pick_clipboard_retention(s: &mut Prefs, tx: &mut Tx) {
+    let options = Retention::ALL
+        .iter()
+        .map(|retention| (retention.label().to_owned(), retention.label().to_owned()))
+        .collect();
+    let selected = s.config.clipboard.retention.label();
+    choose(tx, CLIPBOARD_RETENTION, options, selected, |s, id| {
+        if let Some(retention) = Retention::ALL
+            .into_iter()
+            .find(|retention| retention.label() == id)
+        {
+            s.set(|c| c.clipboard.retention = retention);
+        }
+    });
+}
+
+fn clipboard_images_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("clipboard");
+    let next = !s.config.clipboard.include_images;
+    let images = Switch::new(s.config.clipboard.include_images)
+        .label("Clipboard images")
+        .hide_label()
+        .disabled(locked || !s.config.clipboard.enabled)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.include_images = next))
+        .build(k);
+    setting_with_lock(
+        k,
+        &icons::IMAGE,
+        "Clipboard images",
+        Some("Keep copied images and screenshots, converted to PNG"),
+        images,
+        s.lock_note(locked),
+    )
+}
+
+fn clipboard_files_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("clipboard");
+    let next = !s.config.clipboard.include_files;
+    let files = Switch::new(s.config.clipboard.include_files)
+        .label("Clipboard files")
+        .hide_label()
+        .disabled(locked || !s.config.clipboard.enabled)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.clipboard.include_files = next))
+        .build(k);
+    setting_with_lock(
+        k,
+        &icons::FILES,
+        "Clipboard files",
+        Some("Keep files copied in Finder, by their location rather than a copy"),
+        files,
+        s.lock_note(locked),
+    )
+}
+
 fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
     let locked = s.locked("snippet_paste");
     let next_paste = !s.config.snippet_paste;
@@ -197,56 +274,6 @@ fn window_management_setting(s: &Prefs, k: &Kit) -> El {
         window_management,
         s.lock_note(locked),
     )
-}
-
-fn extensions_setting(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("extensions");
-    let enabled = s.config.extensions;
-    let switch = Switch::new(enabled)
-        .label("Extensions")
-        .hide_label()
-        .disabled(locked)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
-        .build(k);
-    let folder = crate::extensions::directory()
-        .map(|path| tilde(&path.to_string_lossy()))
-        .unwrap_or_else(|| "the extensions folder".into());
-    let (loaded, _) = &s.extensions;
-    let status = if !enabled {
-        format!("Off. Extensions are third-party code; when on, extensions in {folder} answer their keywords")
-    } else if loaded.is_empty() {
-        format!("No extensions loaded from {folder}")
-    } else {
-        format!("Loaded from {folder}: {}", loaded.join(", "))
-    };
-    setting_with_lock(
-        k,
-        &icons::PUZZLE,
-        "Extensions",
-        Some(&status),
-        switch,
-        s.lock_note(locked),
-    )
-}
-
-fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {
-    let (_, problems) = &s.extensions;
-    (s.config.extensions && !problems.is_empty()).then(|| {
-        col()
-            .key("extension-problems")
-            .w_full()
-            .px(ROW_PX)
-            .py(10.0)
-            .gap(4.0)
-            .child(text("Skipped extensions").font(k.ty.ui).color(k.c.text_base))
-            .children(problems.iter().map(|problem| {
-                text(problem.clone())
-                    .font(DESCRIPTION)
-                    .color(k.c.text_muted)
-                    .wrap()
-                    .w_full()
-            }))
-    })
 }
 
 fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {

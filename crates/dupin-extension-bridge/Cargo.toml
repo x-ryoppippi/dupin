@@ -1,0 +1,26 @@
+[package]
+name = "dupin-extension-bridge"
+description = "Connects guest JavaScript's host requests to Dupin's host services through the capability broker."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+dupin-broker = { path = "../dupin-broker" }
+dupin-extension-host = { path = "../dupin-extension-host" }
+dupin-extension-http = { path = "../dupin-extension-http" }
+dupin-host-services = { path = "../dupin-host-services" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }
+dupin-js-runtime = { path = "../dupin-js-runtime" }
+dupin-plugin-protocol = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

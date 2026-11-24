@@ -1,6 +1,6 @@
 # The `http` capability
 
-`dupin-extension-http` is the host side of the extension `http` capability from the [extension platform design](./design/extension-platform.md#capabilities-and-consent). It is not yet connected to a guest: the broker bridge will call it once a guest's `http.fetch` reaches the host. It never prompts, stores grants or knows which extension is asking. Consent, revocation and delivery of the result stay with the broker.
+`dupin-extension-http` is the host side of the extension `http` capability from the [extension platform design](./design/extension-platform.md#capabilities-and-consent). A guest's `http.fetch` reaches it through the [broker bridge](./capability-broker.md#the-broker-bridge), which passes it a scope of the one origin the permit names and caps the response at 2 MiB. It never prompts, stores grants or knows which extension is asking. Consent, revocation and delivery of the result stay with the broker.
 
 ## What an extension declares
 

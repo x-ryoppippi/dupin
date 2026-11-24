@@ -176,6 +176,10 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, permission: Permission, status: P
             Permission::Pasteboard => detail = "Turn on Clipboard history in Search to use it.".into(),
         }
     }
+    let extensions = s.extension_consumers(permission);
+    if !extensions.is_empty() {
+        detail.push_str(&format!(". Extensions: {}", extensions.join(", ")));
+    }
     if status == PermissionStatus::Unavailable {
         detail.push_str(" Open the packaged Dupin.app to grant access.");
     }

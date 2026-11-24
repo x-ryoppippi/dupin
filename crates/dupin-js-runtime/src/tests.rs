@@ -115,7 +115,7 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
         rows[0].view,
         View::Text {
             title: "Docs for a b".into(),
-            subtitle: "v1, 7 rows".into()
+            subtitle: "v2, 7 rows".into()
         }
     );
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
@@ -224,6 +224,23 @@ fn deep_recursion_hits_the_stack_limit() {
     let package = load(&fixture("deep-recursion")).unwrap();
     let diagnostic = failure(search(&package, ""));
     assert_eq!(diagnostic.code, "stack-limit", "{diagnostic:?}");
+}
+
+#[test]
+fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
+    let looping = load(&fixture("startup-loop")).unwrap();
+    for result in [
+        looping.check(timeout(Duration::from_millis(100))),
+        looping
+            .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
+            .map(drop),
+    ] {
+        let diagnostic = failure(result.map(|()| Vec::new()));
+        assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
+    }
+    let allocating = load(&fixture("startup-allocation")).unwrap();
+    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|()| Vec::new()));
+    assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
 #[test]
@@ -389,7 +406,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
     assert_eq!(
         search(&loaded.unwrap(), "").unwrap()[0].view,
         View::Text {
-            title: "1".into(),
+            title: "2".into(),
             subtitle: String::new()
         }
     );
@@ -678,3 +695,54 @@ fn sources_from_another_process_meet_the_same_limits() {
         "too-many-files"
     );
 }
+
+#[test]
+fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
+    let source = "const loaded = Date.now();\n\
+        export function search() {\n\
+        \tconst made = new Date();\n\
+        \tconst parts = [loaded, made.getTime(), made instanceof Date, made.constructor === Date, new Date(0).toISOString(), Date(), Math.random(), Math.random()];\n\
+        \treturn [{ title: parts.join('|') }];\n\
+        }\n";
+    let (_folder, loaded) = package(&[("main.js", source)]);
+    let package = loaded.unwrap();
+    let environment = Environment {
+        now: 1_767_225_600_000,
+        seed: 7,
+    };
+    let title = |environment: Option<&Environment>| {
+        let rows = package
+            .with_environment(environment.copied())
+            .search("", MAX_ROWS, timeout(DEADLINE))
+            .unwrap();
+        let View::Text { title, .. } = &rows[0].view else {
+            panic!("expected a text row");
+        };
+        title.clone()
+    };
+    let fixed = title(Some(&environment));
+    assert_eq!(fixed, title(Some(&environment)));
+    let parts: Vec<&str> = fixed.split('|').collect();
+    assert_eq!(
+        &parts[..5],
+        [
+            "1767225600000",
+            "1767225600000",
+            "true",
+            "true",
+            "1970-01-01T00:00:00.000Z"
+        ]
+    );
+    assert!(parts[5].contains("2026"), "{fixed}");
+    assert_ne!(parts[6], parts[7]);
+    assert_ne!(
+        fixed,
+        title(Some(&Environment {
+            seed: 8,
+            ..environment
+        }))
+    );
+    assert_ne!(title(None).split('|').next(), Some("1767225600000"));
+}
+
+mod host;

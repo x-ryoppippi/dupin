@@ -191,6 +191,24 @@ impl fmt::Display for BrokerError {
 
 impl std::error::Error for BrokerError {}
 
+/// Why [`Broker::change_saved`] left the user's decisions as they were.
+#[derive(Debug)]
+pub enum SaveError {
+    Refused(BrokerError),
+    Store(StoreError),
+}
+
+impl fmt::Display for SaveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(error) => error.fmt(f),
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {}
+
 impl fmt::Display for Denial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -293,12 +311,40 @@ impl Broker {
         revision: Revision,
         capabilities: Capabilities,
     ) -> Reconciliation {
+        let report = self.reconcile(&id, &revision, &capabilities);
+        let same = self
+            .installed
+            .get(&id)
+            .filter(|installed| installed.revision == revision && installed.capabilities == capabilities)
+            .map(|installed| installed.generation);
+        let generation = match same {
+            Some(generation) => generation,
+            None => self.next(),
+        };
+        self.installed.insert(
+            id,
+            Installed {
+                revision,
+                capabilities,
+                generation,
+            },
+        );
+        report
+    }
+
+    /// Brings the user's decisions about `id` in line with what `revision` declares.
+    fn reconcile(
+        &mut self,
+        id: &PackageId,
+        revision: &Revision,
+        capabilities: &Capabilities,
+    ) -> Reconciliation {
         let mut report = Reconciliation::default();
         if let Some(package) = self
             .local
             .packages
             .as_mut()
-            .and_then(|packages| packages.get_mut(&id))
+            .and_then(|packages| packages.get_mut(id))
         {
             package.scopes.retain(|key, record| {
                 let Some(declared) = capabilities.get(key) else {
@@ -327,23 +373,6 @@ impl Broker {
                 true
             });
         }
-        let same = self
-            .installed
-            .get(&id)
-            .filter(|installed| installed.revision == revision && installed.capabilities == capabilities)
-            .map(|installed| installed.generation);
-        let generation = match same {
-            Some(generation) => generation,
-            None => self.next(),
-        };
-        self.installed.insert(
-            id,
-            Installed {
-                revision,
-                capabilities,
-                generation,
-            },
-        );
         report
     }
 
@@ -391,6 +420,19 @@ impl Broker {
             (Some(true), _) | (_, Some(true)) => true,
             (None, None) => self.pristine(id, &installed.revision),
         }
+    }
+
+    /// Whether the user or the base turned the package off, rather than never turning it on.
+    /// Unreadable grants count as off, since a choice they hold can't be known.
+    pub fn is_turned_off(&self, id: &PackageId) -> bool {
+        let Some(installed) = self.installed.get(id) else {
+            return true;
+        };
+        let Some(packages) = &self.local.packages else {
+            return true;
+        };
+        packages.get(id).and_then(|package| package.enabled) == Some(false)
+            || self.base_enabled(id, &installed.revision) == Some(false)
     }
 
     /// The installed revision, for a host that lists [`Broker::consents`] and later passes
@@ -479,16 +521,48 @@ impl Broker {
     }
 
     /// Takes a newly read declarative base. Denials and removals apply at once; grants and
-    /// enables it adds wait for the next launch.
-    pub fn replace_base(&mut self, base: Base) {
+    /// enables it adds wait for the next launch. Returns the packages whose in-flight work is
+    /// dropped.
+    pub fn replace_base(&mut self, base: Base) -> Vec<PackageId> {
         if base == self.base {
-            return;
+            return Vec::new();
         }
         self.base = base;
         let ids: Vec<_> = self.installed.keys().cloned().collect();
-        for id in ids {
-            self.bump(&id);
+        for id in &ids {
+            self.bump(id);
         }
+        ids
+    }
+
+    /// Takes the user's decisions as read again from their file, which another Dupin process,
+    /// such as `dupin ext remove`, may have changed since. Each installed package is reconciled
+    /// with its declaration as [`Broker::install`] does. Returns the packages whose decisions
+    /// changed, whose in-flight work is dropped.
+    pub fn replace_local(&mut self, local: Local) -> Vec<PackageId> {
+        let previous = std::mem::replace(&mut self.local, local);
+        let installed: Vec<_> = self
+            .installed
+            .iter()
+            .map(|(id, installed)| {
+                (
+                    id.clone(),
+                    installed.revision.clone(),
+                    installed.capabilities.clone(),
+                )
+            })
+            .collect();
+        let mut changed = Vec::new();
+        for (id, revision, capabilities) in installed {
+            self.reconcile(&id, &revision, &capabilities);
+            let decisions =
+                |local: &Local| local.packages.as_ref().map(|packages| packages.get(&id).cloned());
+            if decisions(&previous) != decisions(&self.local) {
+                self.bump(&id);
+                changed.push(id);
+            }
+        }
+        changed
     }
 
     pub fn set_os_access(&mut self, permission: OsPermission, access: OsAccess) {
@@ -660,6 +734,24 @@ impl Broker {
     /// Writes the user's decisions to `path`, replacing it whole.
     pub fn save(&self, path: &Path) -> Result<(), StoreError> {
         store::write_atomically(path, &self.local.to_toml()?)
+    }
+
+    /// Makes `change` to the user's decisions and saves them to `path`. If either step fails,
+    /// the decisions are left as they were, so the broker never enforces a choice the file
+    /// doesn't hold.
+    pub fn change_saved<T>(
+        &mut self,
+        path: &Path,
+        change: impl FnOnce(&mut Self) -> Result<T, BrokerError>,
+    ) -> Result<T, SaveError> {
+        let before = self.local.clone();
+        let changed = change(self)
+            .map_err(SaveError::Refused)
+            .and_then(|value| self.save(path).map(|()| value).map_err(SaveError::Store));
+        if changed.is_err() {
+            self.local = before;
+        }
+        changed
     }
 
     #[cfg(test)]

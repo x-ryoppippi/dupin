@@ -97,7 +97,11 @@ fn search(
     query: &str,
     within: Duration,
 ) -> Result<Vec<dupin_plugin_protocol::PluginItem>, RunError> {
-    host.search(package, query, 10, Instant::now() + within, &|| false)
+    host.search(package, query, 10, Instant::now() + within, &|| false, &none())
+}
+
+fn none() -> Arc<dyn Services> {
+    Arc::new(NoServices)
 }
 
 fn titles(rows: &[dupin_plugin_protocol::PluginItem]) -> Vec<String> {
@@ -126,6 +130,30 @@ fn pid_is_sandboxed(pid: u32) -> bool {
 }
 
 const ECHO: &str = "export function search(query) { return [{ title: `echo ${query}` }]; }";
+
+#[test]
+fn a_fixed_environment_reaches_the_guest_through_the_helper() {
+    skip_inside_a_sandbox!();
+    let environment = dupin_js_runtime::Environment {
+        now: 1_767_225_600_000,
+        seed: 1,
+    };
+    let host = Host::fixed(
+        Box::new(|| helper_command("tests::helper_entry")),
+        Some(environment),
+    );
+    let clock = compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            "const loaded = Date.now();\nexport const search = () => [{ title: `${loaded} ${new Date().getHours()} ${Math.random() < 1}` }];",
+        )],
+    )
+    .unwrap();
+    let rows = search(&host, &clock, "", Duration::from_secs(5)).unwrap();
+    // Midnight UTC is 09:00 in the helper's Asia/Tokyo.
+    assert_eq!(titles(&rows), ["1767225600000 9 true"]);
+}
 
 #[test]
 fn queries_run_in_one_resident_helper() {
@@ -442,9 +470,14 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
     let pid = host.helper_pid().expect("the starting helper is kept");
 
     let started = Instant::now();
-    let result = host.search(&echo, "", 10, Instant::now() + Duration::from_secs(10), &|| {
-        started.elapsed() > Duration::from_millis(50)
-    });
+    let result = host.search(
+        &echo,
+        "",
+        10,
+        Instant::now() + Duration::from_secs(10),
+        &|| started.elapsed() > Duration::from_millis(50),
+        &none(),
+    );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
         started.elapsed() < Duration::from_millis(400),
@@ -592,6 +625,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -613,6 +647,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -796,3 +831,5 @@ fn a_helper_inside_another_sandbox_refuses_and_says_why() {
         "{stdout}"
     );
 }
+
+mod services;

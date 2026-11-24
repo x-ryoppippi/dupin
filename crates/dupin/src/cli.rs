@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext check MODULE.wasm REQUEST.json [--json]\ndupin ext snap MODULE.wasm REQUEST.json OUTPUT.png [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
@@ -14,17 +14,24 @@ enum Action {
     SnapshotsClose,
     Set(String, String),
     Snap(String, String),
-    Ext(String, String, Option<String>),
     /// Check an extension folder.
     ExtCheck(String),
     /// Ask an extension folder for a query.
     ExtRun(String, String),
+    /// Replay an extension folder's fixtures, rewriting their expectations with `true`.
+    ExtTest(String, bool),
+    /// Render a fixture's step: the folder, the fixture, the PNG and the step.
+    ExtSnap(String, String, String, Option<usize>),
+    /// Print the revision declared grants name for an extension folder.
+    ExtRevision(String),
     /// Install, list, update, remove or restore packages in the extensions folder.
     ExtPackages(crate::extension_install::Command),
     ExtNew(String, dupin_ext_sdk::Template),
     ExtBuild(String, dupin_ext_sdk::BuildOptions),
     ExtDev(String, dupin_ext_sdk::BuildOptions),
-    Mcp,
+    /// Copy a bundled extension into the extensions folder.
+    ExtEject(String),
+    Mcp(Option<String>),
 }
 
 /// Why a command failed: a plain message, or a diagnostic about an extension package.
@@ -32,6 +39,8 @@ enum Action {
 enum Failure {
     Message(String),
     Diagnostic(dupin_js_runtime::Diagnostic),
+    /// Fixtures that didn't pass: the report as JSON and as text.
+    Report(Value, String),
 }
 
 impl From<String> for Failure {
@@ -69,13 +78,23 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let options = dupin_ext_sdk::BuildOptions {
         sourcemap: parser.contains("--sourcemap"),
     };
+    let update = parser.contains("--update");
+    let step: Option<usize> = parser
+        .opt_value_from_str("--step")
+        .map_err(|_| "--step takes a step number, counting from 1".to_owned())?;
+    let workspace: Option<String> = parser
+        .opt_value_from_str("--workspace")
+        .map_err(|_| "--workspace takes a folder".to_owned())?;
+    let build_flags = typescript || bundled || options.sourcemap;
+    let other_flags = update || step.is_some() || workspace.is_some();
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
         .map(|s| s.to_str().ok_or_else(|| "arguments must be UTF-8".to_owned()))
         .collect::<Result<_, _>>()?;
     match args.as_slice() {
-        ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap => {
+        _ if build_flags && other_flags => Err("invalid arguments; use dupin --help".into()),
+        ["ext", "new", folder] if !folder.starts_with('-') && !options.sourcemap && !other_flags => {
             let template = match (typescript, bundled) {
                 (_, true) => dupin_ext_sdk::Template::Bundled,
                 (true, false) => dupin_ext_sdk::Template::TypeScript,
@@ -83,18 +102,37 @@ fn parse(args: &[String]) -> Result<Action, String> {
             };
             Ok(Action::ExtNew(folder.to_string(), template))
         }
-        ["ext", "build", folder] if !folder.starts_with('-') && !typescript && !bundled => {
+        ["ext", "build", folder] if !folder.starts_with('-') && !typescript && !bundled && !other_flags => {
             Ok(Action::ExtBuild(folder.to_string(), options))
         }
-        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript && !bundled => {
+        ["ext", "dev", folder] if !folder.starts_with('-') && !typescript && !bundled && !other_flags => {
             Ok(Action::ExtDev(folder.to_string(), options))
         }
-        _ if typescript || bundled || options.sourcemap => Err("invalid arguments; use dupin --help".into()),
+        ["ext", "test", folder]
+            if !folder.starts_with('-') && !build_flags && step.is_none() && workspace.is_none() =>
+        {
+            Ok(Action::ExtTest(folder.to_string(), update))
+        }
+        ["ext", "snap", folder, fixture, output]
+            if [folder, fixture, output].iter().all(|arg| !arg.starts_with('-'))
+                && step.is_none_or(|step| step > 0)
+                && !update
+                && !build_flags
+                && workspace.is_none() =>
+        {
+            Ok(Action::ExtSnap(
+                folder.to_string(),
+                fixture.to_string(),
+                output.to_string(),
+                step,
+            ))
+        }
+        ["mcp"] if !json && !build_flags && !update && step.is_none() => Ok(Action::Mcp(workspace)),
+        _ if build_flags || other_flags => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
-        ["mcp"] if !json => Ok(Action::Mcp),
         ["pick"] => Ok(Action::Pick(false)),
         ["pick", "--input-json"] => Ok(Action::Pick(true)),
         ["snapshots", "list"] => Ok(Action::SnapshotsList),
@@ -122,21 +160,13 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "remove", name] if !name.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Remove(name.to_string())))
         }
+        ["ext", "eject", name] if !name.starts_with('-') => Ok(Action::ExtEject(name.to_string())),
         ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
+        ["ext", "revision", folder] if !folder.starts_with('-') => {
+            Ok(Action::ExtRevision(folder.to_string()))
+        }
         ["ext", "run", folder, "--query", query] if !folder.starts_with('-') => {
             Ok(Action::ExtRun(folder.to_string(), query.to_string()))
-        }
-        ["ext", "check", module, request] if !module.starts_with('-') && !request.starts_with('-') => {
-            Ok(Action::Ext(module.to_string(), request.to_string(), None))
-        }
-        ["ext", "snap", module, request, out]
-            if !module.starts_with('-') && !request.starts_with('-') && !out.starts_with('-') =>
-        {
-            Ok(Action::Ext(
-                module.to_string(),
-                request.to_string(),
-                Some(out.to_string()),
-            ))
         }
         _ => Err("invalid arguments; use dupin --help".into()),
     }
@@ -191,7 +221,7 @@ pub fn run() -> bool {
     let picked = matches!(action, Ok(Action::Pick(_)));
     let result = action.map_err(Failure::from).and_then(|action| {
         let output = match &action {
-            Action::Snap(_, output) | Action::Ext(_, _, Some(output)) if json => Some(output.clone()),
+            Action::Snap(_, output) if json => Some(output.clone()),
             _ => None,
         };
         if let Some(output) = output {
@@ -220,6 +250,14 @@ pub fn run() -> bool {
                 println!("{}", serde_json::json!({"error": error}));
             } else {
                 eprintln!("dupin: {error}");
+            }
+            std::process::exit(1)
+        }
+        Err(Failure::Report(report, text)) => {
+            if json {
+                println!("{report}");
+            } else {
+                print!("{text}");
             }
             std::process::exit(1)
         }
@@ -340,22 +378,6 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             render(response, &output);
             Ok(serde_json::json!({"png": output}))
         }
-        Action::Ext(module, request, output) => {
-            let request = protocol::Request::decode(&file(&request, protocol::MAX_REQUEST_BYTES)?)
-                .map_err(|e| e.to_string())?;
-            let module = dupin_plugin_runtime::GuestModule::load(&file(
-                &module,
-                dupin_plugin_runtime::MAX_MODULE_BYTES,
-            )?)
-            .map_err(|e| e.to_string())?;
-            let response = module.query(&request).map_err(|e| e.to_string())?;
-            if let Some(output) = output {
-                render(response, &output);
-                Ok(serde_json::json!({"png":output}))
-            } else {
-                serde_json::to_value(response).map_err(|_| "could not encode response".into())
-            }
-        }
         Action::ExtCheck(folder) => {
             let extension = crate::extensions::check_folder(std::path::Path::new(&folder))?;
             if json {
@@ -364,39 +386,96 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "name": extension.name,
                     "version": extension.version,
                     "keyword": extension.keyword,
-                    "runtime": extension.runtime(),
                 }));
             }
             println!(
-                "{} {} ({}) answers `{}`",
-                extension.name,
-                extension.version,
-                extension.runtime(),
-                extension.keyword
+                "{} {} answers `{}`",
+                extension.name, extension.version, extension.keyword
             );
+            Ok(Value::Null)
+        }
+        Action::ExtRevision(folder) => {
+            let (package, revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
+            if json {
+                return Ok(serde_json::json!({
+                    "package": package.to_string(),
+                    "revision": revision.to_string(),
+                }));
+            }
+            println!("{revision}");
             Ok(Value::Null)
         }
         Action::ExtRun(folder, query) => {
             let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
-            let outcome = extension.query(
+            let items = extension.query(
                 &query,
                 None,
                 dupin_js_runtime::MAX_ROWS,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
+                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
             )?;
-            if let protocol::Outcome::Error { message, .. } = &outcome {
-                return Err(Failure::Message(format!(
-                    "the extension answered with an error: {message}"
-                )));
+            if json {
+                return serde_json::to_value(protocol::Outcome::Results { items, state: None })
+                    .map_err(|_| "could not encode the answer".into());
+            }
+            print!("{}", describe_rows(&items));
+            Ok(Value::Null)
+        }
+        Action::ExtTest(folder, update) => {
+            let report = crate::extensions::test(std::path::Path::new(&folder), update, &|| false)?;
+            if !report.passed {
+                return Err(Failure::Report(report.json, report.text));
             }
             if json {
-                return serde_json::to_value(outcome).map_err(|_| "could not encode the answer".into());
+                return Ok(report.json);
             }
-            print!("{}", describe_outcome(&outcome));
+            print!("{}", report.text);
+            Ok(Value::Null)
+        }
+        Action::ExtSnap(folder, fixture, output, step) => {
+            let snapped = crate::extensions::snap(
+                std::path::Path::new(&folder),
+                std::path::Path::new(&fixture),
+                step,
+                std::path::Path::new(&output),
+                &|| false,
+            )?;
+            if json {
+                return Ok(snapped_json(&snapped));
+            }
+            println!(
+                "Rendered step {} of {fixture} to {output}: {}×{} points at {}×",
+                snapped.step, snapped.width, snapped.height, snapped.scale
+            );
             Ok(Value::Null)
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
+        Action::ExtEject(name) => {
+            let bundled = crate::extensions::bundled::directory()
+                .ok_or("this build of Dupin has no bundled extensions")?;
+            let user = crate::extensions::directory()
+                .ok_or("couldn't find the extensions folder beside config.toml")?;
+            let copy = crate::extensions::bundled::eject(&bundled, &user, &name)?;
+            let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
+            if json {
+                return Ok(serde_json::json!({
+                    "name": name,
+                    "path": copy,
+                    "extensions": config.extensions,
+                }));
+            }
+            println!(
+                "Copied the bundled {name} to {}. It replaces the bundled one while the extensions folder is on, without the bundled grants once you change it; delete it to go back.",
+                copy.display()
+            );
+            if !config.extensions {
+                println!(
+                    "The extensions folder is off: turn it on in Settings → Extensions to use your copy."
+                );
+            }
+            Ok(Value::Null)
+        }
         Action::ExtNew(folder, template) => {
             let files = dupin_ext_sdk::scaffold(std::path::Path::new(&folder), template)?;
             let files: Vec<String> = files.iter().map(|file| file.display().to_string()).collect();
@@ -455,10 +534,20 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             });
             Ok(Value::Null)
         }
-        Action::Mcp => crate::mcp::run()
+        Action::Mcp(workspace) => crate::mcp::run(workspace.map(std::path::PathBuf::from))
             .map(|()| Value::Null)
             .map_err(|e| e.to_string().into()),
     }
+}
+
+pub(crate) fn snapped_json(snapped: &crate::extensions::Snapped) -> Value {
+    serde_json::json!({
+        "png": snapped.png,
+        "step": snapped.step,
+        "width": snapped.width,
+        "height": snapped.height,
+        "scale": snapped.scale,
+    })
 }
 
 fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagnostic> {
@@ -498,43 +587,28 @@ fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::D
 }
 
 /// An answer as plain text: each row's text, then its actions, indented.
-fn describe_outcome(outcome: &dupin_plugin_protocol::Outcome) -> String {
-    use dupin_plugin_protocol::{Effect, Outcome, PluginAction, View};
+fn describe_rows(items: &[dupin_plugin_protocol::PluginItem]) -> String {
+    use dupin_plugin_protocol::{Effect, View};
+    if items.is_empty() {
+        return "No results\n".into();
+    }
     let mut out = String::new();
-    let actions = |out: &mut String, actions: &[PluginAction]| {
-        for action in actions {
+    for item in items {
+        match &item.view {
+            View::Text { title, subtitle } if subtitle.is_empty() => out.push_str(&format!("{title}\n")),
+            View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
+            View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
+            View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
+        }
+        for action in &item.actions {
             let target = match &action.effect {
                 Effect::Copy { text } => text.clone(),
                 Effect::OpenUrl { url } => url.clone(),
                 Effect::Push { view, .. } => format!("view {view}"),
+                Effect::Run { action, .. } => format!("action {action}"),
             };
             out.push_str(&format!("  {}: {target}\n", action.title));
         }
-    };
-    match outcome {
-        Outcome::Results { items, .. } if items.is_empty() => out.push_str("No results\n"),
-        Outcome::Results { items, .. } => {
-            for item in items {
-                match &item.view {
-                    View::Text { title, subtitle } if subtitle.is_empty() => {
-                        out.push_str(&format!("{title}\n"))
-                    }
-                    View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
-                    View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
-                    View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
-                }
-                actions(&mut out, &item.actions);
-            }
-        }
-        Outcome::Detail {
-            title,
-            body,
-            actions: offered,
-        } => {
-            out.push_str(&format!("{title}\n  {body}\n"));
-            actions(&mut out, offered);
-        }
-        Outcome::Error { message, .. } => out.push_str(&format!("{message}\n")),
     }
     out
 }
@@ -607,8 +681,8 @@ mod tests {
         let folder = |path: &str| root.join(path).to_string_lossy().into_owned();
         let word_count = folder("examples/extensions/word-count-js");
         assert_eq!(
-            execute(Action::ExtCheck(word_count.clone()), true).unwrap()["runtime"],
-            "javascript"
+            execute(Action::ExtCheck(word_count.clone()), true).unwrap()["keyword"],
+            "wc"
         );
         let answer = execute(Action::ExtRun(word_count, "two words".into()), true).unwrap();
         assert_eq!(answer["items"][0]["view"]["title"], "2 words");
@@ -617,6 +691,8 @@ mod tests {
             serde_json::json!({"kind": "copy", "text": "2"})
         );
 
+        let leftover = tempfile::tempdir().unwrap();
+        std::fs::write(leftover.path().join("extension.toml"), "entry = \"guest.wasm\"\n").unwrap();
         let fixtures = "crates/dupin-js-runtime/tests/fixtures";
         for (action, code) in [
             (
@@ -634,6 +710,10 @@ mod tests {
             (
                 Action::ExtCheck(folder("examples/extensions")),
                 "missing-manifest",
+            ),
+            (
+                Action::ExtCheck(leftover.path().to_string_lossy().into_owned()),
+                "wasm-removed",
             ),
         ] {
             match execute(action, true) {
@@ -674,7 +754,7 @@ mod tests {
 
         assert_eq!(publish().unwrap().revision, 1);
         let loaded = crate::extensions::check_folder(&link).unwrap();
-        assert_eq!((loaded.id.as_str(), loaded.runtime()), ("greeter", "javascript"));
+        assert_eq!(loaded.id, "greeter");
         let folder = package.to_string_lossy().into_owned();
         assert_eq!(
             execute(Action::ExtCheck(folder.clone()), true).unwrap()["id"],
@@ -690,7 +770,7 @@ mod tests {
         for (edit, code) in [
             (
                 r#""keyword": "greeter", "capabilities": { "http": {} }"#,
-                "unsupported-capability",
+                "invalid-type",
             ),
             (r#""keyword": "greeter", "icon": "x""#, "invalid-manifest"),
         ] {
@@ -717,8 +797,8 @@ mod tests {
         dupin_ext_sdk::scaffold(&package, dupin_ext_sdk::Template::TypeScript).unwrap();
         let folder = package.to_string_lossy().into_owned();
         assert_eq!(
-            execute(Action::ExtCheck(folder.clone()), true).unwrap()["runtime"],
-            "javascript"
+            execute(Action::ExtCheck(folder.clone()), true).unwrap()["id"],
+            "greeter"
         );
         assert_eq!(
             execute(Action::ExtRun(folder.clone(), "Dupin".into()), true).unwrap()["items"][0]["view"]["title"],
@@ -791,42 +871,33 @@ mod tests {
 
     #[test]
     fn plain_text_answers_list_rows_and_actions() {
-        use dupin_plugin_protocol::{Effect, Outcome, PluginAction, PluginItem, View};
-        let outcome = Outcome::Results {
-            items: vec![PluginItem {
-                id: "docs".into(),
-                view: View::Text {
-                    title: "Docs".into(),
-                    subtitle: "Read them".into(),
+        use dupin_plugin_protocol::{Effect, PluginAction, PluginItem, View};
+        let items = vec![PluginItem {
+            id: "docs".into(),
+            view: View::Text {
+                title: "Docs".into(),
+                subtitle: "Read them".into(),
+            },
+            actions: vec![
+                PluginAction {
+                    id: "open".into(),
+                    title: "Open URL".into(),
+                    effect: Effect::OpenUrl {
+                        url: "https://example.com/".into(),
+                    },
                 },
-                actions: vec![
-                    PluginAction {
-                        id: "open".into(),
-                        title: "Open URL".into(),
-                        effect: Effect::OpenUrl {
-                            url: "https://example.com/".into(),
-                        },
-                    },
-                    PluginAction {
-                        id: "copy".into(),
-                        title: "Copy".into(),
-                        effect: Effect::Copy { text: "docs".into() },
-                    },
-                ],
-            }],
-            state: None,
-        };
+                PluginAction {
+                    id: "copy".into(),
+                    title: "Copy".into(),
+                    effect: Effect::Copy { text: "docs".into() },
+                },
+            ],
+        }];
         assert_eq!(
-            describe_outcome(&outcome),
+            describe_rows(&items),
             "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n"
         );
-        assert_eq!(
-            describe_outcome(&Outcome::Results {
-                items: vec![],
-                state: None
-            }),
-            "No results\n"
-        );
+        assert_eq!(describe_rows(&[]), "No results\n");
     }
 
     #[test]
@@ -865,11 +936,11 @@ mod tests {
             parse(&args(&["ext", "run", "word-count", "--query", "two words"])).unwrap(),
             Action::ExtRun("word-count".into(), "two words".into())
         );
-        assert_eq!(
-            parse(&args(&["ext", "check", "guest.wasm", "request.json"])).unwrap(),
-            Action::Ext("guest.wasm".into(), "request.json".into(), None)
-        );
         assert!(parse(&args(&["ext", "run", "word-count"])).is_err());
+        assert_eq!(
+            parse(&args(&["ext", "revision", "word-count"])).unwrap(),
+            Action::ExtRevision("word-count".into())
+        );
         assert_eq!(
             parse(&args(&["ext", "new", "--ts", "greeter"])).unwrap(),
             Action::ExtNew("greeter".into(), dupin_ext_sdk::Template::TypeScript)
@@ -902,6 +973,7 @@ mod tests {
             &["ext", "check", "greeter", "--ts"],
             &["ext", "dev", "greeter", "--bundle"],
             &["ext", "dev"],
+            &["ext", "check", "guest.wasm", "request.json"],
         ] {
             assert!(parse(&args(invalid)).is_err(), "{invalid:?}");
         }
@@ -922,7 +994,80 @@ mod tests {
             );
             assert!(parse(&args(&["ext", "install", "--upload-pack=x"])).is_err());
         }
-        assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp);
+        assert_eq!(
+            parse(&args(&["ext", "eject", "dupin", "--json"])).unwrap(),
+            Action::ExtEject("dupin".into())
+        );
+        assert!(parse(&args(&["ext", "eject"])).is_err());
+        assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp(None));
+        assert_eq!(
+            parse(&args(&["mcp", "--workspace", "packages"])).unwrap(),
+            Action::Mcp(Some("packages".into()))
+        );
+        assert_eq!(
+            parse(&args(&["ext", "test", "greeter", "--update", "--json"])).unwrap(),
+            Action::ExtTest("greeter".into(), true)
+        );
+        assert_eq!(
+            parse(&args(&["ext", "test", "greeter"])).unwrap(),
+            Action::ExtTest("greeter".into(), false)
+        );
+        assert_eq!(
+            parse(&args(&[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "2"
+            ]))
+            .unwrap(),
+            Action::ExtSnap(
+                "greeter".into(),
+                "fixtures/search.json".into(),
+                "out.png".into(),
+                Some(2)
+            )
+        );
+        for invalid in [
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "0",
+            ][..],
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--step",
+                "x",
+            ],
+            &[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--update",
+            ],
+            &["ext", "snap", "greeter", "fixtures/search.json"],
+            &["ext", "test", "greeter", "--step", "1"],
+            &["ext", "run", "greeter", "--query", "x", "--update"],
+            &["ext", "check", "greeter", "--workspace", "x"],
+            &["mcp", "--update"],
+            &["mcp", "--ts"],
+            &["ext", "test", "greeter", "--ts"],
+            &["ext", "new", "greeter", "--update"],
+        ] {
+            assert!(parse(&args(invalid)).is_err(), "{invalid:?}");
+        }
         assert!(parse(&["mcp".into(), "--json".into()]).is_err());
         assert_eq!(
             parse(&["open".into(), "--query".into(), "日本語".into()]).unwrap(),

@@ -25,10 +25,13 @@ let
     (root + /examples/shaders)
     # The JavaScript word counter, which tests load and run.
     (root + /examples/extensions/word-count-js)
+    # The bundled extensions, which a test build finds in the source tree.
+    (root + /extensions)
   ];
   bundleFiles = lib.fileset.unions [
     (root + /packaging)
     (root + /assets/logo/dupin.svg)
+    (root + /extensions)
   ];
   cargoSrc = lib.fileset.toSource {
     inherit root;
@@ -105,6 +108,11 @@ let
       icns assets/logo/dupin.svg $app/Resources/dupin.icns
       # scripts/package-app.nu points a nightly build at this one.
       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
+      # Each package folder, without extensions/tsconfig.json, which only the type check reads.
+      mkdir $app/Resources/extensions
+      for package in extensions/*/; do
+        cp -R "''${package%/}" $app/Resources/extensions/
+      done
       ln -s $app/MacOS/dupin $out/bin/dupin
     '';
     meta = {

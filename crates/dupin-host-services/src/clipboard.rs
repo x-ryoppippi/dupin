@@ -251,9 +251,11 @@ impl Default for Policy {
     }
 }
 
+type PolicySource = Box<dyn Fn() -> Policy + Send + Sync>;
+
 struct Inner<P> {
     board: P,
-    policy: Mutex<Policy>,
+    policy: PolicySource,
     watches: Mutex<Watches>,
 }
 
@@ -272,18 +274,16 @@ pub struct Clipboard<P> {
 }
 
 impl<P: Pasteboard + 'static> Clipboard<P> {
-    pub fn new(board: P, policy: Policy) -> Self {
+    /// `policy` is asked for every copy read or delivered, so a watch subscribed before the
+    /// user ignores another app never sees that app's copies afterwards.
+    pub fn new(board: P, policy: impl Fn() -> Policy + Send + Sync + 'static) -> Self {
         Self {
             inner: Arc::new(Inner {
                 board,
-                policy: Mutex::new(policy),
+                policy: Box::new(policy),
                 watches: Mutex::default(),
             }),
         }
-    }
-
-    pub fn set_policy(&self, policy: Policy) {
-        *self.inner.policy.lock().unwrap() = policy;
     }
 
     /// The current copy, or `None` for an empty, withheld, ignored or oversized one.
@@ -401,7 +401,7 @@ impl<P: Pasteboard> Inner<P> {
         if withheld(&peek.types) {
             return None;
         }
-        let policy = self.policy.lock().unwrap().clone();
+        let policy = (self.policy)();
         let ignored = |app: &str| policy.ignored_apps.iter().any(|ignored| ignored == app);
         let from_ignored = match &peek.apps {
             Some(apps) => apps.iter().any(|app| ignored(app)),

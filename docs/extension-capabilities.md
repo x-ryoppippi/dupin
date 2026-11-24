@@ -1,6 +1,6 @@
 # Extension capabilities: files and exec
 
-`dupin-host-services` implements the host side of the `files` and `exec` capabilities from the [extension platform design](./design/extension-platform.md#capabilities-and-consent). Neither is reachable from a guest yet. The broker bridge will call them after it checks the installation's grant, and it owns consent, persistence, revocation and activation checks. Nothing in this crate prompts, stores grants or requests macOS access. Both capabilities act with your own user access, so consent shows each scope's or profile's `describe()` text verbatim.
+`dupin-host-services` implements the host side of the `files` and `exec` capabilities from the [extension platform design](./design/extension-platform.md#capabilities-and-consent). A guest reaches them as `files` and `exec` in the `dupin` module, through the [broker bridge](./capability-broker.md#the-broker-bridge), which calls them after it checks the installation's grant and owns consent, persistence, revocation and activation checks. It binds each files scope to the path picked in Settings and builds each exec profile from the declaration, its `{input}` placeholders as one-line text inputs and the program picked in Settings. Nothing in this crate prompts, stores grants or requests macOS access. Both capabilities act with your own user access, so consent shows each scope's or profile's `describe()` text verbatim.
 
 ## files
 

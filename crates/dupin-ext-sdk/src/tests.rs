@@ -76,12 +76,19 @@ fn answer(dir: &Path, query: &str) -> Vec<Value> {
         .collect()
 }
 
+/// The scaffold's fixture states what its first query answers, and `--update` would write it
+/// back unchanged.
 fn assert_fixture_matches(dir: &Path) {
-    let fixture: Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join("fixtures/search.json")).unwrap()).unwrap();
+    let source = std::fs::read_to_string(dir.join("fixtures/search.json")).unwrap();
+    let fixture = crate::fixture::parse("fixtures/search.json", source.as_bytes()).unwrap();
+    assert_eq!(crate::fixture::to_json(&fixture), source);
+    let crate::fixture::Action::Query(query) = fixture.steps[0].action() else {
+        panic!("the fixture starts with a query");
+    };
+    let items = compile(dir).unwrap().search(query, 10, control()).unwrap();
     assert_eq!(
-        answer(dir, fixture["query"].as_str().unwrap()),
-        fixture["items"].as_array().unwrap().clone()
+        fixture.steps[0].expect.as_ref().unwrap()["rows"],
+        crate::fixture::rows(&items)
     );
 }
 

@@ -2,14 +2,13 @@
 //! pins each one in `extensions.lock`, and detects a package whose files changed after install.
 //!
 //! The launcher calls [`Integrity::check`] while it scans the extensions directory; `dupin ext`
-//! drives an [`Installer`]; the capability broker reads [`grants::effective`]. Nothing here runs
+//! drives an [`Installer`]. Grants aren't kept here: the capability broker owns them. Nothing here runs
 //! package code, a package manager, or anything a repository supplies, and a `github:` source
 //! needs no Git.
 
 mod error;
 mod git;
 mod github;
-pub mod grants;
 mod hash;
 mod integrity;
 mod lock;
@@ -50,6 +49,9 @@ pub struct Installer {
     /// For Git URLs other than `github:`.
     pub git: Git,
     pub github: GitHub,
+    /// The names of the packages bundled with the launcher, which no installed package may
+    /// take: one would replace the bundled package under its name.
+    pub bundled: BTreeSet<String>,
 }
 
 /// What an install, update or sync did to one package.
@@ -60,8 +62,8 @@ pub struct Change {
     pub entry: Entry,
     /// The lock entry it replaced.
     pub previous: Option<Entry>,
-    /// Scopes the new revision requests that the previous one didn't; they wait in
-    /// `entry.pending_consent` until the user agrees.
+    /// Scopes the new revision requests that the previous one didn't; the broker holds them
+    /// back until the user agrees.
     pub added: Vec<String>,
     /// Scopes the previous revision requested and this one doesn't; their grants are dropped.
     pub removed: Vec<String>,
@@ -317,6 +319,21 @@ impl Installer {
             )
             .hint("Move or delete that folder first, or give the package another name."));
         }
+        if self.bundled.contains(&package.name) {
+            return Err(Error::new(
+                "name-bundled",
+                format!(
+                    "`{}` is the name of an extension bundled with Dupin",
+                    package.name
+                ),
+            )
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+            .hint(format!(
+                "Give the package another name, or run `dupin ext eject {}` to edit the bundled one.",
+                package.name
+            )));
+        }
         self.check_keyword(&package, taken)?;
 
         let (mut entry, added, removed) =
@@ -394,8 +411,8 @@ fn not_installed(name: &str) -> Error {
         .hint("`dupin ext list` shows what `dupin ext install` installed.")
 }
 
-/// The lock entry for a newly placed package, and the scopes it adds and drops. Grants carry
-/// over only for scopes the new revision still requests; added scopes wait for consent.
+/// The lock entry for a newly placed package, and the scopes it adds and drops. The broker
+/// reconciles grants itself when the launcher loads the new revision.
 fn next_entry(
     source: &Source,
     fetched: Option<git::Fetched>,
@@ -404,30 +421,13 @@ fn next_entry(
     previous: Option<&Entry>,
 ) -> (Entry, Vec<String>, Vec<String>) {
     let requested: BTreeSet<_> = package.capabilities.iter().cloned().collect();
-    let (granted, pending, added, removed) = match previous {
-        None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+    let (added, removed) = match previous {
+        None => (Vec::new(), Vec::new()),
         Some(previous) => {
             let before: BTreeSet<_> = previous.requested.iter().cloned().collect();
-            let added: Vec<_> = requested.difference(&before).cloned().collect();
-            let removed: Vec<_> = before.difference(&requested).cloned().collect();
-            let keep = |scopes: &[String]| -> BTreeSet<String> {
-                scopes
-                    .iter()
-                    .filter(|scope| requested.contains(*scope))
-                    .cloned()
-                    .collect()
-            };
-            let granted = keep(&previous.granted);
-            let pending: BTreeSet<_> = keep(&previous.pending_consent)
-                .into_iter()
-                .chain(added.iter().cloned())
-                .filter(|scope| !granted.contains(scope))
-                .collect();
             (
-                granted.into_iter().collect(),
-                pending.into_iter().collect(),
-                added,
-                removed,
+                requested.difference(&before).cloned().collect(),
+                before.difference(&requested).cloned().collect(),
             )
         }
     };
@@ -444,8 +444,6 @@ fn next_entry(
         version: package.version.clone(),
         keyword: package.keyword.clone(),
         requested: requested.into_iter().collect(),
-        granted,
-        pending_consent: pending,
     };
     (entry, added, removed)
 }

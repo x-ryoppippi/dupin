@@ -65,6 +65,7 @@ impl Fixture {
                 token: None,
                 ..GitHub::default()
             },
+            bundled: Default::default(),
         };
         Self {
             _root: root,
@@ -211,7 +212,7 @@ fn typescript_packages_install_as_written() {
 }
 
 #[test]
-fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
+fn updates_report_the_scopes_they_add_and_drop() {
     let fixture = Fixture::new();
     fixture.package(
         "weather",
@@ -221,11 +222,6 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     fixture.commit("one");
     fixture.tag("v1.0.0");
     fixture.install(&fixture.url()).unwrap();
-
-    let mut lock = fixture.lock();
-    let entry = lock.packages.get_mut("weather").unwrap();
-    entry.granted = vec!["clipboard:write".into(), "http:https://api.example.com".into()];
-    lock.write(&fixture.installer.lock).unwrap();
 
     let up_to_date = fixture.installer.update(Some("weather"), &|_| None).unwrap();
     assert!(up_to_date[0].1.as_ref().unwrap().unchanged());
@@ -243,8 +239,6 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     assert_eq!(change.added, ["files:notes"]);
     assert_eq!(change.removed, ["clipboard:write"]);
     let entry = &fixture.lock().packages["weather"];
-    assert_eq!(entry.granted, ["http:https://api.example.com"]);
-    assert_eq!(entry.pending_consent, ["files:notes"]);
     assert_eq!(entry.requested, ["files:notes", "http:https://api.example.com"]);
 
     assert_eq!(
@@ -337,6 +331,19 @@ fn unsafe_or_unbuilt_packages_are_refused_before_anything_is_placed() {
 }
 
 #[test]
+fn a_package_cannot_take_a_bundled_name() {
+    let mut fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.installer.bundled.insert("word-count".into());
+
+    let error = fixture.install(&fixture.url()).unwrap_err();
+    assert_eq!(error.code, "name-bundled");
+    assert!(!fixture.installed("word-count").exists());
+    assert!(fixture.lock().packages.is_empty());
+}
+
+#[test]
 fn keywords_and_folders_belong_to_one_package() {
     let fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");
@@ -352,7 +359,11 @@ fn keywords_and_folders_belong_to_one_package() {
 
     let sibling = fixture.installed("counter");
     std::fs::create_dir_all(&sibling).unwrap();
-    std::fs::write(sibling.join("extension.toml"), "keyword = \"wc\"\n").unwrap();
+    std::fs::write(
+        sibling.join("package.json"),
+        r#"{"name": "counter", "version": "0.1.0", "dupin": {"title": "Counter", "keyword": "wc"}}"#,
+    )
+    .unwrap();
     let error = fixture.install(&fixture.url()).unwrap_err();
     assert!(error.message.contains("counter"), "{error}");
     std::fs::remove_dir_all(&sibling).unwrap();
@@ -371,9 +382,6 @@ fn another_source_cant_take_over_an_installed_name_or_its_grants() {
     );
     trusted.commit("one");
     let installed = trusted.install(&trusted.url()).unwrap();
-    let mut lock = trusted.lock();
-    lock.packages.get_mut("weather").unwrap().granted = vec!["http:https://api.example.com".into()];
-    lock.write(&trusted.installer.lock).unwrap();
 
     let other = Fixture::new();
     other.package(

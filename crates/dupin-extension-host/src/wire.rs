@@ -1,17 +1,19 @@
 //! Messages between Dupin and its extension host, over one Unix socket. A frame is two
 //! big-endian `u32` lengths, then a JSON header and a binary tail of those lengths. A `run`
 //! carries the package in its tail, module after module: its source to compile, or the bytecode
-//! a compile returned. A `compiled` answer carries that bytecode the same way.
+//! a compile returned. A `compiled` answer carries that bytecode the same way. While a run is
+//! going, the helper may send `host` requests, each with its JSON arguments as the tail, and Dupin
+//! answers each with a `reply` whose tail is the JSON result.
 
 use std::io::{self, Read, Write};
 
-use dupin_js_runtime::Diagnostic;
+use dupin_js_runtime::{ActionEffect, Diagnostic, Environment};
 use dupin_plugin_protocol::PluginItem;
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 4;
 /// Comfortably above the largest answer, 50 rows within 256 KiB of text.
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
 /// A package's bytecode, from at most 4 MiB of JavaScript.
@@ -28,9 +30,13 @@ pub enum ToHelper {
         entry: String,
         modules: Vec<ModuleSpan>,
         call: Call,
+        /// A fixture's fixed clock and seed; the launcher's own runs carry none.
+        environment: Option<Environment>,
     },
     /// Stop run `id` if it is still running.
     Cancel { id: u64 },
+    /// Dupin's answer to request `call` of run `id`, as JSON in the tail.
+    Reply { id: u64, call: u32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,6 +57,16 @@ pub enum Call {
         query: String,
         limit: u32,
     },
+    /// `actions[name](data)`, which the user chose.
+    Action {
+        name: String,
+        data: serde_json::Value,
+    },
+    /// `events[name](event)`, for something Dupin watched on the package's behalf.
+    Event {
+        name: String,
+        event: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,6 +85,12 @@ pub enum FromHelper {
         id: u64,
         answer: Answer,
     },
+    /// A host request of run `id`, numbered `call` from one, with its JSON arguments as the tail.
+    Host {
+        id: u64,
+        call: u32,
+        op: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,6 +104,10 @@ pub enum Answer {
     Rows {
         items: Vec<PluginItem>,
     },
+    Acted {
+        effect: Option<ActionEffect>,
+    },
+    Handled,
     Cancelled,
     Failed {
         diagnostic: Diagnostic,
@@ -175,6 +201,7 @@ mod tests {
             entry: "main.js".into(),
             modules,
             call: Call::Compile,
+            environment: None,
         };
         write(&mut bytes, &message, &tail).unwrap();
         write(&mut bytes, &ToHelper::Cancel { id: 2 }, &[]).unwrap();

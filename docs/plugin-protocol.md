@@ -1,13 +1,15 @@
 # Experimental query protocol
 
 This is the first executable part of [the plugin proposal](plugin-design.md),
-tracked by #6, #7 and #96. It is not a stable SDK. The launcher runs it for
-[user extensions](./features/extensions.md), which have no host imports. Capability
-brokerage, streaming, forms and state persistence remain separate work.
+tracked by #6, #7 and #96. It is not a stable SDK. Capability brokerage,
+streaming, forms and state persistence remain separate work.
 
-`dupin-plugin-protocol` has only Serde dependencies and is shared by hosts and
-guests. The calculator fixture in `experiments/plugin-protocol` exercises it
-through actual Wasm memory rather than passing native Rust objects across an ABI.
+`dupin-plugin-protocol` has only Serde dependencies. [User extensions](./features/extensions.md)
+answer in its items, views and actions: the extension host checks a JavaScript
+extension's rows against these bounds, and `dupin ext run --json` prints them as a
+`results` outcome. The message envelope below was the wire format of the Wasm guests
+Dupin no longer runs; the historical calculator fixture in `experiments/plugin-protocol`
+exercised it through Wasm memory.
 
 ## Messages
 
@@ -32,10 +34,14 @@ Items have a stable ID, a view and action descriptors. View kinds are `text`
 A text subtitle may be empty. An action descriptor has an ID, a title and an
 `effect` tagged by `kind`: `copy` with non-empty `text`; `open_url` with an
 `http` or `https` `url` that has a host and no whitespace or control characters;
-or `push` with a `view` ID, a non-empty `title` and optional JSON `context`,
-which asks the host to query the same guest for that view. There is no other
-effect, so actions cannot carry executable code, native UI objects or arbitrary
-OS operations. The calculator fixture emits no actions.
+`push` with a `view` ID, a non-empty `title` and optional JSON `context`,
+which asks the host to query the same guest for that view; or `run` with an
+`action` name of up to 64 bytes and optional JSON `data` bounded like `context`,
+which asks the host to call the JavaScript guest's `actions[action]` when the
+user chooses it. There is no other effect, so actions cannot carry executable
+code, native UI objects or arbitrary OS operations; a `run` reaches only the
+guest's own handler, and the host, not the guest, marks that call as one the user
+chose. The calculator fixture emits no actions.
 
 The host checks request/response correlation and result count after decoding.
 Item IDs must be unique within a response; action IDs must be unique within an
@@ -74,46 +80,3 @@ in that case. Data is rejected rather than silently truncated.
 Input byte caps are checked before JSON decoding. Encoding uses a capped
 writer, including when escaping expands a string. Errors report categories and
 static field names without echoing message contents or JSON parser error text.
-
-## Private Wasm transport
-
-The fixture uses a separate ABI version (`1`) and requires these exports:
-
-- `dupin_abi_version() -> i32`;
-- `dupin_alloc(length: i32) -> i32`;
-- `dupin_query(input: i32, input_length: i32, output: i32, output_capacity: i32) -> i32`;
-- one exported linear memory named `memory`.
-
-The host allocates and validates disjoint input/output regions, copies in the
-encoded request, and supplies a 256 KiB output buffer. The returned length must
-be positive and fit the buffer before any output is read. Negative statuses
-mean invalid buffers/request or insufficient output capacity. Returned bytes
-must then pass protocol decoding, semantic limits and correlation checks.
-
-The module may be reused, but each request has a fresh store/instance. Buffers
-live for that request; dropping the store releases them on both success and
-failure. There is no guest `free` callback or retained pointer. The guest's
-unsafe Rust exports require buffers allocated through its allocator; a hostile
-host is outside this fixture's threat model. Host access to guest memory uses
-checked Wasmi APIs.
-
-The host rejects imports and modules larger than 4 MiB. It caps linear memory at
-16 MiB, tables at one with 1,024 elements, memories at one and instances at one.
-Initialisation/version/allocation share 1M fuel; the query receives a separate
-20M budget. Both are experimental budgets. Wasmi's `auto-dispatch` feature keeps
-portable dispatch available when native tail calls cannot be guaranteed, notably
-in debug builds; increasing the native stack is not a substitute for it.
-
-The shared `dupin-plugin-runtime` host can poll a host cancellation predicate and absolute
-deadline between resumable fuel slices. The CLI uses a five-second fixture
-deadline. These checks do not pre-empt module loading, instantiation/start,
-host parsing/translation, allocations or individual charged operations; the
-start function remains bounded by startup fuel. See the fixture README
-for the execution policy and its limits.
-
-Fuel bounds guest execution, not eager host parsing/translation, rendering or
-total host memory. `MAX_MODULE_BYTES` caps the input size for parsing/translation;
-neither fuel nor query deadlines bound their work. This prototype has no
-permission-bearing imports, host operation completions or external-plugin
-installation. Production cancellation/deadline integration is still required;
-this is not a claim that the production isolation and permission design is complete.

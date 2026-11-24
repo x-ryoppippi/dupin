@@ -1,7 +1,11 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dupin_core::{Action, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View};
+use dupin_core::{
+    Action, ExtensionRequest, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View,
+};
+use dupin_extension_bridge::{Bridge, ConsentReason, ConsentRequest, PackageId, Trigger};
+use dupin_extension_host::{NoServices, Services};
 use dupin_js_runtime::RunError;
 use dupin_plugin_protocol as protocol;
 
@@ -10,14 +14,30 @@ use super::Extension;
 /// Shorter than the command's session deadline, so a slow guest ends with its own error row
 /// rather than the generic expiry.
 pub const QUERY_DEADLINE: Duration = Duration::from_secs(2);
+/// An action the user chose may wait on the network or a program for longer than typing may.
+pub const ACTION_DEADLINE: Duration = Duration::from_secs(30);
 
 pub struct ExtensionProvider {
     extension: Arc<Extension>,
+    bridge: Option<Bridge>,
 }
 
 impl ExtensionProvider {
+    /// A provider whose guest reaches no host service.
+    #[cfg(test)]
     pub fn new(extension: Arc<Extension>) -> Self {
-        Self { extension }
+        Self {
+            extension,
+            bridge: None,
+        }
+    }
+
+    /// A provider whose guest's requests go through `bridge`, as typing in the launcher.
+    pub fn with_bridge(extension: Arc<Extension>, bridge: Bridge) -> Self {
+        Self {
+            extension,
+            bridge: Some(bridge),
+        }
     }
 
     fn problem(&self, message: String) -> Item {
@@ -40,7 +60,12 @@ impl ExtensionProvider {
     }
 }
 
-fn item(id: String, view: View, offered: Vec<protocol::PluginAction>) -> Item {
+fn item(extension: &str, row: protocol::PluginItem) -> Item {
+    let protocol::PluginItem {
+        id,
+        view,
+        actions: offered,
+    } = row;
     let payload = offered
         .iter()
         .find_map(|action| match &action.effect {
@@ -56,6 +81,13 @@ fn item(id: String, view: View, offered: Vec<protocol::PluginAction>) -> Item {
                 protocol::Effect::OpenUrl { url } => Action::OpenUrl(url),
                 protocol::Effect::Push { view, title, context } => {
                     Action::Push(Page { view, title, context })
+                }
+                protocol::Effect::Run { action: name, data } => {
+                    let run = Action::Extension {
+                        extension: extension.to_owned(),
+                        request: ExtensionRequest::Run { action: name, data },
+                    };
+                    return ItemAction::new(&action.id, &action.title, run).keep_open();
                 }
             };
             ItemAction::new(&action.id, &action.title, run)
@@ -82,26 +114,38 @@ impl Provider for ExtensionProvider {
             return Ok(());
         }
         let cancellation = request.cancellation();
+        let access = self
+            .bridge
+            .as_ref()
+            .map(|bridge| (bridge, &self.extension.package));
+        let (services, generation): (Arc<dyn Services>, _) = match access {
+            Some((bridge, id)) => {
+                let call = bridge.call(id, Trigger::Query);
+                (call.services, call.generation)
+            }
+            None => (Arc::new(NoServices), None),
+        };
         let answer = self.extension.query(
             &request.query,
             request.page.as_ref(),
             request.limit,
             Instant::now() + QUERY_DEADLINE,
             move || cancellation.is_cancelled(),
+            &services,
         );
-        let items = match answer {
-            Ok(outcome) => match outcome {
-                protocol::Outcome::Results { items, .. } => items
-                    .into_iter()
-                    .map(|row| item(row.id, row.view, row.actions))
-                    .collect(),
-                protocol::Outcome::Detail {
-                    title,
-                    body,
-                    actions: offered,
-                } => vec![item("detail".into(), View::Detail { title, body }, offered)],
-                protocol::Outcome::Error { message, .. } => vec![self.problem(message)],
-            },
+        if let Some((bridge, id)) = access
+            && !bridge.is_current(id, generation)
+        {
+            emit(vec![self.problem(
+                "Its access changed while it ran, so its answer was dropped. Type again to retry.".into(),
+            )]);
+            return Ok(());
+        }
+        let mut items: Vec<Item> = match answer {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|row| item(&self.extension.id, row))
+                .collect(),
             Err(RunError::Cancelled) => return Ok(()),
             Err(RunError::Failed(diagnostic)) => {
                 crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
@@ -114,9 +158,148 @@ impl Provider for ExtensionProvider {
                 vec![self.problem(subtitle)]
             }
         };
+        if let Some((bridge, id)) = access {
+            let mut asking: Vec<_> = bridge
+                .pending(Some(id))
+                .iter()
+                .map(|request| consent_row(&self.extension, request))
+                .collect();
+            if bridge.asked_while_off(id) {
+                asking.insert(0, turn_on_row(&self.extension));
+            }
+            items.splice(0..0, asking);
+        }
         emit(items);
         Ok(())
     }
+}
+
+fn extension_action(extension: &Extension, id: &str, title: &str, request: ExtensionRequest) -> ItemAction {
+    ItemAction::new(
+        id,
+        title,
+        Action::Extension {
+            extension: extension.id.clone(),
+            request,
+        },
+    )
+    .consumes()
+}
+
+/// A row that asks the user to decide. It sits above the extension's results, where Enter
+/// lands while typing, so Enter opens its choices instead of granting anything.
+fn notice_row(id: String, title: String, subtitle: String, actions: Vec<ItemAction>) -> Item {
+    Item {
+        id,
+        payload: Payload::default(),
+        view: View::Text { title, subtitle },
+        record_usage: false,
+        icon: None,
+        matched: Vec::new(),
+        completion: None,
+        score: None,
+        primary: None,
+        alternate: None,
+        actions,
+    }
+}
+
+/// What the panel shows when the extension asked for a scope the user hasn't decided on: the
+/// scope as the broker describes it, and Allow and Deny. Nothing runs until the user chooses,
+/// and choosing runs nothing the extension asked for before.
+pub(crate) fn consent_row(extension: &Extension, request: &ConsentRequest) -> Item {
+    let key = request.key().to_string();
+    let title = format!("Allow {} to {}?", extension.name, request.description);
+    let (subtitle, actions) = match request.reason {
+        ConsentReason::OsAccess(permission) => (
+            format!(
+                "macOS hasn't allowed Dupin {} yet. Requesting it asks macOS once.",
+                permission.name()
+            ),
+            vec![extension_action(
+                extension,
+                "request-access",
+                "Request Access",
+                ExtensionRequest::RequestAccess { scope: key.clone() },
+            )],
+        ),
+        _ if request.needs_binding() => (
+            format!("{key} · Choose what it may use in Settings → Extensions."),
+            vec![extension_action(
+                extension,
+                "review",
+                "Open Settings",
+                ExtensionRequest::Review,
+            )],
+        ),
+        reason => (
+            if reason == ConsentReason::Changed {
+                format!(
+                    "{key} · An update changed what it asks for. Allowing runs nothing until you use it again."
+                )
+            } else {
+                format!("{key} · Allowing runs nothing until you use it again.")
+            },
+            vec![
+                extension_action(
+                    extension,
+                    "allow",
+                    "Allow",
+                    ExtensionRequest::Allow {
+                        scope: key.clone(),
+                        revision: request.revision.to_string(),
+                    },
+                ),
+                extension_action(
+                    extension,
+                    "deny",
+                    "Deny",
+                    ExtensionRequest::Deny { scope: key.clone() },
+                ),
+            ],
+        ),
+    };
+    let mut actions = actions;
+    if !actions.iter().any(|action| action.id == "deny") {
+        actions.push(extension_action(
+            extension,
+            "deny",
+            "Deny",
+            ExtensionRequest::Deny { scope: key.clone() },
+        ));
+    }
+    notice_row(format!("{CONSENT_ROW}{key}"), title, subtitle, actions)
+}
+
+const CONSENT_ROW: &str = "consent:";
+const TURN_ON_ROW: &str = "consent:turn-on";
+
+/// Whether `row` asks the user something about `id` that the bridge no longer waits on, so the
+/// panel can drop it after an answer without running the guest again.
+pub(crate) fn is_answered_consent_row(row: &Item, bridge: &Bridge, id: &PackageId) -> bool {
+    let Some(asked) = row.id.strip_prefix(CONSENT_ROW) else {
+        return false;
+    };
+    if row.id == TURN_ON_ROW {
+        return !bridge.asked_while_off(id);
+    }
+    !bridge
+        .pending(Some(id))
+        .iter()
+        .any(|request| request.key().to_string() == asked)
+}
+
+fn turn_on_row(extension: &Extension) -> Item {
+    notice_row(
+        TURN_ON_ROW.into(),
+        format!("Turn on {}?", extension.name),
+        "It asked to use something while it's off. Turning it on lets it ask for each thing it declares."
+            .into(),
+        vec![
+            extension_action(extension, "turn-on", "Turn On", ExtensionRequest::TurnOn),
+            extension_action(extension, "review", "Open Settings", ExtensionRequest::Review),
+        ],
+    )
 }
 
 fn capitalized(text: &str) -> String {
@@ -130,7 +313,6 @@ fn capitalized(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::tests::{extension, module};
 
     fn search(provider: &ExtensionProvider, query: &str) -> Vec<Item> {
         let mut rows = Vec::new();
@@ -140,185 +322,64 @@ mod tests {
         rows
     }
 
+    fn row(value: serde_json::Value) -> Item {
+        item("word-count", serde_json::from_value(value).unwrap())
+    }
+
     #[test]
-    fn guest_views_become_rows_with_only_copy_and_web_actions() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "count", "view": {"kind": "pair", "source": "two words", "result": "2 words"},
-                 "actions": [
-                    {"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}},
-                    {"id": "web", "title": "Search", "effect": {"kind": "open_url", "url": "https://example.com/?q=2"}}
-                 ]},
-                {"id": "detail", "view": {"kind": "detail", "title": "Details", "body": "Body"}, "actions": []}
-            ]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
-        assert_eq!(rows.len(), 2);
+    fn guest_rows_become_items_whose_first_action_runs_on_enter() {
+        let count = row(serde_json::json!(
+            {"id": "count", "view": {"kind": "pair", "source": "two words", "result": "2 words"},
+             "actions": [
+                {"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}},
+                {"id": "web", "title": "Search", "effect": {"kind": "open_url", "url": "https://example.com/?q=2"}}
+             ]}
+        ));
         assert_eq!(
-            rows[0].view,
+            count.view,
             View::Pair {
                 source: "two words".into(),
                 result: "2 words".into()
             }
         );
-        assert_eq!(rows[0].primary.as_deref(), Some("copy"));
-        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
-        assert_eq!(rows[0].payload, Payload::text("2"));
+        assert_eq!(count.primary.as_deref(), Some("copy"));
+        assert_eq!(count.action("copy"), Some(&Action::Copy("2".into())));
+        assert_eq!(count.payload, Payload::text("2"));
         assert_eq!(
-            rows[0].action("web"),
+            count.action("web"),
             Some(&Action::OpenUrl("https://example.com/?q=2".into()))
         );
-        assert!(!rows[0].record_usage);
-        assert_eq!(rows[1].primary, None);
+        assert!(!count.record_usage);
+
+        let inert = row(serde_json::json!(
+            {"id": "detail", "view": {"kind": "detail", "title": "Details", "body": "Body"}, "actions": []}
+        ));
+        assert_eq!(inert.primary, None);
+        assert_eq!(inert.payload, Payload::default());
     }
 
-    fn page() -> Page {
-        Page {
+    #[test]
+    fn a_page_never_reaches_the_guest() {
+        let provider =
+            ExtensionProvider::new(Arc::new(crate::extensions::tests::extension("Word Count", "wc")));
+        let page = Page {
             view: "stats".into(),
             title: "Statistics".into(),
-            context: Some(serde_json::json!({"text": "two words"})),
-        }
-    }
-
-    #[test]
-    fn push_effects_become_push_actions_and_views_reach_the_guest() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "count", "view": {"kind": "text", "title": "2 words", "subtitle": ""},
-                 "actions": [{"id": "stats", "title": "Statistics", "effect":
-                    {"kind": "push", "view": "stats", "title": "Statistics", "context": {"text": "two words"}}}]}
-            ]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
-        assert_eq!(rows[0].action("stats"), Some(&Action::Push(page())));
-        assert_eq!(rows[0].primary.as_deref(), Some("stats"));
-
-        let root = provider.extension.wire("q", None, 10);
-        assert_eq!((root.view, root.context), (None, None));
-        let wire = provider.extension.wire("filter", Some(&page()), 10);
-        assert_eq!(wire.query, "filter");
-        assert_eq!(wire.view.as_deref(), Some("stats"));
-        assert_eq!(wire.context, page().context);
-        assert!(wire.encode().is_ok());
-    }
-
-    #[test]
-    fn a_detail_answer_to_a_view_is_one_detail_row_and_is_refused_outside_one() {
-        let response = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "detail", "title": "Statistics", "body": "2 words\n9 characters",
-                "actions": [{"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}}]}
-        });
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
+            context: None,
+        };
         let mut rows = Vec::new();
         provider
-            .search(&Request::detached_page("", page(), 10), &mut |batch| {
+            .search(&Request::detached_page("", page, 10), &mut |batch| {
                 rows.extend(batch)
             })
             .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(
-            rows[0].view,
-            View::Detail {
-                title: "Statistics".into(),
-                body: "2 words\n9 characters".into()
-            }
-        );
-        assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
-        let provider = ExtensionProvider::new(Arc::new(extension(
-            "Word Count",
-            "wc",
-            module(&response.to_string()),
-        )));
-        let rows = search(&provider, "two words");
         assert_eq!(
             rows[0].view,
             View::Text {
                 title: "Word Count failed".into(),
-                subtitle: "Plugin protocol: invalid field: outcome".into()
+                subtitle: "Extensions can't open views yet".into(),
             }
         );
-    }
-
-    #[test]
-    fn traps_and_invalid_responses_become_a_visible_error_row() {
-        let trapping = dupin_plugin_runtime::GuestModule::load(
-            &wat::parse_str(
-                r#"(module
-                (memory (export "memory") 8)
-                (global $next (mut i32) (i32.const 1024))
-                (func (export "dupin_abi_version") (result i32) i32.const 1)
-                (func (export "dupin_alloc") (param i32) (result i32)
-                    global.get $next global.get $next local.get 0 i32.add global.set $next)
-                (func (export "dupin_query") (param i32 i32 i32 i32) (result i32) unreachable))"#,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let looping = dupin_plugin_runtime::GuestModule::load(
-            &wat::parse_str(
-                r#"(module
-                (memory (export "memory") 8)
-                (global $next (mut i32) (i32.const 1024))
-                (func (export "dupin_abi_version") (result i32) i32.const 1)
-                (func (export "dupin_alloc") (param i32) (result i32)
-                    global.get $next global.get $next local.get 0 i32.add global.set $next)
-                (func (export "dupin_query") (param i32 i32 i32 i32) (result i32) (loop br 0) i32.const 0))"#,
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let file_url = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "results", "state": null, "items": [
-                {"id": "x", "view": {"kind": "text", "title": "x", "subtitle": ""},
-                 "actions": [{"id": "open", "title": "Open", "effect": {"kind": "open_url", "url": "file:///"}}]}
-            ]}
-        });
-        let guest_error = serde_json::json!({
-            "version": 1, "request_id": "1", "generation": "1",
-            "outcome": {"kind": "error", "code": "invalid_query", "message": "Type some words"}
-        });
-        for (guest, subtitle) in [
-            (trapping, "Plugin execution trapped"),
-            (
-                module(&file_url.to_string()),
-                "Plugin protocol: invalid field: effect.url",
-            ),
-            (module(&guest_error.to_string()), "Type some words"),
-        ] {
-            let provider = ExtensionProvider::new(Arc::new(extension("Word Count", "wc", guest)));
-            let rows = search(&provider, "query");
-            assert_eq!(rows.len(), 1);
-            assert_eq!(
-                rows[0].view,
-                View::Text {
-                    title: "Word Count failed".into(),
-                    subtitle: subtitle.into(),
-                }
-            );
-            assert!(rows[0].actions.is_empty());
-        }
-        // Fuel or the deadline ends it first, depending on how fast this build runs.
-        let provider = ExtensionProvider::new(Arc::new(extension("Word Count", "wc", looping)));
-        let rows = search(&provider, "query");
-        assert_eq!(rows[0].display_title(), "Word Count failed");
     }
 
     fn javascript(source: &str) -> (tempfile::TempDir, ExtensionProvider) {
@@ -334,15 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn the_javascript_word_counter_answers_like_the_wasm_one() {
+    fn the_word_counter_counts_words_and_copies_the_count() {
         dupin_extension_host::skip_inside_a_sandbox!();
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
-        assert_eq!(
-            (extension.runtime(), extension.keyword.as_str()),
-            ("javascript", "wc")
-        );
+        assert_eq!(extension.keyword, "wc");
         let rows = search(&ExtensionProvider::new(extension), "two words");
         assert_eq!(rows.len(), 1);
         assert_eq!(
@@ -400,5 +458,116 @@ mod tests {
             );
             assert!(rows[0].actions.is_empty());
         }
+    }
+
+    /// A JavaScript extension that declares `capabilities`, behind an in-memory bridge.
+    fn declaring(capabilities: &str, source: &str) -> (tempfile::TempDir, ExtensionProvider, Bridge) {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(super::super::manifest::PACKAGE_JSON),
+            format!(
+                r#"{{"name": "word-count", "version": "0.1.0", "dupin": {{"title": "Word Count", "keyword": "wc", "capabilities": {capabilities}}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(folder.path().join("main.js"), source).unwrap();
+        let extension = super::super::load_folder(folder.path()).unwrap();
+        let bridge = Bridge::new(
+            dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+            None,
+            dupin_extension_bridge::Services::none(),
+        );
+        let (id, revision) = (extension.package.clone(), extension.revision.clone());
+        bridge.install(&id, revision, extension.capabilities.clone());
+        let (package_on_disk, revision_on_disk, _) = super::super::declaration_of(folder.path()).unwrap();
+        assert_eq!(package_on_disk, extension.package);
+        assert_eq!(revision_on_disk, extension.revision);
+        (
+            folder,
+            ExtensionProvider::with_bridge(extension, bridge.clone()),
+            bridge,
+        )
+    }
+
+    #[test]
+    fn a_request_while_off_offers_to_turn_the_extension_on() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider, bridge) = declaring(
+            r#"{"storage": {"quotaBytes": 1024}}"#,
+            "import { storage } from 'dupin'; export async function search() { try { await storage.keys(); } catch (error) { return [{ title: error.code }]; } }",
+        );
+        let rows = search(&provider, "x");
+        assert_eq!(rows[0].id, "consent:turn-on");
+        assert_eq!(rows[0].display_title(), "Turn on Word Count?");
+        assert_eq!(
+            rows[0].action("turn-on"),
+            Some(&Action::Extension {
+                extension: "word-count".into(),
+                request: ExtensionRequest::TurnOn
+            })
+        );
+        assert_eq!(rows[1].display_title(), "disabled");
+
+        let id = provider.extension.package.clone();
+        assert!(!is_answered_consent_row(&rows[0], &bridge, &id));
+        bridge.set_enabled(&id, true).unwrap();
+        assert!(is_answered_consent_row(&rows[0], &bridge, &id));
+        assert!(
+            !is_answered_consent_row(&rows[1], &bridge, &id),
+            "only questions go"
+        );
+        let rows = search(&provider, "x");
+        assert_eq!(rows[0].id, "consent:storage");
+        assert_eq!(rows[0].primary, None, "Enter shows the choices, never grants");
+        assert_eq!(
+            rows[0].display_title(),
+            "Allow Word Count to keep up to 1024 bytes of encrypted data?"
+        );
+        let Some(Action::Extension {
+            request: ExtensionRequest::Allow { scope, revision },
+            ..
+        }) = rows[0].action("allow")
+        else {
+            panic!("{:?}", rows[0].actions);
+        };
+        assert_eq!(scope, "storage");
+        assert_eq!(revision, provider.extension.revision.as_str());
+        assert!(rows[0].action("deny").is_some());
+        assert_eq!(rows[1].display_title(), "needs-consent");
+
+        let request = bridge.pending(Some(&id)).remove(0);
+        assert!(!is_answered_consent_row(&rows[0], &bridge, &id));
+        bridge
+            .allow(&id, &request.revision, &request.scope, None)
+            .unwrap();
+        assert!(
+            is_answered_consent_row(&rows[0], &bridge, &id),
+            "the panel drops the answered row without searching again"
+        );
+        let rows = search(&provider, "x");
+        assert_eq!(rows.len(), 1, "the request is answered");
+        // The in-memory bridge reaches no service, so the granted request now fails there.
+        assert_eq!(rows[0].display_title(), "unavailable");
+    }
+
+    #[test]
+    fn rows_offering_actions_run_them_in_their_own_extension() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider, _bridge) = declaring(
+            "{}",
+            "export const search = () => [{ title: 'Note', actions: [{ title: 'Save', run: 'save', data: { id: 7 } }] }];",
+        );
+        let rows = search(&provider, "x");
+        assert_eq!(rows[0].primary.as_deref(), Some("run-0"));
+        assert_eq!(
+            rows[0].action("run-0"),
+            Some(&Action::Extension {
+                extension: "word-count".into(),
+                request: ExtensionRequest::Run {
+                    action: "save".into(),
+                    data: Some(serde_json::json!({"id": 7}))
+                }
+            })
+        );
     }
 }
