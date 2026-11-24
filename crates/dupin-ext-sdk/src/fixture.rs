@@ -629,7 +629,7 @@ pub fn rows(rows: &[Row]) -> Value {
 
 /// What choosing an action does, as `{ "copy": … }`, `{ "paste": … }`, `{ "url": … }` or
 /// `{ "run": … }`.
-pub fn effect(effect: &RowEffect) -> Map<String, Value> {
+fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
         RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
