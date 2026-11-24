@@ -5,8 +5,8 @@ let
   # Without a hash crane clones a Git source with builtins.fetchGit while evaluating, so every
   # evaluation would clone it, even when the binary cache has every output.
   outputHashes = {
-    "git+https://github.com/anomalyco/rune?rev=fcef33a2f60db30a7a872844464f84ff26f3fc75#fcef33a2f60db30a7a872844464f84ff26f3fc75" =
-      "sha256-Ew4j+TTT6EJQHwcXx2fffq/xcrnZAlI7yD7zWBQDkG4=";
+    "git+https://github.com/anomalyco/rune?rev=4acecee56054c948dc6f57cbbcce2665c1aa5462#4acecee56054c948dc6f57cbbcce2665c1aa5462" =
+      "sha256-aVxIOL16AaEgeM8Tf9qNslSQP0Ox54D04TmiMUU6r1Q=";
   };
   lockedGitSources = builtins.filter (source: builtins.substring 0 4 source == "git+") (
     map (package: package.source or "") (builtins.fromTOML (builtins.readFile ../Cargo.lock)).package

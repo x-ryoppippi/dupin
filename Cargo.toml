@@ -19,17 +19,17 @@ dupin-mac = { path = "crates/dupin-mac" }
 
 # Rune is pre-release: pin a `dev` rev (`dev` is never rewritten) and patch every crate
 # Rune's own workspace patches, at the same rev. Cargo doesn't inherit a dependency's patches.
-rune = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75", default-features = false, features = [
+rune = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462", default-features = false, features = [
 	"accessibility",
 	"metal-backend",
 	# The settings window's icons are SVG.
 	"svg",
 ] }
-rune-kit = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75", default-features = false }
-rune-notify = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
+rune-kit = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462", default-features = false }
+rune-notify = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
 # OpenCode's colours and icons for the settings window, as Hex draws its own. Its fonts are a
 # const the app never reads, so they stay out of the binary.
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
 
 libc = "0.2"
 objc2 = "0.6"
@@ -52,16 +52,18 @@ toml = { version = "0.9", default-features = false, features = ["parse", "serde"
 # Rune's own wgpu, for the compositor that draws the query field's backdrop.
 wgpu = { version = "30.0.2", default-features = false }
 # The shader compiler Rune already links, to check a user's backdrop shader as Rune's Metal backend
-# will compile it, before it reaches the GPU.
-naga = { version = "30.0.2", default-features = false, features = ["wgsl-in", "msl-out"] }
+# will compile it, before it reaches the GPU. 30.0.1 is the release Rune patches.
+naga = { version = "30.0.1", default-features = false, features = ["wgsl-in", "msl-out"] }
 
 [patch.crates-io]
-winit = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
-sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
-parley_engine = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
-wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
-accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
-accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "fcef33a2f60db30a7a872844464f84ff26f3fc75" }
+winit = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "4acecee56054c948dc6f57cbbcce2665c1aa5462" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
