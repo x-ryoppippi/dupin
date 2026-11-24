@@ -98,7 +98,8 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
-fn is_source_name(name: &str) -> bool {
+/// Whether the loader reads a file of this name as part of the package's code.
+pub fn is_source_name(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 

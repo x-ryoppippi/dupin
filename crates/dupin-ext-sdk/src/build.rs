@@ -122,8 +122,9 @@ fn map_path(outfile: &Path) -> PathBuf {
     PathBuf::from(map)
 }
 
-/// The package's own `rolldown.config.*`, relative to it.
-fn own_config(dir: &Path) -> Option<String> {
+/// The package's own `rolldown.config.*`, relative to it. One the loader would read as
+/// extension code is refused, because its Node imports would fail every check and every load.
+fn own_config(dir: &Path) -> Result<Option<String>, Diagnostic> {
     let mut found: Vec<String> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
@@ -133,7 +134,15 @@ fn own_config(dir: &Path) -> Option<String> {
         .filter(|name| name.starts_with(CONFIG_PREFIX))
         .collect();
     found.sort();
-    found.into_iter().next()
+    if let Some(name) = found.iter().find(|name| dupin_js_runtime::is_source_name(name)) {
+        return Err(Diagnostic::new(
+            "config-is-extension-code",
+            "is JavaScript, so Dupin would load it as part of the extension",
+        )
+        .file(name)
+        .hint("Rename it to `rolldown.config.ts`: Dupin loads every `.js` and `.mjs` file in the package."));
+    }
+    Ok(found.into_iter().next())
 }
 
 /// Runs Rolldown in `dir` to write the package's `source` and its dependencies into `outfile`
@@ -167,7 +176,7 @@ pub(crate) fn bundle(
     ));
     let report = scratch.with_extension("json");
     let fallback = scratch.with_extension("config.ts");
-    let config = match own_config(dir) {
+    let config = match own_config(dir)? {
         Some(name) => PathBuf::from(name),
         None => {
             std::fs::write(&fallback, CONFIG).map_err(|error| {

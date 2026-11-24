@@ -383,6 +383,28 @@ fn bundling_rejects_node_builtins_and_keeps_the_previous_entry() {
 }
 
 #[test]
+fn bundling_refuses_a_configuration_the_loader_would_run_as_extension_code() {
+    let previous = "export function search() { return []; }\n";
+    for name in ["rolldown.config.js", "rolldown.config.mjs"] {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        package_without_config(dir, previous, "");
+        write(&dir.join(name), CONFIG);
+        write(&dir.join("dist/main.js"), previous);
+        let never_runs = Rolldown {
+            program: dir.join("no-rolldown"),
+        };
+        let error = build(dir, Some(&never_runs), BuildOptions::default(), &validate).unwrap_err();
+        assert_eq!(error.code, "config-is-extension-code", "{error:?}");
+        assert_eq!(error.file.as_deref(), Some(name), "{error:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dist/main.js")).unwrap(),
+            previous
+        );
+    }
+}
+
+#[test]
 fn bundling_fails_on_an_import_rolldown_cannot_resolve() {
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path();

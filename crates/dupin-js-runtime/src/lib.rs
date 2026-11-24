@@ -20,7 +20,7 @@ use rquickjs::promise::PromiseState;
 use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runtime, Value, WriteOptions};
 
 pub use diagnostic::Diagnostic;
-pub use package::source_files;
+pub use package::{is_source_name, source_files};
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
