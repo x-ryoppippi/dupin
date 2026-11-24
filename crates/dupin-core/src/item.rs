@@ -235,7 +235,7 @@ pub enum HostImageSource {
 
 impl HostImage {
     /// The bytes of text it carries, for budgets on what is kept in memory.
-    pub fn text_bytes(&self) -> usize {
+    pub(crate) fn text_bytes(&self) -> usize {
         self.extension.len()
             + match &self.source {
                 HostImageSource::Blob(handle) => handle.len(),

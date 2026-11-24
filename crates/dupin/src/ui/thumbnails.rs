@@ -168,7 +168,7 @@ fn thumbnail(bridge: &Bridge, job: &Job) -> Option<Vec<u8>> {
         ImageData::File(path) => dupin_mac::thumbnail::from_file(path, fit),
     });
     match made {
-        Ok(thumbnail) => thumbnail.map(|thumbnail| thumbnail.png),
+        Ok(png) => png,
         Err(failure) => {
             if !matches!(failure.code(), "needs-consent" | "disabled" | "not-found") {
                 crate::log::warn(&format!(

@@ -5,7 +5,6 @@ use std::io::Read;
 use std::path::Path;
 
 use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFString, CFType};
-use objc2_core_graphics::CGImage;
 use objc2_image_io::{
     CGImageSource, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
     kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
@@ -15,23 +14,15 @@ use objc2_image_io::{
 use crate::clipboard::image::{dimension, encode};
 
 /// The largest encoded image read, as large as a copied image clipboard history reads.
-pub const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 /// The most pixels an image may have: ImageIO may decode a PNG whole before scaling it down, so
 /// this bounds what one thumbnail holds in memory while it is made.
-pub const MAX_SOURCE_PIXELS: u64 = 64 * 1024 * 1024;
+const MAX_SOURCE_PIXELS: u64 = 64 * 1024 * 1024;
 
-/// A scaled-down image, as PNG, and its size in pixels.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Thumbnail {
-    pub png: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
-
-/// The image in `data`, scaled down to fit `fit` pixels (width, height), keeping its aspect
+/// The image in `data` as PNG, scaled down to fit `fit` pixels (width, height), keeping its aspect
 /// ratio and its orientation, never scaled up. `None` when it isn't an image ImageIO decodes, or
 /// is larger than [`MAX_SOURCE_BYTES`] or [`MAX_SOURCE_PIXELS`].
-pub fn from_bytes(data: &[u8], fit: (u32, u32)) -> Option<Thumbnail> {
+pub fn from_bytes(data: &[u8], fit: (u32, u32)) -> Option<Vec<u8>> {
     if data.is_empty() || data.len() > MAX_SOURCE_BYTES || fit.0 == 0 || fit.1 == 0 {
         return None;
     }
@@ -73,17 +64,13 @@ pub fn from_bytes(data: &[u8], fit: (u32, u32)) -> Option<Thumbnail> {
             ],
         );
         let image = source.thumbnail_at_index(0, Some(options.as_opaque()))?;
-        Some(Thumbnail {
-            png: encode(&image, "public.png")?,
-            width: u32::try_from(CGImage::width(Some(&image))).ok()?,
-            height: u32::try_from(CGImage::height(Some(&image))).ok()?,
-        })
+        encode(&image, "public.png")
     }
 }
 
 /// As [`from_bytes`], for the image in the regular file at `path`, which is read only when it
 /// is no larger than [`MAX_SOURCE_BYTES`].
-pub fn from_file(path: &Path, fit: (u32, u32)) -> Option<Thumbnail> {
+pub fn from_file(path: &Path, fit: (u32, u32)) -> Option<Vec<u8>> {
     let file = std::fs::File::open(path).ok()?;
     let metadata = file.metadata().ok()?;
     if !metadata.is_file() || metadata.len() > MAX_SOURCE_BYTES as u64 {
@@ -130,20 +117,23 @@ mod tests {
         encode(&image, kind).unwrap()
     }
 
+    /// The width and height a PNG's header states.
+    fn size(png: &[u8]) -> (u32, u32) {
+        let header = png.strip_prefix(b"\x89PNG\r\n\x1a\n").expect("a PNG");
+        let number = |at: usize| u32::from_be_bytes(header[at..at + 4].try_into().unwrap());
+        (number(8), number(12))
+    }
+
     #[test]
     fn images_shrink_to_fit_keeping_their_shape_and_never_grow() {
         let wide = encoded(400, 100, "public.png");
-        let thumbnail = from_bytes(&wide, (64, 64)).unwrap();
-        assert_eq!((thumbnail.width, thumbnail.height), (64, 16));
-        assert!(thumbnail.png.starts_with(b"\x89PNG"));
+        assert_eq!(size(&from_bytes(&wide, (64, 64)).unwrap()), (64, 16));
 
         let tall = encoded(100, 400, "public.tiff");
-        let thumbnail = from_bytes(&tall, (600, 200)).unwrap();
-        assert_eq!((thumbnail.width, thumbnail.height), (50, 200));
+        assert_eq!(size(&from_bytes(&tall, (600, 200)).unwrap()), (50, 200));
 
         let small = encoded(20, 10, "public.jpeg");
-        let thumbnail = from_bytes(&small, (64, 64)).unwrap();
-        assert_eq!((thumbnail.width, thumbnail.height), (20, 10));
+        assert_eq!(size(&from_bytes(&small, (64, 64)).unwrap()), (20, 10));
     }
 
     #[test]
@@ -155,7 +145,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let png = folder.path().join("a.png");
         std::fs::write(&png, encoded(8, 8, "public.png")).unwrap();
-        assert_eq!(from_file(&png, (4, 4)).map(|t| (t.width, t.height)), Some((4, 4)));
+        assert_eq!(from_file(&png, (4, 4)).map(|png| size(&png)), Some((4, 4)));
         assert!(from_file(folder.path(), (4, 4)).is_none(), "a folder");
         assert!(from_file(&folder.path().join("gone.png"), (4, 4)).is_none());
         let huge = folder.path().join("huge.png");
