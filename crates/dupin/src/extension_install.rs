@@ -56,13 +56,7 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
             let mut broker = grants().0;
             let granted: Vec<_> = listed
                 .iter()
-                .map(|listed| {
-                    granted(
-                        &mut broker,
-                        &installer.extensions.join(&listed.name),
-                        &listed.name,
-                    )
-                })
+                .map(|listed| granted(&mut broker, &installer.extensions.join(&listed.name)))
                 .collect();
             let lines = if listed.is_empty() {
                 vec!["No extensions were installed with `dupin ext install`.".to_owned()]
@@ -109,10 +103,8 @@ fn grants() -> (Broker, Option<std::path::PathBuf>) {
 }
 
 /// The scopes of the package in `folder` granted for the revision installed there.
-fn granted(broker: &mut Broker, folder: &std::path::Path, name: &str) -> Vec<String> {
-    let (Ok(id), Ok((revision, capabilities))) =
-        (PackageId::new(name), crate::extensions::declaration_of(folder))
-    else {
+fn granted(broker: &mut Broker, folder: &std::path::Path) -> Vec<String> {
+    let Ok((id, revision, capabilities)) = crate::extensions::declaration_of(folder) else {
         return Vec::new();
     };
     let _ = broker.install(id.clone(), revision, capabilities);

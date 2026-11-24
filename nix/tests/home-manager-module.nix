@@ -41,9 +41,12 @@ let
             _module.args.pkgs = pkgs;
             programs.dupin = {
               enable = true;
-              # Stands in for `dupin ext revision`, which names the revision of the folder.
+              # Stands in for `dupin ext revision --json`, which names the package in the folder
+              # and its revision.
               package = pkgs.writeShellScriptBin "dupin" ''
-                [ "$1 $2" = "ext revision" ] && printf 'blake3:%s\n' "$(basename "$3" | cut -c1-8)"
+                [ "$1 $2 $4" = "ext revision --json" ] \
+                  && printf '{"package": %s, "revision": "blake3:%s"}\n' \
+                    "$(${lib.getExe pkgs.jq} .name "$3/package.json")" "$(basename "$3" | cut -c1-8)"
               '';
             }
             // dupin;
@@ -52,6 +55,7 @@ let
       ];
     }).config;
   fixture = ./hm-extension;
+  notes = ./hm-extension-notes;
   plain = evaluate { settings.hotkey = "alt+space"; };
   declared = evaluate {
     launchd.enable = true;
@@ -65,10 +69,20 @@ let
         bindings."files:notes" = "/Users/me/Notes";
       }
       {
-        src = fixture;
-        name = "word-count-copy";
+        src = notes;
+        name = "my-notes";
         deny = [ "clipboard:read" ];
         enable = false;
+      }
+    ];
+  };
+  # Two folders of one package, whose grants would both apply to it.
+  clashing = evaluate {
+    extensions = [
+      { src = fixture; }
+      {
+        src = fixture;
+        name = "word-count-copy";
       }
     ];
   };
@@ -82,7 +96,7 @@ let
 in
 assert lib.attrNames plain.xdg.configFile == [ "dupin/config.toml" ];
 assert declared.xdg.configFile."dupin/extensions/word-count".source == fixture;
-assert declared.xdg.configFile."dupin/extensions/word-count-copy".source == fixture;
+assert declared.xdg.configFile."dupin/extensions/my-notes".source == notes;
 assert declared.launchd.agents.dupin.enable;
 assert !failed declared && failed duplicated;
 pkgs.runCommand "dupin-home-manager-module"
@@ -92,6 +106,7 @@ pkgs.runCommand "dupin-home-manager-module"
       pkgs.jq
     ];
     grants = declared.xdg.configFile."dupin/extension-grants.toml".source;
+    clash = pkgs.testers.testBuildFailure clashing.xdg.configFile."dupin/extension-grants.toml".source;
     expected = builtins.toJSON {
       version = 1;
       packages = {
@@ -104,7 +119,7 @@ pkgs.runCommand "dupin-home-manager-module"
           deny = [ ];
           bindings."files:notes" = "/Users/me/Notes";
         };
-        word-count-copy = {
+        notes = {
           enabled = false;
           grant = [ ];
           deny = [ "clipboard:read" ];
@@ -118,5 +133,6 @@ pkgs.runCommand "dupin-home-manager-module"
     toml2json "$grants" | jq -e '[.packages[].revision] | all(startswith("blake3:"))'
     printf '%s' "$expected" | jq --sort-keys . > expected.json
     diff expected.json actual.json
+    grep -F 'more than one package is named word-count in package.json' "$clash/testBuildFailure.log"
     touch $out
   ''

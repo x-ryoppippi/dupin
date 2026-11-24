@@ -479,7 +479,8 @@ mod tests {
         );
         let (id, revision) = (extension.package.clone(), extension.revision.clone());
         bridge.install(&id, revision, extension.capabilities.clone());
-        let (revision_on_disk, _) = super::super::declaration_of(folder.path()).unwrap();
+        let (package_on_disk, revision_on_disk, _) = super::super::declaration_of(folder.path()).unwrap();
+        assert_eq!(package_on_disk, extension.package);
         assert_eq!(revision_on_disk, extension.revision);
         (
             folder,

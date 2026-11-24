@@ -10,9 +10,10 @@
     let
       cfg = config.programs.dupin;
       toml = pkgs.formats.toml { };
-      # The capability broker's declarative base. Its grants name the revision Dupin computes
-      # from the package, which only the package's own Dupin can compute, so it is filled in
-      # when the file builds rather than while Nix evaluates.
+      # The capability broker's declarative base. Dupin knows a package by `name` in its
+      # package.json, whatever its folder is called, and its grants name the revision Dupin
+      # computes from the package. Only Dupin computes both, so they are filled in when the file
+      # builds rather than while Nix evaluates.
       grantsFile =
         pkgs.runCommand "dupin-extension-grants.toml"
           {
@@ -23,7 +24,6 @@
             packages = builtins.toJSON (
               map (extension: {
                 inherit (extension)
-                  name
                   src
                   grants
                   deny
@@ -37,10 +37,15 @@
           ''
             jq -c '.[]' "$packagesPath" | while read -r package; do
               src=$(jq -r .src <<<"$package")
-              revision=$(${lib.getExe' cfg.package "dupin"} ext revision "$src")
-              jq --arg revision "$revision" \
-                '{(.name): {revision: $revision, enabled, grant: .grants, deny, bindings}}' <<<"$package"
-            done | jq -s '{version: 1, packages: (add // {})}' > grants.json
+              declared=$(${lib.getExe' cfg.package "dupin"} ext revision "$src" --json)
+              jq --argjson declared "$declared" \
+                '{($declared.package): {revision: $declared.revision, enabled, grant: .grants, deny, bindings}}' <<<"$package"
+            done | jq -s '
+              (map(keys[0]) | group_by(.) | map(select(length > 1) | .[0])) as $twice
+              | if $twice != [] then
+                  error("programs.dupin.extensions: more than one package is named \($twice | join(", ")) in package.json")
+                else {version: 1, packages: (add // {})} end
+            ' > grants.json
             json2toml grants.json "$out"
           '';
       extension = lib.types.submodule (
@@ -67,8 +72,9 @@
               default = (lib.importJSON "${config.src}/package.json").name;
               defaultText = lib.literalMD "`name` from the package's `package.json`";
               description = ''
-                The package's name, which names its folder. It defaults to `name` in
-                `package.json`, which Nix reads from `src` while evaluating; set it to avoid that.
+                The name of the package's folder. It defaults to `name` in `package.json`, which
+                Nix reads from `src` while evaluating; set it to avoid that. Grants always apply to
+                the package by its `package.json` name, read when the configuration builds.
               '';
             };
             grants = lib.mkOption {

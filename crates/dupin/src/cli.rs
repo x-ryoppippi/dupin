@@ -349,9 +349,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtRevision(folder) => {
-            let (revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
+            let (package, revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
             if json {
-                return Ok(serde_json::json!({ "revision": revision.to_string() }));
+                return Ok(serde_json::json!({
+                    "package": package.to_string(),
+                    "revision": revision.to_string(),
+                }));
             }
             println!("{revision}");
             Ok(Value::Null)

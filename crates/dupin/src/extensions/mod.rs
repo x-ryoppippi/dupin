@@ -302,11 +302,7 @@ fn load_with(
     let manifest = manifest::read(&manifests)?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
-    let package = PackageId::new(manifest.id.clone()).map_err(|error| {
-        Diagnostic::new("invalid-manifest", error)
-            .file(manifest::PACKAGE_JSON)
-            .field("name")
-    })?;
+    let package = package_id(&manifest)?;
     let revision = package_revision(folder, &content)?;
     Ok(LoadedExtension {
         manifests,
@@ -342,13 +338,23 @@ fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, D
         .map_err(|error| Diagnostic::new("host-error", error))
 }
 
-/// The revision Dupin gives the package in `folder`, which declared grants name, and what it
-/// declares.
-pub fn declaration_of(folder: &Path) -> Result<(Revision, Capabilities), Diagnostic> {
+/// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
+fn package_id(manifest: &manifest::Manifest) -> Result<PackageId, Diagnostic> {
+    PackageId::new(manifest.id.clone()).map_err(|error| {
+        Diagnostic::new("invalid-manifest", error)
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+    })
+}
+
+/// What the broker knows the package in `folder` by, the revision Dupin gives it, which
+/// declared grants name, and what it declares.
+pub fn declaration_of(folder: &Path) -> Result<(PackageId, Revision, Capabilities), Diagnostic> {
     let manifests = manifest::Stamps::read(folder)?;
     let manifest = manifest::read(&manifests)?;
     let sources = Sources::read(folder, &manifest.entry)?;
     Ok((
+        package_id(&manifest)?,
         package_revision(folder, &content_hash(&sources))?,
         manifest.capabilities,
     ))
