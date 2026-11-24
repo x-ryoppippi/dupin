@@ -1,10 +1,13 @@
-//! The clipboard history's lifetime: kept in memory only, watched while `[clipboard]` is
-//! enabled, and dropped as soon as it is turned off.
+//! The clipboard history's lifetime: watched while `[clipboard]` is enabled, and forgotten,
+//! with everything its store kept, as soon as it is turned off.
 
 use std::sync::{Arc, Mutex};
 
-use dupin_core::clipboard::{Access, Content, History, Policy};
+use dupin_core::clipboard::{
+    Access, Content, FileRef, History, MemoryStore, Policy, Record, Store, StoreError,
+};
 use dupin_core::config;
+use dupin_core::session::unix_now;
 
 pub struct Clipboard {
     history: Arc<Mutex<History>>,
@@ -12,10 +15,21 @@ pub struct Clipboard {
     enabled: bool,
 }
 
+/// Where the history persists. Records stay in memory until the encrypted store from
+/// `dupin-storage` replaces this, keyed to the native history's own namespace.
+fn store() -> Box<dyn Store> {
+    Box::new(MemoryStore::default())
+}
+
+fn report(error: &StoreError) {
+    crate::log::warn(&format!("couldn't update the stored clipboard history: {error}"));
+}
+
 impl Clipboard {
     pub fn new(config: &config::Clipboard) -> Self {
+        let history = History::with_store(config.into(), store(), report, unix_now());
         let mut clipboard = Self {
-            history: Arc::new(Mutex::new(History::new(config.into()))),
+            history: Arc::new(Mutex::new(history)),
             monitor: None,
             enabled: false,
         };
@@ -32,10 +46,12 @@ impl Clipboard {
         let mut history = self.history.lock().unwrap();
         let policy = Policy::from(config);
         let mut changed = self.enabled != config.enabled || *history.policy() != policy;
-        history.set_policy(policy);
+        history.set_policy(policy, unix_now());
         if !config.enabled {
             self.monitor.take();
-            history.clear();
+            if let Err(error) = history.clear() {
+                report(&error);
+            }
             history.set_access(Access::default());
         } else if rune::tooling::is_headless() {
             if !self.enabled {
@@ -51,12 +67,16 @@ impl Clipboard {
         changed
     }
 
-    pub fn delete(&self, id: u64) {
-        self.history.lock().unwrap().remove(id);
+    pub fn record(&self, id: u64) -> Option<Arc<Record>> {
+        self.history.lock().unwrap().record(id)
     }
 
-    pub fn clear(&self) {
-        self.history.lock().unwrap().clear();
+    pub fn delete(&self, id: u64) -> Result<(), StoreError> {
+        self.history.lock().unwrap().remove(id).map(drop)
+    }
+
+    pub fn clear(&self) -> Result<(), StoreError> {
+        self.history.lock().unwrap().clear()
     }
 }
 
@@ -86,12 +106,12 @@ fn seed_fixture(history: &mut History) {
             return;
         }
     };
-    let now = dupin_core::session::unix_now();
+    let now = unix_now();
     for entry in entries {
         let content = match entry.text {
             Some(text) => Content::Text(text),
-            None => Content::Files(entry.files),
+            None => Content::Files(entry.files.into_iter().map(FileRef::new).collect()),
         };
-        history.push(content, now.saturating_sub(entry.age));
+        history.push(content, None, now.saturating_sub(entry.age));
     }
 }
