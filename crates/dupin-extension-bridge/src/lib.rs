@@ -287,18 +287,20 @@ impl Bridge {
 
     /// Reads the declarative base at `base` and the local grants at `local`. A missing file is
     /// empty. An unreadable local file grants nothing and is never overwritten; an unreadable
-    /// base is reported and grants nothing.
+    /// base is reported and grants nothing; a base entry that can't be read is reported and
+    /// keeps its package off.
     pub fn open(base: &Path, local: &Path, services: Services) -> Self {
-        let mut problems = Vec::new();
         // Stamped before reading, so a change made during the read is read again later.
         let seen = Seen {
             base: stamp(base),
             local: stamp(local),
         };
-        let base_grants = read_base(base).unwrap_or_else(|error| {
-            problems.push(format!("{}: {error}", base.display()));
-            Base::default()
-        });
+        let base_grants = read_base(base);
+        let mut problems: Vec<_> = base_problems(&base_grants)
+            .into_iter()
+            .map(|problem| format!("{}: {problem}", base.display()))
+            .collect();
+        let base_grants = base_grants.unwrap_or_default();
         let local_grants = read_local(local).unwrap_or_else(|error| {
             problems.push(format!("{}: {error}", local.display()));
             Local::unreadable()
@@ -724,7 +726,7 @@ impl Inner {
             if now != state.seen.base {
                 state.seen.base = now;
                 let base = read_base(path);
-                note_problem(state, path, base.as_ref().err());
+                note_problem(state, path, &base_problems(&base));
                 changed.extend(state.broker.replace_base(base.unwrap_or_default()));
             }
         }
@@ -822,12 +824,20 @@ impl Inner {
     }
 }
 
-/// Replaces what Settings shows about reading `path` with `problem`, if any.
-fn note_problem(state: &mut State, path: &Path, problem: Option<&String>) {
+/// Replaces what Settings shows about reading `path` with `problems`.
+fn note_problem<'a>(state: &mut State, path: &Path, problems: impl IntoIterator<Item = &'a String>) {
     let prefix = format!("{}: ", path.display());
     state.problems.retain(|known| !known.starts_with(&prefix));
-    if let Some(problem) = problem {
+    for problem in problems {
         state.problems.push(format!("{prefix}{problem}"));
+    }
+}
+
+/// What reading the base found wrong: the whole file, or each entry it set aside.
+fn base_problems(base: &Result<Base, String>) -> Vec<String> {
+    match base {
+        Ok(base) => base.problems(),
+        Err(error) => vec![error.clone()],
     }
 }
 

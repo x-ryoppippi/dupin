@@ -998,6 +998,42 @@ fn a_choice_that_cannot_be_saved_changes_nothing() {
 }
 
 #[test]
+fn settings_hears_of_a_base_entry_set_aside_and_its_package_stays_off() {
+    let folder = tempfile::tempdir().unwrap();
+    let base = folder.path().join("base.toml");
+    std::fs::write(
+        &base,
+        "version = 1\n[packages.weather]\ndeny = [\"dictionery\"]\n[packages.news]\nenabled = false\n",
+    )
+    .unwrap();
+    let bridge = Bridge::open(&base, &folder.path().join("grants.toml"), Services::none());
+    let [problem] = bridge.problems().try_into().unwrap();
+    assert!(
+        problem.contains("weather") && problem.contains("dictionery"),
+        "{problem}"
+    );
+    let weather = PackageId::new("weather").unwrap();
+    let news = PackageId::new("news").unwrap();
+    for id in [&weather, &news] {
+        bridge.install(id, revision(), Capabilities::default());
+    }
+    assert!(bridge.set_enabled(&weather, true).is_err());
+    assert!(bridge.is_turned_off(&weather));
+    assert!(bridge.is_turned_off(&news), "the valid entry still applies");
+
+    std::fs::write(
+        &base,
+        "version = 1\n[packages.weather]\ndeny = [\"dictionary\"]\n",
+    )
+    .unwrap();
+    bridge.reload();
+    assert!(
+        bridge.problems().is_empty(),
+        "fixing the entry clears its problem"
+    );
+}
+
+#[test]
 fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
     let folder = tempfile::tempdir().unwrap();
     let local = folder.path().join("grants.toml");

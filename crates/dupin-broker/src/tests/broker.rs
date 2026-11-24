@@ -1329,6 +1329,68 @@ enabled = false
 }
 
 #[test]
+fn an_invalid_base_entry_keeps_only_its_own_package_off() {
+    let base = base(
+        r#"
+version = 1
+
+[packages."bundled:calendar"]
+deny = ["calender"]
+
+[packages."bundled:emoji"]
+deny = ["clipboard:paste"]
+"#,
+    );
+    assert_eq!(base.problems().len(), 1);
+    let mut broker = Broker::new(base, Local::default());
+    let calendar = id("bundled:calendar");
+    let emoji = id("bundled:emoji");
+    let dictionary = id("bundled:dictionary");
+    for (package, capabilities) in [
+        (
+            &calendar,
+            json!({ "calendar": { "access": ["read"], "pastDays": 30, "futureDays": 90 } }),
+        ),
+        (&emoji, json!({ "clipboard": ["paste"] })),
+        (&dictionary, json!({ "dictionary": ["lookup"] })),
+    ] {
+        broker.set_bundled(package.clone(), rev(R1), true);
+        let _ = broker.install(package.clone(), rev(R1), caps(capabilities));
+    }
+
+    assert!(
+        broker.is_turned_off(&calendar),
+        "what the entry meant to deny is unknown"
+    );
+    assert_eq!(
+        broker.set_enabled(&calendar, true),
+        Err(BrokerError::DisabledByBase)
+    );
+    assert!(
+        broker
+            .consents(&calendar)
+            .iter()
+            .all(|(_, state)| *state == ConsentState::DeniedByBase)
+    );
+
+    assert!(broker.is_enabled(&emoji));
+    assert_eq!(
+        broker.consents(&emoji),
+        vec![(
+            caps(json!({ "clipboard": ["paste"] }))
+                .scopes()
+                .next()
+                .unwrap()
+                .clone(),
+            ConsentState::DeniedByBase
+        )],
+        "the valid entry beside it still applies"
+    );
+    assert!(broker.is_enabled(&dictionary));
+    permit(broker.check(&dictionary, &rev(R1), &Request::DictionaryLookup, Trigger::Query));
+}
+
+#[test]
 fn a_changed_copy_of_a_package_that_ships_off_waits_like_any_new_extension() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("window-management");

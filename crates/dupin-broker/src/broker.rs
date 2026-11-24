@@ -803,16 +803,24 @@ impl Broker {
             .filter_map(move |base| base.package(id))
     }
 
+    /// Whether the current base or the one read at startup holds an entry for `id` that
+    /// couldn't be read. Whatever it denied is unknown, so it denies everything and keeps the
+    /// package off.
+    fn base_rejects(&self, id: &PackageId) -> bool {
+        self.base.rejects(id) || self.ceiling.rejects(id)
+    }
+
     fn base_denies(&self, id: &PackageId, key: &ScopeKey) -> bool {
-        self.base_packages(id).any(|package| package.deny.contains(key))
+        self.base_rejects(id) || self.base_packages(id).any(|package| package.deny.contains(key))
     }
 
     /// A base disable applies to every revision, like a denial; an enable only to the
     /// revision it names, if it names one.
     fn base_enabled(&self, id: &PackageId, revision: &Revision) -> Option<bool> {
-        if self
-            .base_packages(id)
-            .any(|package| package.enabled == Some(false))
+        if self.base_rejects(id)
+            || self
+                .base_packages(id)
+                .any(|package| package.enabled == Some(false))
         {
             return Some(false);
         }

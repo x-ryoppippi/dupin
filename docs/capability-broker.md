@@ -108,6 +108,8 @@ bindings = { "files:notes" = "/Users/me/Notes" }
 
 An entry without a `revision` can only switch the package and deny its scopes. Home Manager writes such entries for bundled packages under `bundled:<name>`: only the sealed copy that shipped carries that id, so a revision would pin nothing more.
 
+`Base::parse` rejects the whole file only for a version it doesn't support or TOML it can't parse. A package entry it can't read, such as one with an unknown scope or a grant without a binding, is set aside alone, and `Base::problems` says why for Settings. Whatever that entry meant to deny is unknown, so the package fails closed: it is off, can't be turned on, and every scope it declares is denied by the base. As with any denial, a rejection in the base read at startup lasts until the next launch, even once the file is fixed.
+
 ## OS permissions
 
 Calendar reads need macOS Calendars access, clipboard reads and watching need the pasteboard policy (Paste from Other Apps), and pasting and both `windows` scopes need Accessibility. The host reads each without prompting and reports it with `Broker::set_os_access`; macOS's write-only calendar access counts as denied. `Broker::os_consumers` lists every installed package scope that needs one, for Settings → Permissions to show beside the built-in features in `features::permission_uses`. `dupin_mac::privacy::Permission::of` names the row each joins: Calendars consumers join the Calendars row, pasteboard consumers the Paste from Other Apps row, which clipboard history also uses, and Accessibility consumers the Accessibility row. `Access::os_access` and `PermissionStatus::os_access` turn what macOS reports into the `OsAccess` the host passes to `set_os_access`.

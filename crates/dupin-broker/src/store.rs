@@ -39,6 +39,9 @@ fn invalid(name: &str, error: toml::de::Error) -> StoreError {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Base {
     pub(crate) packages: BTreeMap<PackageId, BasePackage>,
+    /// Entries that couldn't be read, by the key they were written under, with why. What such
+    /// an entry meant to deny is unknown, so the broker keeps its package off.
+    rejected: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -55,53 +58,79 @@ pub(crate) struct BasePackage {
     pub bindings: BTreeMap<ScopeKey, PathBuf>,
 }
 
+impl BasePackage {
+    fn read(value: toml::Value) -> Result<Self, String> {
+        let package: Self = value
+            .try_into()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        if package.revision.is_none() && !package.grant.is_empty() {
+            return Err("grants need the `revision` they approve".into());
+        }
+        if let Some(key) = package.grant.intersection(&package.deny).next() {
+            return Err(format!("`{key}` is both granted and denied"));
+        }
+        for key in &package.grant {
+            if matches!(key, ScopeKey::Files(_) | ScopeKey::Exec(_)) && !package.bindings.contains_key(key) {
+                return Err(format!("`{key}` needs a path in `bindings`"));
+            }
+        }
+        for (key, path) in &package.bindings {
+            if !package.grant.contains(key) {
+                return Err(format!("`{key}` has a binding but no grant"));
+            }
+            if !path.is_absolute() {
+                return Err(format!("the binding for `{key}` must be an absolute path"));
+            }
+        }
+        Ok(package)
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct BaseFile {
     version: u32,
     #[serde(default)]
-    packages: BTreeMap<PackageId, BasePackage>,
+    packages: BTreeMap<String, toml::Value>,
 }
 
 impl Base {
+    /// Reads the file, setting aside each package entry that is invalid rather than the whole
+    /// file, so one mistyped scope leaves every other declaration in force.
     pub fn parse(source: &str) -> Result<Self, StoreError> {
         let file: BaseFile = toml::from_str(source).map_err(|e| invalid("the declared grants", e))?;
         check_version(file.version)?;
-        for (id, package) in &file.packages {
-            let problem = |message: String| {
-                Err(StoreError::Invalid(format!(
-                    "declared grants for {id}: {message}"
-                )))
-            };
-            if package.revision.is_none() && !package.grant.is_empty() {
-                return problem("grants need the `revision` they approve".into());
-            }
-            if let Some(key) = package.grant.intersection(&package.deny).next() {
-                return problem(format!("`{key}` is both granted and denied"));
-            }
-            for key in &package.grant {
-                if matches!(key, ScopeKey::Files(_) | ScopeKey::Exec(_))
-                    && !package.bindings.contains_key(key)
-                {
-                    return problem(format!("`{key}` needs a path in `bindings`"));
+        let mut base = Self::default();
+        for (key, value) in file.packages {
+            let read = PackageId::new(key.as_str()).and_then(|id| Ok((id, BasePackage::read(value)?)));
+            match read {
+                Ok((id, package)) => {
+                    base.packages.insert(id, package);
                 }
-            }
-            for (key, path) in &package.bindings {
-                if !package.grant.contains(key) {
-                    return problem(format!("`{key}` has a binding but no grant"));
-                }
-                if !path.is_absolute() {
-                    return problem(format!("the binding for `{key}` must be an absolute path"));
+                Err(message) => {
+                    base.rejected.insert(key, message);
                 }
             }
         }
-        Ok(Self {
-            packages: file.packages,
-        })
+        Ok(base)
     }
 
     pub(crate) fn package(&self, id: &PackageId) -> Option<&BasePackage> {
         self.packages.get(id)
+    }
+
+    pub(crate) fn rejects(&self, id: &PackageId) -> bool {
+        self.rejected.contains_key(id.as_str())
+    }
+
+    /// Why each entry that couldn't be read was set aside, for Settings to show.
+    pub fn problems(&self) -> Vec<String> {
+        self.rejected
+            .iter()
+            .map(|(key, message)| {
+                format!("the declared grants for {key} are invalid, so it stays off: {message}")
+            })
+            .collect()
     }
 }
 
