@@ -1,4 +1,5 @@
 use driver.nu [
+    DUPIN
     ad
     log-count
     poll
@@ -19,7 +20,7 @@ def script-query [out: path, title: string] {
         {|r| is-focused-query $r '' }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --name
@@ -32,7 +33,7 @@ def script-query [out: path, title: string] {
         $'($title)-stale-card'
         find
         --app
-        Dupin
+        $DUPIN
         --name
         '↵ Copy · ⌘O Full output'
         --exact
@@ -46,7 +47,7 @@ def script-query [out: path, title: string] {
         {|r| is-focused-query $r $title }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --name
@@ -60,7 +61,7 @@ def script-query [out: path, title: string] {
         {|r| has-match $r }
         find
         --app
-        Dupin
+        $DUPIN
         --name
         $title
         --exact
@@ -86,7 +87,7 @@ export def scripts-stage [out: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.is_focused }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         script-query $out 'E2E script echo'
         press $out scripts-arguments tab | ignore
@@ -96,7 +97,7 @@ export def scripts-stage [out: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -117,7 +118,7 @@ export def scripts-stage [out: path] {
             {|r| is-focused-query $r $arguments }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -133,7 +134,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'first | $HOME | *.rs'
             --exact
@@ -150,7 +151,7 @@ export def scripts-stage [out: path] {
             {|r| $r.ok and (($r.data?.match?.name? | default '') =~ '^Finished · [0-9]+\.[0-9] s$') }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             statictext
             --name
@@ -174,7 +175,7 @@ export def scripts-stage [out: path] {
             $focused
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         (poll
             $out
@@ -182,7 +183,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Stream line 3'
             --exact
@@ -194,7 +195,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             Running
             --exact
@@ -208,7 +209,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             Cancelled
             --exact
@@ -220,7 +221,7 @@ export def scripts-stage [out: path] {
             $out
             scripts-echo-in-history
             {|r| $r.ok and $r.data?.match?.ref_id? != null }
-            find --app Dupin --role button --name 'E2E script echo Finished' --exact --first
+            find --app $DUPIN --role button --name 'E2E script echo Finished' --exact --first
         )
         ad $out scripts-select-echo click $echo.data.match.ref_id | ignore
         press $out scripts-repeat-echo cmd+r | ignore
@@ -228,7 +229,7 @@ export def scripts-stage [out: path] {
             $out
             scripts-repeated-echo-selected
             $found
-            find --app Dupin --name 'Repeated echo' --exact --first
+            find --app $DUPIN --name 'Repeated echo' --exact --first
         ) | ignore
         press $out scripts-output-close cmd+w | ignore
         (poll
@@ -237,7 +238,7 @@ export def scripts-stage [out: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Script Output' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
 
         script-query $out 'E2E script failure'
@@ -248,7 +249,7 @@ export def scripts-stage [out: path] {
             $focused
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         (poll
             $out
@@ -256,7 +257,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'Exited with code 3'
             --exact
@@ -268,7 +269,7 @@ export def scripts-stage [out: path] {
             $found
             find
             --app
-            Dupin
+            $DUPIN
             --name
             'stderr: E2E script failed deliberately'
             --exact

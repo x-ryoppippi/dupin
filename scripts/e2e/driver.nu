@@ -3,6 +3,11 @@ use ../e2e-script-fixtures.nu [prepare-scripts cleanup-scripts]
 use ../e2e-file-fixtures.nu [prepare cleanup viewer-running]
 use keys.nu key-script
 
+# agent-desktop takes every process run from Dupin.app/Contents/MacOS for an instance of the app
+# named Dupin, the extension host and a waiting CLI included. Only the resident launcher is an
+# application to AppKit, so only it answers to the bundle ID.
+export const DUPIN = 'app.dupin.Dupin'
+
 export def run-suite [
     app: path
     out: path
@@ -12,6 +17,10 @@ export def run-suite [
     mkdir $out
     let out = $out | path expand
     let app = $app | path expand
+    let bundle_id = ^plutil -extract CFBundleIdentifier raw -o - ($app | path join Contents Info.plist) | str trim
+    if $bundle_id != $DUPIN {
+        error make {msg: $"($app) is ($bundle_id), not ($DUPIN)"}
+    }
 
     for command in [version status] {
         ad $out $command $command | to json | print
@@ -58,11 +67,6 @@ export def run-suite [
     mkdir $runtime
     ^chmod 700 $runtime
     let binary = $app | path join Contents MacOS dupin
-    let control = $out | path join cli dupin-control-e2e
-    mkdir ($control | path dirname)
-    # A waiting CLI inside the bundle shares the resident's AX application name.
-    cp $binary $control
-    ^chmod +x $control
     let dupin = job spawn {
         with-env {
             XDG_CONFIG_HOME: $config
@@ -84,7 +88,7 @@ export def run-suite [
             (do
                 $suite
                 $out
-                {binary: $control, runtime: $runtime, data: $data}
+                {binary: $binary, runtime: $runtime, data: $data}
             )
         }
         if $record {
@@ -237,7 +241,7 @@ export def mentions [reply: record, name: string]: nothing -> bool {
     $reply.data? | to json --raw | str contains $'"($name)"'
 }
 
-export def snap [out: path, name: string, --app: string = 'Dupin'] {
+export def snap [out: path, name: string, --app: string = $DUPIN] {
     ad $out $'($name)-snapshot' snapshot --app $app | ignore
     let shot = ^screencapture -x ($out | path join $'($name).png') | complete
     if $shot.exit_code != 0 {
