@@ -42,7 +42,11 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             &format!(
                 "{} ({}{})",
                 extension.title,
-                extension.keyword,
+                if extension.built_in {
+                    "a built-in command"
+                } else {
+                    &extension.keyword
+                },
                 if extension.main_search {
                     ", in the main search"
                 } else {
@@ -302,6 +306,18 @@ fn status(extension: &Listed, enabled: bool, runs: bool) -> String {
         Kind::User => "From the extensions folder",
     };
     let keyword = &extension.keyword;
+    if extension.built_in {
+        return match (runs, extension.registered, enabled) {
+            (false, ..) => format!("{origin}. Off, so its built-in command isn't available."),
+            (true, false, _) => format!("{origin}. Not answering: its built-in command is off in Settings."),
+            (true, true, true) => {
+                format!("{origin}. Answers its built-in command; it can use what you allow below.")
+            }
+            (true, true, false) => format!(
+                "{origin}. Answers its built-in command; it can use nothing below until you turn it on."
+            ),
+        };
+    }
     match (runs, extension.registered, enabled) {
         (false, ..) => format!("{origin}. Off."),
         (true, false, _) => format!("{origin}. Not answering: another command already uses {keyword}."),
@@ -489,6 +505,7 @@ mod tests {
             kind: Kind::User,
             registered,
             main_search: false,
+            built_in: false,
         };
         assert_eq!(
             status(&listed(true), true, true),
@@ -505,6 +522,35 @@ mod tests {
         assert_eq!(
             status(&listed(false), false, false),
             "From the extensions folder. Off."
+        );
+    }
+
+    #[test]
+    fn a_built_in_row_says_its_command_is_what_answers() {
+        let listed = |kind, registered| Listed {
+            package: PackageId::new("bundled:calendar").unwrap(),
+            title: "Calendar".into(),
+            keyword: "cal".into(),
+            kind,
+            registered,
+            main_search: false,
+            built_in: true,
+        };
+        assert_eq!(
+            status(&listed(Kind::Bundled, true), true, true),
+            "Bundled with Dupin. Answers its built-in command; it can use what you allow below."
+        );
+        assert_eq!(
+            status(&listed(Kind::Copy, false), true, true),
+            "Your copy of a bundled extension, unchanged. Not answering: its built-in command is off in Settings."
+        );
+        assert_eq!(
+            status(&listed(Kind::Modified, true), false, true),
+            "Replaces a bundled extension of the same name, without its grants. Answers its built-in command; it can use nothing below until you turn it on."
+        );
+        assert_eq!(
+            status(&listed(Kind::Bundled, true), true, false),
+            "Bundled with Dupin. Off, so its built-in command isn't available."
         );
     }
 }

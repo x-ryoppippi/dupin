@@ -8,7 +8,7 @@ use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
-use crate::extensions::packages::{Kind, Packages};
+use crate::extensions::packages::Packages;
 use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
 use crate::features::extensions::Port;
 
@@ -188,37 +188,20 @@ impl Ui {
                 role,
                 self.extensions.bridge.clone(),
             );
-            match self.extensions.ports.get(&id) {
-                Some(port) => port.set(Some(provider)),
-                None => {
-                    let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
-                    self.searchers.insert(id.clone(), searcher);
-                }
+            if let Some(provider) =
+                crate::features::extensions::hand_over(&self.extensions.ports, &id, provider)
+            {
+                let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
+                self.searchers.insert(id.clone(), searcher);
             }
             self.extensions.registered.insert(id, (extension, role));
         }
         let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
-        // A feature's own switch turns its bundled extension on and off, so Settings lists only
-        // a changed copy of one, which runs as third-party code.
-        let listing = self
-            .extensions
-            .packages
-            .listing(|extension| {
-                routed
-                    .iter()
-                    .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
-            })
-            .into_iter()
-            .filter(|listed| {
-                !(matches!(listed.kind, Kind::Bundled | Kind::Copy)
-                    && listed
-                        .package
-                        .as_str()
-                        .strip_prefix("bundled:")
-                        .and_then(crate::features::ported_command)
-                        .is_some())
-            })
-            .collect();
+        let listing = self.extensions.packages.listing(|extension| {
+            routed
+                .iter()
+                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+        });
         let problems: Vec<_> = self
             .extensions
             .bundled

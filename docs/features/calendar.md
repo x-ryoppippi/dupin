@@ -14,7 +14,7 @@ Turn on **Calendar search** in Settings → Search, or set `enabled = true` in `
 
 ## How it works
 
-Calendar search is the [bundled extension](./extensions.md#bundled-extensions) `calendar`, a TypeScript package in [`extensions/calendar`](../../extensions/calendar) that ships inside Dupin.app. **Calendar search** is its switch: it runs only while the setting is on, under the `cal` keyword, and Settings → Extensions doesn't list it separately. It reads events through the [`calendar` capability](./extensions.md#calendar), which the bundled package holds from the start for 30 days back and 90 ahead, and lays them out itself. macOS's Calendars access is still Dupin's to ask for, as above, never the extension's.
+Calendar search is the [bundled extension](./extensions.md#bundled-extensions) `calendar`, a TypeScript package in [`extensions/calendar`](../../extensions/calendar) that ships inside Dupin.app. **Calendar search** is its switch: it runs only while the setting is on, under the `cal` keyword. Settings → Extensions lists it as a built-in command, with where it comes from, its switch and its grant. It reads events through the [`calendar` capability](./extensions.md#calendar), which the bundled package holds from the start for 30 days back and 90 ahead, and lays them out itself. macOS's Calendars access is still Dupin's to ask for, as above, never the extension's.
 
 The calendar service matches the typed words against each event's title and location, so a keystroke sends only the matching events to the extension. JavaScript in the extension host has no `Intl`, so the service also hands over each event's day, time and dates as this Mac's locale and time zone write them, and the Calendar link Enter opens.
 
@@ -24,4 +24,4 @@ To change how events are listed, copy the package into the extensions folder and
 dupin ext eject calendar
 ```
 
-While the extensions folder is on, your copy answers `cal` in place of the bundled one, still behind **Calendar search**. Once it differs from the bundled package it is a third-party extension: the panel asks you to turn it on and to allow it to read calendars before it shows any events. Delete the copy to go back. `dupin ext test` replays the package's [fixtures](./extensions.md#fixtures) in `extensions/calendar/fixtures`.
+While the extensions folder is on, your copy answers `cal` in place of the bundled one, still behind **Calendar search**, as [Overriding a built-in](./extensions.md#overriding-a-built-in) describes. Once it differs from the bundled package it is a third-party extension: the panel asks you to turn it on and to allow it to read calendars before it shows any events. Delete the copy to go back. `dupin ext test` replays the package's [fixtures](./extensions.md#fixtures) in `extensions/calendar/fixtures`.
