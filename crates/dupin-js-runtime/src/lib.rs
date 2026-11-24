@@ -366,7 +366,11 @@ impl Compiler {
             .get(name)
             .ok_or_else(|| rquickjs::Error::new_loading(name))?;
         let module = Module::declare(ctx.clone(), name, source.as_str())?;
-        let bytecode = module.write(WriteOptions::default())?;
+        // Every call that imports `dupin` loads its bytecode, and nothing reads its source back.
+        let bytecode = module.write(WriteOptions {
+            strip_source: name == HOST_MODULE,
+            ..WriteOptions::default()
+        })?;
         self.compiled
             .borrow_mut()
             .insert(name.to_owned(), bytecode.into_boxed_slice());
