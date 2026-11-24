@@ -21,7 +21,10 @@ def main []: nothing -> nothing {
     let lock = open --raw Cargo.lock | from toml
     if not ($lock | in-step $rev $patched) {
         print $"Refreshing Cargo.lock's Rune packages to ($rev)"
-        let specs = ["rune" ...($lock | unlock-specs $patched)]
+        let specs = [
+            "rune"
+            ...($lock | unlock-specs $patched)
+        ]
         ^cargo update ...($specs | each {|spec| [--package $spec] } | flatten)
 
         let lock = open --raw Cargo.lock | from toml

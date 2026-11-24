@@ -1,5 +1,14 @@
 use std/assert
-use ../update-rune.nu [pinned-rev patched-crates locked-revs in-step unapplied-patches unlock-specs hashed-rev with-hash]
+use ../update-rune.nu [
+    pinned-rev
+    patched-crates
+    locked-revs
+    in-step
+    unapplied-patches
+    unlock-specs
+    hashed-rev
+    with-hash
+]
 
 const OLD = "86b903de7fef9c6b683e05dc23440de4ebbc4347"
 const NEW = "fcef33a2f60db30a7a872844464f84ff26f3fc75"
@@ -69,7 +78,11 @@ def main [] {
             {name: winit, version: "0.30.13", source: $rune}
             {name: naga, version: "30.0.2", source: $crates_io}
         ]
-        patch: {unused: [{name: naga, version: "30.0.1", source: $rune}]}
+        patch: {
+            unused: [
+                {name: naga, version: "30.0.1", source: $rune}
+            ]
+        }
     }
     # Moving Rune's own packages leaves a newly patched crate locked from crates.io.
     assert equal ($relocked | locked-revs) [$NEW]
