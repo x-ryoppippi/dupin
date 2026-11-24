@@ -155,8 +155,11 @@ declare module 'dupin' {
 		main?: `${string}.js` | `${string}.mjs`;
 		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */
 		defaultSearch?: boolean;
-		/** Reserved: apiVersion 2 grants no capabilities, so any entry is an error. */
-		capabilities?: v2.Capabilities;
+		/**
+		 * Reserved: no apiVersion grants capabilities yet, so any entry is an error.
+		 * `planned.Capabilities` drafts what it may take later.
+		 */
+		capabilities?: Record<string, never>;
 	}
 
 	export interface PackageJson {
@@ -176,12 +179,12 @@ declare module 'dupin' {
 	}
 
 	/**
-	 * Drafts of what later API versions are planned to add, from docs/design/extension-platform.md.
-	 * apiVersion 2 hosts provide none of it: the `dupin` module exports no such values, an item
-	 * with these fields is rejected, and a manifest that declares capabilities is an error.
-	 * Shapes may change before they ship.
+	 * Drafts of what a later apiVersion may add, from docs/design/extension-platform.md. None of it
+	 * is part of apiVersion 2 or works yet: the `dupin` module exports no such values, an item with
+	 * these fields is rejected, and a manifest that declares capabilities is an error. Shapes may
+	 * change before they ship.
 	 */
-	export namespace v2 {
+	export namespace planned {
 		type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 		/** Up to three text or tag accessories beside an item. */
