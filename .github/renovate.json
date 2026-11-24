@@ -17,6 +17,11 @@
 			"description": "Lock file maintenance has no release timestamp, so the age gate would keep it pending forever.",
 			"matchUpdateTypes": ["lockFileMaintenance"],
 			"minimumReleaseAge": null
+		},
+		{
+			"description": "Without the age gate, lock file maintenance can pick up a release minutes old, and main ships to the signed nightly feed, so a person merges it.",
+			"matchUpdateTypes": ["lockFileMaintenance"],
+			"automerge": false
 		}
 	],
 	"nix": {

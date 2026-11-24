@@ -80,12 +80,17 @@ impl Saver {
 
 /// Write beside the file and rename over it, so a crash mid-write leaves the old file whole.
 fn write(json: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
     let path = path().ok_or_else(|| std::io::Error::other("HOME is unset"))?;
     let dir = path
         .parent()
         .ok_or_else(|| std::io::Error::other("no parent directory"))?;
     std::fs::create_dir_all(dir)?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(tmp, path)
+    let mut staged = tempfile::Builder::new()
+        .prefix(".history.json.")
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    staged.write_all(json.as_bytes())?;
+    staged.persist(path).map(drop).map_err(|error| error.error)
 }

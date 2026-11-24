@@ -23,13 +23,13 @@ With the Nix package or the home-manager module, `dupin` is on `PATH`, so `"comm
 
 ## Tools
 
-| Tool                | Needs the launcher | What it does                                                                                                                       |
-| ------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `read_config`       | No                 | Returns both configuration files and the `lockedKeys` from a read-only `config.toml`.                                              |
-| `validate_config`   | No                 | Checks a whole `config.toml` source as Dupin would load it, hotkey included, and writes nothing.                                   |
-| `get_active_config` | Yes                | Returns the values the launcher has applied, as `dupin config get` prints them.                                                    |
-| `open_panel`        | Yes                | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does. Nothing is activated.                           |
-| `pick`              | Yes                | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for the user to choose one, as `dupin pick` does. |
+| Tool                | Needs the launcher | What it does                                                                                                                                                               |
+| ------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read_config`       | No                 | Returns both configuration files and the `lockedKeys` from a read-only `config.toml`.                                                                                      |
+| `validate_config`   | No                 | Checks a whole `config.toml` source as Dupin would load it, hotkey included, and writes nothing.                                                                           |
+| `get_active_config` | Yes                | Returns the values the launcher has applied, as `dupin config get` prints them.                                                                                            |
+| `open_panel`        | Yes                | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does. Nothing is activated, and Enter does nothing for half a second after the panel appears. |
+| `pick`              | Yes                | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for the user to choose one, as `dupin pick` does.                                         |
 
 `read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay` has the same fields plus `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
 

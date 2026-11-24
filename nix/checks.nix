@@ -43,12 +43,13 @@ in
           inherit pkgs;
           inherit (inputs) crane;
           native = dupin.baseline;
-          inherit (config.packages) cargo-hawk;
+          inherit (config.packages) cargo-hawk rolldown;
         };
         home-manager-module = import ./tests/home-manager-module.nix {
           inherit lib pkgs;
           module = self.homeManagerModules.default;
         };
+        renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
         gitleaks = repoCheck "dupin-gitleaks" [ pkgs.gitleaks ] ''
           ^gitleaks detect --source . --config .gitleaks.toml --no-git --redact
         '';

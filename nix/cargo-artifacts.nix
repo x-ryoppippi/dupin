@@ -2,6 +2,7 @@
   pkgs,
   crane,
   native,
+  rolldown,
   cargo-hawk,
 }:
 let
@@ -88,10 +89,10 @@ let
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
       # The extension installer tests fetch from fixture Git repositories, and the extension
-      # SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
+      # SDK's tests bundle their fixtures with the Rolldown on PATH.
       nativeBuildInputs = debugArgs.nativeBuildInputs ++ [
         pkgs.git
-        pkgs.esbuild
+        rolldown
       ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings

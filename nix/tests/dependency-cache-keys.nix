@@ -5,12 +5,18 @@
   crane,
   native,
   cargo-hawk,
+  rolldown,
 }:
 let
   artifacts =
     version:
     (import ../cargo-artifacts.nix {
-      inherit pkgs crane cargo-hawk;
+      inherit
+        pkgs
+        crane
+        cargo-hawk
+        rolldown
+        ;
       native = native // {
         passthru = native.passthru // {
           commonArgs = native.passthru.commonArgs // {

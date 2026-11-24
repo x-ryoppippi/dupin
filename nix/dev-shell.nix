@@ -12,8 +12,8 @@
             rust-analyzer
             nushell
             nodejs
-            # `dupin ext build` bundles TypeScript extensions with Bun or esbuild from PATH.
-            esbuild
+            # `dupin ext build` falls back to the Rolldown on PATH for a package without its own.
+            config.packages.rolldown
             config.packages.pnpm
             config.packages.blacksmith
             just

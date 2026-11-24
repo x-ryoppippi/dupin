@@ -151,6 +151,7 @@ struct Worker<F> {
     last_processed_revision: u64,
     last_emitted: Option<Emitted>,
     activated: bool,
+    write: fn(&Path, &str) -> io::Result<()>,
 }
 
 impl<F> Worker<F>
@@ -172,6 +173,7 @@ where
             last_processed_revision: 0,
             last_emitted: None,
             activated: false,
+            write: super::write,
         }
     }
 
@@ -214,7 +216,7 @@ where
             .filter(|(_, desired)| saves[0].base == *desired)
             .map(|(base, _)| base);
 
-        match save_to_disk(&self.paths, &saves, original_base.as_ref()) {
+        match save_to_disk(&self.paths, &saves, original_base.as_ref(), self.write) {
             Ok(notice) => {
                 self.save_problem = None;
                 self.save_notice = notice;
@@ -353,6 +355,7 @@ fn save_to_disk(
     paths: &Paths,
     saves: &[Save],
     original_base: Option<&Config>,
+    write: fn(&Path, &str) -> io::Result<()>,
 ) -> Result<Option<String>, String> {
     let layers = paths.read()?;
     let effective = layers.effective()?;
@@ -402,7 +405,7 @@ fn save_to_disk(
     if paths.read().as_ref() != Ok(&layers) {
         return Err("configuration changed on disk while saving; no changes were written".into());
     }
-    super::write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
+    write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
     Ok(notice)
 }
 
@@ -927,13 +930,12 @@ script = "missing.sh"
         let path = temp.path().join("config.toml");
         let base = Config::default();
         fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
-        let blocked = path.with_extension("toml.tmp");
-        fs::create_dir(&blocked).unwrap();
         let (sender, receiver) = mpsc::channel();
         let (updates, received) = mpsc::channel();
         let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
             updates.send(update).unwrap();
         });
+        worker.write = |_, _| Err(io::Error::other("blocked"));
         let first = Config {
             file_limit: 50,
             ..base.clone()
@@ -951,7 +953,7 @@ script = "missing.sh"
                 .unwrap()
                 .contains("could not save")
         );
-        fs::remove_dir(&blocked).unwrap();
+        worker.write = super::super::write;
         let latest = Config {
             file_limit: 30,
             ..first.clone()
@@ -977,13 +979,12 @@ script = "missing.sh"
                 ..Config::default()
             };
             fs::write(&path, toml::to_string(&base).unwrap()).unwrap();
-            let blocked = path.with_extension("toml.tmp");
-            fs::create_dir(&blocked).unwrap();
             let (sender, receiver) = mpsc::channel();
             let (updates, received) = mpsc::channel();
             let mut worker = Worker::new(base_only(path.clone()), receiver, sender, move |update| {
                 updates.send(update).unwrap();
             });
+            worker.write = |_, _| Err(io::Error::other("blocked"));
             let first = Config {
                 file_limit: 50,
                 ..base.clone()
@@ -994,7 +995,7 @@ script = "missing.sh"
                 desired: first.clone(),
             }]);
             assert!(received.try_recv().unwrap().save_problem.is_some());
-            fs::remove_dir(&blocked).unwrap();
+            worker.write = super::super::write;
             let repaired = Config {
                 position: external_position,
                 ..first.clone()
