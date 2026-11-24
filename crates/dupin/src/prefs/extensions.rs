@@ -453,8 +453,8 @@ impl Prefs {
         });
     }
 
-    /// Turning a package on is the deliberate choice that may ask macOS for what the scopes it
-    /// already holds need, as turning on a built-in feature does.
+    /// Turning on a bundled package that ships off is turning on its feature, so it may ask
+    /// macOS for what its scopes need, as turning on a built-in feature does.
     fn set_extension_enabled(&mut self, id: &PackageId, enabled: bool) {
         let Some(bridge) = self.access.clone() else { return };
         self.extension_problem = bridge
@@ -484,8 +484,13 @@ impl Prefs {
     }
 }
 
-/// The macOS access `id`'s granted scopes need that macOS hasn't been asked for yet.
+/// The macOS access that turning `id` on asks for: what its granted scopes need that macOS hasn't
+/// been asked for yet, only for a package whose switch is its feature's. A built-in command's
+/// setting asks for its own package, and any other extension asks only through Request Access.
 fn os_access_to_request(bridge: &Bridge, id: &PackageId) -> Vec<OsPermission> {
+    if !bridge.ships_off(id) {
+        return Vec::new();
+    }
     let mut permissions: Vec<_> = bridge
         .scopes(id)
         .into_iter()
@@ -550,7 +555,7 @@ mod tests {
     }
 
     #[test]
-    fn turning_on_asks_macos_only_for_what_granted_scopes_still_need() {
+    fn only_turning_on_a_package_that_ships_off_asks_macos_for_what_its_grants_need() {
         let bridge = Bridge::new(
             dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
             None,
@@ -565,12 +570,32 @@ mod tests {
             revision.clone(),
             capabilities(serde_json::json!({ "windows": ["read", "arrange"], "dictionary": ["lookup"] })),
         );
+        let calendar = PackageId::new("bundled:calendar").unwrap();
+        bridge.set_bundled(&calendar, revision.clone(), true);
+        bridge.install(
+            &calendar,
+            revision.clone(),
+            capabilities(
+                serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 1, "futureDays": 1 } }),
+            ),
+        );
         let user = PackageId::new("arranger").unwrap();
         bridge.install(
             &user,
-            revision,
+            revision.clone(),
             capabilities(serde_json::json!({ "windows": ["arrange"] })),
         );
+        let granted = PackageId::new("reader").unwrap();
+        bridge.install(
+            &granted,
+            revision.clone(),
+            capabilities(
+                serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 1, "futureDays": 1 } }),
+            ),
+        );
+        for entry in bridge.scopes(&granted) {
+            bridge.allow(&granted, &revision, &entry.scope, None).unwrap();
+        }
         assert_eq!(
             os_access_to_request(&bridge, &bundled),
             [OsPermission::Accessibility]
@@ -578,6 +603,14 @@ mod tests {
         assert!(
             os_access_to_request(&bridge, &user).is_empty(),
             "an extension that holds no grant asks for nothing"
+        );
+        assert!(
+            os_access_to_request(&bridge, &calendar).is_empty(),
+            "a built-in command's own setting asks for its package"
+        );
+        assert!(
+            os_access_to_request(&bridge, &granted).is_empty(),
+            "any other extension asks through Request Access"
         );
         bridge.set_os_access(OsPermission::Accessibility, OsAccess::Denied);
         assert!(

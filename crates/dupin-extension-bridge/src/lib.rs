@@ -411,6 +411,12 @@ impl Bridge {
         self.inner.lock().broker.is_enabled(id)
     }
 
+    /// Whether `id` is the shipped revision of a bundled package that ships off, whose switch is
+    /// then its feature's switch.
+    pub fn ships_off(&self, id: &PackageId) -> bool {
+        self.inner.lock().broker.ships_off(id)
+    }
+
     /// Whether the user or the base turned `id` off, rather than never turning it on.
     pub fn is_turned_off(&self, id: &PackageId) -> bool {
         self.inner.lock().broker.is_turned_off(id)

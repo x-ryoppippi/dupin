@@ -429,6 +429,14 @@ impl Broker {
         }
     }
 
+    /// Whether the installed revision of `id` is a bundled package that ships off, so its own
+    /// switch is the only one that turns its feature on.
+    pub fn ships_off(&self, id: &PackageId) -> bool {
+        self.installed
+            .get(id)
+            .is_some_and(|installed| self.pristine(id, &installed.revision) && self.off_until_chosen(id))
+    }
+
     /// Whether the user or the base turned the package off, or it ships off and nobody has
     /// turned it on, rather than never turning it on. Unreadable grants count as off, since a
     /// choice they hold can't be known.

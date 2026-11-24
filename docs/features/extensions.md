@@ -328,7 +328,7 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 - Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
 - While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, calendars, the displays and the focused window, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard and moving a window need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 - Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
-- Calendars, reading or watching the clipboard, pasting and windows also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
+- Calendars, reading or watching the clipboard, pasting and windows also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. Turning on a bundled extension that ships off, such as Window Management, is turning on its feature and asks for what its grants need; turning on any other extension never asks. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
 [Permissions](./permissions.md#extensions) and [Capability broker](../capability-broker.md) have the full rules.
 
@@ -533,7 +533,7 @@ Events come earliest start first, and the limit keeps the earliest. With `order:
 
 ### Windows
 
-`"windows": ["read", "arrange"]` declares each kind of access separately; both act on the focused window of the app that was in front when the panel opened, and both need macOS Accessibility access, which only **Request Access**, or turning a bundled extension on, asks for.
+`"windows": ["read", "arrange"]` declares each kind of access separately; both act on the focused window of the app that was in front when the panel opened, and both need macOS Accessibility access, which only **Request Access**, or turning on a bundled extension that ships off, asks for.
 
 - **Read**: `windows.displays()` returns every display, the primary one first, as `{ frame, visibleFrame, scale }`, where `visibleFrame` leaves out the menu bar and the Dock and `scale` is pixels per point; `windows.focused()` returns `{ frame, app: { name, bundleId } }`, or `null` when that app has no window.
 - **Arrange**: `windows.setFrame({ x, y, width, height })` moves and resizes that window when you choose an action and resolves to the frame it took, which the app may constrain. A frame that lies off every display is `out-of-scope`, and one that isn't finite, starts more than 1,000,000 points from the origin or is not from above 0 to 100,000 points wide and tall is `invalid`.

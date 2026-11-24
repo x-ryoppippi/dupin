@@ -1219,6 +1219,7 @@ fn a_bundled_package_that_ships_off_waits_to_be_turned_on_with_its_grants() {
         broker.is_turned_off(&package),
         "it doesn't answer until turned on"
     );
+    assert!(broker.ships_off(&package));
     assert_eq!(
         denial(check(&broker, &package, &arrange, Trigger::Activation)),
         Denial::Disabled
@@ -1243,6 +1244,10 @@ fn a_bundled_package_that_ships_off_waits_to_be_turned_on_with_its_grants() {
     assert!(broker.is_turned_off(&package));
 
     let _ = broker.install(package.clone(), rev(R2), windows());
+    assert!(
+        !broker.ships_off(&package),
+        "a changed copy is an extension like any other"
+    );
     broker.set_enabled(&package, true).unwrap();
     assert_eq!(
         consent_needed(broker.check(&package, &rev(R2), &arrange, Trigger::Activation)).reason,
