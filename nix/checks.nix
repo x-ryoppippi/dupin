@@ -1,4 +1,9 @@
-{ lib, self, ... }:
+{
+  lib,
+  self,
+  inputs,
+  ...
+}:
 let
   root = ./..;
 in
@@ -34,6 +39,12 @@ in
         # Clippy and the tests share one debug build of the dependencies. Formatting is
         # `checks.treefmt`, from nix/treefmt.nix.
         lint-and-test = dupin.lintAndTest;
+        dependency-cache-keys = import ./tests/dependency-cache-keys.nix {
+          inherit pkgs;
+          inherit (inputs) crane;
+          native = dupin.baseline;
+          inherit (config.packages) cargo-hawk;
+        };
         home-manager-module = import ./tests/home-manager-module.nix {
           inherit lib pkgs;
           module = self.homeManagerModules.default;

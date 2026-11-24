@@ -79,12 +79,14 @@ authentication, warmup or native E2E succeeded.
 
 The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
 
-Flake builds keep compiled dependencies in three outputs, one each for the
-release binary, Clippy and the tests, and Hawk, whose toolchain differs. A
-source edit reuses all three; only a manifest or `Cargo.lock` change rebuilds
-them. Their names carry version 0.0.0 rather than `VERSION`, so a release bump
-reuses them too. The two check builds leave out debug info, which a failing
-test does not need to report where it panicked.
+Flake builds keep compiled dependencies in four outputs, one each for the
+release binary, Clippy and the tests, Hawk, whose toolchain differs, and the
+latency binary. A source edit reuses all four; only a manifest or `Cargo.lock`
+change rebuilds them. Every dependency-only output is named with version 0.0.0
+rather than `VERSION`, so a release bump reuses them as well;
+`checks.<system>.dependency-cache-keys` fails if one would not. The two check
+builds leave out debug info, which a failing test does not need to report where
+it panicked.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
 builder and its vendor-hash definition; the hash update script evaluates it so
@@ -113,8 +115,9 @@ its pack had been evicted from the cache; nine of them rebuilt the app for a
 change that touched no Rust. Each `Cargo.lock` change stores about 1 GB of
 compiled dependencies. On the Testbox, the same step after a UI edit takes 107
 seconds instead of 142 now that Hawk reuses its dependencies, and the three
-dependency outputs together hold 1.03 GB (debug 353 MB, release 343 MB, Hawk
-338 MB), where the debug output alone held 662 MB with debug info.
+dependency outputs that step builds together hold 1.03 GB (debug 353 MB,
+release 343 MB, Hawk 338 MB), where the debug output alone held 662 MB with
+debug info.
 
 sccache is not configured for local builds or CI. Cargo builds workspace
 crates incrementally in the dev profile, which sccache cannot cache, and those

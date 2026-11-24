@@ -12,7 +12,10 @@ let
     bundleSrc
     ;
   craneLib = (crane.mkLib pkgs).overrideScope (
-    _: _: {
+    _: prev: {
+      # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
+      # stay 0.0.0 (see Cargo.toml). buildPackage calls this too when given no cargoArtifacts.
+      buildDepsOnly = args: prev.buildDepsOnly (args // { version = "0.0.0"; });
       cargo = pkgs.buildPackages.cargo-auditable-cargo-wrapper.override {
         cargo = pkgs.rustPlatform.rust.cargo;
         inherit (pkgs) cargo-auditable;
@@ -70,19 +73,14 @@ let
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
   };
-  # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
-  # stay 0.0.0 (see Cargo.toml).
-  depsArgs = {
-    version = "0.0.0";
-  };
   latencyArgs = baseArgs // {
     pname = "dupin-latency";
     CARGO_PROFILE = "latency";
     cargoExtraArgs = "--offline --locked --package dupin --features tooling";
     doCheck = false;
   };
-  releaseArtifacts = craneLib.buildDepsOnly (releaseArgs // depsArgs);
-  debugArtifacts = craneLib.buildDepsOnly (debugArgs // depsArgs);
+  releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
+  debugArtifacts = craneLib.buildDepsOnly debugArgs;
   lintAndTest = craneLib.mkCargoDerivation (
     debugArgs
     // {
@@ -117,7 +115,7 @@ let
     buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
     doCheck = false;
   };
-  hawkArtifacts = craneLib.buildDepsOnly (hawkArgs // depsArgs);
+  hawkArtifacts = craneLib.buildDepsOnly hawkArgs;
   hawk = craneLib.mkCargoDerivation (
     hawkArgs
     // {
