@@ -42,7 +42,7 @@ pub use action_screen::{ActionStage, ApplicationState, SEND_TO};
 pub use control::pick_indices;
 pub use lifecycle::Busy;
 pub use search::ICON_SIZE;
-pub use thumbnails::PREVIEW_HEIGHT;
+pub use thumbnails::{PREVIEW_HEIGHT, Preview};
 
 use action_screen::ActionScreen;
 use control::{CallerHold, Picker};

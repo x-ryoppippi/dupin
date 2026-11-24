@@ -40,6 +40,16 @@ impl Size {
 
 type Key = (HostImage, Size);
 
+/// What a detail shows for its image.
+pub enum Preview<'a> {
+    Ready(&'a Image),
+    /// Not made yet: the space is kept, so the card doesn't jump when it lands.
+    Loading,
+    /// It can't be made, as when the package may not read its storage or the image doesn't
+    /// decode, so no space is kept for it.
+    Failed,
+}
+
 pub(super) struct Job {
     pub image: HostImage,
     pub size: Size,
@@ -74,8 +84,12 @@ impl Thumbnails {
         }
     }
 
-    pub(crate) fn preview(&self, image: &HostImage) -> Option<&Image> {
-        self.previews.get(image)
+    pub(crate) fn preview(&self, image: &HostImage) -> Preview<'_> {
+        match self.previews.get(image) {
+            Some(preview) => Preview::Ready(preview),
+            None if self.failed.contains(&(image.clone(), Size::Preview)) => Preview::Failed,
+            None => Preview::Loading,
+        }
     }
 
     pub(super) fn has_preview(&self, image: &HostImage) -> bool {
@@ -178,5 +192,26 @@ fn thumbnail(bridge: &Bridge, job: &Job) -> Option<Vec<u8>> {
             }
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_preview_that_failed_keeps_no_space_until_access_changes() {
+        let image = HostImage {
+            extension: "clipboard-history".into(),
+            source: HostImageSource::Blob("handle".into()),
+        };
+        let mut thumbnails = Thumbnails::new();
+        assert!(matches!(thumbnails.preview(&image), Preview::Loading));
+        thumbnails.failed(image.clone(), Size::Row);
+        assert!(matches!(thumbnails.preview(&image), Preview::Loading));
+        thumbnails.failed(image.clone(), Size::Preview);
+        assert!(matches!(thumbnails.preview(&image), Preview::Failed));
+        thumbnails.retry_failed();
+        assert!(matches!(thumbnails.preview(&image), Preview::Loading));
     }
 }
