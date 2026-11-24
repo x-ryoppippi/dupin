@@ -80,11 +80,24 @@ impl Ui {
             }
         }
         if let Some(searcher) = self.searchers.get(&command) {
-            crate::latency::search_started(&command, generation, self.extensions.package(&command));
+            crate::latency::search_started(&command, generation, || self.answering_package(&command, &query));
             searcher.search(generation, query, folder, page, limit);
             self.deadlines.insert(command, (generation, due));
             tx.wake_at(due);
         }
+    }
+
+    /// The extension package that answers `command` for `query`: the one that registers it,
+    /// or, for a web alias, the one whose catalogue lists that alias.
+    fn answering_package(&self, command: &CommandId, query: &str) -> Option<String> {
+        if let Some(package) = self.extensions.package(command) {
+            return Some(package.to_owned());
+        }
+        if command.as_str() != crate::features::web::WEB_KEYWORDS {
+            return None;
+        }
+        let web = self.web.read().ok()?;
+        web.held_package(query).map(|package| package.as_str().to_owned())
     }
 
     pub(super) fn cancel_search(&mut self) {

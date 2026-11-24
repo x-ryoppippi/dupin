@@ -56,10 +56,12 @@ config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"
 package = "bundled:clipboard-history"
 
-# The bundled web-search package lists the searches; Dupin matches the alias and fills the URL.
+# The bundled web-search package lists the searches; Dupin matches the alias and fills the URL,
+# held to the native web search it replaced (scripts/latency/native-baseline.json).
 [features.web.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "web.keywords"
+package = "bundled:web-search"
 
 [features.snippets.native]
 config = "scripts/headless/snippets.toml"

@@ -108,17 +108,16 @@ pub fn edit_applied(session: &Session) {
     });
 }
 
-/// `package` is the extension package that answers `provider`, if one does.
-pub fn search_started(provider: &CommandId, generation: u64, package: Option<&str>) {
+/// `package` finds the extension package that answers `provider`, if one does; only a
+/// headless run with the probe on asks it.
+pub fn search_started(provider: &CommandId, generation: u64, package: impl FnOnce() -> Option<String>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_none()
         {
             sample.pending.insert(provider.clone(), generation);
-            if let Some(package) = package {
-                sample
-                    .packages
-                    .insert(provider.as_str().to_owned(), package.to_owned());
+            if let Some(package) = package() {
+                sample.packages.insert(provider.as_str().to_owned(), package);
             }
         }
     });

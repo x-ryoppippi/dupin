@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use dupin_core::config::Config;
 use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
-use dupin_extension_bridge::{Bridge, Call, Trigger};
+use dupin_extension_bridge::{Bridge, Call, PackageId, Trigger};
 use dupin_js_runtime::web_search::{self, PLACEHOLDER, WebSearch};
 use serde_json::{Map, Value, json};
 
@@ -201,6 +201,22 @@ impl WebSearches {
         Some(self.usable(held.into_iter().flatten()))
     }
 
+    /// The package whose held catalogue answers the alias `raw` starts with, as
+    /// [`WebSearches::searches`] would pick it; None while Dupin holds no current catalogue
+    /// that lists it.
+    pub fn held_package(&self, raw: &str) -> Option<&PackageId> {
+        let (alias, _) = split_alias(raw)?;
+        if self.reserved.contains(alias) {
+            return None;
+        }
+        self.sources.iter().find_map(|extension| {
+            let held = extension.held_web_searches()?;
+            held.iter()
+                .any(|(_, search)| search.alias == alias)
+                .then_some(&extension.package)
+        })
+    }
+
     fn usable(&self, searches: impl Iterator<Item = (Item, WebSearch)>) -> Vec<(Item, WebSearch)> {
         let mut seen = HashSet::new();
         searches
@@ -257,14 +273,16 @@ pub(crate) fn item(shown: &Item, search: &WebSearch, query: &str, complete: bool
     })
 }
 
-fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
+/// The alias `raw` starts with and the query typed after it.
+fn split_alias(raw: &str) -> Option<(&str, &str)> {
     let raw = raw.trim_start();
     let boundary = raw.find(char::is_whitespace).unwrap_or(raw.len());
     let alias = &raw[..boundary];
-    if alias.is_empty() {
-        return None;
-    }
-    let query = raw[boundary..].trim();
+    (!alias.is_empty()).then(|| (alias, raw[boundary..].trim()))
+}
+
+fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
+    let (alias, query) = split_alias(raw)?;
     searches
         .searches(deadline)
         .into_iter()
@@ -652,8 +670,19 @@ mod tests {
         let first = package("first", &search("first"));
         let second = package("second", &search("second"));
         let searchless = package("searchless", "export function search() { return []; }");
-        let web = provider(vec![searchless, first, second.clone()], &[], false);
+        let sources = vec![searchless, first.clone(), second.clone()];
+        let held = WebSearches::new(sources.clone(), HashSet::new());
+        assert_eq!(
+            held.held_package("g x"),
+            None,
+            "no catalogue is held before typing"
+        );
+        let web = provider(sources.clone(), &[], false);
         assert_eq!(url(&collect(&web, "g x", 5)[0]), "https://first.example/?q=x");
+        assert_eq!(held.held_package("  g x"), Some(&first.package));
+        assert_eq!(held.held_package("gh x"), None);
+        let reserved = WebSearches::new(sources, ["g".to_owned()].into());
+        assert_eq!(reserved.held_package("g x"), None);
         let fallbacks = provider(vec![second], &[], true);
         assert_eq!(collect(&fallbacks, "x", 5).len(), 1);
     }
