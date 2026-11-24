@@ -14,7 +14,9 @@ pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
 const MAX_WASM_MANIFEST_BYTES: usize = 16 * 1024;
-const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main` and `capabilities`";
+const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch` and `capabilities`";
+const DEFAULT_SEARCH_HINT: &str =
+    "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
 /// The capabilities the extension platform design names. None can be granted yet.
 const PLANNED_CAPABILITIES: [&str; 3] = ["http", "exec", "files"];
 
@@ -25,6 +27,8 @@ pub(super) struct Manifest {
     pub keyword: String,
     /// Relative to the folder: a JavaScript or TypeScript module, or a .wasm module.
     pub entry: String,
+    /// The package's `items()` catalogue also answers the default search.
+    pub default_search: bool,
 }
 
 /// The manifest files in one folder, so a later scan can tell whether any appeared, changed or
@@ -147,10 +151,12 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
             &format!("Give `dupin` {DUPIN_KEYS}."),
         ));
     };
-    if let Some(key) = dupin
-        .keys()
-        .find(|key| !matches!(key.as_str(), "title" | "keyword" | "main" | "capabilities"))
-    {
+    if let Some(key) = dupin.keys().find(|key| {
+        !matches!(
+            key.as_str(),
+            "title" | "keyword" | "main" | "defaultSearch" | "capabilities"
+        )
+    }) {
         return Err(field(
             &format!("dupin.{key}"),
             "is not a key Dupin reads",
@@ -163,6 +169,17 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         version: required(package, "version", "version", VERSION_HINT)?,
         keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
+        default_search: match dupin.get("defaultSearch") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Err(field(
+                    "dupin.defaultSearch",
+                    "must be true or false",
+                    DEFAULT_SEARCH_HINT,
+                ));
+            }
+        },
     };
     let fields = Fields {
         file: PACKAGE_JSON,
@@ -251,6 +268,7 @@ fn wasm_manifest(path: &Path) -> Result<Manifest, Diagnostic> {
         version: manifest.version,
         keyword: manifest.keyword,
         entry,
+        default_search: false,
     };
     let fields = Fields {
         file: WASM_MANIFEST,

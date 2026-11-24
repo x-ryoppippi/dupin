@@ -364,7 +364,11 @@ impl Session {
     }
 
     pub fn detail(&self, index: usize) -> Option<&Detail> {
-        self.presentation(index)?.detail.as_deref()
+        let presentation = self.presentation(index)?;
+        if presentation.detail_when_selected && index != self.search.selected {
+            return None;
+        }
+        presentation.detail.as_deref()
     }
 
     pub fn renaming(&self) -> Option<&Renaming> {

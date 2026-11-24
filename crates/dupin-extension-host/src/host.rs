@@ -11,8 +11,11 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
-use dupin_plugin_protocol::{self as protocol, PluginItem};
+use std::collections::HashSet;
+
+use dupin_js_runtime::row::Source;
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Exports, Reason, Row, RunError, Sources};
+use dupin_plugin_protocol::MAX_RESPONSE_BYTES;
 
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
 
@@ -50,7 +53,8 @@ impl std::fmt::Debug for Compiled {
 }
 
 impl Compiled {
-    fn entry(&self) -> &str {
+    /// The module the package's calls start from, as diagnostics name it.
+    pub fn entry(&self) -> &str {
         &self.entry
     }
 
@@ -88,6 +92,8 @@ struct State {
 enum Work {
     Compile,
     Search,
+    Items,
+    Action,
 }
 
 impl Work {
@@ -95,6 +101,8 @@ impl Work {
         match self {
             Work::Compile => "compiling the package",
             Work::Search => "search",
+            Work::Items => "items",
+            Work::Action => "the action",
         }
     }
 
@@ -102,6 +110,8 @@ impl Work {
         match self {
             Work::Compile => "the compile's",
             Work::Search => "search's",
+            Work::Items => "items'",
+            Work::Action => "the action's",
         }
     }
 }
@@ -167,15 +177,61 @@ impl Host {
         })
     }
 
-    /// Links and evaluates `package`'s entry and checks that it exports `search`.
+    /// Links and evaluates `package`'s entry and reports which of `search` and `items` it
+    /// exports.
     pub fn check(
         &self,
         package: &Compiled,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
-    ) -> Result<(), RunError> {
-        match self.call(Request::run(package, Call::Check), deadline, is_cancelled)? {
-            (Answer::Checked, _) => Ok(()),
+    ) -> Result<Exports, RunError> {
+        match self.call(
+            Request::run(package, Call::Check, Work::Search),
+            deadline,
+            is_cancelled,
+        )? {
+            (Answer::Checked { exports }, _) => Ok(exports),
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `items({ cursor, reason })` in `package` for the next part of its catalogue.
+    pub fn items(
+        &self,
+        package: &Compiled,
+        cursor: Option<&str>,
+        reason: Reason,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<CataloguePage, RunError> {
+        let call = Call::Items {
+            cursor: cursor.map(str::to_owned),
+            reason,
+        };
+        match self.call(Request::run(package, call, Work::Items), deadline, is_cancelled)? {
+            (Answer::Catalogue { page }, _) => {
+                page.validate().map_err(|problem| unshowable(problem, package))?;
+                Ok(page)
+            }
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `actions[handler](data)` in `package`.
+    pub fn action(
+        &self,
+        package: &Compiled,
+        handler: &str,
+        data: Option<&serde_json::Value>,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+    ) -> Result<Acted, RunError> {
+        let call = Call::Action {
+            handler: handler.into(),
+            data: data.cloned(),
+        };
+        match self.call(Request::run(package, call, Work::Action), deadline, is_cancelled)? {
+            (Answer::Acted { acted }, _) => Ok(acted),
             _ => Err(mismatch()),
         }
     }
@@ -188,16 +244,15 @@ impl Host {
         limit: usize,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
-    ) -> Result<Vec<PluginItem>, RunError> {
+    ) -> Result<Vec<Row>, RunError> {
         let limit = limit.min(dupin_js_runtime::MAX_ROWS) as u32;
         let call = Call::Search {
             query: query.into(),
             limit,
         };
-        match self.call(Request::run(package, call), deadline, is_cancelled)? {
+        match self.call(Request::run(package, call, Work::Search), deadline, is_cancelled)? {
             (Answer::Rows { items }, _) => {
-                validate(&items, limit)
-                    .map_err(|diagnostic| RunError::Failed(diagnostic.file(package.entry())))?;
+                validate(&items, limit as usize).map_err(|problem| unshowable(problem, package))?;
                 Ok(items)
             }
             _ => Err(mismatch()),
@@ -296,7 +351,7 @@ struct Request<'a> {
 }
 
 impl<'a> Request<'a> {
-    fn run(package: &'a Compiled, call: Call) -> Self {
+    fn run(package: &'a Compiled, call: Call, work: Work) -> Self {
         let (modules, tail) = wire::spans(package.modules());
         let bytes: u64 = tail.iter().map(|part| part.len() as u64).sum();
         Self {
@@ -304,7 +359,7 @@ impl<'a> Request<'a> {
             modules,
             tail,
             call,
-            work: Work::Search,
+            work,
             // The bytecode as read from the socket and as the package the helper rebuilds.
             allowance: 2 * bytes,
         }
@@ -585,34 +640,34 @@ fn footprint(_pid: u32) -> Option<u64> {
     None
 }
 
-/// The helper is another process, so its rows are checked again here, against the protocol
-/// limits a Wasm guest's answer meets.
-fn validate(items: &[PluginItem], limit: u32) -> Result<(), Diagnostic> {
-    let request = protocol::Request {
-        version: protocol::VERSION,
-        request_id: "1".into(),
-        generation: "1".into(),
-        command: "extension".into(),
-        query: String::new(),
-        limit,
-        state: None,
-        view: None,
-        context: None,
-    };
-    let response = protocol::Response {
-        version: protocol::VERSION,
-        request_id: "1".into(),
-        generation: "1".into(),
-        outcome: protocol::Outcome::Results {
-            items: items.to_vec(),
-            state: None,
-        },
-    };
-    response.encode(&request).map(drop).map_err(|error| {
+/// The helper is another process, so its rows are checked again here, against the limits the
+/// reader in the helper applied.
+fn validate(items: &[Row], limit: usize) -> Result<(), String> {
+    if items.len() > limit {
+        return Err(format!("{} rows where {limit} were asked for", items.len()));
+    }
+    let mut ids = HashSet::new();
+    let mut bytes = 0;
+    for item in items {
+        item.validate(Source::Search)?;
+        if !ids.insert(item.id.as_str()) {
+            return Err(format!("`{}` is the id of more than one row", item.id));
+        }
+        bytes += item.text_bytes();
+    }
+    if bytes > MAX_RESPONSE_BYTES {
+        return Err("more text than an answer may carry".into());
+    }
+    Ok(())
+}
+
+fn unshowable(problem: String, package: &Compiled) -> RunError {
+    RunError::Failed(
         host_error(format!(
-            "the extension host returned rows Dupin can't show: {error}"
+            "the extension host returned rows Dupin can't show: {problem}"
         ))
-    })
+        .file(package.entry()),
+    )
 }
 
 /// A helper's answer as the call's result: its own failure or cancellation becomes the error.
@@ -645,6 +700,10 @@ fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
         Work::Search => {
             "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
         }
+        Work::Items => {
+            "Answer sooner with part of the list and `more: true`: Dupin stops items after 2 seconds."
+        }
+        Work::Action => "Make the action return sooner: Dupin stops it after 2 seconds.",
     };
     Diagnostic::new(
         "deadline",

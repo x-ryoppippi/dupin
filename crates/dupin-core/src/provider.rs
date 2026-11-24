@@ -30,6 +30,8 @@ pub struct Batch {
     /// Shown in place of a row's own view, by item ID. The view remains the plain-text form
     /// for places that don't render details.
     pub details: HashMap<String, Arc<Detail>>,
+    /// Show a row's detail only while it is selected, so a long list stays a list.
+    pub details_when_selected: bool,
 }
 
 impl Batch {
@@ -37,7 +39,7 @@ impl Batch {
         Self {
             items,
             section: Some(title.into()),
-            details: HashMap::new(),
+            ..Self::default()
         }
     }
 

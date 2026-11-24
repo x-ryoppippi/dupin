@@ -36,6 +36,33 @@ impl Detail {
         }
     }
 
+    /// The bytes of text the detail holds, for budgets on what is kept in memory.
+    pub fn text_bytes(&self) -> usize {
+        fn blocks(list: &[Block]) -> usize {
+            list.iter()
+                .map(|block| match block {
+                    Block::Heading { text, .. } | Block::Paragraph(text) => {
+                        text.text.len()
+                            + text
+                                .runs
+                                .iter()
+                                .map(|run| run.style.link.as_ref().map_or(0, String::len))
+                                .sum::<usize>()
+                    }
+                    Block::List { items, .. } => items.iter().map(|item| blocks(item)).sum(),
+                    Block::Code(code) => code.len(),
+                })
+                .sum()
+        }
+        self.title.len()
+            + self
+                .metadata
+                .iter()
+                .map(|entry| entry.label.len() + entry.value.len())
+                .sum::<usize>()
+            + blocks(&self.body.blocks)
+    }
+
     /// Add a labeled value above the body; values past [`MAX_METADATA`] are dropped.
     pub fn with_metadata(mut self, label: impl Into<String>, value: impl Into<String>) -> Self {
         let value = value.into();

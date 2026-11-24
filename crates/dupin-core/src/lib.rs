@@ -2,6 +2,7 @@
 //! result is, how providers hand results over, fuzzy matching, and the launcher session that
 //! turns keys and query edits into searches and actions.
 
+pub mod catalogue;
 pub mod clipboard;
 pub mod command;
 pub mod config;
@@ -26,7 +27,9 @@ pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
 pub use detail::Detail;
 pub use history::History;
 pub(crate) use item::ActionDisposition;
-pub use item::{Action, Icon, Item, ItemAction, Page, Payload, ShareTarget, SystemCommand, View};
+pub use item::{
+    Action, ExtensionRun, Icon, Item, ItemAction, Page, Payload, ShareTarget, SystemCommand, View,
+};
 pub use provider::{Batch, Cancellation, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};
 pub use session::{Effect, Intent, Session};

@@ -639,6 +639,69 @@ mod tests {
     }
 
     #[test]
+    fn catalogues_that_ask_for_it_join_the_main_search_after_apps_in_folder_order() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::{extension, module};
+        use dupin_core::Effect;
+
+        let mut configured = configured(&Config::default()).unwrap();
+        let extensions: Vec<_> = [
+            ("Bookmarks", "bm", true),
+            ("Words", "wc", false),
+            ("Clips", "cl", true),
+        ]
+        .into_iter()
+        .map(|(name, keyword, default_search)| {
+            let mut extension = extension(name, keyword, module("{}"));
+            extension.default_search = default_search;
+            Arc::new(extension)
+        })
+        .collect();
+        let added = add_extensions(&mut configured, &extensions);
+        let roles: Vec<_> = added
+            .registered
+            .iter()
+            .map(|(command, _, role)| (command.as_str(), *role))
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                ("extension.bookmarks", Role::Keyword),
+                ("extension-search.bookmarks", Role::DefaultSearch),
+                ("extension.words", Role::Keyword),
+                ("extension.clips", Role::Keyword),
+                ("extension-search.clips", Role::DefaultSearch),
+            ]
+        );
+        let mut session = Session::new(History::default(), configured.registry).unwrap();
+        let searched: Vec<_> = session
+            .set_query("anything")
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Search { command, .. } => Some(command.as_str().to_owned()),
+                _ => None,
+            })
+            .collect();
+        let apps = searched
+            .iter()
+            .position(|command| command == "apps.search")
+            .unwrap();
+        assert_eq!(
+            searched[apps + 1..apps + 3],
+            ["extension-search.bookmarks", "extension-search.clips"]
+        );
+        // The keyword command lists its catalogue before anything is typed.
+        let effects = session.set_query("bm ");
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::Search { command, query, .. } if command.as_str() == "extension.bookmarks" && query.is_empty()
+            )),
+            "{effects:?}"
+        );
+    }
+
+    #[test]
     fn clip_is_reserved_only_while_clipboard_history_is_enabled() {
         use dupin_core::{Delivery, Effect, Session};
 

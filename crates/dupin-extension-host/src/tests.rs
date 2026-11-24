@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, RunError, Sources};
-use dupin_plugin_protocol::View;
+use dupin_js_runtime::row::PageChange;
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, Exports, Reason, Row, RunError, Sources};
 
 use super::*;
 
@@ -91,22 +91,12 @@ fn counting_host() -> (Host, Arc<AtomicUsize>) {
     (host, started)
 }
 
-fn search(
-    host: &Host,
-    package: &Compiled,
-    query: &str,
-    within: Duration,
-) -> Result<Vec<dupin_plugin_protocol::PluginItem>, RunError> {
+fn search(host: &Host, package: &Compiled, query: &str, within: Duration) -> Result<Vec<Row>, RunError> {
     host.search(package, query, 10, Instant::now() + within, &|| false)
 }
 
-fn titles(rows: &[dupin_plugin_protocol::PluginItem]) -> Vec<String> {
-    rows.iter()
-        .map(|row| match &row.view {
-            View::Text { title, .. } => title.clone(),
-            other => panic!("unexpected view {other:?}"),
-        })
-        .collect()
+fn titles(rows: &[Row]) -> Vec<String> {
+    rows.iter().map(|row| row.title.clone()).collect()
 }
 
 fn failed<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
@@ -459,6 +449,49 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
     assert_eq!(host.helper_pid(), Some(pid), "the same helper finished starting");
 }
 
+#[test]
+fn catalogues_and_action_handlers_run_in_the_helper() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let package = compile(
+        &host,
+        &[(
+            DEFAULT_ENTRY,
+            r#"import { items as catalogue } from 'dupin';
+               export function items(ctx) {
+                 return { cursor: 'next', more: ctx.cursor === null, items: [{ id: `${ctx.reason}`, title: 'Row' }] };
+               }
+               export const actions = { refresh() { catalogue.invalidate(); } };"#,
+        )],
+    )
+    .unwrap();
+    let deadline = || Instant::now() + Duration::from_secs(5);
+    assert_eq!(
+        host.check(&package, deadline(), &|| false).unwrap(),
+        Exports {
+            search: false,
+            items: true
+        }
+    );
+    let page = host
+        .items(&package, None, Reason::Load, deadline(), &|| false)
+        .unwrap();
+    assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
+    let PageChange::Reset { rows } = page.change else {
+        panic!("{:?}", page.change);
+    };
+    assert_eq!(rows[0].id, "load");
+    let next = host
+        .items(&package, Some("next"), Reason::More, deadline(), &|| false)
+        .unwrap();
+    assert!(!next.more);
+    assert!(
+        host.action(&package, "refresh", None, deadline(), &|| false)
+            .unwrap()
+            .invalidated
+    );
+}
+
 const ROGUE_ENV: &str = "DUPIN_EXTENSION_HOST_ROGUE";
 
 /// Not a test: a compromised helper. It answers each call, then forges an answer to the next
@@ -468,7 +501,6 @@ fn rogue_helper_entry() {
     use std::os::fd::FromRawFd;
     use std::os::unix::net::UnixStream;
 
-    use dupin_plugin_protocol::PluginItem;
     use wire::{Answer, FromHelper, ToHelper};
 
     if std::env::var_os(ROGUE_ENV).is_none() {
@@ -477,12 +509,14 @@ fn rogue_helper_entry() {
     // SAFETY: the host starts this process with the socket as standard input.
     let mut socket = unsafe { UnixStream::from_raw_fd(0) };
     let rows = |title: &str| Answer::Rows {
-        items: vec![PluginItem {
+        items: vec![Row {
             id: "1".into(),
-            view: View::Text {
-                title: title.into(),
-                subtitle: String::new(),
-            },
+            title: title.into(),
+            subtitle: String::new(),
+            keywords: Vec::new(),
+            icon: None,
+            section: None,
+            detail: None,
             actions: Vec::new(),
         }],
     };

@@ -33,10 +33,13 @@ def "main run" [
     let jobs = $catalogue.scenarios
     | where {|scenario| $only == null or ($scenario.id | str contains $only) }
     | each {|scenario|
-        let implementations = $catalogue.features | get $scenario.feature | transpose label setup
+        let implementations = $catalogue.features | get $scenario.feature
         $implementations
-        | where {|it| $implementation == null or $it.label == $implementation }
-        | each {|it| $scenario | insert implementation $it.label | insert setup $it.setup }
+        | columns
+        | where {|label| $implementation == null or $label == $implementation }
+        | each {|label|
+            $scenario | insert implementation $label | insert setup (resolve $implementations $label)
+        }
     }
     | flatten
     if ($jobs | is-empty) {
@@ -137,6 +140,19 @@ def "main parity" [
     judge $pairs $tolerance $floor false $summary "Extension parity"
 }
 
+# The implementation `label` of a feature, with what it `extends` filled in: a port names only
+# what it changes, such as its extensions and the `settings` that hand the feature to them,
+# merged over the config it starts from.
+export def resolve [implementations: record, label: string]: nothing -> record {
+    let own = $implementations | get $label
+    if $own.extends? == null {
+        return $own
+    }
+    let base = resolve $implementations $own.extends
+    let settings = $base.settings? | default {} | merge deep ($own.settings? | default {})
+    $base | merge ($own | reject extends) | upsert settings $settings
+}
+
 # One process: type the scenario, then read back the samples for the measured keypresses.
 def measure [
     bin: path
@@ -153,7 +169,12 @@ def measure [
     {events: $script.events} | to json | save $script_path
     let config = $dir | path join config
     mkdir ($config | path join dupin)
-    cp $job.setup.config ($config | path join dupin config.toml)
+    let target = $config | path join dupin config.toml
+    if $job.setup.settings? == null {
+        cp $job.setup.config $target
+    } else {
+        open $job.setup.config | merge deep $job.setup.settings | to toml | save $target
+    }
     if $job.setup.extensions? != null {
         cp --recursive $job.setup.extensions ($config | path join dupin extensions)
     }

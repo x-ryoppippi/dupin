@@ -68,6 +68,17 @@ pub enum Action {
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
     ArrangeWindow(crate::window_management::Layout),
+    /// Run a handler of the extension that offered the row.
+    Extension(ExtensionRun),
+}
+
+/// A named handler an extension exports, with the data its row declared for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtensionRun {
+    /// The extension's id.
+    pub extension: String,
+    pub handler: String,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

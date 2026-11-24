@@ -358,6 +358,15 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         }
         Action::ExtCheck(folder) => {
             let extension = crate::extensions::check_folder(std::path::Path::new(&folder))?;
+            // Kept from the check above, so this asks the package nothing.
+            let exports = extension.check(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE)?;
+            let mut exported: Vec<&str> = Vec::new();
+            if exports.search {
+                exported.push("search");
+            }
+            if exports.items {
+                exported.push("items");
+            }
             if json {
                 return Ok(serde_json::json!({
                     "id": extension.id,
@@ -365,35 +374,39 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "version": extension.version,
                     "keyword": extension.keyword,
                     "runtime": extension.runtime(),
+                    "exports": exported,
+                    "defaultSearch": extension.default_search,
                 }));
             }
             println!(
-                "{} {} ({}) answers `{}`",
+                "{} {} ({}) answers `{}` with {}{}",
                 extension.name,
                 extension.version,
                 extension.runtime(),
-                extension.keyword
+                extension.keyword,
+                exported.join(" and "),
+                if extension.default_search {
+                    ", and the main search with its items"
+                } else {
+                    ""
+                }
             );
             Ok(Value::Null)
         }
         Action::ExtRun(folder, query) => {
             let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
-            let outcome = extension.query(
+            let batches = crate::extensions::answer(
+                &extension,
                 &query,
                 None,
                 dupin_js_runtime::MAX_ROWS,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
             )?;
-            if let protocol::Outcome::Error { message, .. } = &outcome {
-                return Err(Failure::Message(format!(
-                    "the extension answered with an error: {message}"
-                )));
-            }
             if json {
-                return serde_json::to_value(outcome).map_err(|_| "could not encode the answer".into());
+                return Ok(answer_json(&batches));
             }
-            print!("{}", describe_outcome(&outcome));
+            print!("{}", describe_answer(&batches));
             Ok(Value::Null)
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
@@ -497,44 +510,92 @@ fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::D
     }
 }
 
-/// An answer as plain text: each row's text, then its actions, indented.
-fn describe_outcome(outcome: &dupin_plugin_protocol::Outcome) -> String {
-    use dupin_plugin_protocol::{Effect, Outcome, PluginAction, View};
-    let mut out = String::new();
-    let actions = |out: &mut String, actions: &[PluginAction]| {
-        for action in actions {
-            let target = match &action.effect {
-                Effect::Copy { text } => text.clone(),
-                Effect::OpenUrl { url } => url.clone(),
-                Effect::Push { view, .. } => format!("view {view}"),
-            };
-            out.push_str(&format!("  {}: {target}\n", action.title));
+/// An action's effect as `dupin ext run --json` shows it: the protocol's effects, and `run` for
+/// a package's own handler.
+fn effect_json(action: &dupin_core::Action) -> Value {
+    use dupin_core::Action;
+    match action {
+        Action::Copy(text) => serde_json::json!({"kind": "copy", "text": text}),
+        Action::OpenUrl(url) => serde_json::json!({"kind": "open_url", "url": url}),
+        Action::Push(page) => serde_json::json!({
+            "kind": "push", "view": page.view, "title": page.title, "context": page.context,
+        }),
+        Action::Extension(run) => {
+            serde_json::json!({"kind": "run", "handler": run.handler, "data": run.data})
         }
-    };
-    match outcome {
-        Outcome::Results { items, .. } if items.is_empty() => out.push_str("No results\n"),
-        Outcome::Results { items, .. } => {
-            for item in items {
-                match &item.view {
-                    View::Text { title, subtitle } if subtitle.is_empty() => {
-                        out.push_str(&format!("{title}\n"))
-                    }
-                    View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
-                    View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
-                    View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
-                }
-                actions(&mut out, &item.actions);
+        other => serde_json::json!({"kind": format!("{other:?}")}),
+    }
+}
+
+/// The rows an extension answered with, in the protocol's `results` shape, with each row's
+/// section and detail beside it.
+fn answer_json(batches: &[dupin_core::Batch]) -> Value {
+    let items: Vec<Value> = batches
+        .iter()
+        .flat_map(|batch| batch.items.iter().map(move |item| (batch, item)))
+        .map(|(batch, item)| {
+            let mut row = serde_json::json!({
+                "id": item.id,
+                "view": item.view,
+                "actions": item.actions.iter().map(|action| serde_json::json!({
+                    "id": action.id,
+                    "title": action.title,
+                    "effect": effect_json(item.action(&action.id).expect("listed")),
+                })).collect::<Vec<_>>(),
+            });
+            if let Some(section) = &batch.section {
+                row["section"] = section.as_str().into();
+            }
+            if let Some(icon) = &item.icon {
+                row["icon"] = icon.path().to_string_lossy().into_owned().into();
+            }
+            if let Some(detail) = batch.details.get(&item.id) {
+                row["detail"] = serde_json::json!({
+                    "title": detail.title,
+                    "metadata": detail.metadata.iter().map(|entry| serde_json::json!({
+                        "label": entry.label, "text": entry.value,
+                    })).collect::<Vec<_>>(),
+                    "blocks": detail.body.blocks.len(),
+                });
+            }
+            row
+        })
+        .collect();
+    serde_json::json!({"kind": "results", "items": items})
+}
+
+/// An answer as plain text: each section's heading, each row's text, then its actions,
+/// indented.
+fn describe_answer(batches: &[dupin_core::Batch]) -> String {
+    use dupin_core::View;
+    let mut out = String::new();
+    let mut section = None;
+    for batch in batches {
+        if batch.section.is_some() && batch.section != section {
+            out.push_str(&format!("# {}\n", batch.section.as_deref().unwrap_or_default()));
+        }
+        section.clone_from(&batch.section);
+        for item in &batch.items {
+            match &item.view {
+                View::Text { title, subtitle } if subtitle.is_empty() => out.push_str(&format!("{title}\n")),
+                View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
+                View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
+                View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
+            }
+            for action in &item.actions {
+                let target = match item.action(&action.id).expect("listed") {
+                    dupin_core::Action::Copy(text) => text.clone(),
+                    dupin_core::Action::OpenUrl(url) => url.clone(),
+                    dupin_core::Action::Push(page) => format!("view {}", page.view),
+                    dupin_core::Action::Extension(run) => format!("runs {}", run.handler),
+                    other => format!("{other:?}"),
+                };
+                out.push_str(&format!("  {}: {target}\n", action.title));
             }
         }
-        Outcome::Detail {
-            title,
-            body,
-            actions: offered,
-        } => {
-            out.push_str(&format!("{title}\n  {body}\n"));
-            actions(&mut out, offered);
-        }
-        Outcome::Error { message, .. } => out.push_str(&format!("{message}\n")),
+    }
+    if out.is_empty() {
+        out.push_str("No results\n");
     }
     out
 }
@@ -790,43 +851,59 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_answers_list_rows_and_actions() {
-        use dupin_plugin_protocol::{Effect, Outcome, PluginAction, PluginItem, View};
-        let outcome = Outcome::Results {
-            items: vec![PluginItem {
-                id: "docs".into(),
-                view: View::Text {
-                    title: "Docs".into(),
-                    subtitle: "Read them".into(),
-                },
-                actions: vec![
-                    PluginAction {
-                        id: "open".into(),
-                        title: "Open URL".into(),
-                        effect: Effect::OpenUrl {
-                            url: "https://example.com/".into(),
-                        },
-                    },
-                    PluginAction {
-                        id: "copy".into(),
-                        title: "Copy".into(),
-                        effect: Effect::Copy { text: "docs".into() },
-                    },
-                ],
-            }],
-            state: None,
+    fn plain_text_answers_list_sections_rows_and_actions() {
+        use dupin_core::{Action, Batch, ExtensionRun, Item, ItemAction, Payload, View};
+        let item = |title: &str, actions: Vec<ItemAction>| Item {
+            id: title.into(),
+            view: View::Text {
+                title: title.into(),
+                subtitle: "Read them".into(),
+            },
+            payload: Payload::default(),
+            record_usage: false,
+            icon: None,
+            matched: Vec::new(),
+            completion: None,
+            score: None,
+            primary: None,
+            alternate: None,
+            actions,
         };
+        let batches = [
+            Batch::from(vec![item(
+                "Docs",
+                vec![
+                    ItemAction::new("open", "Open URL", Action::OpenUrl("https://example.com/".into())),
+                    ItemAction::new("copy", "Copy", Action::Copy("docs".into())),
+                ],
+            )]),
+            Batch::section(
+                "Recent",
+                vec![item(
+                    "Notes",
+                    vec![ItemAction::new(
+                        "action-0",
+                        "Forget",
+                        Action::Extension(ExtensionRun {
+                            extension: "notes".into(),
+                            handler: "forget".into(),
+                            data: None,
+                        }),
+                    )],
+                )],
+            ),
+        ];
         assert_eq!(
-            describe_outcome(&outcome),
-            "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n"
+            describe_answer(&batches),
+            "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n# Recent\nNotes\n  Read them\n  Forget: runs forget\n"
         );
+        let json = answer_json(&batches);
+        assert_eq!(json["items"][1]["section"], "Recent");
         assert_eq!(
-            describe_outcome(&Outcome::Results {
-                items: vec![],
-                state: None
-            }),
-            "No results\n"
+            json["items"][1]["actions"][0]["effect"],
+            serde_json::json!({"kind": "run", "handler": "forget", "data": null})
         );
+        assert_eq!(describe_answer(&[]), "No results\n");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use std/assert
-use ../latency.nu [percentiles typing-script unanswered verdicts]
+use ../latency.nu [percentiles resolve typing-script unanswered verdicts]
 
 def result [id: string, implementation: string, p95: float]: nothing -> record {
     {id: $id, implementation: $implementation, p95_ms: $p95}
@@ -68,4 +68,44 @@ def main [] {
         0.65
     ]
     assert equal ($script.events | last | get name) end
+
+    # A port names what it changes; the rest comes from the implementation it extends.
+    let implementations = {
+        native: {
+            config: "native.toml"
+            provider: snippets.search
+            settings: {
+                snippets: {sort: "name"}
+            }
+        }
+        extension: {
+            extends: native
+            provider: extension.snippets
+            extensions: "ports"
+            settings: {
+                extensions: true
+                snippets: {enabled: false}
+            }
+        }
+    }
+    assert equal (resolve $implementations native) $implementations.native
+    assert equal (resolve $implementations extension) {
+        config: "native.toml"
+        provider: extension.snippets
+        settings: {snippets: {sort: "name", enabled: false}, extensions: true}
+        extensions: "ports"
+    }
+
+    # Every implementation in the catalogue resolves, and every scenario names a feature it has.
+    let catalogue = open ($env.FILE_PWD | path dirname | path join latency scenarios.toml)
+    for feature in ($catalogue.features | transpose name implementations) {
+        for label in ($feature.implementations | columns) {
+            let setup = resolve $feature.implementations $label
+            assert ($setup.config | is-not-empty) $"($feature.name).($label) has no config"
+            assert ($setup.provider | is-not-empty) $"($feature.name).($label) has no provider"
+        }
+    }
+    for scenario in $catalogue.scenarios {
+        assert ($scenario.feature in ($catalogue.features | columns)) $"($scenario.id) has no feature"
+    }
 }

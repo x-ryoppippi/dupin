@@ -10,8 +10,18 @@
 # Each implementation names the config Dupin starts with, the provider that answers it (every
 # measured keypress must search it and the whole of `typed` must show its rows, so a scenario
 # that never reaches its feature fails rather than timing another one) and, optionally, an
-# `extensions` directory copied beside the config. `prefix` is typed in one go and not
-# measured; each character of `typed` is one measured keypress.
+# `extensions` directory copied beside the config and `settings` merged over the config. An
+# implementation that `extends` another of its feature starts from that one, so the port of a
+# built-in declares only its extensions and the settings that hand the feature to them:
+#
+#   [features.snippets.extension]
+#   extends = "native"
+#   settings = { extensions = true, snippets = { enabled = false } }
+#   provider = "extension.snippets"
+#   extensions = "scripts/latency/snippets.extensions"
+#
+# `prefix` is typed in one go and not measured; each character of `typed` is one measured
+# keypress.
 
 [features.search.native]
 config = "scripts/headless/config/dupin/config.toml"
@@ -36,6 +46,22 @@ provider = "web.keywords"
 [features.snippets.native]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"
+
+# A 5,000-row items() catalogue under its keyword. Loading it is the warm-up's work; a measured
+# keypress only matches the rows Dupin holds and calls into no extension.
+[features.catalogue.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.catalogue"
+extensions = "scripts/latency/catalogue.extensions"
+
+# The main search with that catalogue in it, as its `defaultSearch` asks. It adds to apps rather
+# than replacing a built-in, so it has no native implementation to hold to parity.
+[features.search-catalogue.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension-search.catalogue"
+extensions = "scripts/latency/catalogue.extensions"
 
 [[scenarios]]
 id = "search.saf"
@@ -78,3 +104,21 @@ id = "snippets.sig"
 feature = "snippets"
 prefix = "snip "
 typed = "sig"
+
+[[scenarios]]
+id = "catalogue.term"
+feature = "catalogue"
+prefix = "cat "
+typed = "term"
+
+[[scenarios]]
+id = "catalogue.rel"
+feature = "catalogue"
+prefix = "cat "
+typed = "rel"
+
+[[scenarios]]
+id = "search-catalogue.term"
+feature = "search-catalogue"
+prefix = ""
+typed = "term"

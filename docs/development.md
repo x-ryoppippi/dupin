@@ -251,7 +251,17 @@ provider = "<the extension's command id>"
 extensions = "scripts/latency/calendar-extension.extensions"
 ```
 
-Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation.
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
+
+```toml
+[features.snippets.extension]
+extends = "native"
+settings = { extensions = true, snippets = { enabled = false } }
+provider = "extension.snippets"
+extensions = "scripts/latency/snippets.extensions"
+```
+
+The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity.
 
 The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
 

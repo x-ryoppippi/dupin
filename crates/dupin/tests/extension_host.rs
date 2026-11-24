@@ -8,7 +8,6 @@ use std::time::{Duration, Instant};
 
 use dupin_extension_host::{Compiled, FLAG, Host};
 use dupin_js_runtime::{DEFAULT_ENTRY, Sources};
-use dupin_plugin_protocol::View;
 
 fn host() -> Host {
     Host::new(Box::new(|| {
@@ -41,13 +40,7 @@ fn the_dupin_executable_serves_as_the_extension_host() {
             &|| false,
         )
         .unwrap();
-    assert_eq!(
-        rows[0].view,
-        View::Text {
-            title: "2 words".into(),
-            subtitle: String::new()
-        }
-    );
+    assert_eq!(rows[0].title, "2 words");
     assert!(host.helper_pid().is_some());
 }
 

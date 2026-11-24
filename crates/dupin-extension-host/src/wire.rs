@@ -5,15 +5,15 @@
 
 use std::io::{self, Read, Write};
 
-use dupin_js_runtime::Diagnostic;
-use dupin_plugin_protocol::PluginItem;
+use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Exports, Reason, Row};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 2;
-/// Comfortably above the largest answer, 50 rows within 256 KiB of text.
-const MAX_HEADER_BYTES: usize = 1024 * 1024;
+pub const VERSION: u32 = 3;
+/// Comfortably above the largest answer, part of a catalogue with 1 MiB of text, which JSON
+/// escaping can double.
+const MAX_HEADER_BYTES: usize = 4 * 1024 * 1024;
 /// A package's bytecode, from at most 4 MiB of JavaScript.
 pub const MAX_TAIL_BYTES: usize = 32 * 1024 * 1024;
 
@@ -51,6 +51,14 @@ pub enum Call {
         query: String,
         limit: u32,
     },
+    Items {
+        cursor: Option<String>,
+        reason: Reason,
+    },
+    Action {
+        handler: String,
+        data: Option<serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,9 +86,17 @@ pub enum Answer {
     Compiled {
         modules: Vec<ModuleSpan>,
     },
-    Checked,
+    Checked {
+        exports: Exports,
+    },
     Rows {
-        items: Vec<PluginItem>,
+        items: Vec<Row>,
+    },
+    Catalogue {
+        page: CataloguePage,
+    },
+    Acted {
+        acted: Acted,
     },
     Cancelled,
     Failed {

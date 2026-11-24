@@ -1,0 +1,524 @@
+//! A list of rows kept in memory and matched natively as the user types, for a source that
+//! hands over its whole list rather than answering each query: an extension's `items()`, and
+//! built-ins ported to the same shape. Matching folds every name once, when the row arrives, so
+//! a keystroke costs one pass of the fuzzy matcher over the list and no call into the source.
+
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::sync::Arc;
+
+use crate::fuzzy::{self, Name, Query, Scratch};
+use crate::{Action, Batch, Detail, Item};
+
+/// A match on a keyword ranks below the same match on the title, as an app's alias does.
+const KEYWORD_PENALTY: i32 = 8;
+
+/// One row of a catalogue: what the list shows, and what else matching and presentation need.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Entry {
+    /// Its `id` is unique within the catalogue.
+    pub item: Item,
+    /// Further words the query is matched against.
+    pub keywords: Vec<String>,
+    /// The heading the row is listed under while the query is empty.
+    pub section: Option<Arc<str>>,
+    /// Shown while the row is selected.
+    pub detail: Option<Arc<Detail>>,
+}
+
+/// How much one catalogue may hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub rows: usize,
+    /// Bytes of text across every row.
+    pub bytes: usize,
+}
+
+/// A whole new list, or changes to the current one by row ID.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Change {
+    Reset(Vec<Entry>),
+    Update {
+        /// New rows, after the existing ones.
+        append: Vec<Entry>,
+        /// Rows that take the place of the existing rows with their IDs.
+        replace: Vec<Entry>,
+        /// IDs of rows to drop. An ID the catalogue doesn't hold is ignored.
+        remove: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChangeError {
+    /// Two rows would share this ID.
+    DuplicateId(String),
+    /// A replacement names a row the catalogue doesn't hold.
+    UnknownId(String),
+    TooManyRows {
+        rows: usize,
+        limit: usize,
+    },
+    TooManyBytes {
+        bytes: usize,
+        limit: usize,
+    },
+}
+
+impl fmt::Display for ChangeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateId(id) => write!(f, "`{id}` is the id of more than one item"),
+            Self::UnknownId(id) => write!(f, "`{id}` replaces an item the catalogue doesn't hold"),
+            Self::TooManyRows { rows, limit } => {
+                write!(
+                    f,
+                    "the catalogue would hold {rows} items; at most {limit} are allowed"
+                )
+            }
+            Self::TooManyBytes { bytes, limit } => write!(
+                f,
+                "the catalogue would hold {} KiB of text; at most {} KiB are allowed",
+                bytes.div_ceil(1024),
+                limit / 1024
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ChangeError {}
+
+#[derive(Debug, Default)]
+pub struct Catalogue {
+    rows: Vec<Row>,
+    index: HashMap<String, usize>,
+    bytes: usize,
+}
+
+#[derive(Debug)]
+struct Row {
+    entry: Entry,
+    title: Name,
+    keywords: Vec<Name>,
+    bytes: usize,
+}
+
+impl Row {
+    fn new(entry: Entry) -> Self {
+        let bytes = entry_bytes(&entry);
+        Self {
+            title: Name::new(entry.item.display_title()),
+            keywords: entry.keywords.iter().map(|keyword| Name::new(keyword)).collect(),
+            entry,
+            bytes,
+        }
+    }
+
+    /// The row's best match, and whether it was on its title rather than one of its keywords.
+    fn score(&self, query: &Query, scratch: &mut Scratch) -> Option<(i32, bool)> {
+        let on_title = fuzzy::score_only(query, &self.title, scratch);
+        let on_keyword = self
+            .keywords
+            .iter()
+            .filter_map(|keyword| fuzzy::score_only(query, keyword, scratch))
+            .max()
+            .map(|score| score - KEYWORD_PENALTY);
+        match (on_title, on_keyword) {
+            (Some(title), Some(keyword)) if keyword > title => Some((keyword, false)),
+            (Some(title), _) => Some((title, true)),
+            (None, keyword) => keyword.map(|score| (score, false)),
+        }
+    }
+}
+
+impl Catalogue {
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Bytes of text the catalogue holds.
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn contains(&self, id: &str) -> bool {
+        self.index.contains_key(id)
+    }
+
+    /// Applies `change` whole, or not at all when it would break `limits` or the rows' IDs.
+    pub fn apply(&mut self, change: Change, limits: Limits) -> Result<(), ChangeError> {
+        match change {
+            Change::Reset(entries) => {
+                let mut ids = HashSet::with_capacity(entries.len());
+                if let Some(entry) = entries.iter().find(|entry| !ids.insert(entry.item.id.as_str())) {
+                    return Err(ChangeError::DuplicateId(entry.item.id.clone()));
+                }
+                check_rows(entries.len(), limits)?;
+                let rows: Vec<Row> = entries.into_iter().map(Row::new).collect();
+                let bytes = rows.iter().map(|row| row.bytes).sum();
+                check_bytes(bytes, limits)?;
+                self.rows = rows;
+                self.bytes = bytes;
+            }
+            Change::Update {
+                append,
+                replace,
+                remove,
+            } => {
+                let remove: HashSet<String> = remove.into_iter().filter(|id| self.contains(id)).collect();
+                let mut replaced = HashSet::with_capacity(replace.len());
+                for entry in &replace {
+                    let id = &entry.item.id;
+                    if !self.contains(id) || remove.contains(id) {
+                        return Err(ChangeError::UnknownId(id.clone()));
+                    }
+                    if !replaced.insert(id.as_str()) {
+                        return Err(ChangeError::DuplicateId(id.clone()));
+                    }
+                }
+                let mut appended = HashSet::with_capacity(append.len());
+                for entry in &append {
+                    let id = entry.item.id.as_str();
+                    let held = self.contains(id) && !remove.contains(id);
+                    if held || !appended.insert(id) {
+                        return Err(ChangeError::DuplicateId(id.to_owned()));
+                    }
+                }
+                check_rows(self.rows.len() - remove.len() + append.len(), limits)?;
+                let replace: Vec<Row> = replace.into_iter().map(Row::new).collect();
+                let append: Vec<Row> = append.into_iter().map(Row::new).collect();
+                let dropped: usize = remove.iter().map(|id| self.rows[self.index[id]].bytes).sum();
+                let swapped_out: usize = replace
+                    .iter()
+                    .map(|row| self.rows[self.index[&row.entry.item.id]].bytes)
+                    .sum();
+                let added: usize = replace.iter().chain(&append).map(|row| row.bytes).sum();
+                let bytes = self.bytes - dropped - swapped_out + added;
+                check_bytes(bytes, limits)?;
+                for row in replace {
+                    let at = self.index[&row.entry.item.id];
+                    self.rows[at] = row;
+                }
+                if !remove.is_empty() {
+                    self.rows.retain(|row| !remove.contains(&row.entry.item.id));
+                }
+                self.rows.extend(append);
+                self.bytes = bytes;
+            }
+        }
+        self.index = self
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(at, row)| (row.entry.item.id.clone(), at))
+            .collect();
+        Ok(())
+    }
+
+    /// The rows for `query`, at most `limit`. An empty query lists rows in the catalogue's own
+    /// order under their sections, without scores, so ranking leaves them in place. Otherwise
+    /// rows are ranked by how well they match, as apps are, in one batch without sections so
+    /// usage ranking can reorder them freely.
+    pub fn search(&self, query: &str, limit: usize) -> Vec<Batch> {
+        let Some(query) = Query::new(query) else {
+            return self.listed(limit);
+        };
+        let mut scratch = Scratch::default();
+        let mut hits: Vec<(i32, usize, bool)> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(at, row)| {
+                row.score(&query, &mut scratch)
+                    .map(|(score, on_title)| (score, at, on_title))
+            })
+            .collect();
+        hits.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        hits.truncate(limit);
+        let mut batch = Batch {
+            details_when_selected: true,
+            ..Batch::default()
+        };
+        for (score, at, on_title) in hits {
+            let row = &self.rows[at];
+            // Only the rows shown need the characters to highlight.
+            let positions = on_title
+                .then(|| fuzzy::score_prepared(&query, &row.title))
+                .flatten()
+                .map(|found| found.positions)
+                .unwrap_or_default();
+            let entry = &row.entry;
+            if let Some(detail) = &entry.detail {
+                batch.details.insert(entry.item.id.clone(), detail.clone());
+            }
+            batch.items.push(Item {
+                score: Some(score),
+                matched: positions,
+                ..entry.item.clone()
+            });
+        }
+        if batch.items.is_empty() {
+            return Vec::new();
+        }
+        vec![batch]
+    }
+
+    fn listed(&self, limit: usize) -> Vec<Batch> {
+        let mut batches: Vec<Batch> = Vec::new();
+        for row in self.rows.iter().take(limit) {
+            let entry = &row.entry;
+            let section = entry.section.as_deref().map(str::to_owned);
+            let batch = match batches.last_mut() {
+                Some(batch) if batch.section == section => batch,
+                _ => {
+                    batches.push(Batch {
+                        section,
+                        details_when_selected: true,
+                        ..Batch::default()
+                    });
+                    batches.last_mut().expect("just pushed")
+                }
+            };
+            if let Some(detail) = &entry.detail {
+                batch.details.insert(entry.item.id.clone(), detail.clone());
+            }
+            batch.items.push(Item {
+                score: None,
+                matched: Vec::new(),
+                ..entry.item.clone()
+            });
+        }
+        batches
+    }
+}
+
+fn check_rows(rows: usize, limits: Limits) -> Result<(), ChangeError> {
+    if rows > limits.rows {
+        return Err(ChangeError::TooManyRows {
+            rows,
+            limit: limits.rows,
+        });
+    }
+    Ok(())
+}
+
+fn check_bytes(bytes: usize, limits: Limits) -> Result<(), ChangeError> {
+    if bytes > limits.bytes {
+        return Err(ChangeError::TooManyBytes {
+            bytes,
+            limit: limits.bytes,
+        });
+    }
+    Ok(())
+}
+
+/// The text a row holds, counted toward its catalogue's budget.
+fn entry_bytes(entry: &Entry) -> usize {
+    let item = &entry.item;
+    let view = match &item.view {
+        crate::View::Text { title, subtitle } => title.len() + subtitle.len(),
+        crate::View::Detail { title, body } => title.len() + body.len(),
+        crate::View::Pair { source, result } => source.len() + result.len(),
+    };
+    let actions: usize = item
+        .actions
+        .iter()
+        .map(|action| {
+            action.id.len()
+                + action.title.len()
+                + match &action.action {
+                    Action::Copy(text) | Action::OpenUrl(text) => text.len(),
+                    Action::Extension(run) => {
+                        run.handler.len() + run.data.as_ref().map_or(0, |data| data.to_string().len())
+                    }
+                    _ => 0,
+                }
+        })
+        .sum();
+    item.id.len()
+        + view
+        + item.payload.text.as_ref().map_or(0, String::len)
+        + actions
+        + entry.keywords.iter().map(String::len).sum::<usize>()
+        + entry.section.as_ref().map_or(0, |section| section.len())
+        + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Payload, View};
+
+    const LIMITS: Limits = Limits {
+        rows: 100,
+        bytes: 64 * 1024,
+    };
+
+    fn entry(id: &str, title: &str) -> Entry {
+        Entry {
+            item: Item {
+                id: id.into(),
+                view: View::Text {
+                    title: title.into(),
+                    subtitle: String::new(),
+                },
+                payload: Payload::default(),
+                record_usage: true,
+                icon: None,
+                matched: Vec::new(),
+                completion: None,
+                score: None,
+                primary: None,
+                alternate: None,
+                actions: Vec::new(),
+            },
+            keywords: Vec::new(),
+            section: None,
+            detail: None,
+        }
+    }
+
+    fn titles(batches: &[Batch]) -> Vec<&str> {
+        batches
+            .iter()
+            .flat_map(|batch| &batch.items)
+            .map(Item::display_title)
+            .collect()
+    }
+
+    fn catalogue(entries: Vec<Entry>) -> Catalogue {
+        let mut catalogue = Catalogue::default();
+        catalogue.apply(Change::Reset(entries), LIMITS).unwrap();
+        catalogue
+    }
+
+    #[test]
+    fn typing_ranks_rows_as_apps_are_ranked_and_highlights_title_matches() {
+        let catalogue = catalogue(vec![
+            entry("a", "Hush Safe"),
+            entry("b", "Safari Technology Preview"),
+            entry("c", "Safari"),
+            entry("d", "Notes"),
+        ]);
+        let batches = catalogue.search("saf", 10);
+        assert_eq!(
+            titles(&batches),
+            ["Safari", "Safari Technology Preview", "Hush Safe"]
+        );
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].section, None);
+        assert_eq!(batches[0].items[0].matched, [0, 1, 2]);
+        assert!(batches[0].items.iter().all(|item| item.score.is_some()));
+        assert_eq!(titles(&catalogue.search("saf", 1)), ["Safari"]);
+        assert!(catalogue.search("zzz", 10).is_empty());
+    }
+
+    #[test]
+    fn keywords_match_below_an_equal_title_match_without_highlights() {
+        let mut aliased = entry("aliased", "Visual Studio Code");
+        aliased.keywords = vec!["editor".into()];
+        let catalogue = catalogue(vec![entry("plain", "Editorial"), aliased]);
+        let batches = catalogue.search("editor", 10);
+        assert_eq!(titles(&batches), ["Editorial", "Visual Studio Code"]);
+        assert!(batches[0].items[1].matched.is_empty());
+    }
+
+    #[test]
+    fn an_empty_query_lists_rows_in_order_under_their_sections_without_scores() {
+        let mut first = entry("1", "One");
+        first.section = Some("Pinned".into());
+        let mut second = entry("2", "Two");
+        second.section = Some("Pinned".into());
+        second.detail = Some(Arc::new(Detail::new("Two", "**bold**")));
+        let third = entry("3", "Three");
+        let batches = catalogue(vec![first, second, third]).search("  ", 10);
+        assert_eq!(
+            batches
+                .iter()
+                .map(|batch| (batch.section.as_deref(), batch.items.len()))
+                .collect::<Vec<_>>(),
+            [(Some("Pinned"), 2), (None, 1)]
+        );
+        assert!(batches.iter().all(|batch| batch.details_when_selected));
+        assert!(batches[0].details.contains_key("2"));
+        assert!(
+            batches
+                .iter()
+                .flat_map(|batch| &batch.items)
+                .all(|item| item.score.is_none())
+        );
+    }
+
+    #[test]
+    fn updates_append_replace_and_remove_by_id_in_place() {
+        let mut catalogue = catalogue(vec![entry("a", "Alpha"), entry("b", "Beta"), entry("c", "Gamma")]);
+        catalogue
+            .apply(
+                Change::Update {
+                    append: vec![entry("d", "Delta")],
+                    replace: vec![entry("b", "Bravo")],
+                    remove: vec!["a".into(), "never-held".into()],
+                },
+                LIMITS,
+            )
+            .unwrap();
+        assert_eq!(titles(&catalogue.search("", 10)), ["Bravo", "Gamma", "Delta"]);
+        // A removed ID may come back in the same update.
+        catalogue
+            .apply(
+                Change::Update {
+                    append: vec![entry("c", "Charlie")],
+                    replace: vec![],
+                    remove: vec!["c".into()],
+                },
+                LIMITS,
+            )
+            .unwrap();
+        assert_eq!(titles(&catalogue.search("", 10)), ["Bravo", "Delta", "Charlie"]);
+    }
+
+    #[test]
+    fn a_change_that_breaks_ids_or_limits_leaves_the_catalogue_untouched() {
+        let mut catalogue = catalogue(vec![entry("a", "Alpha"), entry("b", "Beta")]);
+        let update = |append: Vec<Entry>, replace: Vec<Entry>| Change::Update {
+            append,
+            replace,
+            remove: vec!["a".into()],
+        };
+        for (change, error) in [
+            (
+                update(vec![entry("b", "Again")], vec![]),
+                ChangeError::DuplicateId("b".into()),
+            ),
+            (
+                update(vec![], vec![entry("a", "Removed")]),
+                ChangeError::UnknownId("a".into()),
+            ),
+            (
+                update(vec![], vec![entry("z", "Missing")]),
+                ChangeError::UnknownId("z".into()),
+            ),
+            (
+                Change::Reset(vec![entry("x", "One"), entry("x", "Two")]),
+                ChangeError::DuplicateId("x".into()),
+            ),
+        ] {
+            assert_eq!(catalogue.apply(change, LIMITS), Err(error));
+        }
+        let small = Limits { rows: 2, bytes: 1024 };
+        assert_eq!(
+            catalogue.apply(update(vec![entry("c", "C"), entry("d", "D")], vec![]), small),
+            Err(ChangeError::TooManyRows { rows: 3, limit: 2 })
+        );
+        let tight = Limits { rows: 10, bytes: 12 };
+        assert_eq!(
+            catalogue.apply(update(vec![], vec![entry("b", "A much longer title")]), tight),
+            Err(ChangeError::TooManyBytes { bytes: 20, limit: 12 })
+        );
+        assert_eq!(titles(&catalogue.search("", 10)), ["Alpha", "Beta"]);
+        assert_eq!(catalogue.bytes(), "aAlphabBeta".len());
+    }
+}

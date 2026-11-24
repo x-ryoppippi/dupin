@@ -85,6 +85,7 @@ impl Ui {
                     | Action::DeleteClipboardEntry(_)
                     | Action::ClearClipboardHistory => {}
                     Action::RequestClipboardAccess => self.request_clipboard_access(),
+                    Action::Extension(run) => self.run_extension_action(run),
                     Action::Duplicate(path) => self.duplicate_file(path),
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self

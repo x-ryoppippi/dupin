@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use dupin_plugin_protocol::{Effect, View};
+use dupin_js_runtime::row::RowEffect;
 use serde_json::{Value, json};
 
 use crate::build::{CONFIG, node_builtin_import, summarize};
@@ -59,15 +59,12 @@ fn answer(dir: &Path, query: &str) -> Vec<Value> {
         .unwrap()
         .into_iter()
         .map(|item| {
-            let View::Text { title, subtitle } = item.view else {
-                panic!("expected a text row");
-            };
-            let mut row = json!({ "title": title });
-            if !subtitle.is_empty() {
-                row["subtitle"] = subtitle.into();
+            let mut row = json!({ "title": item.title });
+            if !item.subtitle.is_empty() {
+                row["subtitle"] = item.subtitle.into();
             }
             for action in item.actions {
-                if let Effect::Copy { text } = action.effect {
+                if let RowEffect::Copy { text } = action.effect {
                     row["text"] = text.into();
                 }
             }
@@ -88,7 +85,7 @@ fn assert_fixture_matches(dir: &Path) {
 /// Links the entry with the launcher's JavaScript runtime. The launcher's full loader, which
 /// `dupin ext build` and `dupin ext dev` really validate with, is exercised by the `dupin` crate.
 fn validate(dir: &Path) -> Result<(), Diagnostic> {
-    compile(dir)?.check(control()).map_err(failure)
+    compile(dir)?.check(control()).map(drop).map_err(failure)
 }
 
 /// Rolldown from `PATH`. The Nix checks and the dev shell put one there; elsewhere the tests that

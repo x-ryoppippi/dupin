@@ -1,9 +1,14 @@
 //! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
 //! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process,
-//! or a Wasm guest. Guests get the query and return views; neither runtime gives them any host
-//! access.
+//! or a Wasm guest. Guests get the query and return views, or hand over a catalogue Dupin
+//! matches itself; neither runtime gives them any host access.
 
+mod catalogue;
+#[cfg(test)]
+mod items_tests;
 mod manifest;
+#[cfg(test)]
+pub(crate) mod parity;
 mod provider;
 
 use std::collections::HashMap;
@@ -13,13 +18,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
-use dupin_core::Page;
+use dupin_core::{Batch, Page};
 use dupin_extension_host::{Compiled, Host};
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
+use dupin_js_runtime::{Acted, Diagnostic, Exports, RunError, Sources};
 use dupin_plugin_protocol as protocol;
 use dupin_plugin_runtime::{GuestModule, HostError, MAX_MODULE_BYTES, QueryControl};
 
-pub use provider::{ExtensionProvider, QUERY_DEADLINE};
+pub use provider::{ExtensionProvider, QUERY_DEADLINE, Role, answer};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -31,9 +36,16 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
+    /// The package's folder, which row icons are relative to.
+    pub root: PathBuf,
+    /// The package asked for its catalogue to answer the default search too.
+    pub default_search: bool,
     guest: Guest,
     /// Numbers each Wasm request, which the guest must echo back.
     requests: AtomicU64,
+    /// What the package exports, once a call has linked it.
+    exports: OnceLock<Exports>,
+    catalogue: catalogue::Cached,
 }
 
 /// package.json's `dupin` key declares a JavaScript package; extension.toml a Wasm module.
@@ -62,12 +74,22 @@ impl Extension {
         }
     }
 
-    /// Links a JavaScript package and checks that its entry exports `search`. A Wasm module was
-    /// checked as far as it can be without a request when it loaded.
-    pub fn check(&self, deadline: Instant) -> Result<(), RunError> {
+    /// Links a JavaScript package and reports which of `search` and `items` its entry exports,
+    /// which must be at least one. A Wasm module was checked as far as it can be without a
+    /// request when it loaded, and answers queries as `search` does.
+    pub fn check(&self, deadline: Instant) -> Result<Exports, RunError> {
         match &self.guest {
-            Guest::Wasm(_) => Ok(()),
-            Guest::JavaScript(package) => host().check(package, deadline, &|| false),
+            Guest::Wasm(_) => Ok(Exports {
+                search: true,
+                items: false,
+            }),
+            Guest::JavaScript(package) => {
+                if let Some(exports) = self.exports.get() {
+                    return Ok(*exports);
+                }
+                let exports = host().check(package, deadline, &|| false)?;
+                Ok(*self.exports.get_or_init(|| exports))
+            }
         }
     }
 
@@ -79,7 +101,7 @@ impl Extension {
         limit: usize,
         deadline: Instant,
         is_cancelled: impl Fn() -> bool + 'static,
-    ) -> Result<protocol::Outcome, RunError> {
+    ) -> Result<Answer, RunError> {
         match &self.guest {
             Guest::Wasm(module) => {
                 let control = QueryControl {
@@ -87,7 +109,7 @@ impl Extension {
                     is_cancelled: &is_cancelled,
                 };
                 match module.query_controlled(&self.wire(query, page, limit), &control) {
-                    Ok(response) => Ok(response.outcome),
+                    Ok(response) => Ok(Answer::Wasm(response.outcome)),
                     Err(HostError::Cancelled) => Err(RunError::Cancelled),
                     Err(error) => Err(RunError::Failed(Diagnostic::new("wasm-error", error.to_string()))),
                 }
@@ -97,9 +119,59 @@ impl Extension {
                 "JavaScript extensions can't open views yet",
             ))),
             Guest::JavaScript(package) => {
-                let items = host().search(package, query, limit, deadline, &is_cancelled)?;
-                Ok(protocol::Outcome::Results { items, state: None })
+                let rows = host().search(package, query, limit, deadline, &is_cancelled)?;
+                Ok(Answer::Rows(rows))
             }
+        }
+    }
+
+    /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
+    /// holds none or it went stale. Typing never cancels that, since the next keystroke needs
+    /// the same catalogue.
+    pub fn catalogue(&self, query: &str, limit: usize) -> Result<Vec<Batch>, RunError> {
+        let Guest::JavaScript(package) = &self.guest else {
+            return Ok(Vec::new());
+        };
+        let mut fetch = |cursor: Option<&str>, reason| {
+            host().items(package, cursor, reason, Instant::now() + QUERY_DEADLINE, &|| {
+                false
+            })
+        };
+        self.catalogue
+            .search(query, limit, &mut fetch, &|row| provider::entry(self, row))
+            .map_err(|error| match error {
+                RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
+                    RunError::Failed(diagnostic.file(self.entry()))
+                }
+                error => error,
+            })
+    }
+
+    /// Runs `actions[handler](data)` in the package, which the user chose from one of its rows,
+    /// and asks for the catalogue again if the handler invalidated it.
+    pub fn run_action(
+        &self,
+        handler: &str,
+        data: Option<&serde_json::Value>,
+        deadline: Instant,
+    ) -> Result<Acted, RunError> {
+        let Guest::JavaScript(package) = &self.guest else {
+            return Err(RunError::Failed(Diagnostic::new(
+                "unsupported-action",
+                "Wasm extensions can't run action handlers",
+            )));
+        };
+        let acted = host().action(package, handler, data, deadline, &|| false)?;
+        if acted.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(acted)
+    }
+
+    fn entry(&self) -> String {
+        match &self.guest {
+            Guest::JavaScript(package) => package.entry().to_owned(),
+            Guest::Wasm(_) => String::new(),
         }
     }
 
@@ -117,6 +189,14 @@ impl Extension {
             context: page.and_then(|page| page.context.clone()),
         }
     }
+}
+
+/// What a guest answered a query with.
+pub enum Answer {
+    /// A Wasm guest's protocol answer.
+    Wasm(protocol::Outcome),
+    /// A JavaScript package's `search` rows.
+    Rows(Vec<dupin_js_runtime::Row>),
 }
 
 /// The one extension host every JavaScript extension shares, started on the first query.
@@ -333,8 +413,12 @@ fn load_with(
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
+            root: folder.to_path_buf(),
+            default_search: manifest.default_search,
             guest: built.guest,
             requests: AtomicU64::new(0),
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::default(),
         }),
     })
 }
@@ -515,8 +599,12 @@ pub(crate) mod tests {
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
+            root: PathBuf::from("/fixture"),
+            default_search: false,
             guest: Guest::Wasm(module),
             requests: AtomicU64::new(0),
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::default(),
         }
     }
 
@@ -902,19 +990,13 @@ pub(crate) mod tests {
         assert!(Arc::ptr_eq(&catalog.extensions[0], &updated.extensions[0]));
         assert!(!Arc::ptr_eq(&catalog.extensions[1], &updated.extensions[1]));
         assert!(Arc::ptr_eq(&catalog.extensions[2], &updated.extensions[2]));
-        let outcome = updated.extensions[1]
+        let Answer::Rows(rows) = updated.extensions[1]
             .query("", None, 10, std::time::Instant::now() + QUERY_DEADLINE, || false)
-            .unwrap();
-        let protocol::Outcome::Results { items, .. } = outcome else {
-            panic!("{outcome:?}");
+            .unwrap()
+        else {
+            panic!("a JavaScript package answers with rows");
         };
-        assert_eq!(
-            items[0].view,
-            protocol::View::Text {
-                title: "second edit".into(),
-                subtitle: String::new()
-            }
-        );
+        assert_eq!(rows[0].title, "second edit");
 
         fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
         assert!(scanner.update(root, None).is_some());

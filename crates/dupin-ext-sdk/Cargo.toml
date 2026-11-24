@@ -13,7 +13,6 @@ dupin-js-runtime = { path = "../dupin-js-runtime" }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-dupin-plugin-protocol = { workspace = true }
 tempfile = "3"
 
 [lints]

@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
-use dupin_core::CommandId;
+use dupin_core::{CommandId, ExtensionRun};
+use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
-use super::{Ui, search::spawn_searcher};
+use super::{Busy, Ui, search::spawn_searcher};
+use crate::extensions::{Extension, QUERY_DEADLINE, Role};
 
 /// The extensions folder's latest catalogue while `extensions = true`, and which of its
 /// extensions own a command and searcher now.
@@ -15,7 +18,7 @@ pub(super) struct Extensions {
     epoch: u64,
     catalog: Vec<Arc<crate::extensions::Extension>>,
     scan_problems: Vec<String>,
-    registered: HashMap<CommandId, Arc<crate::extensions::Extension>>,
+    registered: HashMap<CommandId, (Arc<Extension>, Role)>,
 }
 
 impl Ui {
@@ -66,38 +69,50 @@ impl Ui {
         registration: &mut crate::commands::ConfiguredCommands,
     ) -> bool {
         let added = crate::features::extensions::add_extensions(registration, &self.extensions.catalog);
-        let registered: HashMap<_, _> = added.registered.into_iter().collect();
+        let registered: HashMap<_, _> = added
+            .registered
+            .into_iter()
+            .map(|(id, extension, role)| (id, (extension, role)))
+            .collect();
         let active = self.session.command_id();
-        let active_changed = registered.get(active).is_some_and(|next| {
+        let active_changed = registered.get(active).is_some_and(|(next, _)| {
             self.extensions
                 .registered
                 .get(active)
-                .is_some_and(|current| !Arc::ptr_eq(next, current))
+                .is_some_and(|(current, _)| !Arc::ptr_eq(next, current))
         });
-        self.extensions.registered.retain(|id, extension| {
+        self.extensions.registered.retain(|id, (extension, _)| {
             let keep = registered
                 .get(id)
-                .is_some_and(|next| Arc::ptr_eq(next, extension));
+                .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
             if !keep {
                 self.searchers.remove(id);
                 self.deadlines.remove(id);
             }
             keep
         });
-        for (id, extension) in registered {
+        for (id, (extension, role)) in registered {
             if self.extensions.registered.contains_key(&id) {
                 continue;
             }
-            let provider = crate::features::extensions::provider(extension.clone());
+            let provider = crate::features::extensions::provider(extension.clone(), role);
             let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
             self.searchers.insert(id.clone(), searcher);
-            self.extensions.registered.insert(id, extension);
+            self.extensions.registered.insert(id, (extension, role));
         }
         let mut loaded: Vec<_> = self
             .extensions
             .registered
             .values()
-            .map(|extension| format!("{} ({})", extension.name, extension.keyword))
+            .filter(|(_, role)| *role == Role::Keyword)
+            .map(|(extension, _)| {
+                let main = if extension.default_search {
+                    ", in the main search"
+                } else {
+                    ""
+                };
+                format!("{} ({}{main})", extension.name, extension.keyword)
+            })
             .collect();
         loaded.sort();
         let problems: Vec<_> = self
@@ -110,5 +125,49 @@ impl Ui {
         self.prefs
             .update(move |prefs, _| prefs.reflect_extensions(loaded, problems));
         active_changed
+    }
+}
+
+impl Ui {
+    /// Runs the handler a row's action named, off the main thread, and searches again when it
+    /// invalidated the extension's catalogue so the change shows at once.
+    pub(super) fn run_extension_action(&mut self, run: ExtensionRun) {
+        let extension = self
+            .extensions
+            .registered
+            .values()
+            .find(|(extension, _)| extension.id == run.extension)
+            .map(|(extension, _)| extension.clone());
+        let Some(extension) = extension else {
+            crate::log::warn(&format!("extension {} is no longer loaded", run.extension));
+            return;
+        };
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        let started = std::thread::Builder::new()
+            .name("extension-action".into())
+            .spawn(move || {
+                let outcome =
+                    extension.run_action(&run.handler, run.data.as_ref(), Instant::now() + QUERY_DEADLINE);
+                drop(busy);
+                me.update(move |ui, tx| ui.extension_acted(&extension, outcome, tx));
+            });
+        if let Err(error) = started {
+            crate::log::warn(&format!("couldn't start the extension action: {error}"));
+        }
+    }
+
+    fn extension_acted(&mut self, extension: &Extension, outcome: Result<Acted, RunError>, tx: &mut Tx) {
+        match outcome {
+            Ok(acted) if acted.invalidated => {
+                let effects = self.session.refresh();
+                self.apply(effects, tx);
+            }
+            Ok(_) | Err(RunError::Cancelled) => {}
+            Err(RunError::Failed(diagnostic)) => {
+                crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                self.show_notice(format!("{} failed: {diagnostic}", extension.name), tx);
+            }
+        }
     }
 }

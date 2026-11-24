@@ -8,6 +8,7 @@
 mod diagnostic;
 mod output;
 mod package;
+pub mod row;
 mod typescript;
 
 use std::cell::{Cell, RefCell};
@@ -16,7 +17,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use dupin_plugin_protocol::PluginItem;
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Declared;
 use rquickjs::promise::PromiseState;
@@ -24,6 +24,7 @@ use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runti
 
 pub use diagnostic::Diagnostic;
 pub use package::{Sources, is_module, is_source_name, source_files};
+pub use row::{CataloguePage, Reason, Row};
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
@@ -35,7 +36,21 @@ pub const MAX_ROWS: usize = 50;
 pub const COMPILE_HEAP_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_ENTRY: &str = "main.js";
 const HOST_MODULE: &str = "dupin";
-const HOST_SOURCE: &str = "export const apiVersion = 1;\n";
+/// What `import … from "dupin"` gives a package. The global the host puts in place before
+/// running the package reaches only this module, which takes it away before any package code
+/// runs.
+const HOST_SOURCE: &str = r#"const host = globalThis[Symbol.for("dupin.host")];
+delete globalThis[Symbol.for("dupin.host")];
+export const apiVersion = 2;
+export const items = Object.freeze({
+    invalidate() {
+        if (!host.invalidate()) {
+            throw new Error("items.invalidate() works only in an action handler");
+        }
+    },
+});
+"#;
+const HOST_GLOBAL: &str = "dupin.host";
 
 /// When a call must stop. Checked between promise jobs and, through QuickJS's interrupt
 /// handler, while JavaScript runs.
@@ -118,35 +133,161 @@ impl Package {
             .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
     }
 
-    /// Links and evaluates the entry module, and checks that it exports `search`.
-    pub fn check(&self, control: Control) -> Result<(), RunError> {
-        let sandbox = Sandbox::new(self, control)?;
+    /// Links and evaluates the entry module, and reports which of `search` and `items` it
+    /// exports. A package must export at least one.
+    pub fn check(&self, control: Control) -> Result<Exports, RunError> {
+        let sandbox = Sandbox::new(self, control, Export::Search)?;
         sandbox.run(|ctx| {
-            sandbox.search_function(ctx)?;
-            Ok(())
+            let namespace = sandbox.namespace(ctx)?;
+            let exports = Exports {
+                search: namespace.get::<_, Value>("search")?.is_function(),
+                items: namespace.get::<_, Value>("items")?.is_function(),
+            };
+            if !exports.search && !exports.items {
+                return Err(missing_export(&self.entry).into());
+            }
+            Ok(exports)
         })
     }
 
     /// Calls `search(query, { limit })` and reads its answer. At most `limit` rows are kept.
-    pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<PluginItem>, RunError> {
-        let sandbox = Sandbox::new(self, control)?;
+    pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<Row>, RunError> {
+        let sandbox = Sandbox::new(self, control, Export::Search)?;
         sandbox.run(|ctx| {
-            let search = sandbox.search_function(ctx)?;
-            let options = Object::new(ctx.clone())?;
-            options.set("limit", limit.min(MAX_ROWS) as u32)?;
-            let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
-            let options: Value = freeze.call((options,))?;
-            let answer: Value = search
-                .call((query, options))
-                .map_err(|error| sandbox.thrown(ctx, error, "search-threw"))?;
-            let answer = match answer.as_promise() {
-                Some(promise) => sandbox.settle(ctx, promise.clone(), "search")?,
-                None => answer,
-            };
-            let mut reader = output::Reader::new(&self.entry, limit.min(MAX_ROWS));
-            reader.rows(answer)
+            let search = sandbox.function(ctx, "search")?;
+            let options = frozen(ctx, |options| options.set("limit", limit.min(MAX_ROWS) as u32))?;
+            let answer = sandbox.call(ctx, search, (query, options))?;
+            output::Reader::search(&self.entry, limit.min(MAX_ROWS)).rows(answer)
         })
     }
+
+    /// Calls `items({ cursor, reason })` and reads the part of the catalogue it answers with.
+    pub fn items(
+        &self,
+        cursor: Option<&str>,
+        reason: Reason,
+        control: Control,
+    ) -> Result<CataloguePage, RunError> {
+        let sandbox = Sandbox::new(self, control, Export::Items)?;
+        sandbox.run(|ctx| {
+            let items = sandbox.function(ctx, "items")?;
+            let context = frozen(ctx, |context| {
+                match cursor {
+                    Some(cursor) => context.set("cursor", cursor)?,
+                    None => context.set("cursor", rquickjs::Null)?,
+                }
+                context.set("reason", reason.as_str())
+            })?;
+            let answer = sandbox.call(ctx, items, (context,))?;
+            output::Reader::items(&self.entry).page(answer)
+        })
+    }
+
+    /// Calls `actions[handler](data)`, which the user chose from a row, and reports whether it
+    /// invalidated the catalogue.
+    pub fn action(
+        &self,
+        handler: &str,
+        data: Option<&serde_json::Value>,
+        control: Control,
+    ) -> Result<Acted, RunError> {
+        let sandbox = Sandbox::new(self, control, Export::Action)?;
+        let invalidated = sandbox.invalidated.clone();
+        sandbox.run(|ctx| {
+            let namespace = sandbox.namespace(ctx)?;
+            let actions: Value = namespace.get("actions")?;
+            let handlers = actions.as_object().filter(|_| !actions.is_function());
+            let function = match handlers {
+                Some(handlers) => handlers.get::<_, Value>(handler)?.into_function(),
+                None => None,
+            };
+            let Some(function) = function else {
+                return Err(Diagnostic::new(
+                    "missing-action",
+                    format!("doesn't export an action handler named `{handler}`"),
+                )
+                .file(&self.entry)
+                .field(format!("actions.{handler}"))
+                .hint(format!(
+                    "Add `export const actions = {{ {handler}(data) {{}} }};` to the entry module."
+                ))
+                .into());
+            };
+            let data = match data {
+                Some(data) => ctx.json_parse(data.to_string())?,
+                None => Value::new_undefined(ctx.clone()),
+            };
+            let answer = sandbox.call(ctx, function, (data,))?;
+            if !answer.is_undefined() {
+                return Err(Diagnostic::new(
+                    "invalid-result",
+                    format!("action `{handler}` returned {}", output::describe(&answer)),
+                )
+                .file(&self.entry)
+                .hint("Return nothing; call `items.invalidate()` from `dupin` to refresh the list.")
+                .into());
+            }
+            Ok(Acted {
+                invalidated: invalidated.get(),
+            })
+        })
+    }
+}
+
+/// Which of the exports Dupin calls a package has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Exports {
+    pub search: bool,
+    pub items: bool,
+}
+
+/// What an action handler did that Dupin acts on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Acted {
+    pub invalidated: bool,
+}
+
+/// The export a call runs, which decides what its diagnostics say and what `dupin` allows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Export {
+    Search,
+    Items,
+    Action,
+}
+
+impl Export {
+    fn name(self) -> &'static str {
+        match self {
+            Export::Search => "search",
+            Export::Items => "items",
+            Export::Action => "the action",
+        }
+    }
+
+    fn threw(self) -> &'static str {
+        match self {
+            Export::Search => "search-threw",
+            Export::Items => "items-threw",
+            Export::Action => "action-threw",
+        }
+    }
+}
+
+fn missing_export(entry: &str) -> Diagnostic {
+    Diagnostic::new("missing-search", "doesn't export a `search` or `items` function")
+        .file(entry)
+        .hint("Add `export function search(query) { return []; }` or `export function items() { return []; }` to the entry module.")
+}
+
+/// A frozen object, filled by `fill`, to hand to a package.
+fn frozen<'js>(
+    ctx: &Ctx<'js>,
+    fill: impl FnOnce(&Object<'js>) -> rquickjs::Result<()>,
+) -> rquickjs::Result<Value<'js>> {
+    let object = Object::new(ctx.clone())?;
+    fill(&object)?;
+    let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+    freeze.call((object,))
 }
 
 fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {
@@ -409,6 +550,9 @@ impl Loader for PackageModules {
 
 struct Sandbox<'a> {
     package: &'a Package,
+    export: Export,
+    /// Set when an action handler calls `items.invalidate()`.
+    invalidated: Rc<Cell<bool>>,
     watchdog: Watchdog,
     problem: LinkProblem,
     // Dropped in order: the context's values before the runtime that owns them.
@@ -417,7 +561,7 @@ struct Sandbox<'a> {
 }
 
 impl<'a> Sandbox<'a> {
-    fn new(package: &'a Package, control: Control) -> Result<Self, RunError> {
+    fn new(package: &'a Package, control: Control, export: Export) -> Result<Self, RunError> {
         let runtime = Runtime::new().map_err(|error| internal(&error))?;
         runtime.set_memory_limit(HEAP_BYTES);
         runtime.set_max_stack_size(STACK_BYTES);
@@ -438,6 +582,8 @@ impl<'a> Sandbox<'a> {
         let context = Context::full(&runtime).map_err(|_| memory_limit())?;
         Ok(Self {
             package,
+            export,
+            invalidated: Rc::default(),
             watchdog,
             problem,
             context,
@@ -463,7 +609,7 @@ impl<'a> Sandbox<'a> {
         match failure {
             Failure::Report(diagnostic) => RunError::Failed(diagnostic),
             Failure::Stopped => self.stopped(),
-            Failure::Js(error) => self.conclude(ctx, self.thrown(ctx, error, "search-threw")),
+            Failure::Js(error) => self.conclude(ctx, self.thrown(ctx, error, self.export.threw())),
         }
     }
 
@@ -471,29 +617,81 @@ impl<'a> Sandbox<'a> {
         match self.watchdog.stop.get() {
             Some(Stop::Cancelled) | None => RunError::Cancelled,
             Some(Stop::Deadline) => RunError::Failed(
-                Diagnostic::new("deadline", "search didn't finish before its deadline")
-                    .file(&self.package.entry)
-                    .hint("Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."),
+                Diagnostic::new(
+                    "deadline",
+                    format!("{} didn't finish before its deadline", self.export.name()),
+                )
+                .file(&self.package.entry)
+                .hint(match self.export {
+                    Export::Search => {
+                        "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds."
+                    }
+                    Export::Items => {
+                        "Answer sooner with part of the list and `more: true`: Dupin stops items after 2 seconds."
+                    }
+                    Export::Action => "Make the action return sooner: Dupin stops it after 2 seconds.",
+                }),
             ),
         }
     }
 
-    fn search_function<'js>(&self, ctx: &Ctx<'js>) -> Result<Function<'js>, Failure> {
+    /// Evaluates the entry module, with the host's own hooks in place for `dupin`.
+    fn namespace<'js>(&self, ctx: &Ctx<'js>) -> Result<Object<'js>, Failure> {
+        let host = Object::new(ctx.clone())?;
+        let (invalidated, export) = (self.invalidated.clone(), self.export);
+        host.set(
+            "invalidate",
+            Function::new(ctx.clone(), move || {
+                let allowed = export == Export::Action;
+                if allowed {
+                    invalidated.set(true);
+                }
+                allowed
+            })?,
+        )?;
+        let symbol: Function = ctx.globals().get::<_, Object>("Symbol")?.get("for")?;
+        let key: Value = symbol.call((HOST_GLOBAL,))?;
+        ctx.globals().set(key, host)?;
         let entry = &self.package.entry;
         let loading =
             Module::import(ctx, entry.as_str()).map_err(|error| self.thrown(ctx, error, "module-threw"))?;
         let namespace = self.settle(ctx, loading, "module")?;
-        let namespace = namespace
+        namespace
             .into_object()
-            .ok_or(Failure::Js(rquickjs::Error::Unknown))?;
-        let search: Value = namespace.get("search")?;
-        search.into_function().ok_or_else(|| {
-            Failure::Report(
-                Diagnostic::new("missing-search", "doesn't export a `search` function")
+            .ok_or(Failure::Js(rquickjs::Error::Unknown))
+    }
+
+    /// The entry module's exported function `name`.
+    fn function<'js>(&self, ctx: &Ctx<'js>, name: &str) -> Result<Function<'js>, Failure> {
+        let entry = &self.package.entry;
+        let namespace = self.namespace(ctx)?;
+        let function: Value = namespace.get(name)?;
+        function.into_function().ok_or_else(|| {
+            Failure::Report(match name {
+                "items" => Diagnostic::new("missing-items", "doesn't export an `items` function")
+                    .file(entry)
+                    .hint("Add `export function items() { return []; }` to the entry module."),
+                _ => Diagnostic::new("missing-search", "doesn't export a `search` function")
                     .file(entry)
                     .hint("Add `export function search(query) { return []; }` to the entry module."),
-            )
+            })
         })
+    }
+
+    /// Calls `function` and waits for the promise it may return.
+    fn call<'js>(
+        &self,
+        ctx: &Ctx<'js>,
+        function: Function<'js>,
+        arguments: impl rquickjs::function::IntoArgs<'js>,
+    ) -> Result<Value<'js>, Failure> {
+        let answer: Value = function
+            .call(arguments)
+            .map_err(|error| self.thrown(ctx, error, self.export.threw()))?;
+        match answer.as_promise() {
+            Some(promise) => self.settle(ctx, promise.clone(), self.export.name()),
+            None => Ok(answer),
+        }
     }
 
     /// Runs promise jobs until `promise` settles, the job budget is spent or nothing is left to
@@ -502,7 +700,7 @@ impl<'a> Sandbox<'a> {
         let code = if what == "module" {
             "module-threw"
         } else {
-            "search-threw"
+            self.export.threw()
         };
         let mut jobs = 0;
         loop {
@@ -569,7 +767,11 @@ impl<'a> Sandbox<'a> {
             return Failure::Report(
                 Diagnostic::new(
                     "stack-limit",
-                    format!("search used more than {} KiB of stack", STACK_BYTES / 1024),
+                    format!(
+                        "{} used more than {} KiB of stack",
+                        self.export.name(),
+                        STACK_BYTES / 1024
+                    ),
                 )
                 .file(entry)
                 .hint("Replace deep recursion with a loop."),
@@ -582,8 +784,16 @@ impl<'a> Sandbox<'a> {
             )
         } else {
             (
-                format!("search threw {}", thrown.message),
-                "Catch the error inside search, or return an item that explains the problem.",
+                format!("{} threw {}", self.export.name(), thrown.message),
+                match self.export {
+                    Export::Search => {
+                        "Catch the error inside search, or return an item that explains the problem."
+                    }
+                    Export::Items => {
+                        "Catch the error inside items, or return an item that explains the problem."
+                    }
+                    Export::Action => "Catch the error inside the action handler.",
+                },
             )
         };
         let mut diagnostic = Diagnostic::new(code, message).hint(hint);

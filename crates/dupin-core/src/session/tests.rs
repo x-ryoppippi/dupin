@@ -2727,3 +2727,22 @@ fn detail_links_open_only_from_the_current_detail() {
     assert!(effects.contains(&Effect::Hide));
     assert!(s.detail(0).is_none());
 }
+
+#[test]
+fn details_shown_while_selected_follow_the_selection() {
+    let mut s = session();
+    let generation = searched(&s.set_query("define word")[1..]).1;
+    let (first, second) = (item("first"), item("second"));
+    let batch = crate::Batch {
+        details_when_selected: true,
+        ..crate::Batch::from(vec![first.clone(), second.clone()])
+    }
+    .with_detail(&first.id, crate::Detail::new("first", "One"))
+    .with_detail(&second.id, crate::Detail::new("second", "Two"));
+    s.deliver_from(dictionary_command(), Delivery::Presented { generation, batch });
+    assert_eq!(s.detail(0).unwrap().title, "first");
+    assert!(s.detail(1).is_none());
+    s.intent(Intent::Down);
+    assert!(s.detail(0).is_none());
+    assert_eq!(s.detail(1).unwrap().title, "second");
+}

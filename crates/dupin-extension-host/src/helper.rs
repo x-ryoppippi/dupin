@@ -10,8 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Control, Diagnostic, Package, RunError, Sources};
-use dupin_plugin_protocol::PluginItem;
+use dupin_js_runtime::{Acted, CataloguePage, Control, Diagnostic, Exports, Package, Row, RunError, Sources};
 
 use crate::sandbox;
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -94,8 +93,10 @@ fn run(socket: UnixStream) -> io::Result<()> {
                     .hint("Bundle and minify the extension, and leave out code it doesn't run."),
                 }
             }
-            Ok(Outcome::Checked) => Answer::Checked,
+            Ok(Outcome::Checked(exports)) => Answer::Checked { exports },
             Ok(Outcome::Rows(items)) => Answer::Rows { items },
+            Ok(Outcome::Catalogue(page)) => Answer::Catalogue { page },
+            Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
@@ -122,8 +123,10 @@ fn read(mut socket: UnixStream, cancelled: &AtomicU64, messages: &mpsc::SyncSend
 
 enum Outcome {
     Compiled(Package),
-    Checked,
-    Rows(Vec<PluginItem>),
+    Checked(Exports),
+    Rows(Vec<Row>),
+    Catalogue(CataloguePage),
+    Acted(Acted),
 }
 
 fn execute(
@@ -132,18 +135,30 @@ fn execute(
     call: Call,
     control: Control,
 ) -> Result<Outcome, RunError> {
-    let search = match call {
+    match call {
         Call::Compile => {
             let files = modules
                 .into_iter()
                 .map(|(name, source)| (name, source.to_vec()))
                 .collect();
             let sources = Sources::new(entry, files)?;
-            return Package::compile(sources, control).map(Outcome::Compiled);
+            Package::compile(sources, control).map(Outcome::Compiled)
         }
-        Call::Check => None,
-        Call::Search { query, limit } => Some((query, limit)),
-    };
+        Call::Check => load(entry, modules).check(control).map(Outcome::Checked),
+        Call::Search { query, limit } => load(entry, modules)
+            .search(&query, limit as usize, control)
+            .map(Outcome::Rows),
+        Call::Items { cursor, reason } => load(entry, modules)
+            .items(cursor.as_deref(), reason, control)
+            .map(Outcome::Catalogue),
+        Call::Action { handler, data } => load(entry, modules)
+            .action(&handler, data.as_ref(), control)
+            .map(Outcome::Acted),
+    }
+}
+
+/// The package a call carries as bytecode.
+fn load(entry: String, modules: Vec<(String, &[u8])>) -> Package {
     let bytecode = modules
         .into_iter()
         .map(|(name, bytes)| (name, Box::from(bytes)))
@@ -154,9 +169,5 @@ fn execute(
     // compile this package alone, so these are bytes `Package::compile` wrote from this
     // package's source, or ones that source subverted its own compile into writing, which can
     // do no more than running the source could.
-    let package = unsafe { Package::from_compiled(entry, bytecode) };
-    match search {
-        None => package.check(control).map(|()| Outcome::Checked),
-        Some((query, limit)) => package.search(&query, limit as usize, control).map(Outcome::Rows),
-    }
+    unsafe { Package::from_compiled(entry, bytecode) }
 }
