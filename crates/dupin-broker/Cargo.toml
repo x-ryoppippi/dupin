@@ -1,0 +1,20 @@
+[package]
+name = "dupin-broker"
+description = "The authority model for extension host services: declared capabilities, persisted grants and revocable permits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+homepage.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true, features = ["display"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

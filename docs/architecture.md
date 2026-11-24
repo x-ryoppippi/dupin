@@ -12,7 +12,7 @@ A provider that groups or lays out its rows overrides `Provider::search_batches`
 
 The host renders each item in declared order. All-text lists retain fixed-height virtualisation; a sectioned list adds a heading row where the section changes and lays out every row, and mixed results use a bounded scrolling column with selectable detail/pair cards and stable row/action anchors. Text rows keep an icon column only when some row in the list has an icon, so an icon-less list such as calendar events or snippets starts its titles at the row's edge while a mixed list keeps them aligned. Keyboard selection moves between rows only; a heading shares its first row's key, so revealing that row shows the heading too. A pressed link goes back to the session, which opens it only if the current row's detail links to it.
 
-Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly: the native OS broker and plugin grants remain incomplete. User extensions get no host operations at all, so they need neither.
+Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly. `dupin-broker` holds the extension authority model, with declared capabilities, per-revision grants and revocable permits ([capability broker](./capability-broker.md)), but no host service goes through it yet. User extensions get no host operations at all, so they need neither.
 
 ## Searching off the main thread
 
