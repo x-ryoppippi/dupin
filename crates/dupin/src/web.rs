@@ -1,7 +1,7 @@
 //! Web searches: an alias typed first in the main search, then a query Dupin fills into a URL
-//! and opens in the browser or Maps. Extensions list them in their `items()` catalogues, as the
-//! bundled web-search package lists config.toml's, and Dupin matches the alias and fills the
-//! URL itself, so typing calls into no package.
+//! and opens in the browser or Maps. The bundled web-search package lists config.toml's in its
+//! `items()` catalogue, and Dupin matches the alias and fills the URL itself, so typing calls
+//! into no package.
 
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
@@ -19,6 +19,13 @@ use crate::extensions::{Extension, QUERY_DEADLINE, Role};
 pub const WEB_SEARCH_PACKAGE: &str = "bundled:web-search";
 const MAX_NAME_CHARS: usize = 80;
 const MAX_FALLBACKS: usize = 20;
+
+/// Whether `package`'s web searches reach the main search and Send to. Only the package Dupin
+/// shipped may put an alias, fallback or URL in front of what the user types there; any other
+/// package's are listed under its own keyword alone, where it already sees the query.
+pub fn reaches_main_search(package: &PackageId) -> bool {
+    package.as_str() == WEB_SEARCH_PACKAGE
+}
 
 /// The aliases the bundled package lists while config.toml sets no `web_searches`.
 pub const DEFAULT_ALIASES: [&str; 4] = ["g", "gh", "maps", "yt"];
@@ -109,7 +116,7 @@ fn valid_name(name: &str) -> bool {
         && !name.contains(PLACEHOLDER)
 }
 
-/// The extensions whose catalogues hold web searches, in the order they register, the
+/// The extensions whose catalogues hold web searches the main search reaches, the
 /// keywords that take precedence over an alias, and the bridge their catalogues reach host
 /// services through.
 #[derive(Clone, Default)]
@@ -141,7 +148,8 @@ impl PartialEq for WebSearches {
 }
 
 impl WebSearches {
-    pub fn new(sources: Vec<Arc<Extension>>, reserved: HashSet<String>) -> Self {
+    pub fn new(mut sources: Vec<Arc<Extension>>, reserved: HashSet<String>) -> Self {
+        sources.retain(|extension| reaches_main_search(&extension.package));
         Self {
             sources,
             reserved,
@@ -357,7 +365,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::extensions::{ExtensionProvider, load_folder, preferences as held};
+    use crate::extensions::{ExtensionProvider, load_bundled, load_folder, preferences as held};
 
     fn reserved(config: &Config) -> impl Fn(&str) -> bool + '_ {
         |keyword| {
@@ -451,9 +459,14 @@ mod tests {
         }
     }
 
+    fn bundled_root() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/web-search")
+    }
+
     fn bundled() -> Arc<Extension> {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/web-search");
-        load_folder(&root).unwrap()
+        let extension = load_bundled(&bundled_root()).unwrap();
+        assert_eq!(extension.package.as_str(), WEB_SEARCH_PACKAGE);
+        extension
     }
 
     fn provider(sources: Vec<Arc<Extension>>, reserved: &[&str], fallback: bool) -> WebProvider {
@@ -601,6 +614,38 @@ mod tests {
         );
         let refreshed = sources.searches(Instant::now() + QUERY_DEADLINE);
         assert_eq!(sources.held().as_ref(), Some(&refreshed));
+
+        // config.toml's searches reach only the package Dupin shipped, not one in the
+        // extensions folder that took its name, whether a third party's or an edited copy.
+        assert!(extension.preferences()["webSearches"].is_object());
+        let folder = tempfile::tempdir().unwrap();
+        let edited = folder.path().join("web-search");
+        std::fs::create_dir_all(&edited).unwrap();
+        for file in ["package.json", "main.ts"] {
+            std::fs::copy(bundled_root().join(file), edited.join(file)).unwrap();
+        }
+        let main = std::fs::read_to_string(edited.join("main.ts")).unwrap();
+        std::fs::write(edited.join("main.ts"), main.replace("'Google'", "'Edited'")).unwrap();
+        for (copy, google) in [
+            (load_folder(&bundled_root()).unwrap(), "Search Google for term"),
+            (load_folder(&edited).unwrap(), "Search Edited for term"),
+        ] {
+            assert_eq!(copy.package.as_str(), "web-search");
+            let preferences = copy.preferences();
+            assert!(preferences.get("webSearches").is_none(), "{preferences}");
+            assert!(preferences.get("webFallbacks").is_none(), "{preferences}");
+            let mut titles = Vec::new();
+            ExtensionProvider::new(copy)
+                .search(&Request::detached("term", 50), &mut |batch| {
+                    titles.extend(batch.iter().map(|item| item.display_title().to_owned()));
+                })
+                .unwrap();
+            assert!(titles.iter().any(|title| title == google), "{titles:?}");
+            assert!(
+                !titles.iter().any(|title| title.contains("Example")),
+                "{titles:?}"
+            );
+        }
         let receivers = crate::receivers::for_payload(&Payload::text("term"), &refreshed);
         assert!(receivers.contains(&ItemAction::new(
             "web:g",
@@ -633,40 +678,87 @@ mod tests {
         held::set(extension.package.as_str(), Map::new());
     }
 
+    fn package(folder: &Path, name: &str, main: &str, bundled: bool) -> Arc<Extension> {
+        let root = folder.join(if bundled { "bundled" } else { "user" }).join(name);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            format!(
+                r#"{{"name": "{name}", "version": "1.0.0", "dupin": {{"title": "{name}", "keyword": "{name}", "defaultSearch": true}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(root.join("main.js"), main).unwrap();
+        if bundled {
+            load_bundled(&root).unwrap()
+        } else {
+            load_folder(&root).unwrap()
+        }
+    }
+
+    fn lookalike(host: &str) -> String {
+        format!(
+            "export function items() {{ return [{{ id: 'g', title: 'Search Google', webSearch: {{ alias: 'g', url: 'https://{host}/?q={{query}}', title: 'Search Google for {{query}}', fallback: 0 }} }}, {{ id: 'again', title: 'Again', webSearch: {{ alias: 'g', url: 'https://again.example/?q={{query}}', title: 'Again for {{query}}' }} }}]; }}"
+        )
+    }
+
     #[test]
-    fn the_first_package_keeps_an_alias_and_one_without_items_is_skipped() {
+    fn only_the_bundled_package_adds_web_searches_to_the_main_search() {
         dupin_extension_host::skip_inside_a_sandbox!();
         let folder = tempfile::tempdir().unwrap();
-        let package = |name: &str, main: &str| {
-            let root = folder.path().join(name);
-            std::fs::create_dir_all(&root).unwrap();
-            std::fs::write(
-                root.join("package.json"),
-                format!(
-                    r#"{{"name": "{name}", "version": "1.0.0", "dupin": {{"title": "{name}", "keyword": "{name}", "defaultSearch": true}}}}"#
-                ),
-            )
-            .unwrap();
-            std::fs::write(root.join("main.js"), main).unwrap();
-            load_folder(&root).unwrap()
-        };
-        let search = |name: &str| {
-            format!(
-                "export function items() {{ return [{{ id: 'g', title: 'Search {name}', webSearch: {{ alias: 'g', url: 'https://{name}.example/?q={{query}}', title: 'Search {name} for {{query}}', fallback: 0 }} }}]; }}"
-            )
-        };
-        let first = package("first", &search("first"));
-        let second = package("second", &search("second"));
-        let searchless = package("searchless", "export function search() { return []; }");
-        let sources = vec![searchless, first.clone(), second.clone()];
-        let web = provider(sources.clone(), &[], false);
-        let row = collect(&web, "g x", 5).remove(0);
-        assert_eq!(url(&row), "https://first.example/?q=x");
+        let third_party = package(folder.path(), "lookalike", &lookalike("attacker.example"), false);
+        let named_alike = package(folder.path(), "web-search", &lookalike("attacker.example"), false);
+        for extension in [&third_party, &named_alike] {
+            let sources = vec![extension.clone()];
+            assert!(collect(&provider(sources.clone(), &[], false), "g x", 5).is_empty());
+            assert!(collect(&provider(sources.clone(), &[], true), "x", 5).is_empty());
+            let searches = WebSearches::new(sources, HashSet::new());
+            assert_eq!(searches.held(), Some(Vec::new()), "Send to offers none of them");
+            assert_eq!(
+                searches.package_of(&format!("extension:{}/g", extension.id)),
+                None
+            );
+
+            // Under its own keyword, where the package already sees the query, it lists them.
+            let mut titles = Vec::new();
+            ExtensionProvider::new(extension.clone())
+                .search(&Request::detached("x", 5), &mut |batch| {
+                    titles.extend(batch.iter().map(|item| item.display_title().to_owned()));
+                })
+                .unwrap();
+            assert_eq!(titles, ["Search Google for x", "Again for x"]);
+        }
+
+        let shipped = package(folder.path(), "web-search", &lookalike("shipped.example"), true);
+        let searchless = package(
+            folder.path(),
+            "searchless",
+            "export function search() { return []; }",
+            false,
+        );
+        let sources = vec![searchless, third_party, shipped.clone()];
+        let row = collect(&provider(sources.clone(), &[], false), "g x", 5).remove(0);
+        assert_eq!(
+            url(&row),
+            "https://shipped.example/?q=x",
+            "the first `g` in its catalogue"
+        );
+        assert_eq!(collect(&provider(sources.clone(), &[], true), "x", 5).len(), 1);
         let searches = WebSearches::new(sources, HashSet::new());
-        assert_eq!(searches.package_of(&row.id), Some(&first.package));
-        assert_eq!(searches.package_of("extension:firstly/g"), None);
+        assert_eq!(searches.package_of(&row.id), Some(&shipped.package));
+        assert_eq!(searches.package_of("extension:web-searchly/g"), None);
         assert_eq!(searches.package_of("unavailable"), None);
-        let fallbacks = provider(vec![second], &[], true);
-        assert_eq!(collect(&fallbacks, "x", 5).len(), 1);
+    }
+
+    #[test]
+    fn a_port_of_a_built_in_owns_no_row_by_its_id() {
+        let port = crate::extensions::tests::extension("Calendar", "cal");
+        assert!(crate::features::ported_command(&port.id).is_some());
+        for id in ["extension:web-search/g", "g", ""] {
+            assert!(!port.owns_row(id), "{id}");
+        }
+        let other = crate::extensions::tests::extension("Web Search", "web");
+        assert!(other.owns_row("extension:web-search/g"));
+        assert!(!other.owns_row("extension:calendar/g"));
     }
 }

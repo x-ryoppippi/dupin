@@ -176,6 +176,9 @@ impl Convert for Extension {
         let aliases = std::mem::take(&mut row.aliases);
         let keywords = std::mem::take(&mut row.keywords);
         let web_search = row.web_search.take();
+        if web_search.is_some() {
+            self.note_keyword_only_web_searches();
+        }
         let match_text = row.match_text.take();
         let time = row.time.map(|ms| ms / 1000);
         let file = row.file.clone().map(Into::into);

@@ -12,7 +12,7 @@ Set `web_searches` and optional `web_fallbacks` in [configuration](#configuratio
 
 Web searches are the bundled **Web Search** extension, [`extensions/web-search`](../../extensions/web-search), which lists them as [web search items](./extensions.md#web-searches). Dupin matches the keyword and fills the URL itself, so typing never waits on the extension. Turn it off in Settings → Extensions to turn every web search off. When another command, such as a Dictionary or snippet alias or a `web` entry in `web_searches`, uses its keyword `web`, Settings says so and only typing `web` to list every search stops working.
 
-`dupin ext eject web-search` copies it into the extensions folder. An unchanged copy behaves as the bundled one. Once you change it, it no longer receives `web_searches` or `web_fallbacks` from config.toml: list your searches in its `main.ts` instead. Other extensions can add web searches of their own; the first to claim a keyword keeps it.
+`dupin ext eject web-search` copies it into the extensions folder. An unchanged copy behaves as the bundled one. Once you change it, it is a third-party extension: it no longer receives `web_searches` or `web_fallbacks` from config.toml, and its web searches are listed only under its keyword `web`. Only the bundled package, or an unchanged copy, adds aliases and fallbacks to the main search and searches to Send to, so no other extension can put a search there that receives what you type.
 
 ## Configuration
 

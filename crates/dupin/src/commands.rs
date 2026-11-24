@@ -515,10 +515,21 @@ mod tests {
 
         dupin_extension_host::skip_inside_a_sandbox!();
         let configured = configured(&Config::default()).unwrap();
-        let bundled = crate::extensions::load_folder(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/web-search"),
+        // Lists fixed searches rather than reading the preferences the web tests change.
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("web-search");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name": "web-search", "version": "1.0.0", "dupin": {"title": "Web Search", "keyword": "web", "defaultSearch": true}}"#,
         )
         .unwrap();
+        std::fs::write(
+            root.join("main.js"),
+            "export function items() { return ['g', 'gh'].map((alias) => ({ id: alias, title: alias, webSearch: { alias, url: alias === 'g' ? 'https://www.google.com/search?q={query}' : 'https://github.com/search?q={query}', title: `${alias} {query}` } })); }",
+        )
+        .unwrap();
+        let bundled = crate::extensions::load_bundled(&root).unwrap();
         let web = crate::web::WebProvider::new(
             Arc::new(RwLock::new(crate::web::WebSearches::new(
                 vec![bundled],

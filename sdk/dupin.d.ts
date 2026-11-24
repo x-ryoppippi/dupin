@@ -84,10 +84,10 @@ declare module 'dupin' {
 		 */
 		file?: string;
 		/**
-		 * Makes the item a web search, which takes no `url`, `text` or `actions`. Typing the alias
-		 * in the main search shows the item first, with `title`; a space and a query show
-		 * `webSearch.title`, and Enter opens the URL filled with the query. The package's own
-		 * keyword lists every web search for the query. Query matching never reaches the item.
+		 * Makes the item a web search, which takes no `url`, `text` or `actions`. The package's own
+		 * keyword lists every web search for the query, and `webSearch.title` shows it; Enter
+		 * opens the URL filled with the query. Only the bundled Web Search package's also reach
+		 * the main search by their alias. Query matching never reaches the item.
 		 */
 		webSearch?: WebSearch;
 	}

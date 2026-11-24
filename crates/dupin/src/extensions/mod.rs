@@ -22,6 +22,7 @@ mod provider;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
@@ -61,6 +62,7 @@ pub struct Extension {
     /// What the package exports, once a call has linked it.
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
+    web_searches_noted: AtomicBool,
     /// What the broker knows the package by: its `name`, or `bundled:<name>` for one that
     /// ships with Dupin.
     pub package: PackageId,
@@ -237,9 +239,24 @@ impl Extension {
         self.catalogue.held_web_searches(&preferences::of(&self.package))
     }
 
-    /// Whether the row `id` is one of this package's.
+    /// Whether the row `id` is one of this package's. A built-in's port keeps the built-in's
+    /// row IDs, which name no package, so it owns none by ID.
     pub fn owns_row(&self, id: &str) -> bool {
-        id.starts_with(&catalogue::Convert::entry_id(self, ""))
+        let prefix = catalogue::Convert::entry_id(self, "");
+        !prefix.is_empty() && id.starts_with(&prefix)
+    }
+
+    /// Logs, once, that the package's web searches reach only its own keyword.
+    fn note_keyword_only_web_searches(&self) {
+        if crate::web::reaches_main_search(&self.package)
+            || self.web_searches_noted.swap(true, Ordering::Relaxed)
+        {
+            return;
+        }
+        crate::log::warn(&format!(
+            "extension {}: its web searches are listed only under its keyword `{}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
+            self.id, self.keyword
+        ));
     }
 
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
@@ -538,6 +555,7 @@ fn load_with(
             preferences: manifest.preferences,
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::new(manifest.matching),
+            web_searches_noted: AtomicBool::new(false),
             package,
             revision,
             capabilities: manifest.capabilities,
@@ -726,6 +744,7 @@ pub(crate) mod tests {
             preferences: Default::default(),
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
+            web_searches_noted: AtomicBool::new(false),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
             compiled: Compiled::empty(),
