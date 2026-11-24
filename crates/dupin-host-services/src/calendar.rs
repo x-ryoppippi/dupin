@@ -6,7 +6,7 @@
 //! Request Access, following the shared Calendar access policy.
 
 use dupin_broker::{OsAccess, OsPermission, Scope};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::service::{ServiceError, bounded};
 
@@ -66,6 +66,17 @@ pub struct CalendarInfo {
     pub color: Option<String>,
 }
 
+/// Which end of the range a read's limit keeps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Order {
+    /// Earliest start first.
+    #[default]
+    Earliest,
+    /// Latest start first, for the events nearest the end of a range in the past.
+    Latest,
+}
+
 /// A validated read: events overlapping `start..end`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
@@ -74,6 +85,7 @@ pub struct Query {
     calendars: Option<Vec<String>>,
     terms: Vec<String>,
     limit: usize,
+    order: Order,
 }
 
 impl Query {
@@ -118,7 +130,12 @@ impl Query {
                 .map(str::to_owned)
                 .collect(),
             limit,
+            order: Order::Earliest,
         })
+    }
+
+    pub fn ordered(self, order: Order) -> Self {
+        Self { order, ..self }
     }
 }
 
@@ -185,7 +202,7 @@ impl<C: Calendars> Calendar<C> {
         })
     }
 
-    /// The events the query matches, earliest first, within the declared `bounds`.
+    /// The events the query matches, in its order, within the declared `bounds`.
     pub fn events(&self, query: &Query, bounds: Bounds) -> Result<Vec<Event>, ServiceError> {
         if let Some(error) = ServiceError::from_access(PERMISSION, self.backend.access()) {
             return Err(error);
@@ -220,6 +237,9 @@ impl<C: Calendars> Calendar<C> {
             })
             .collect();
         events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
+        if query.order == Order::Latest {
+            events.reverse();
+        }
         events.truncate(query.limit);
         self.backend.describe(&mut events);
         Ok(events.into_iter().map(Event::bounded).collect())

@@ -107,6 +107,18 @@ fn calendars_query_and_limit_narrow_the_events() {
 }
 
 #[test]
+fn a_latest_first_read_keeps_the_events_nearest_the_end_of_the_range() {
+    let calendar = Calendar::new(fixture(OsAccess::Allowed));
+    let query = Query::new(TODAY - 3 * DAY, TODAY + 3 * DAY, None, None, Some(2))
+        .unwrap()
+        .ordered(Order::Latest);
+    assert_eq!(
+        titles(&calendar.events(&query, WEEK).unwrap()),
+        ["Out of office", "Design review"]
+    );
+}
+
+#[test]
 fn titles_come_as_one_line_that_fits_a_row() {
     let calendar = Calendar::new(Fixture {
         access: OsAccess::Allowed,

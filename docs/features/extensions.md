@@ -428,7 +428,7 @@ Text the layout doesn't recognize stays in a sense's `definition` or a group's `
 
 ### Calendar
 
-`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, query, limit })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed. With `query`, up to 200 characters, only events whose title or location holds every word of it, in any order and case, come back, so a search sends the extension only what matches:
+`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, query, limit, order })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed. With `query`, up to 200 characters, only events whose title or location holds every word of it, in any order and case, come back, so a search sends the extension only what matches:
 
 ```js
 import { calendar } from 'dupin';
@@ -444,7 +444,7 @@ export async function search() {
 }
 ```
 
-Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
+Events come earliest start first, and the limit keeps the earliest. With `order: 'latest'` they come latest start first and the limit keeps the latest, which is what a read of past events wants. `start` and `end` are ISO 8601 in UTC:
 
 ```json
 {
@@ -674,7 +674,7 @@ Any step's outcome also has `clipboard`, the texts the package wrote to the clip
 | `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                               |
 | `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                          |
 | `dictionary`  | Each term's entries, in the [dictionary](#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                                    |
-| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range that match its `query`, earliest first. Whole days are counted from `now` in UTC.                                                                              |
+| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                              |
 | `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error. |
 
 ### Through MCP

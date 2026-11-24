@@ -29,20 +29,13 @@ interface Placed {
 	end: number;
 }
 
-async function read(
-	query: string,
-	now: Date,
-	typed: boolean,
-	limit: number,
-): Promise<CalendarEvent[]> {
+async function read(range: Parameters<typeof calendar.events>[0]): Promise<Placed[]> {
 	try {
-		return await calendar.events({
-			from: typed ? daysAfter(now, -PAST_DAYS) : now,
-			to: daysAfter(now, typed ? FUTURE_DAYS : UPCOMING_DAYS),
-			query,
-			// Ended events sort last, so a typed search reads them all before cutting.
-			limit: typed ? 500 : limit,
-		});
+		return (await calendar.events(range)).map((event) => ({
+			event,
+			start: Date.parse(event.start),
+			end: Date.parse(event.end),
+		}));
 	} catch (error) {
 		// Dupin lists the request to allow above the results.
 		if (error instanceof DupinError && error.code === 'needs-consent') return [];
@@ -70,15 +63,23 @@ export async function search(query: string, ctx: SearchContext): Promise<List> {
 	const typed = query.trim() !== '';
 	const limit = Math.min(ctx.limit, MAX_ROWS);
 	const words = Array.from(query.trim()).slice(0, MAX_QUERY_CHARS).join('');
-	const placed = (await read(words, now, typed, limit)).map((event) => ({
-		event,
-		start: Date.parse(event.start),
-		end: Date.parse(event.end),
-	}));
-	const isEnded = ({ start, end }: Placed) => start < now.getTime() && end <= now.getTime();
-	const upcoming = placed.filter((each) => !isEnded(each));
-	const ended = placed
-		.filter(isEnded)
+	const [upcoming, past] = await Promise.all([
+		read({
+			from: now,
+			to: daysAfter(now, typed ? FUTURE_DAYS : UPCOMING_DAYS),
+			query: words,
+			limit,
+		}),
+		// The events still under way are in both reads. Ended ones are shown only while fewer
+		// than `limit` are upcoming, so fewer than `limit` are under way, and this read's
+		// `limit` holds them and every ended one that is shown.
+		typed
+			? read({ from: daysAfter(now, -PAST_DAYS), to: now, query: words, limit, order: 'latest' })
+			: [],
+	]);
+	const left = Math.max(0, limit - upcoming.length);
+	const ended = past
+		.filter(({ start, end }) => start < now.getTime() && end <= now.getTime())
 		.sort(
 			(a, b) =>
 				b.start - a.start || (a.event.id < b.event.id ? -1 : a.event.id > b.event.id ? 1 : 0),
@@ -90,14 +91,14 @@ export async function search(query: string, ctx: SearchContext): Promise<List> {
 		if (last?.title === title) last.items.push(item);
 		else sections.push({ title, items: [item] });
 	};
-	for (const each of upcoming.slice(0, limit)) {
+	for (const each of upcoming) {
 		// An event already under way is listed under today.
 		const heading = dayOf(Math.max(each.start, now.getTime()));
 		const title =
 			heading === today ? 'Today' : heading === today + 1 ? 'Tomorrow' : each.event.labels.day;
 		add(title, row(each, false, heading));
 	}
-	for (const each of ended.slice(0, Math.max(0, limit - upcoming.length))) {
+	for (const each of ended.slice(0, left)) {
 		add(EARLIER, row(each, true, today));
 	}
 	return { sections };

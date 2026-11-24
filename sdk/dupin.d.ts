@@ -431,14 +431,16 @@ declare module 'dupin' {
 	/** `calendar` capability, inside the declared window around today. `to` is exclusive. */
 	export const calendar: {
 		/**
-		 * Events overlapping the range, earliest first: up to `limit` (100 by default, 500 at
-		 * most) whose title or location holds every word of `query`, in any order and case.
+		 * Events overlapping the range, earliest start first, or latest with `order: 'latest'`:
+		 * the first `limit` (100 by default, 500 at most) in that order whose title or location
+		 * holds every word of `query`, in any order and case.
 		 */
 		events(range: {
 			from: Date | string | number;
 			to: Date | string | number;
 			query?: string;
 			limit?: number;
+			order?: 'earliest' | 'latest';
 		}): Promise<CalendarEvent[]>;
 	};
 

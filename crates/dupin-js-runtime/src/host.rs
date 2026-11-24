@@ -222,6 +222,7 @@ export const calendar = Object.freeze({
 			to: time(range.to),
 			query: range.query,
 			limit: range.limit,
+			order: range.order,
 		});
 		return events.map((event) => Object.freeze({ ...event, start: iso(event.start), end: iso(event.end) }));
 	},

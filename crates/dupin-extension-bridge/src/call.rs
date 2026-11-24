@@ -12,7 +12,7 @@ use dupin_broker::{
     ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{exec, files};
+use dupin_host_services::{calendar, exec, files};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -142,6 +142,7 @@ struct Range {
     to: f64,
     query: Option<String>,
     limit: Option<u64>,
+    order: Option<calendar::Order>,
 }
 
 impl Session {
@@ -258,6 +259,7 @@ impl Session {
                     to,
                     query,
                     limit,
+                    order,
                 } = decode(args)?;
                 if let Some(query) = &query {
                     bounded(query, "query", MAX_QUERY_BYTES)?;
@@ -280,7 +282,14 @@ impl Session {
                     future_days,
                 })?;
                 let limit = limit.map_or(MAX_EVENTS, |limit| (limit as usize).min(MAX_EVENTS));
-                let events = calendar.events(from, to, query.as_deref(), limit, permit.scope())?;
+                let events = calendar.events(
+                    from,
+                    to,
+                    query.as_deref(),
+                    limit,
+                    order.unwrap_or_default(),
+                    permit.scope(),
+                )?;
                 self.release(&permit, cancelled)?;
                 Ok(json!({ "events": events }))
             }

@@ -17,7 +17,7 @@ use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, FilesKind, Local, OsAccess, OsPermission, PackageStorage, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::exec;
+use dupin_host_services::{calendar, exec};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -394,13 +394,14 @@ impl services::Calendar for Shared {
     }
 
     /// The fixture's events overlapping the range whose title or location holds every word of
-    /// `query`, earliest first, as the calendar service matches them.
+    /// `query`, in `order`, as the calendar service matches them.
     fn events(
         &self,
         from: i64,
         to: i64,
         query: Option<&str>,
         limit: usize,
+        order: calendar::Order,
         _scope: &Scope,
     ) -> Result<Value, Failure> {
         let at = |event: &Value, key: &str| event.get(key).and_then(Value::as_i64);
@@ -430,6 +431,9 @@ impl services::Calendar for Shared {
             })
             .collect();
         events.sort_by_key(|event| at(event, "start"));
+        if order == calendar::Order::Latest {
+            events.reverse();
+        }
         Ok(Value::from(
             events.into_iter().take(limit).cloned().collect::<Vec<_>>(),
         ))

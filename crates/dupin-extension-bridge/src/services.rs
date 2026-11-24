@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use dupin_extension_http as http;
-use dupin_host_services::exec;
+use dupin_host_services::{calendar, exec};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -136,14 +136,15 @@ pub trait Calendar: Send + Sync {
     /// epoch) reaches, which the broker checks against the declared window.
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure>;
     /// Events overlapping `[from, to)` whose title or location holds every word of `query`, at
-    /// most `limit`, inside `scope`'s window, as a JSON array whose `start` and `end` are
-    /// milliseconds since the epoch.
+    /// most `limit` from the end `order` names, inside `scope`'s window, as a JSON array whose
+    /// `start` and `end` are milliseconds since the epoch.
     fn events(
         &self,
         from: i64,
         to: i64,
         query: Option<&str>,
         limit: usize,
+        order: calendar::Order,
         scope: &dupin_broker::Scope,
     ) -> Result<Value, Failure>;
 }
@@ -220,6 +221,7 @@ impl Calendar for Unavailable {
         _to: i64,
         _query: Option<&str>,
         _limit: usize,
+        _order: calendar::Order,
         _scope: &dupin_broker::Scope,
     ) -> Result<Value, Failure> {
         Err(self.failure())
@@ -429,6 +431,7 @@ pub(crate) mod fixture {
             to: i64,
             query: Option<&str>,
             limit: usize,
+            _order: calendar::Order,
             _scope: &dupin_broker::Scope,
         ) -> Result<Value, Failure> {
             if query.is_some_and(|query| !"standup".contains(&query.trim().to_lowercase())) {

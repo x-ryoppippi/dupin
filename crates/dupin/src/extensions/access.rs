@@ -227,9 +227,12 @@ impl services::Calendar for Calendars {
         to: i64,
         query: Option<&str>,
         limit: usize,
+        order: calendar::Order,
         scope: &Scope,
     ) -> Result<Value, Failure> {
-        let query = calendar::Query::new(from, to, None, query, Some(limit)).map_err(Failure::from)?;
+        let query = calendar::Query::new(from, to, None, query, Some(limit))
+            .map_err(Failure::from)?
+            .ordered(order);
         let bounds = calendar::Bounds::of(scope)
             .ok_or_else(|| Failure::new("failed", "the permit isn't for calendars"))?;
         encoded(self.0.events(&query, bounds).map_err(Failure::from)?)
