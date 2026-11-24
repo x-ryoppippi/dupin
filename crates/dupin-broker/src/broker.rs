@@ -191,6 +191,24 @@ impl fmt::Display for BrokerError {
 
 impl std::error::Error for BrokerError {}
 
+/// Why [`Broker::change_saved`] left the user's decisions as they were.
+#[derive(Debug)]
+pub enum SaveError {
+    Refused(BrokerError),
+    Store(StoreError),
+}
+
+impl fmt::Display for SaveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(error) => error.fmt(f),
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {}
+
 impl fmt::Display for Denial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -673,6 +691,24 @@ impl Broker {
     /// Writes the user's decisions to `path`, replacing it whole.
     pub fn save(&self, path: &Path) -> Result<(), StoreError> {
         store::write_atomically(path, &self.local.to_toml()?)
+    }
+
+    /// Makes `change` to the user's decisions and saves them to `path`. If either step fails,
+    /// the decisions are left as they were, so the broker never enforces a choice the file
+    /// doesn't hold.
+    pub fn change_saved<T>(
+        &mut self,
+        path: &Path,
+        change: impl FnOnce(&mut Self) -> Result<T, BrokerError>,
+    ) -> Result<T, SaveError> {
+        let before = self.local.clone();
+        let changed = change(self)
+            .map_err(SaveError::Refused)
+            .and_then(|value| self.save(path).map(|()| value).map_err(SaveError::Store));
+        if changed.is_err() {
+            self.local = before;
+        }
+        changed
     }
 
     #[cfg(test)]
