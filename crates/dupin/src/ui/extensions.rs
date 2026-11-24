@@ -50,6 +50,13 @@ impl Extensions {
         }
     }
 
+    /// The package that answers `command`, if an extension does.
+    pub(super) fn package(&self, command: &CommandId) -> Option<&str> {
+        self.registered
+            .get(command)
+            .map(|(extension, _)| extension.package.as_str())
+    }
+
     /// Whether `current` lists `package`'s catalogue: its keyword, or the main search it
     /// answers too.
     fn lists_catalogue_of(&self, current: &CommandId, package: &PackageId) -> bool {

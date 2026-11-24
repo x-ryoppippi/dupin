@@ -1,4 +1,4 @@
-//! Lays out Dictionary Services' plain-text definitions as a [`Detail`].
+//! Lays out Dictionary Services' plain-text definitions as Markdown and as structure.
 //!
 //! The text has no markup, only conventions that vary by dictionary: Oxford-style entries run
 //! `headword | pronunciation | part of speech 1 sense • sub-sense: example 2 …` and end with
@@ -57,11 +57,22 @@ const CIRCLED: [char; 20] = [
     '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳',
 ];
 
-/// The definition laid out: the pronunciation between the headword's bars as metadata, each
-/// part of speech under a subheading with its numbered senses as an ordered list, sub-senses
-/// after `•` nested under their sense with examples in italics, and each labeled part under a
-/// heading.
-pub(super) fn detail(term: &str, definition: &str) -> Detail {
+/// The layout as the bundled Dictionary shows it, with the pronunciation as metadata.
+#[cfg(test)]
+fn detail(term: &str, definition: &str) -> Detail {
+    let (pronunciation, markdown) = laid_out(term, definition);
+    let detail = Detail::new(term, &markdown);
+    match pronunciation {
+        Some(pronunciation) => detail.with_metadata("Pronunciation", pronunciation),
+        None => detail,
+    }
+}
+
+/// The pronunciation between the headword's bars, and the rest of the definition as Markdown:
+/// each part of speech under a subheading with its numbered senses as an ordered list,
+/// sub-senses after `•` nested under their sense with examples in italics, and each labeled
+/// part under a heading.
+fn laid_out<'a>(term: &str, definition: &'a str) -> (Option<&'a str>, String) {
     let (pronunciation, body) = pronunciation(term, definition)
         .map_or((None, definition), |(pronunciation, body)| {
             (Some(pronunciation), body)
@@ -91,11 +102,8 @@ pub(super) fn detail(term: &str, definition: &str) -> Detail {
         rest = following;
         heading = Some(title);
     }
-    let detail = Detail::new(term, &markdown);
-    match pronunciation {
-        Some(pronunciation) => detail.with_metadata("Pronunciation", pronunciation),
-        None => detail,
-    }
+    markdown.truncate(markdown.trim_end().len());
+    (pronunciation, markdown)
 }
 
 /// `pronunciation` and the rest from `headword | pronunciation | rest`, when the definition
@@ -391,19 +399,18 @@ fn tidy(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The same layout as [`detail`], as data: each `###` part of speech becomes a group whose
-/// numbered items are senses, `•` items under a sense its sub-senses and italic `▸` items its
-/// examples, and each `##` part a section. A group's text before its numbered senses is its
-/// note.
+/// The definition with its layout, as Markdown and as data: each `###`
+/// part of speech becomes a group whose numbered items are senses, `•` items under a sense its
+/// sub-senses and italic `▸` items its examples, and each `##` part a section. A group's text
+/// before its numbered senses is its note.
 pub(super) fn structure(term: &str, definition: &str) -> Entry {
-    let detail = detail(term, definition);
+    let (pronunciation, markdown) = laid_out(term, definition);
+    let detail = Detail::new(term, &markdown);
     let mut entry = Entry {
         headword: detail.title,
-        pronunciation: detail
-            .metadata
-            .into_iter()
-            .find(|metadata| metadata.label == "Pronunciation")
-            .map(|metadata| metadata.value),
+        pronunciation: pronunciation.map(str::to_owned),
+        text: definition.to_owned(),
+        markdown,
         truncated: detail.body.truncated,
         ..Entry::default()
     };

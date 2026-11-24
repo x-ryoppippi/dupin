@@ -57,8 +57,9 @@ pub struct Platform {
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
 /// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
-/// Calendar search reads it; a headless render may still declare a base beside its own config,
-/// and one `dupin ext snap` starts answers from the fixture it renders.
+/// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
+/// headless render may still declare a base beside its own config, and one `dupin ext snap`
+/// starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) {
         return Bridge::new(
@@ -79,6 +80,7 @@ pub fn open(platform: Platform) -> Bridge {
             calendar: Box::new(Calendars(calendar::Calendar::new(
                 dupin_mac::EventStore::fixtures(),
             ))),
+            dictionary: fixed_dictionary(),
             storage: match crate::clipboard::headless_storage() {
                 Some(storage) => Box::new(storage),
                 None => Box::new(services::Unavailable(
@@ -117,7 +119,7 @@ pub fn open(platform: Platform) -> Bridge {
             service: OnceLock::new(),
         }),
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
-            dupin_mac::DictionaryProvider::default(),
+            dupin_mac::SystemDictionary::default(),
         ))),
         calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
             platform.calendar_access,
@@ -237,7 +239,15 @@ impl services::Clipboard for Pasteboard {
     }
 }
 
-struct Dictionaries(dictionary::Dictionary<dupin_mac::DictionaryProvider>);
+struct Dictionaries(dictionary::Dictionary<dupin_mac::SystemDictionary>);
+
+/// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
+/// depend on the dictionaries this Mac has.
+fn fixed_dictionary() -> Box<dyn services::Dictionary> {
+    Box::new(Dictionaries(dictionary::Dictionary::new(
+        dupin_mac::SystemDictionary::fixtures(),
+    )))
+}
 
 impl services::Dictionary for Dictionaries {
     fn lookup(&self, word: &str) -> Result<Value, Failure> {

@@ -333,6 +333,9 @@ fn an_english_entry_as_data_keeps_the_layouts_structure() {
     assert_eq!(entry.headword, "run");
     assert_eq!(entry.dictionary, None);
     assert_eq!(entry.pronunciation.as_deref(), Some("rʌn"));
+    assert_eq!(entry.text, ENGLISH);
+    let shown = detail("run", ENGLISH);
+    assert_eq!(Detail::new("run", &entry.markdown).body, shown.body);
     assert!(!entry.truncated);
     assert_eq!(
         entry.groups,

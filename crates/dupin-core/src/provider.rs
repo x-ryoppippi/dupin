@@ -43,7 +43,8 @@ impl Batch {
         }
     }
 
-    pub fn with_detail(mut self, id: impl Into<String>, detail: Detail) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_detail(mut self, id: impl Into<String>, detail: Detail) -> Self {
         self.details.insert(id.into(), Arc::new(detail));
         self
     }

@@ -666,7 +666,7 @@ mod tests {
             ),
             (
                 "export function search() { return [{ title: 'x', url: 'file:///' }]; }",
-                "main.js: `items[0].url` must be an http or https URL with a host",
+                "main.js: `items[0].url` must be an http or https URL with a host, a dict:// URL, or a calendar event's `link`",
             ),
         ] {
             let (_folder, provider) = javascript(source);

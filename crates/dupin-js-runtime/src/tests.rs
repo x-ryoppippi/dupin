@@ -556,6 +556,16 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             Some("items[0].url"),
         ),
         (
+            "export function search() { return [{ title: 'a', url: 'dict://' }]; }",
+            "invalid-url",
+            Some("items[0].url"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', open: 'dict://two words' }] }]; }",
+            "invalid-url",
+            Some("items[0].actions[0].open"),
+        ),
+        (
             "export function search() { return [{ title: 'x'.repeat(513) }]; }",
             "field-too-long",
             Some("items[0].title"),
@@ -813,16 +823,28 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
 }
 
 #[test]
-fn open_actions_take_web_urls_and_calendar_event_links_only() {
-    use crate::row::is_openable;
+fn rows_open_web_urls_dictionary_words_and_calendar_event_links_only() {
+    use crate::row::{Source, is_openable};
     for url in [
         "https://example.com/",
+        "dict://serendipity",
+        "dict://a%20b%2F%23%C3%A9",
+    ] {
+        assert!(is_openable(url, Source::Search), "{url}");
+        assert!(is_openable(url, Source::Items), "{url}");
+    }
+    for url in [
         "ical://ekevent/20261123T100000Z/7F3C%3A1?method=show&options=more",
         "ical://ekevent/shared%2Fmeeting%3F?method=show&options=more",
     ] {
-        assert!(is_openable(url), "{url}");
+        assert!(is_openable(url, Source::Search), "{url}");
+        // A catalogue reaches no host service, so no calendar link reached it.
+        assert!(!is_openable(url, Source::Items), "{url}");
     }
     for url in [
+        "dict://",
+        "dict://a b",
+        "DICT://run",
         "ical://ekevent/?method=show&options=more",
         "ical://ekevent/a b?method=show&options=more",
         "ical://ekevent/a?method=edit",
@@ -831,7 +853,8 @@ fn open_actions_take_web_urls_and_calendar_event_links_only() {
         "x-apple.systempreferences:com.apple.preference.security",
         "file:///etc/passwd",
     ] {
-        assert!(!is_openable(url), "{url}");
+        assert!(!is_openable(url, Source::Search), "{url}");
+        assert!(!is_openable(url, Source::Items), "{url}");
     }
 }
 
