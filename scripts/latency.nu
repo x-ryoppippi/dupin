@@ -162,7 +162,7 @@ def measure [
 ]: nothing -> record {
     mkdir $dir
     let gap = $settings.gap_ms / 1000
-    let per_pass = $job.typed | str length
+    let per_pass = $job.typed | split chars | length
     let passes = $settings.warmup + ($settings.samples / $per_pass | math ceil)
     let script = typing-script $job $passes $gap
     let script_path = $dir | path join script.json
