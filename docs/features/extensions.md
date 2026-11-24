@@ -84,6 +84,29 @@ The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io
 
 There are no files, network, processes, clipboard, timers or console. Each query runs in a fresh engine, on the extension's own thread, so module-level variables never carry from one query to the next.
 
+### Asking for more
+
+Host services aren't connected yet. When they are, an extension will ask for them by declaring `capabilities` in the `dupin` field of its `package.json`, and Dupin will check every call against that declaration and your grants:
+
+```json
+"capabilities": {
+	"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }],
+	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
+	"exec": { "@script:open-in-zed": {} },
+	"storage": { "quotaBytes": 1048576 },
+	"clipboard": ["write"],
+	"dictionary": ["lookup"],
+	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 }
+}
+```
+
+- A declaration is the most an extension can get. Anything malformed, unknown or out of range rejects it with a diagnostic naming the field.
+- You grant each item separately, such as one origin or one named folder, and can revoke it at any time. Your grants belong to the version you approved: an update that asks for more asks again.
+- Searching may use granted reads. Sending anything but GET or HEAD, running a program or script, and reading or writing the clipboard need you to choose the action.
+- Calendar and clipboard reads also need macOS access, requested when you turn the extension on or first use it.
+
+[Permissions](./permissions.md#extensions) has the rest, and [Capability broker](../capability-broker.md) the full rules.
+
 TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=dist/main.js`), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                        | Value          |
@@ -124,6 +147,46 @@ dupin ext run examples/extensions/word-count-js --query 'two words' --json
 ```
 
 `code` is stable; `file` is relative to the folder (`package.json` for a manifest problem, with `field` naming the key, such as `dupin.keyword`), and `line` and `column` are present when the problem has a source position. [`crates/dupin-js-runtime/tests/fixtures`](../../crates/dupin-js-runtime/tests/fixtures) holds extensions that break each limit, for comparison.
+
+## Authoring
+
+`dupin ext` has three commands for writing an extension. They describe a package with `package.json`, whose `dupin` key is the manifest: `title`, `keyword` and optionally `main`, the module Dupin runs, which defaults to `main.js`. The package's `name` is its id and the name of its folder in `extensions/`.
+
+### `dupin ext new <dir> [--ts]`
+
+Creates a package in a new or empty folder. The folder's name becomes the id, so it takes 1–64 lowercase letters, digits or hyphens.
+
+| File                          | Purpose                                                                                                     |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `package.json`                | The name, version 0.1.0, `"keywords": ["dupin-extension"]` and the `dupin` key, with the id as the keyword. |
+| `main.js` or `src/main.ts`    | A `search` that greets the query.                                                                           |
+| `dupin.d.ts`                  | The API's declarations, for editors and `tsc --noEmit`.                                                     |
+| `fixtures/search.json`        | A query and the items `search` answers it with.                                                             |
+| `README.md`                   | How to develop, build and share the package.                                                                |
+| `tsconfig.json`, `.gitignore` | `--ts` only. The compiler sees ES2023 and nothing else, as the guest does.                                  |
+| `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Bun and commits it on every push to `main`.                       |
+
+`dupin ext new .` names the package after the current folder.
+
+The `--ts` workflow installs exactly what `bun.lock` pins, without install scripts, so commit `bun.lock` once the package has dependencies. It installs and bundles in a job that can only read the repository; a second job, which runs no dependency code, commits the bundle.
+
+With `--ts`, `package.json` adds `"source": "src/main.ts"` and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle.
+
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
+
+### `dupin ext build <dir> [--sourcemap]`
+
+A package with `source` is bundled into a single ES module at `dupin.main`, with its npm dependencies, by `bun` or, without it, `esbuild` from `PATH`. Dupin never downloads either; with neither installed the build fails and says so. `--sourcemap` also writes `<main>.map` and links it from the bundle. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
+
+A dependency that imports a Node built-in (`fs`, `net`, `child_process` and the rest, with or without `node:`) fails the build, naming the file that imports it. Bundlers otherwise quietly stub or polyfill some built-ins for the browser, and the guest has none of them. A failed build or check puts back the `dupin.main` that was there before.
+
+A package without `source` is plain JavaScript and needs no build; `build` only checks it. [`dupin ext install`](#installing-and-updating) installs packages from Git without building them, so commit the bundle; the `--ts` scaffold's workflow does that for you.
+
+### `dupin ext dev <dir> [--sourcemap]`
+
+Publishes a development copy to the extensions folder and keeps it current. It polls the package, skipping dot-files, `node_modules` and the bundle, and after each change it bundles (if the package has `source`), copies `package.json` and the JavaScript into a new revision, and checks it as `dupin ext check` does. Only a revision that passes goes live: `extensions/<name>` is a symlink to `extensions/.dev/<name>/r<N>`, replaced in one rename, so a running Dupin with **Extensions** on reloads it and never sees a half-written copy. A failed build or check prints its diagnostic and leaves the previous revision live. Each revision is a line on stdout, or with `--json` a JSON object per line.
+
+`dev` refuses to replace an `extensions/<name>` that is not its own symlink, so an installed extension of the same name is safe. Stop `dev` with ⌃C; the last revision stays installed until you delete `extensions/<name>` and `extensions/.dev/<name>`.
 
 ## Installing and updating
 
@@ -186,7 +249,7 @@ requested = ["http:https://api.example.com"]
 granted = []
 ```
 
-`requested` flattens `dupin.capabilities`: `"http": ["https://api.example.com"]` requests `http:https://api.example.com`, and `"clipboard": true` requests `clipboard`. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't in Dupin yet.
+`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't connected yet.
 
 When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Search shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
 

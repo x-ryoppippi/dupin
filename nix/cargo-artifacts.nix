@@ -75,9 +75,13 @@ let
     debugArgs
     // {
       pname = "dupin-lint-and-test";
-      # The extension installer tests fetch from fixture Git repositories.
-      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [ pkgs.git ];
       cargoArtifacts = debugArtifacts;
+      # The extension installer tests fetch from fixture Git repositories, and the extension
+      # SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [
+        pkgs.git
+        pkgs.esbuild
+      ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';

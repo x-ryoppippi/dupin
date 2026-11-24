@@ -11,6 +11,7 @@ license.workspace = true
 [dependencies]
 # Rune already links it, so hashing installed packages adds no crate to the app.
 blake3 = "1.8"
+dupin-broker = { path = "../dupin-broker" }
 # The app already links it for PNG decoding, so unpacking GitHub tarballs adds no crate.
 flate2 = "1.1"
 libc = { workspace = true }

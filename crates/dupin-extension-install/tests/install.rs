@@ -195,7 +195,7 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     fixture.package(
         "weather",
         "wx",
-        r#"{"http":["https://api.example.com"],"clipboard":true}"#,
+        r#"{"http":[{"origin":"https://api.example.com","methods":["GET"]}],"clipboard":["write"]}"#,
     );
     fixture.commit("one");
     fixture.tag("v1.0.0");
@@ -203,7 +203,7 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
 
     let mut lock = fixture.lock();
     let entry = lock.packages.get_mut("weather").unwrap();
-    entry.granted = vec!["clipboard".into(), "http:https://api.example.com".into()];
+    entry.granted = vec!["clipboard:write".into(), "http:https://api.example.com".into()];
     lock.write(&fixture.installer.lock).unwrap();
 
     let up_to_date = fixture.installer.update(Some("weather"), &|_| None).unwrap();
@@ -212,19 +212,19 @@ fn updates_report_scope_changes_and_hold_added_scopes_for_consent() {
     fixture.package(
         "weather",
         "wx",
-        r#"{"http":["https://api.example.com"],"files":["~/Notes"]}"#,
+        r#"{"http":[{"origin":"https://api.example.com","methods":["GET"]}],"files":{"notes":{"kind":"directory","access":["read"]}}}"#,
     );
     let second = fixture.commit("two");
     fixture.tag("v2.0.0");
     let updated = fixture.installer.update(None, &|_| None).unwrap();
     let change = updated[0].1.as_ref().unwrap();
     assert_eq!(change.entry.commit.as_deref(), Some(second.as_str()));
-    assert_eq!(change.added, ["files:~/Notes"]);
-    assert_eq!(change.removed, ["clipboard"]);
+    assert_eq!(change.added, ["files:notes"]);
+    assert_eq!(change.removed, ["clipboard:write"]);
     let entry = &fixture.lock().packages["weather"];
     assert_eq!(entry.granted, ["http:https://api.example.com"]);
-    assert_eq!(entry.pending_consent, ["files:~/Notes"]);
-    assert_eq!(entry.requested, ["files:~/Notes", "http:https://api.example.com"]);
+    assert_eq!(entry.pending_consent, ["files:notes"]);
+    assert_eq!(entry.requested, ["files:notes", "http:https://api.example.com"]);
 
     assert_eq!(
         fixture
@@ -332,7 +332,11 @@ fn keywords_and_folders_belong_to_one_package() {
 #[test]
 fn another_source_cant_take_over_an_installed_name_or_its_grants() {
     let trusted = Fixture::new();
-    trusted.package("weather", "wx", r#"{"http":["https://api.example.com"]}"#);
+    trusted.package(
+        "weather",
+        "wx",
+        r#"{"http":[{"origin":"https://api.example.com","methods":["GET"]}]}"#,
+    );
     trusted.commit("one");
     let installed = trusted.install(&trusted.url()).unwrap();
     let mut lock = trusted.lock();
@@ -340,7 +344,11 @@ fn another_source_cant_take_over_an_installed_name_or_its_grants() {
     lock.write(&trusted.installer.lock).unwrap();
 
     let other = Fixture::new();
-    other.package("weather", "wx", r#"{"http":["https://api.example.com"]}"#);
+    other.package(
+        "weather",
+        "wx",
+        r#"{"http":[{"origin":"https://api.example.com","methods":["GET"]}]}"#,
+    );
     other.write("main.js", "export function search() { steal(); }\n");
     other.commit("one");
     let error = trusted.install(&other.url()).unwrap_err();

@@ -55,7 +55,7 @@ let
     extensions = [
       {
         src = fixture;
-        grants = [ "clipboard" ];
+        grants = [ "clipboard:write" ];
       }
       {
         src = fixture;
@@ -84,7 +84,7 @@ pkgs.runCommand "dupin-home-manager-module"
     ];
     grants = declared.xdg.configFile."dupin/extension-grants.toml".source;
     expected = builtins.toJSON {
-      word-count.grants = [ "clipboard" ];
+      word-count.grants = [ "clipboard:write" ];
       word-count-copy.grants = [ ];
     };
   }

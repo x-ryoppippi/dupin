@@ -67,7 +67,7 @@ mod tests {
         assert_eq!(Base::read(&path).unwrap(), Base::default());
         std::fs::write(
             &path,
-            "[weather]\ngrants = [\"http:https://api.example.com\", \"files:~/Notes\"]\n",
+            "[weather]\ngrants = [\"http:https://api.example.com\", \"files:notes\"]\n",
         )
         .unwrap();
         let base = Base::read(&path).unwrap();
@@ -80,13 +80,19 @@ mod tests {
             version: "1".into(),
             keyword: "w".into(),
             requested: vec![],
-            granted: vec!["clipboard".into()],
+            granted: vec!["clipboard:write".into()],
             pending_consent: vec![],
         };
-        let requested = ["http:https://api.example.com".to_owned(), "clipboard".to_owned()];
+        let requested = [
+            "http:https://api.example.com".to_owned(),
+            "clipboard:write".to_owned(),
+        ];
         assert_eq!(
             effective(&base, Some(&entry), "weather", &requested),
-            BTreeSet::from(["clipboard".to_owned(), "http:https://api.example.com".to_owned()])
+            BTreeSet::from([
+                "clipboard:write".to_owned(),
+                "http:https://api.example.com".to_owned()
+            ])
         );
         assert!(effective(&base, None, "other", &requested).is_empty());
 
