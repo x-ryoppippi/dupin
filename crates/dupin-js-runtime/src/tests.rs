@@ -523,6 +523,16 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             Some("items[0].url"),
         ),
         (
+            "export function search() { return [{ title: 'a', url: 'dict://' }]; }",
+            "invalid-url",
+            Some("items[0].url"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', open: 'dict://two words' }] }]; }",
+            "invalid-url",
+            Some("items[0].actions[0].open"),
+        ),
+        (
             "export function search() { return [{ title: 'x'.repeat(513) }]; }",
             "field-too-long",
             Some("items[0].title"),
@@ -780,3 +790,23 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
 }
 
 mod host;
+
+#[test]
+fn items_open_web_urls_and_dictionary_words_only() {
+    for url in [
+        "https://example.com/",
+        "dict://serendipity",
+        "dict://a%20b%2F%23%C3%A9",
+    ] {
+        assert!(crate::row::is_openable_url(url), "{url}");
+    }
+    for url in [
+        "dict://",
+        "dict://a b",
+        "DICT://run",
+        "file:///",
+        "x-apple.systempreferences:",
+    ] {
+        assert!(!crate::row::is_openable_url(url), "{url}");
+    }
+}

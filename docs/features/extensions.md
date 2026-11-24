@@ -105,7 +105,7 @@ A package with both lists what `search` computes for the query first, then the c
 | `title`    | Required. One line, up to 512 bytes.                                                                                                                 |
 | `subtitle` | Optional, up to 2,048 bytes.                                                                                                                         |
 | `id`       | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                         |
-| `url`      | Optional. An `http` or `https` URL with a host, up to 2,048 bytes: **Open URL** opens it.                                                            |
+| `url`      | Optional. An `http` or `https` URL with a host, or a `dict://` URL that shows a word in Dictionary, up to 2,048 bytes: **Open URL** opens it.        |
 | `text`     | Optional, up to 16 KiB: **Copy** copies it.                                                                                                          |
 | `icon`     | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file. |
 | `section`  | Optional. The heading the item is listed under, one line up to 128 bytes. Items of a list's `sections` get their section's title.                    |
@@ -189,7 +189,7 @@ An item's `actions` adds up to eight actions, counting the ones `url` and `text`
 | Action | What it does                                                                                                                                                                      |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `copy` | Copies the text, 1 byte to 16 KiB.                                                                                                                                                |
-| `open` | Opens the `http` or `https` URL.                                                                                                                                                  |
+| `open` | Opens the `http`, `https` or `dict://` URL.                                                                                                                                       |
 | `run`  | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. |
 
 ```js

@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, MAX_URL_BYTES, is_web_url};
+use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, MAX_URL_BYTES};
 use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
@@ -604,7 +604,7 @@ impl<'a> Reader<'a> {
         let detail = self.detail(&item, &field("detail"))?;
         let mut actions = Vec::new();
         if let Some(url) = self.string(&item, &field("url"), "url", MAX_URL_BYTES)? {
-            self.web_url(&field("url"), &url)?;
+            self.openable_url(&field("url"), &url)?;
             actions.push(RowAction {
                 title: "Open URL".into(),
                 effect: RowEffect::OpenUrl { url },
@@ -629,12 +629,16 @@ impl<'a> Reader<'a> {
         })
     }
 
-    fn web_url(&self, field: &str, url: &str) -> Result<(), Failure> {
-        if is_web_url(url) {
+    fn openable_url(&self, field: &str, url: &str) -> Result<(), Failure> {
+        if row::is_openable_url(url) {
             return Ok(());
         }
         Err(self
-            .invalid("invalid-url", field, "must be an http or https URL with a host")
+            .invalid(
+                "invalid-url",
+                field,
+                "must be an http or https URL with a host, or a dict:// URL",
+            )
             .hint("Use a full URL such as `https://example.com/`; other schemes can't be opened.")
             .into())
     }
@@ -845,7 +849,7 @@ impl<'a> Reader<'a> {
                     let url = self
                         .string(&action, &field, "open", MAX_URL_BYTES)?
                         .expect("present");
-                    self.web_url(&field, &url)?;
+                    self.openable_url(&field, &url)?;
                     RowEffect::OpenUrl { url }
                 }
                 _ => {

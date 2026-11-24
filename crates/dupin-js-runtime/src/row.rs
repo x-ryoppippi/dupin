@@ -206,8 +206,8 @@ impl Row {
                 RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
                     return Err("a copy action's text must be 1 byte to 16 KiB".into());
                 }
-                RowEffect::OpenUrl { url } if url.len() > MAX_URL_BYTES || !is_web_url(url) => {
-                    return Err("an open action needs an http or https URL".into());
+                RowEffect::OpenUrl { url } if !is_openable_url(url) => {
+                    return Err("an open action needs an http, https or dict URL".into());
                 }
                 RowEffect::Run { handler, data } => {
                     check_handler(handler)?;
@@ -295,6 +295,15 @@ impl CataloguePage {
         }
         Ok(())
     }
+}
+
+/// Whether an item may open `url`: an `http` or `https` URL with a host, or a `dict://` URL,
+/// which only shows a word in Dictionary.
+pub(crate) fn is_openable_url(url: &str) -> bool {
+    is_web_url(url)
+        || (url.len() <= MAX_URL_BYTES
+            && url.strip_prefix("dict://").is_some_and(|word| !word.is_empty())
+            && !url.chars().any(|c| c.is_control() || c.is_whitespace()))
 }
 
 /// A path inside the package, to an image format the launcher draws.

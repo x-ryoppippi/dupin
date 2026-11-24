@@ -30,7 +30,7 @@ declare module 'dupin' {
 		subtitle?: string;
 		/** Unique among the items, up to 128 bytes. Dupin numbers `search` items without one. */
 		id?: string;
-		/** An `http` or `https` URL with a host, up to 2,048 bytes. */
+		/** An `http` or `https` URL with a host, or a `dict://` URL, up to 2,048 bytes. */
 		url?: string;
 		/** Non-empty, up to 16 KiB. */
 		text?: string;
