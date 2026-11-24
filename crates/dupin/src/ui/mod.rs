@@ -44,7 +44,7 @@ pub use lifecycle::Busy;
 pub use search::ICON_SIZE;
 
 use action_screen::ActionScreen;
-use control::Picker;
+use control::{CallerHold, Picker};
 use extensions::Extensions;
 use lifecycle::Restart;
 use notices::Notices;
@@ -69,6 +69,7 @@ pub struct Configuration {
 
 pub struct Ui {
     pub picker: Option<Picker>,
+    caller_hold: CallerHold,
     control_save: Option<(u64, crate::control::Call)>,
     pub theme: dupin_core::config::Theme,
     pub active_radius: f32,
@@ -255,6 +256,7 @@ impl Ui {
             icons: HashMap::new(),
             shown: false,
             shown_at: 0.0,
+            caller_hold: CallerHold::default(),
             typed_at: f64::NEG_INFINITY,
             backdrop,
             backdrop_pick: config.backdrop.clone(),

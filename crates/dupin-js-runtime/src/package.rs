@@ -74,7 +74,7 @@ fn walk(
                     format!("nests folders more than {MAX_FOLDER_DEPTH} deep"),
                 )
                 .file(&relative)
-                .hint("Bundle the extension into fewer files with esbuild or Bun."));
+                .hint("Bundle the extension into one module with `dupin ext build`."));
             }
             walk(root, &canonical, &format!("{relative}/"), depth + 1, files)?;
         } else {
@@ -94,7 +94,8 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
-fn is_source_name(name: &str) -> bool {
+/// Whether the loader reads a file of this name as part of the package's code.
+pub fn is_source_name(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
@@ -188,7 +189,7 @@ fn too_many_files() -> Diagnostic {
         "too-many-files",
         format!("The package has more than {MAX_SOURCE_FILES} JavaScript files"),
     )
-    .hint("Bundle the extension into fewer files with esbuild or Bun.")
+    .hint("Bundle the extension into one module with `dupin ext build`.")
 }
 
 fn too_large(name: &str) -> Diagnostic {
@@ -231,7 +232,7 @@ pub(crate) fn resolve(
             "is neither a relative path nor `dupin`",
         ))
         .hint(
-            "Import package files with `./`, and bundle dependencies with esbuild or Bun before installing.",
+            "Import package files with `./`, and bundle dependencies with `dupin ext build` before installing.",
         ));
     }
     let mut parts: Vec<&str> = base.split('/').collect();

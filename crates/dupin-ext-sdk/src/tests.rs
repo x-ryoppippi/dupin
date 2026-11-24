@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use dupin_plugin_protocol::{Effect, View};
 use serde_json::{Value, json};
 
-use crate::build::node_builtin_import;
+use crate::build::{CONFIG, node_builtin_import, summarize};
 use crate::dev::{DevCopy, Fingerprint};
-use crate::{BuildOptions, Bundler, Diagnostic, Template, build, scaffold};
+use crate::{BuildOptions, Diagnostic, Rolldown, Template, build, scaffold};
 
 fn write(path: &Path, contents: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -91,10 +91,15 @@ fn validate(dir: &Path) -> Result<(), Diagnostic> {
     compile(dir)?.check(control()).map_err(failure)
 }
 
-fn bundlers() -> Vec<Bundler> {
-    let found = Bundler::all_on(&std::env::var_os("PATH").unwrap_or_default());
-    if found.is_empty() {
-        eprintln!("neither bun nor esbuild is on PATH; skipping the bundling half of this test");
+/// Rolldown from `PATH`. The Nix checks and the dev shell put one there; elsewhere the tests that
+/// need it skip their bundling half and say so.
+fn rolldown() -> Option<Rolldown> {
+    let found = Rolldown::find_on(
+        Path::new("/nonexistent"),
+        &std::env::var_os("PATH").unwrap_or_default(),
+    );
+    if found.is_none() {
+        eprintln!("rolldown is not on PATH; skipping the bundling half of this test");
     }
     found
 }
@@ -160,7 +165,7 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
     assert_fixture_matches(&dir);
 
     let built = build(&dir, None, BuildOptions::default(), &validate).unwrap();
-    assert_eq!(built.bundler, None);
+    assert_eq!(built.rolldown, None);
 
     assert_eq!(
         scaffold(&dir, Template::JavaScript).unwrap_err().code,
@@ -175,7 +180,7 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
 }
 
 #[test]
-fn typescript_scaffold_builds_with_each_bundler_on_path() {
+fn typescript_scaffold_builds_with_rolldown() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("greeter");
     let mut files = scaffold(&dir, Template::TypeScript).unwrap();
@@ -189,6 +194,7 @@ fn typescript_scaffold_builds_with_each_bundler_on_path() {
             "dupin.d.ts",
             "fixtures/search.json",
             "package.json",
+            "rolldown.config.ts",
             "src/main.ts",
             "tsconfig.json",
         ]
@@ -198,9 +204,19 @@ fn typescript_scaffold_builds_with_each_bundler_on_path() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).unwrap()).unwrap();
     assert_eq!(manifest["source"], "src/main.ts");
     assert_eq!(manifest["dupin"]["main"], "dist/main.js");
+    let pinned = manifest["devDependencies"]["rolldown"].as_str().unwrap();
+    assert!(
+        pinned.split('.').count() == 3 && pinned.split('.').all(|part| part.parse::<u32>().is_ok()),
+        "rolldown must be pinned to an exact version, not {pinned}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("rolldown.config.ts")).unwrap(),
+        CONFIG
+    );
     let workflow = std::fs::read_to_string(dir.join(".github/workflows/build.yml")).unwrap();
     assert!(
-        workflow.contains("bun build src/main.ts --outfile=dist/main.js")
+        workflow.contains("bun --bun run rolldown --config rolldown.config.ts")
+            && workflow.contains("- 'rolldown.config.ts'")
             && workflow.contains("bun install --frozen-lockfile --ignore-scripts")
             && workflow.contains("persist-credentials: false")
             && workflow.contains("path: 'dist'\n")
@@ -225,17 +241,44 @@ fn typescript_scaffold_builds_with_each_bundler_on_path() {
             .code,
         "bundler-missing"
     );
-    for bundler in bundlers() {
-        let _ = std::fs::remove_dir_all(dir.join("dist"));
-        let built = build(&dir, Some(&bundler), BuildOptions { sourcemap: true }, &validate)
-            .unwrap_or_else(|error| panic!("{}: {error:?}", bundler.kind.name()));
-        assert_eq!(built.bundler, Some(bundler.kind));
-        assert_eq!(built.output, "dist/main.js");
-        assert!(dir.join("dist/main.js.map").is_file(), "{}", bundler.kind.name());
-        let bundle = std::fs::read_to_string(dir.join("dist/main.js")).unwrap();
-        assert!(!bundle.contains("import type"), "{bundle}");
-        assert_fixture_matches(&dir);
-    }
+    let Some(rolldown) = rolldown() else { return };
+    let built = build(&dir, Some(&rolldown), BuildOptions { sourcemap: true }, &validate)
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    assert_eq!(built.rolldown.as_deref(), Some(rolldown.program.as_path()));
+    assert_eq!(built.output, "dist/main.js");
+    assert_eq!(built.sourcemap.as_deref(), Some("dist/main.js.map"));
+    assert!(dir.join("dist/main.js.map").is_file());
+    let bundle = std::fs::read_to_string(dir.join("dist/main.js")).unwrap();
+    assert!(
+        !bundle.contains("import type") && bundle.ends_with("//# sourceMappingURL=main.js.map"),
+        "{bundle}"
+    );
+    assert_fixture_matches(&dir);
+}
+
+#[test]
+fn rolldown_is_found_in_the_package_before_path() {
+    let package = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let executable = |path: &Path| {
+        use std::os::unix::fs::PermissionsExt;
+        write(path, "#!/bin/sh\n");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let on_path = elsewhere.path().join("rolldown");
+    let path = std::env::join_paths([elsewhere.path()]).unwrap();
+    assert_eq!(Rolldown::find_on(package.path(), &path), None);
+    write(&on_path, "#!/bin/sh\n");
+    assert_eq!(
+        Rolldown::find_on(package.path(), &path),
+        None,
+        "a file that isn't executable is not a program"
+    );
+    executable(&on_path);
+    assert_eq!(Rolldown::find_on(package.path(), &path).unwrap().program, on_path);
+    let local = package.path().join("node_modules/.bin/rolldown");
+    executable(&local);
+    assert_eq!(Rolldown::find_on(package.path(), &path).unwrap().program, local);
 }
 
 #[test]
@@ -260,52 +303,84 @@ fn bundling_a_package_named_by_a_relative_path_writes_its_own_entry() {
     let mut relative: std::path::PathBuf = cwd.components().skip(1).map(|_| "..").collect();
     relative.push(dir.canonicalize().unwrap().strip_prefix("/").unwrap());
     assert!(relative.is_relative());
-    for bundler in bundlers() {
-        let _ = std::fs::remove_dir_all(dir.join("dist"));
-        build(&relative, Some(&bundler), BuildOptions::default(), &validate)
-            .unwrap_or_else(|error| panic!("{}: {error:?}", bundler.kind.name()));
-        assert_fixture_matches(&dir);
-    }
+    let Some(rolldown) = rolldown() else { return };
+    build(&relative, Some(&rolldown), BuildOptions::default(), &validate)
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    assert_fixture_matches(&dir);
 }
 
-#[test]
-fn bundling_rejects_node_builtins_and_keeps_the_previous_entry() {
-    let dir = tempfile::tempdir().unwrap();
-    let dir = dir.path();
+/// A package without a Rolldown configuration of its own, bundled with [`CONFIG`]. Its source is
+/// TypeScript because the loader compiles every JavaScript file in the folder.
+fn package_without_config(dir: &Path, main: &str, dependency: &str) {
     write(
         &dir.join("package.json"),
         &manifest(
             "reader",
-            json!({ "source": "src/main.js", "main": "dist/main.js" }),
+            json!({ "source": "src/main.ts", "main": "dist/main.js" }),
         ),
     );
-    write(
-        &dir.join("src/main.js"),
-        "import { load } from 'reader-dep';\nexport function search() { return [{ title: String(load) }]; }\n",
-    );
+    write(&dir.join("src/main.ts"), main);
     write(
         &dir.join("node_modules/reader-dep/package.json"),
-        r#"{ "name": "reader-dep", "type": "module", "main": "index.js" }"#,
+        r#"{ "name": "reader-dep", "main": "lib/entry.js" }"#,
     );
-    write(
-        &dir.join("node_modules/reader-dep/index.js"),
-        "import { readFileSync } from 'node:fs';\nexport const load = () => readFileSync('x');\n",
-    );
-    let previous = "export function search() { return []; }\n";
-    write(&dir.join("dist/main.js"), previous);
+    write(&dir.join("node_modules/reader-dep/lib/entry.js"), dependency);
+}
 
-    for bundler in bundlers() {
-        let error = build(dir, Some(&bundler), BuildOptions::default(), &validate).unwrap_err();
-        assert_eq!(error.code, "node-builtin", "{}: {error:?}", bundler.kind.name());
-        assert!(
-            error
-                .file
-                .as_deref()
-                .unwrap()
-                .contains("node_modules/reader-dep/index.js"),
+#[test]
+fn bundling_inlines_main_field_dependencies_and_dynamic_imports_into_one_module() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path();
+    package_without_config(
+        dir,
+        "import { title } from 'reader-dep';\n\
+         export async function search() {\n\
+           const { suffix } = await import('./suffix.ts');\n\
+           return [{ title: title + suffix }];\n\
+         }\n",
+        "exports.title = 'from a CommonJS main';\n",
+    );
+    write(&dir.join("src/suffix.ts"), "export const suffix = '!';\n");
+    let Some(rolldown) = rolldown() else { return };
+    build(dir, Some(&rolldown), BuildOptions::default(), &validate)
+        .unwrap_or_else(|error| panic!("{error:?}"));
+    let emitted: Vec<_> = std::fs::read_dir(dir.join("dist"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(emitted, ["main.js"]);
+    assert_eq!(answer(dir, ""), vec![json!({ "title": "from a CommonJS main!" })]);
+}
+
+#[test]
+fn bundling_rejects_node_builtins_and_keeps_the_previous_entry() {
+    let previous = "export function search() { return []; }\n";
+    let cases = [
+        (
+            "import { readFileSync } from 'node:fs';\nexports.load = () => readFileSync('x');\n",
+            "node:fs",
+        ),
+        ("exports.load = require('path').join;\n", "path"),
+        ("exports.load = () => import('os');\n", "os"),
+    ];
+    for (dependency, builtin) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        package_without_config(
+            dir,
+            "import { load } from 'reader-dep';\nexport function search() { return [{ title: String(load) }]; }\n",
+            dependency,
+        );
+        write(&dir.join("dist/main.js"), previous);
+        let Some(rolldown) = rolldown() else { return };
+        let error = build(dir, Some(&rolldown), BuildOptions::default(), &validate).unwrap_err();
+        assert_eq!(error.code, "node-builtin", "{error:?}");
+        assert_eq!(
+            error.file.as_deref(),
+            Some("node_modules/reader-dep/lib/entry.js"),
             "{error:?}"
         );
-        assert!(error.message.contains("node:fs"), "{error:?}");
+        assert!(error.message.contains(&format!("`{builtin}`")), "{error:?}");
         assert_eq!(
             std::fs::read_to_string(dir.join("dist/main.js")).unwrap(),
             previous
@@ -314,31 +389,60 @@ fn bundling_rejects_node_builtins_and_keeps_the_previous_entry() {
 }
 
 #[test]
-fn metafiles_from_either_bundler_reveal_node_builtins() {
-    let bun = json!({ "inputs": {
-        "src/main.ts": { "imports": [{ "path": "dupin", "kind": "import-statement", "external": true }] },
-        "node_modules/dep/index.js": { "imports": [
-            { "path": "node:path", "kind": "import-statement", "original": "path" },
-        ] },
-    } });
-    assert_eq!(
-        node_builtin_import(&bun),
-        Some(("node_modules/dep/index.js".into(), "path".into()))
+fn bundling_refuses_a_configuration_the_loader_would_run_as_extension_code() {
+    let previous = "export function search() { return []; }\n";
+    for name in ["rolldown.config.js", "rolldown.config.mjs"] {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        package_without_config(dir, previous, "");
+        write(&dir.join(name), CONFIG);
+        write(&dir.join("dist/main.js"), previous);
+        let never_runs = Rolldown {
+            program: dir.join("no-rolldown"),
+        };
+        let error = build(dir, Some(&never_runs), BuildOptions::default(), &validate).unwrap_err();
+        assert_eq!(error.code, "config-is-extension-code", "{error:?}");
+        assert_eq!(error.file.as_deref(), Some(name), "{error:?}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("dist/main.js")).unwrap(),
+            previous
+        );
+    }
+}
+
+#[test]
+fn bundling_fails_on_an_import_rolldown_cannot_resolve() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path();
+    package_without_config(
+        dir,
+        "import { missing } from 'not-installed';\nexport function search() { return [{ title: missing }]; }\n",
+        "",
     );
-    let esbuild = json!({ "inputs": {
-        "node_modules/dep/net.js": { "imports": [{ "path": "net", "kind": "require-call", "external": true }] },
-    } });
+    let Some(rolldown) = rolldown() else { return };
+    let error = build(dir, Some(&rolldown), BuildOptions::default(), &validate).unwrap_err();
+    assert_eq!(error.code, "build-failed", "{error:?}");
+    assert!(
+        error.message.contains("not-installed") && !error.message.contains("\n    at "),
+        "{error:?}"
+    );
+    assert!(!dir.join("dist/main.js").exists());
+}
+
+#[test]
+fn reports_name_the_module_and_the_builtin() {
     assert_eq!(
-        node_builtin_import(&esbuild),
+        node_builtin_import(
+            br#"{ "nodeBuiltin": { "importer": "node_modules/dep/net.js", "specifier": "net" } }"#
+        ),
         Some(("node_modules/dep/net.js".into(), "net".into()))
     );
-    let clean = json!({ "inputs": {
-        "src/main.ts": { "imports": [
-            { "path": "dupin", "external": true },
-            { "path": "node_modules/pathe/index.js", "original": "pathe" },
-        ] },
-    } });
-    assert_eq!(node_builtin_import(&clean), None);
+    assert_eq!(node_builtin_import(b"{}"), None);
+    assert_eq!(node_builtin_import(b"not json"), None);
+    assert_eq!(
+        summarize("RolldownError: nope\n    at error (file:///x.mjs:1:2)\n    at main (file:///y.mjs:3:4)\n"),
+        "RolldownError: nope"
+    );
 }
 
 fn link_target(link: &Path) -> String {
@@ -362,7 +466,7 @@ fn development_copy_swaps_atomically_and_keeps_the_last_good_revision() {
     let copy = DevCopy {
         package_dir: package,
         extensions,
-        bundler: None,
+        rolldown: None,
         options: BuildOptions::default(),
         validate: &validate,
     };
@@ -419,7 +523,7 @@ fn development_copy_never_replaces_an_installed_extension() {
     let copy = DevCopy {
         package_dir: package.path(),
         extensions: extensions.path(),
-        bundler: None,
+        rolldown: None,
         options: BuildOptions::default(),
         validate: &validate,
     };
@@ -472,7 +576,7 @@ fn watching_publishes_again_after_an_edit() {
         DevCopy {
             package_dir: &package_dir,
             extensions: &extensions_dir,
-            bundler: None,
+            rolldown: None,
             options: BuildOptions::default(),
             validate: &validate,
         }
