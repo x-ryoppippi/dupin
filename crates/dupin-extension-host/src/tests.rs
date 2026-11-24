@@ -507,7 +507,15 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         }
     );
     let page = host
-        .items(&package, None, Reason::Load, deadline(), &|| false, &none())
+        .items(
+            &package,
+            None,
+            Reason::Load,
+            &serde_json::json!({}),
+            deadline(),
+            &|| false,
+            &none(),
+        )
         .unwrap();
     assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
     let PageChange::Reset { rows } = page.change else {
@@ -519,6 +527,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
             &package,
             Some("next"),
             Reason::More,
+            &serde_json::json!({}),
             deadline(),
             &|| false,
             &none(),
@@ -530,6 +539,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
             &package,
             "refresh",
             &serde_json::Value::Null,
+            &serde_json::json!({}),
             deadline(),
             &|| false,
             &none()
@@ -561,6 +571,9 @@ fn rogue_helper_entry() {
             title: title.into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,

@@ -5,9 +5,13 @@ use crate::row::{self, PageChange, RowAction, RowEffect};
 
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
-    loaded
-        .unwrap()
-        .items(cursor, reason, timeout(DEADLINE), &mut Unavailable::default())
+    loaded.unwrap().items(
+        cursor,
+        reason,
+        "{}",
+        timeout(DEADLINE),
+        &mut Unavailable::default(),
+    )
 }
 
 fn failure_of<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
@@ -32,11 +36,13 @@ fn a_package_may_export_items_search_or_both() {
     }
     let (_folder, loaded) = package(&[("main.js", "export function search() { return []; }")]);
     assert_eq!(
-        failure_of(
-            loaded
-                .unwrap()
-                .items(None, Reason::Load, timeout(DEADLINE), &mut Unavailable::default())
-        )
+        failure_of(loaded.unwrap().items(
+            None,
+            Reason::Load,
+            "{}",
+            timeout(DEADLINE),
+            &mut Unavailable::default()
+        ))
         .code,
         "missing-items"
     );
@@ -112,6 +118,7 @@ fn items_answers_with_changes_by_id_after_its_cursor() {
         append,
         replace,
         remove,
+        ..
     } = page.change
     else {
         panic!("{:?}", page.change);
@@ -239,8 +246,9 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
            };"#,
     )]);
     let package = loaded.unwrap();
-    let act =
-        |name: &str, data: &str| package.action(name, data, timeout(DEADLINE), &mut Unavailable::default());
+    let act = |name: &str, data: &str| {
+        package.action(name, data, "{}", timeout(DEADLINE), &mut Unavailable::default())
+    };
     assert_eq!(
         act("forget", r#"{"id":"rune"}"#).unwrap(),
         Acted {
@@ -303,6 +311,9 @@ fn rows_from_another_process_are_checked_again() {
             title: "A".into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -312,10 +323,7 @@ fn rows_from_another_process_are_checked_again() {
         row
     };
     assert!(row(&|_| {}).validate(row::Source::Search).is_ok());
-    let action = |effect: RowEffect| RowAction {
-        title: "Act".into(),
-        effect,
-    };
+    let action = |effect: RowEffect| RowAction::new("Act", effect);
     for broken in [
         row(&|row| row.title = "a\nb".into()),
         row(&|row| row.keywords = vec!["k".into()]),

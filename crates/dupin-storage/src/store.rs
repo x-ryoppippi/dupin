@@ -1025,6 +1025,12 @@ impl Store {
         self.write(self.key_id(key), record, false)
     }
 
+    /// Like [`Store::upsert`], but refuses a record there is no room for, as
+    /// [`Store::put_within_limits`] does. The record it replaces makes room for it.
+    pub fn upsert_within_limits(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
+        self.write(self.key_id(key), record, true)
+    }
+
     fn write(&self, id: RecordId, record: NewRecord, within_limits: bool) -> Result<Record, Error> {
         let NewRecord { data, blobs } = record;
         let blobs: Vec<Zeroizing<Vec<u8>>> = blobs.into_iter().map(Zeroizing::new).collect();
@@ -1055,8 +1061,20 @@ impl Store {
                 .filter(|(handle, _)| !state.blobs.contains_key(handle) && new_blobs.insert(**handle))
                 .map(|(_, blob)| blob.len() as u64)
                 .sum();
-            let entries = state.records.len() + 1;
-            let bytes = state.total + body.len() as u64 + new_blob_bytes;
+            let replaced = state.records.get(&id);
+            let entries = state.records.len() + usize::from(replaced.is_none());
+            // A blob only the replaced record carries goes with it.
+            let freed: u64 = replaced.map_or(0, |meta| {
+                meta.body_len
+                    + meta
+                        .blobs
+                        .iter()
+                        .filter(|blob| !handles.contains(&blob.handle))
+                        .filter(|blob| state.blobs.get(&blob.handle).is_some_and(|entry| entry.refs == 1))
+                        .map(|blob| blob.len)
+                        .sum::<u64>()
+            });
+            let bytes = (state.total + body.len() as u64 + new_blob_bytes).saturating_sub(freed);
             if entries > state.limits.max_entries || bytes > state.limits.max_total_bytes {
                 return Err(Error::QuotaExceeded { entries, bytes });
             }

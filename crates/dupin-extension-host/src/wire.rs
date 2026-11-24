@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -62,16 +62,20 @@ pub enum Call {
     Items {
         cursor: Option<String>,
         reason: Reason,
+        /// `ctx.preferences`: what the user chose for each preference the package declares.
+        preferences: serde_json::Value,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
         name: String,
         data: serde_json::Value,
+        preferences: serde_json::Value,
     },
     /// `events[name](event)`, for something Dupin watched on the package's behalf.
     Event {
         name: String,
         event: serde_json::Value,
+        preferences: serde_json::Value,
     },
 }
 
@@ -261,6 +265,9 @@ mod tests {
                 title: "a".into(),
                 subtitle: control(1),
                 keywords: vec!["a".into(); 16],
+                match_text: None,
+                time: None,
+                file: None,
                 icon: Some("a.png".into()),
                 section: Some("a".into()),
                 detail: Some(RowDetail {
@@ -273,13 +280,7 @@ mod tests {
                         12
                     ],
                 }),
-                actions: vec![
-                    RowAction {
-                        title: "a".into(),
-                        effect: RowEffect::Copy { text: control(1) },
-                    };
-                    8
-                ],
+                actions: vec![RowAction::new("a", RowEffect::Copy { text: control(1) }); 8],
             })
             .collect();
         let mut left = MAX_PAGE_BYTES - rows.iter().map(Row::text_bytes).sum::<usize>();
@@ -329,6 +330,9 @@ mod tests {
             title: "A".into(),
             subtitle: String::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -348,14 +352,17 @@ mod tests {
             Call::Items {
                 cursor: Some("c".into()),
                 reason: Reason::Invalidated,
+                preferences: serde_json::json!({"a": true}),
             },
             Call::Action {
                 name: "run".into(),
                 data: serde_json::Value::Null,
+                preferences: serde_json::json!({}),
             },
             Call::Event {
                 name: "clipboard".into(),
                 event: serde_json::json!({}),
+                preferences: serde_json::json!({}),
             },
         ];
         let mut shapes: Vec<String> = calls
@@ -387,6 +394,7 @@ mod tests {
             Answer::Catalogue {
                 page: CataloguePage {
                     change: PageChange::Update {
+                        prepend: Vec::new(),
                         append: vec![row.clone()],
                         replace: vec![row],
                         remove: vec!["b".into()],
@@ -433,7 +441,7 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (6, SHAPES.map(str::to_owned).to_vec()),
+            (7, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
@@ -442,9 +450,9 @@ mod tests {
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated"},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"a":true}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"cancel","id":1}"#,
         r#"{"kind":"reply","id":1,"call":2}"#,
         r#"{"kind":"hello","version":0,"engine":"e"}"#,

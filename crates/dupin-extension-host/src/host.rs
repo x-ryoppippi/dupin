@@ -241,13 +241,15 @@ impl Host {
         }
     }
 
-    /// Calls `items({ cursor, reason })` in `package` for the next part of its catalogue,
-    /// answering its host requests with `services`.
+    /// Calls `items({ cursor, reason, preferences })` in `package` for the next part of its
+    /// catalogue, answering its host requests with `services`.
+    #[allow(clippy::too_many_arguments)]
     pub fn items(
         &self,
         package: &Compiled,
         cursor: Option<&str>,
         reason: Reason,
+        preferences: &serde_json::Value,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -255,6 +257,7 @@ impl Host {
         let call = Call::Items {
             cursor: cursor.map(str::to_owned),
             reason,
+            preferences: preferences.clone(),
         };
         let request = Request::run(package, call, Work::Items);
         match self.call(request, deadline, is_cancelled, services)? {
@@ -297,14 +300,17 @@ impl Host {
         }
     }
 
-    /// Calls `actions[name](data)` in `package`, which the user chose, answering its host
-    /// requests with `services`. An action may wait on the network or a program for far longer
-    /// than a search may wait for the shared helper, so it runs in a helper of its own.
+    /// Calls `actions[name](data, { preferences })` in `package`, which the user chose,
+    /// answering its host requests with `services`. An action may wait on the network or a
+    /// program for far longer than a search may wait for the shared helper, so it runs in a
+    /// helper of its own.
+    #[allow(clippy::too_many_arguments)]
     pub fn action(
         &self,
         package: &Compiled,
         name: &str,
         data: &serde_json::Value,
+        preferences: &serde_json::Value,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -312,6 +318,7 @@ impl Host {
         let call = Call::Action {
             name: name.into(),
             data: data.clone(),
+            preferences: preferences.clone(),
         };
         match self.alone(
             Request::run(package, call, Work::Action),
@@ -325,13 +332,15 @@ impl Host {
         }
     }
 
-    /// Calls `events[name](event)` in `package`, answering its host requests with `services`,
-    /// in a helper of its own so that background work never holds up typing.
+    /// Calls `events[name](event, { preferences })` in `package`, answering its host requests
+    /// with `services`, in a helper of its own so that background work never holds up typing.
+    #[allow(clippy::too_many_arguments)]
     pub fn event(
         &self,
         package: &Compiled,
         name: &str,
         event: &serde_json::Value,
+        preferences: &serde_json::Value,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -339,6 +348,7 @@ impl Host {
         let call = Call::Event {
             name: name.into(),
             event: event.clone(),
+            preferences: preferences.clone(),
         };
         match self.alone(
             Request::run(package, call, Work::Event),

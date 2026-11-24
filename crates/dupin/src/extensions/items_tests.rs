@@ -415,7 +415,7 @@ impl Provider for NativeCatalogue {
 
     fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         self.0
-            .search(&request.query, request.limit)
+            .search(&request.query, request.limit, 0)
             .into_iter()
             .for_each(emit);
         Ok(())
@@ -469,6 +469,8 @@ fn a_port_answers_like_the_native_catalogue_it_replaces() {
                     .unwrap_or_default(),
                 section: row["section"].as_str().map(Into::into),
                 detail: None,
+                match_text: None,
+                time: None,
             }
         })
         .collect();

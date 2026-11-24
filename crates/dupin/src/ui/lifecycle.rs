@@ -194,6 +194,7 @@ impl Ui {
         match self.paste_after_close.take() {
             Some(PendingPaste::Snippet(snippet)) => self.deliver_snippet(snippet, true, tx),
             Some(PendingPaste::ClipboardEntry(entry)) => self.deliver_clipboard_entry(entry, true, tx),
+            Some(PendingPaste::Clipboard) => self.paste_clipboard(),
             None => {}
         }
         if let Some(notice) = self.notice_after_close.take() {

@@ -164,12 +164,16 @@ impl Convert for Extension {
     /// A catalogue row as the launcher holds it.
     fn entry(&self, mut row: Row) -> Entry {
         let keywords = std::mem::take(&mut row.keywords);
+        let match_text = row.match_text.take();
+        let time = row.time.map(|ms| ms / 1000);
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
             keywords,
             section: section.map(Into::into),
             detail,
+            match_text,
+            time,
         }
     }
 
@@ -189,6 +193,9 @@ pub(super) fn row_item(
         title,
         subtitle,
         keywords: _,
+        match_text: _,
+        time: _,
+        file,
         icon,
         section,
         detail,
@@ -209,6 +216,7 @@ pub(super) fn row_item(
         })
         .unwrap_or_default();
     let (mut copy, mut open) = (false, false);
+    let mut alternate = None;
     let actions: Vec<ItemAction> = offered
         .into_iter()
         .enumerate()
@@ -227,18 +235,33 @@ pub(super) fn row_item(
                 RowEffect::OpenUrl { url } => {
                     ItemAction::new(&name(&mut open, "open"), &action.title, Action::OpenUrl(url))
                 }
-                RowEffect::Run { handler, data } => ItemAction::new(
+                RowEffect::Reveal { path } => ItemAction::new(
                     &format!("action-{index}"),
                     &action.title,
-                    Action::Extension {
-                        extension: extension.id.clone(),
-                        request: ExtensionRequest::Run {
-                            action: handler,
-                            data,
+                    Action::Reveal(path.into()),
+                ),
+                RowEffect::Run { handler, data } => {
+                    let id = format!("action-{index}");
+                    if action.alternate {
+                        alternate = Some(id.clone());
+                    }
+                    let run = ItemAction::new(
+                        &id,
+                        &action.title,
+                        Action::Extension {
+                            extension: extension.id.clone(),
+                            request: ExtensionRequest::Run {
+                                action: handler,
+                                data,
+                            },
                         },
-                    },
-                )
-                .keep_open(),
+                    )
+                    .keep_open();
+                    match &action.confirm {
+                        Some(prompt) => run.confirm(prompt, &action.title),
+                        None => run,
+                    }
+                }
             }
         })
         .collect();
@@ -246,13 +269,17 @@ pub(super) fn row_item(
         id: if catalogue { extension.entry_id(&id) } else { id },
         view: View::Text { title, subtitle },
         payload,
-        record_usage: catalogue,
-        icon: icon.map(|icon| Icon::Image(extension.root.join(icon))),
+        // A catalogue matched by words keeps its own order, as a history does, so picks never
+        // rank it.
+        record_usage: catalogue && extension.matching == dupin_core::catalogue::Matching::Fuzzy,
+        icon: icon
+            .map(|icon| Icon::Image(extension.root.join(icon)))
+            .or_else(|| file.map(|file| Icon::File(file.into()))),
         matched: Vec::new(),
         completion: None,
         score: None,
         primary: actions.first().map(|action| action.id.clone()),
-        alternate: None,
+        alternate,
         actions,
     };
     (item, detail, section)

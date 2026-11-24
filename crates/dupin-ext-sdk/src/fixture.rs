@@ -21,11 +21,12 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 10] = [
+const EXPECTATIONS: [&str; 11] = [
     "rows",
     "selected",
     "effect",
     "toasts",
+    "panel",
     "clipboard",
     "error",
     "sections",
@@ -626,6 +627,7 @@ pub fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
+        RowEffect::Reveal { path } => ("reveal", Value::from(path.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])

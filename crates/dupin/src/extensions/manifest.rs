@@ -13,12 +13,12 @@ pub const PACKAGE_JSON: &str = "package.json";
 pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
-const DUPIN_KEYS: &str =
-    "`title`, `keyword`, and optionally `main`, `defaultSearch`, `emptyQuery` and `capabilities`";
+const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch`, `emptyQuery`, `match`, `preferences` and `capabilities`";
 const DEFAULT_SEARCH_HINT: &str =
     "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
 const EMPTY_QUERY_HINT: &str =
     "Set `\"emptyQuery\": true` to have `search` answer before anything is typed, or leave it out.";
+const MATCH_HINT: &str = "Set `\"match\": \"words\"` to find `items()` by every word typed, in the catalogue's order, or leave it out to rank them as apps are.";
 
 pub(super) struct Manifest {
     pub id: String,
@@ -31,6 +31,9 @@ pub(super) struct Manifest {
     pub default_search: bool,
     /// `search` answers the keyword before anything is typed.
     pub empty_query: bool,
+    /// How the `items()` catalogue is matched.
+    pub matching: dupin_core::catalogue::Matching,
+    pub preferences: super::preferences::Preferences,
     /// The most the package may do; the user grants each scope.
     pub capabilities: dupin_broker::Capabilities,
 }
@@ -156,7 +159,14 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     if let Some(key) = dupin.keys().find(|key| {
         !matches!(
             key.as_str(),
-            "title" | "keyword" | "main" | "defaultSearch" | "emptyQuery" | "capabilities"
+            "title"
+                | "keyword"
+                | "main"
+                | "defaultSearch"
+                | "emptyQuery"
+                | "match"
+                | "preferences"
+                | "capabilities"
         )
     }) {
         return Err(field(
@@ -173,6 +183,17 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
         default_search: flag(dupin, "defaultSearch", DEFAULT_SEARCH_HINT)?,
         empty_query: flag(dupin, "emptyQuery", EMPTY_QUERY_HINT)?,
+        matching: match string(dupin, "match", "dupin.match", MATCH_HINT)?.as_deref() {
+            None | Some("fuzzy") => dupin_core::catalogue::Matching::Fuzzy,
+            Some("words") => dupin_core::catalogue::Matching::Words,
+            Some(_) => {
+                return Err(field("dupin.match", "must be \"fuzzy\" or \"words\"", MATCH_HINT));
+            }
+        },
+        preferences: match dupin.get("preferences") {
+            Some(preferences) => super::preferences::Preferences::parse(preferences)?,
+            None => super::preferences::Preferences::default(),
+        },
         capabilities: dupin_broker::Capabilities::default(),
     };
     validate(&manifest)?;

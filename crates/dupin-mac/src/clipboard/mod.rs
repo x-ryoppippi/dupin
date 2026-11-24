@@ -21,8 +21,7 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::sel;
 use objc2_app_kit::{
     NSPasteboard, NSPasteboardAccessBehavior, NSPasteboardTypeFileURL, NSPasteboardTypePNG,
-    NSPasteboardTypeString, NSPasteboardTypeTIFF, NSPasteboardTypeURL, NSPasteboardWriting,
-    NSRunningApplication, NSWorkspace,
+    NSPasteboardTypeString, NSPasteboardTypeURL, NSPasteboardWriting, NSRunningApplication, NSWorkspace,
 };
 use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 use objc2_uniform_type_identifiers::UTType;
@@ -591,6 +590,10 @@ impl Pasteboard for GeneralPasteboard {
         })
     }
 
+    fn app_name(&self, id: &str) -> Option<String> {
+        autoreleasepool(|_| app_named(id.to_owned()).name)
+    }
+
     fn read(&self, change: i64, limits: &Limits) -> Option<service::Content> {
         autoreleasepool(|_| {
             let board = NSPasteboard::generalPasteboard();
@@ -616,7 +619,16 @@ impl Pasteboard for GeneralPasteboard {
                     .collect()
             })
             .ok_or_else(failed),
+            Write::Image(png) => autoreleasepool(|_| {
+                let board = NSPasteboard::generalPasteboard();
+                board.clearContents();
+                board
+                    .setData_forType(Some(&NSData::with_bytes(png)), unsafe { NSPasteboardTypePNG })
+                    .then_some(())
+                    .ok_or_else(failed)
+            }),
             Write::Files(files) => copy_files(files.paths()).map_err(ServiceError::Failed),
+            Write::CopiedFiles(paths) => copy_files(paths).map_err(ServiceError::Failed),
         }
     }
 
@@ -657,37 +669,52 @@ impl Drop for Unwatch {
     }
 }
 
-/// Files, then a URL, then an image, then text: the most specific form the copy offers.
+/// Files, then a URL, then text, then an image: the one form of a copy clipboard history keeps.
+/// Finder also offers copied files' names as text, and a copy that offers both text and a
+/// picture of it is the text. Images are read from PNG, TIFF, HEIC, HEIF or JPEG and converted
+/// to a PNG at most [`image::MAX_PIXELS`] on its longest side; files are described, never read.
 fn read_content(board: &NSPasteboard, limits: &Limits) -> Option<service::Content> {
     let types = Board::types(board);
-    let has = |kind: &NSString| types.iter().any(|offered| *offered == kind.to_string());
-    if has(unsafe { NSPasteboardTypeFileURL }) {
+    let offers = |kind: &str| types.iter().any(|offered| offered == kind);
+    if offers(FILE_URL_TYPE) {
         let paths = board.file_urls();
         return (!paths.is_empty() && paths.len() <= limits.files).then(|| service::Content::Files {
-            files: paths.iter().map(|path| service::FileRef::new(path)).collect(),
+            files: paths.into_iter().map(described).collect(),
         });
     }
-    if has(unsafe { NSPasteboardTypeURL }) {
+    if offers(&unsafe { NSPasteboardTypeURL }.to_string()) {
         let url = board.stringForType(unsafe { NSPasteboardTypeURL })?;
         return (url.len() <= service::MAX_URL_BYTES).then(|| service::Content::Url { url: url.to_string() });
     }
-    for (kind, media_type) in [
-        (unsafe { NSPasteboardTypePNG }, "image/png"),
-        (unsafe { NSPasteboardTypeTIFF }, "image/tiff"),
-    ] {
-        if has(kind) {
-            let data = board.dataForType(kind)?;
-            return (data.len() <= limits.image_bytes).then(|| service::Content::Image {
-                media_type: media_type.into(),
-                data: data.to_vec(),
-            });
-        }
+    if offers(STRING_TYPE) {
+        // Measured before it is copied out, so an oversized copy is never duplicated.
+        return Board::string(board, STRING_TYPE, limits.text_bytes)
+            .map(|text| service::Content::Text { text });
     }
-    let text = board.stringForType(unsafe { NSPasteboardTypeString })?;
-    // Measure before copying the string out, so an oversized copy is never duplicated.
-    (text.len() <= limits.text_bytes).then(|| service::Content::Text {
-        text: text.to_string(),
+    let kind = IMAGE_TYPES.into_iter().find(|kind| offers(kind))?;
+    let data = Board::data(board, kind, MAX_SOURCE_IMAGE_BYTES)?;
+    let image = image::to_png(&data, image::MAX_PIXELS, limits.image_bytes)?;
+    Some(service::Content::Image {
+        media_type: "image/png".into(),
+        width: image.width,
+        height: image.height,
+        data: image.png.clone(),
     })
+}
+
+/// A copied file as the service describes it: its size from the file system and its type from
+/// its name, so its contents are never read.
+fn described(path: PathBuf) -> service::FileRef {
+    let file = describe(path);
+    service::FileRef {
+        folder: file
+            .path
+            .parent()
+            .map(|parent| dupin_core::item::tilde(&parent.to_string_lossy())),
+        size: file.size,
+        kind: file.kind,
+        ..service::FileRef::new(&file.path)
+    }
 }
 
 #[cfg(test)]

@@ -282,7 +282,7 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
-        .action(name, data, timeout(DEADLINE), bridge)
+        .action(name, data, "{}", timeout(DEADLINE), bridge)
         .map(|acted| acted.effect)
 }
 
@@ -351,7 +351,7 @@ fn items_reaches_host_services_like_search() {
     )]);
     let page = loaded
         .unwrap()
-        .items(None, Reason::Load, timeout(DEADLINE), &mut bridge)
+        .items(None, Reason::Load, "{}", timeout(DEADLINE), &mut bridge)
         .unwrap();
     let crate::row::PageChange::Reset { rows } = page.change else {
         panic!("expected the whole catalogue, got {:?}", page.change);
@@ -378,7 +378,7 @@ fn an_event_handler_may_invalidate_the_catalogue() {
     let mut bridge = Fixture::default();
     let mut handle = |event: &str| {
         package
-            .event("clipboard", event, timeout(DEADLINE), &mut bridge)
+            .event("clipboard", event, "{}", timeout(DEADLINE), &mut bridge)
             .unwrap()
     };
     assert!(handle(r#"{"type":"text","text":"hi"}"#).invalidated);
@@ -402,6 +402,7 @@ fn event_handlers_receive_a_frozen_event() {
         .event(
             "clipboard",
             r#"{"type":"text","text":"hi"}"#,
+            "{}",
             timeout(DEADLINE),
             &mut bridge,
         )
@@ -414,7 +415,7 @@ fn event_handlers_receive_a_frozen_event() {
         )]
     );
     assert_eq!(
-        failure_of(package.event("other", "{}", timeout(DEADLINE), &mut bridge)).code,
+        failure_of(package.event("other", "{}", "{}", timeout(DEADLINE), &mut bridge)).code,
         "missing-handler"
     );
 }

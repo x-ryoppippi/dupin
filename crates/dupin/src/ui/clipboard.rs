@@ -14,6 +14,28 @@ impl Ui {
         }
     }
 
+    /// Presses ⌘V in the app in front, once the panel has closed.
+    pub(super) fn paste_clipboard(&self) {
+        let me = self.me.clone();
+        let busy = Busy::new(self.running.clone());
+        let key = dupin_mac::paste::key_code();
+        std::thread::spawn(move || {
+            if let Err(error) = dupin_mac::paste::press(key) {
+                me.update(move |ui, tx| ui.show_notice(error, tx));
+            }
+            drop(busy);
+        });
+    }
+
+    /// Closes the panel after an extension's action put something on the clipboard, and pastes
+    /// it into the app in front when asked to and allowed.
+    pub(super) fn close_after_copy(&mut self, paste: bool, tx: &mut Tx) {
+        if paste && !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
+            self.paste_after_close = Some(PendingPaste::Clipboard);
+        }
+        self.hide(tx);
+    }
+
     pub(super) fn request_clipboard_access(&self) {
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {

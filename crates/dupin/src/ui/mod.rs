@@ -55,6 +55,8 @@ use snippets::SnippetRun;
 enum PendingPaste {
     Snippet(SnippetRun),
     ClipboardEntry(u64),
+    /// What an extension's action just put on the clipboard.
+    Clipboard,
 }
 
 pub struct Windows {

@@ -168,6 +168,9 @@ struct Inner {
     local: Option<PathBuf>,
     files: Mutex<HashMap<PackageId, FilesTable>>,
     watches: watch::Watches,
+    /// The image of each package's latest clipboard change, which its handler may store
+    /// without the bytes crossing to the guest.
+    clips: Mutex<HashMap<PackageId, watch::Staged>>,
     listener: Mutex<Option<Listener>>,
 }
 
@@ -259,6 +262,7 @@ impl Bridge {
                 local,
                 files: Mutex::default(),
                 watches: watch::Watches::default(),
+                clips: Mutex::default(),
                 listener: Mutex::default(),
             }),
         }
@@ -324,11 +328,10 @@ impl Bridge {
         self.load(id, revision, capabilities, Origin::User)
     }
 
-    /// Loads a package that ships in Dupin, as [`Bridge::install`] does. While `revision` is
-    /// the one Dupin ships, its scopes are granted without asking. No package ships yet, so
-    /// only tests load one.
-    #[cfg(test)]
-    fn install_bundled(
+    /// Loads a package that ships in Dupin, as [`Bridge::install`] does, into the bundled
+    /// origin, which names its own storage namespace. While `revision` is the one Dupin ships,
+    /// its scopes are granted without asking.
+    pub fn install_bundled(
         &self,
         id: &PackageId,
         revision: Revision,
@@ -369,24 +372,13 @@ impl Bridge {
     /// Host services for one call of `id`, as `trigger` describes why it runs. The app sets the
     /// trigger from what it saw: typing, a chosen action or a watched event.
     pub fn call(&self, id: &PackageId, trigger: Trigger) -> Call {
-        self.inner.sync();
-        let state = self.inner.lock();
-        let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
-        else {
+        let Some(session) = self.inner.session(id, trigger) else {
             return Call::none();
         };
-        let session = Session {
-            bridge: self.inner.clone(),
-            package: id.clone(),
-            revision: revision.clone(),
-            generation,
-            trigger,
-            namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
-            links: Mutex::default(),
-        };
+        let generation = Some(session.generation);
         Call {
             services: Arc::new(session),
-            generation: Some(generation),
+            generation,
         }
     }
 
@@ -564,6 +556,11 @@ impl Bridge {
     /// Stops delivering clipboard changes to `id`.
     pub fn unwatch_clipboard(&self, id: &PackageId) {
         self.inner.watches.unregister(id);
+        self.inner
+            .clips
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(id);
     }
 
     /// Makes `change` and saves it, or leaves the decisions as they were if either fails, so
@@ -606,6 +603,25 @@ impl Bridge {
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Host services for one call of `id` under `trigger`, or none when `id` isn't installed.
+    fn session(self: &Arc<Self>, id: &PackageId, trigger: Trigger) -> Option<Session> {
+        self.sync();
+        let state = self.lock();
+        let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
+        else {
+            return None;
+        };
+        Some(Session {
+            bridge: self.clone(),
+            package: id.clone(),
+            revision: revision.clone(),
+            generation,
+            trigger,
+            namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
+            links: Mutex::default(),
+        })
     }
 
     fn notify(&self, notice: Notice) {
