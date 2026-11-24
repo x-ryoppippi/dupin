@@ -3,7 +3,7 @@
 
 use std::path::{Component, Path};
 
-use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic};
+use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -173,13 +173,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     };
     fields.validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
-        .filter(|entry| {
-            Path::new(entry).extension().is_some_and(|extension| {
-                ["js", "mjs", "ts", "mts", "tsx"]
-                    .iter()
-                    .any(|module| extension == *module)
-            })
-        })
+        .filter(|entry| is_module(entry))
         .ok_or_else(|| {
             field(
                 "dupin.main",
@@ -420,6 +414,12 @@ mod tests {
         )])
         .unwrap();
         assert_eq!(manifest.entry, "dist/index.mjs");
+        let manifest = read_folder(&[(
+            PACKAGE_JSON,
+            &package(r#"{"title": "W", "keyword": "wc", "main": "src/main.ts"}"#),
+        )])
+        .unwrap();
+        assert_eq!(manifest.entry, "src/main.ts");
         for main in ["dist/./index.js", ".//dist/index.js", "./dist//index.js"] {
             let manifest = read_folder(&[(
                 PACKAGE_JSON,
@@ -456,6 +456,11 @@ mod tests {
             ),
             (
                 r#"{"title": "W", "keyword": "wc", "main": "guest.wasm"}"#,
+                "invalid-manifest",
+                "dupin.main",
+            ),
+            (
+                r#"{"title": "W", "keyword": "wc", "main": "dupin.d.ts"}"#,
                 "invalid-manifest",
                 "dupin.main",
             ),

@@ -228,12 +228,12 @@ dupin ext install ./word-count                              # a folder, copied a
 
 Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pre-release ranks below its release, and `rc.10` above `rc.9`), or the default branch when the repository has no version tag. A commit is named by its full SHA. A URL can't carry a password or token, which would end up in `extensions.lock`; let Git supply it from a credential helper or an SSH key.
 
-The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
+The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is committed to the repository: JavaScript or erasable TypeScript as written, or the bundle a build made.
 
 Installing never runs anything from the package. Dupin runs `git` to fetch the one commit into a scratch repository and reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run, and there is no package manager, install script or build. Git sources need Git (`xcode-select --install`); a folder source doesn't. Before placing anything, Dupin checks that:
 
 - `package.json` has a valid `dupin` key and `name`;
-- `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
+- `dupin.main` (default `main.js`) is a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file in the package, not a declaration file. A JSX entry, or a build output that isn't committed, fails with a hint to build and commit it;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
 - there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch that writes more than 64 MiB is stopped before it finishes;
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;

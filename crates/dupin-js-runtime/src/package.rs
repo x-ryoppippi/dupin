@@ -110,6 +110,12 @@ fn is_javascript(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
+/// Whether the file `name` can be a package's entry: JavaScript, or TypeScript other than a
+/// declaration file.
+pub fn is_module(name: &str) -> bool {
+    is_javascript(name) || is_typescript(name)
+}
+
 /// A package's modules, read from its folder within the package limits. Dupin reads it and
 /// hands it to the extension host, which alone parses and compiles it.
 #[derive(Clone, Debug)]
@@ -276,7 +282,7 @@ pub(crate) fn resolve(
     if exists(&name) {
         Ok(name)
     } else {
-        let hint = if is_javascript(&name) || is_typescript(&name) {
+        let hint = if is_module(&name) {
             "Check the path; imports are relative to the importing file."
         } else {
             "Write the file's extension in the import, such as `./util.js`."
