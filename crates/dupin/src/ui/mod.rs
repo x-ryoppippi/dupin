@@ -187,16 +187,11 @@ impl Ui {
         });
         currency.set_enabled(config.calculator && config.calculator_currency);
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
-        let calendar = if rune::tooling::is_headless() {
-            dupin_mac::CalendarProvider::fixtures()
-        } else {
-            dupin_mac::CalendarProvider::new(calendar_access.clone())
-        };
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
             history,
-            calendar,
+            (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
             clipboard.history(),
             currency.calculator(),
         )
@@ -293,7 +288,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
-            extensions: Extensions::new(bridge),
+            extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
             clipboard,

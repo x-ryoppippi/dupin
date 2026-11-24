@@ -568,6 +568,29 @@ enum Stage {
     Call,
 }
 
+thread_local! {
+    /// The next call's engine, built while the thread waits for that call.
+    static SPARE: RefCell<Option<(Runtime, Context)>> = const { RefCell::new(None) };
+}
+
+/// Builds the engine of the next call on this thread ahead of it, while nothing waits, so the
+/// call doesn't wait for it. Each call still gets an engine no guest code has run in.
+pub fn prepare() {
+    SPARE.with_borrow_mut(|spare| {
+        if spare.is_none() {
+            *spare = engine().ok();
+        }
+    });
+}
+
+fn engine() -> Result<(Runtime, Context), RunError> {
+    let runtime = Runtime::new().map_err(|error| internal(&error))?;
+    runtime.set_memory_limit(HEAP_BYTES);
+    runtime.set_max_stack_size(STACK_BYTES);
+    let context = Context::full(&runtime).map_err(|_| memory_limit())?;
+    Ok((runtime, context))
+}
+
 struct Sandbox<'a> {
     package: &'a Package,
     /// Set when an action or event handler calls `items.invalidate()`.
@@ -589,9 +612,10 @@ impl<'a> Sandbox<'a> {
         bridge: &'a mut dyn Bridge,
         work: Work,
     ) -> Result<Self, RunError> {
-        let runtime = Runtime::new().map_err(|error| internal(&error))?;
-        runtime.set_memory_limit(HEAP_BYTES);
-        runtime.set_max_stack_size(STACK_BYTES);
+        let (runtime, context) = match SPARE.take() {
+            Some(spare) => spare,
+            None => engine()?,
+        };
         let watchdog = Watchdog::new(control);
         let interrupt = watchdog.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || interrupt.tripped())));
@@ -606,7 +630,6 @@ impl<'a> Sandbox<'a> {
                 problem: problem.clone(),
             },
         );
-        let context = Context::full(&runtime).map_err(|_| memory_limit())?;
         let calls = host::Shared::default();
         let invalidated = Rc::<Cell<bool>>::default();
         let invalidating = matches!(work, Work::Action | Work::Event).then(|| invalidated.clone());

@@ -21,7 +21,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::exec;
+use dupin_host_services::{calendar, exec};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -511,20 +511,49 @@ impl services::Calendar for Shared {
         ))
     }
 
-    fn events(&self, from: i64, to: i64, limit: usize, _scope: &Scope) -> Result<Value, Failure> {
+    /// The fixture's events overlapping the range whose title or location holds every word of
+    /// `query`, in `order`, as the calendar service matches them.
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        order: calendar::Order,
+        _scope: &Scope,
+    ) -> Result<Value, Failure> {
         let at = |event: &Value, key: &str| event.get(key).and_then(Value::as_i64);
+        let text = |event: &Value, key: &str| {
+            event
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_lowercase()
+        };
+        let query = query.unwrap_or_default().to_lowercase();
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        let mut events: Vec<&Value> = self
+            .0
+            .replies
+            .calendar
+            .iter()
+            .filter(|event| {
+                at(event, "start").is_some_and(|start| start < to)
+                    && at(event, "end").is_some_and(|end| end > from)
+            })
+            .filter(|event| {
+                let (title, location) = (text(event, "title"), text(event, "location"));
+                terms
+                    .iter()
+                    .all(|term| title.contains(term) || location.contains(term))
+            })
+            .collect();
+        events.sort_by_key(|event| at(event, "start"));
+        if order == calendar::Order::Latest {
+            events.reverse();
+        }
         Ok(Value::from(
-            self.0
-                .replies
-                .calendar
-                .iter()
-                .filter(|event| {
-                    at(event, "start").is_some_and(|start| start < to)
-                        && at(event, "end").is_some_and(|end| end > from)
-                })
-                .take(limit)
-                .cloned()
-                .collect::<Vec<_>>(),
+            events.into_iter().take(limit).cloned().collect::<Vec<_>>(),
         ))
     }
 }

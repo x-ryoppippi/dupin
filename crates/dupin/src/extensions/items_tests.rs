@@ -504,3 +504,18 @@ fn the_latency_fixture_lists_five_thousand_rows() {
     assert_eq!(extension.catalogue.len(), 5_000);
     assert!(!titles_of(&provider, "term").is_empty());
 }
+
+#[test]
+fn search_answers_before_anything_is_typed_only_when_the_package_asks() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let source = "export function search(query) { return [{ title: `Upcoming ${JSON.stringify(query)}` }]; }";
+    let (_folder, waits) = package("", &[("main.js", source)]);
+    assert!(!waits.empty_query);
+    assert!(titles_of(&ExtensionProvider::new(waits), " ").is_empty());
+
+    let (_folder, eager) = package(r#", "emptyQuery": true"#, &[("main.js", source)]);
+    assert!(eager.empty_query);
+    let provider = ExtensionProvider::new(eager);
+    assert_eq!(titles_of(&provider, ""), [r#"Upcoming """#]);
+    assert_eq!(titles_of(&provider, "rev"), [r#"Upcoming "rev""#]);
+}

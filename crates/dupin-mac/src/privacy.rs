@@ -70,7 +70,8 @@ impl Permission {
         }
     }
 
-    pub(crate) fn settings_url(self) -> &'static str {
+    /// The System Settings pane that grants this permission.
+    pub fn settings_url(self) -> &'static str {
         match self {
             Permission::Accessibility => accessibility::SETTINGS_URL,
             Permission::Calendars => CALENDARS_SETTINGS_URL,
@@ -171,7 +172,9 @@ impl CalendarAccess {
         self.start(true, || Permission::Calendars.status(), queue_calendar_request);
     }
 
-    pub(crate) fn request_on_use(&self) -> PermissionStatus {
+    /// Requests access the first time a feature that needs it is used, if macOS hasn't been
+    /// asked, and otherwise only reads the status.
+    pub fn request_on_use(&self) -> PermissionStatus {
         self.start(false, || Permission::Calendars.status(), queue_calendar_request)
     }
 

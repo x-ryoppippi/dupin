@@ -230,6 +230,19 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_extension_passes_its_fixtures() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        for (folder, name, _) in packages(&directory().unwrap()) {
+            if !folder.join("fixtures").is_dir() {
+                continue;
+            }
+            let report = crate::extensions::fixtures::test(&folder, false, &|| false)
+                .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
+            assert!(report.passed, "{name}:\n{}", report.text);
+        }
+    }
+
+    #[test]
     fn ejecting_copies_a_bundled_package_into_the_extensions_folder_once() {
         let bundled = tempfile::tempdir().unwrap();
         let user = tempfile::tempdir().unwrap();

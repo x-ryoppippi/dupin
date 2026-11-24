@@ -772,6 +772,73 @@ fn calendar_reads_stay_inside_the_declared_window() {
 }
 
 #[test]
+fn a_call_opens_only_the_calendar_links_its_own_reads_returned() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 2 } }),
+        &guest("export const search = () => [];"),
+    );
+    world.enable();
+    world
+        .bridge
+        .set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let link = "ical://ekevent/standup-43200000?method=show&options=more";
+    let read = |call: &Call| -> serde_json::Value {
+        serde_json::from_slice(&call.services.call(
+            "calendar.events",
+            br#"{"from":0,"to":86400000}"#,
+            Instant::now() + Duration::from_secs(1),
+            &Default::default(),
+        ))
+        .unwrap()
+    };
+
+    let refused = world.bridge.call(&world.id, Trigger::Query);
+    assert_eq!(read(&refused)["error"]["code"], "needs-consent");
+    assert!(!refused.services.opens(link));
+
+    world.grant("calendar");
+    let granted = world.bridge.call(&world.id, Trigger::Query);
+    assert_eq!(read(&granted)["ok"]["events"][0]["link"], link);
+    assert!(granted.services.opens(link));
+    assert!(
+        !granted
+            .services
+            .opens("ical://ekevent/other?method=show&options=more")
+    );
+    assert!(!world.bridge.call(&world.id, Trigger::Query).services.opens(link));
+}
+
+#[test]
+fn a_latest_first_calendar_read_reaches_the_service() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 2 } }),
+        &guest("export const search = () => [];"),
+    );
+    world.enable();
+    world.grant("calendar");
+    world
+        .bridge
+        .set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let call = world.bridge.call(&world.id, Trigger::Query);
+    let ask = |args: &[u8]| -> serde_json::Value {
+        serde_json::from_slice(&call.services.call(
+            "calendar.events",
+            args,
+            Instant::now() + Duration::from_secs(1),
+            &Default::default(),
+        ))
+        .unwrap()
+    };
+    assert!(ask(br#"{"from":0,"to":86400000,"order":"latest"}"#)["ok"].is_object());
+    assert_eq!(
+        ask(br#"{"from":0,"to":86400000,"order":"newest"}"#)["error"]["code"],
+        "invalid"
+    );
+}
+
+#[test]
 fn dictionary_lookups_return_entries() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let world = world(

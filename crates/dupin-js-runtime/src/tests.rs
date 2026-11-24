@@ -779,4 +779,27 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
     assert_ne!(title(None).split('|').next(), Some("1767225600000"));
 }
 
+#[test]
+fn open_actions_take_web_urls_and_calendar_event_links_only() {
+    use crate::row::is_openable;
+    for url in [
+        "https://example.com/",
+        "ical://ekevent/20261123T100000Z/7F3C%3A1?method=show&options=more",
+        "ical://ekevent/shared%2Fmeeting%3F?method=show&options=more",
+    ] {
+        assert!(is_openable(url), "{url}");
+    }
+    for url in [
+        "ical://ekevent/?method=show&options=more",
+        "ical://ekevent/a b?method=show&options=more",
+        "ical://ekevent/a?method=edit",
+        "ical://calendar/a?method=show&options=more",
+        "webcal://example.com/feed.ics",
+        "x-apple.systempreferences:com.apple.preference.security",
+        "file:///etc/passwd",
+    ] {
+        assert!(!is_openable(url), "{url}");
+    }
+}
+
 mod host;

@@ -220,7 +220,9 @@ export const calendar = Object.freeze({
 		const { events } = await call('calendar.events', {
 			from: time(range.from),
 			to: time(range.to),
+			query: range.query,
 			limit: range.limit,
+			order: range.order,
 		});
 		return events.map((event) => Object.freeze({ ...event, start: iso(event.start), end: iso(event.end) }));
 	},

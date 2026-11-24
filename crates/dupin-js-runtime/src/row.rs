@@ -213,8 +213,13 @@ impl Row {
                 RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
                     return Err("a paste action's text must be 1 byte to 16 KiB".into());
                 }
-                RowEffect::OpenUrl { url } if url.len() > MAX_URL_BYTES || !is_web_url(url) => {
-                    return Err("an open action needs an http or https URL".into());
+                RowEffect::OpenUrl { url } if source == Source::Items && !is_web_url(url) => {
+                    return Err("a catalogue's open action needs an http or https URL".into());
+                }
+                RowEffect::OpenUrl { url } if !is_openable(url) => {
+                    return Err(
+                        "an open action needs an http or https URL, or a calendar event's link".into(),
+                    );
                 }
                 RowEffect::Run { handler, data } => {
                     check_handler(handler)?;
@@ -331,6 +336,27 @@ pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// What an open action may open: a web URL, or the `link` the calendar service gives an event,
+/// which only shows that event in Calendar.
+pub(crate) fn is_openable(url: &str) -> bool {
+    if url.len() > MAX_URL_BYTES {
+        return false;
+    }
+    is_web_url(url)
+        || url
+            .strip_prefix(CALENDAR_LINK)
+            .and_then(|rest| rest.strip_suffix(CALENDAR_LINK_QUERY))
+            .is_some_and(|event| {
+                !event.is_empty()
+                    && event
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"%-._~/".contains(&byte))
+            })
+}
+
+const CALENDAR_LINK: &str = "ical://ekevent/";
+const CALENDAR_LINK_QUERY: &str = "?method=show&options=more";
 
 /// The name of an export in the package's `actions` object.
 pub(crate) fn check_handler(handler: &str) -> Result<(), String> {

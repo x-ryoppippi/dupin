@@ -244,3 +244,49 @@ fn actions_and_events_waiting_on_a_service_never_hold_up_searches() {
         call.join().unwrap().unwrap();
     }
 }
+
+/// Gave the guest one calendar link.
+struct Issued;
+
+const ISSUED: &str = "ical://ekevent/issued?method=show&options=more";
+
+impl Services for Issued {
+    fn call(&self, _op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+        br#"{"ok":null}"#.to_vec()
+    }
+
+    fn opens(&self, url: &str) -> bool {
+        url == ISSUED
+    }
+}
+
+#[test]
+fn a_row_opens_only_the_calendar_links_its_own_call_was_given() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let package = package(
+        r#"export function search(query) {
+             return [{ title: 'Event', actions: [{ title: 'Open in Calendar', open: `ical://ekevent/${query}?method=show&options=more` }] }];
+           }"#,
+    );
+    let search = |query: &str, services: Arc<dyn Services>| {
+        host.search(
+            &package,
+            query,
+            10,
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+            &services,
+        )
+    };
+    assert_eq!(search("issued", Arc::new(Issued)).unwrap().len(), 1);
+    for (query, services) in [
+        ("forged", Arc::new(Issued) as Arc<dyn Services>),
+        ("issued", Arc::new(NoServices)),
+    ] {
+        let Err(RunError::Failed(diagnostic)) = search(query, services) else {
+            panic!("opened a calendar link its call wasn't given: {query}");
+        };
+        assert_eq!(diagnostic.code, "invalid-url");
+    }
+}

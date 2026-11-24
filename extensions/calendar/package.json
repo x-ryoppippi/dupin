@@ -1,0 +1,20 @@
+{
+	"name": "calendar",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Calendar",
+		"keyword": "cal",
+		"main": "main.ts",
+		"emptyQuery": true,
+		"capabilities": {
+			"calendar": {
+				"access": [
+					"read"
+				],
+				"pastDays": 30,
+				"futureDays": 90
+			}
+		}
+	}
+}
