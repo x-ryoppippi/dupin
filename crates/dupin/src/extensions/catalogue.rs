@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use dupin_core::Batch;
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits, Matching};
 use dupin_extension_bridge::Generation;
-use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
+use dupin_js_runtime::row::{MAX_PAGE_BYTES, MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
 
 use super::Role;
@@ -31,8 +31,9 @@ pub const LIMITS: Limits = Limits {
 /// Text all catalogues together may hold. Past it, the least recently used are dropped and
 /// asked for again on their next use.
 const BUDGET_BYTES: usize = 24 * 1024 * 1024;
-/// Parts one refresh may take: a full catalogue in the largest parts, and one more.
-const MAX_PARTS: usize = LIMITS.rows / MAX_PAGE_ROWS + 1;
+/// Parts one refresh may take: a full catalogue whose parts each end at an answer's rows or at
+/// its text, whichever comes first, and one more.
+const MAX_PARTS: usize = LIMITS.rows / MAX_PAGE_ROWS + LIMITS.bytes / MAX_PAGE_BYTES + 1;
 
 pub(crate) struct Cached {
     shared: Arc<Shared>,
@@ -721,6 +722,42 @@ mod tests {
             [(None, Reason::Load), (None, Reason::Load)],
             "a new generation starts over instead of updating rows asked for under the old one"
         );
+    }
+
+    #[test]
+    fn a_catalogue_near_both_limits_arrives_in_the_parts_its_rows_and_text_need() {
+        let cached = Cached::default();
+        let heavy = 7;
+        let full = 19;
+        let mut sent = 0;
+        let mut fetch = |_: Option<&str>, _| {
+            sent += 1;
+            let rows = if sent <= heavy {
+                let mut large = row(&format!("heavy-{sent}"), "Heavy");
+                large.subtitle = "x".repeat(MAX_PAGE_BYTES - 64);
+                vec![large]
+            } else {
+                (0..MAX_PAGE_ROWS)
+                    .map(|index| row(&format!("{sent}-{index}"), "Light"))
+                    .collect()
+            };
+            let change = if sent == 1 {
+                PageChange::Reset { rows }
+            } else {
+                PageChange::Update {
+                    prepend: Vec::new(),
+                    append: rows,
+                    replace: Vec::new(),
+                    remove: Vec::new(),
+                }
+            };
+            Ok(page(change, "1", sent < heavy + full))
+        };
+        assert!(heavy + full > LIMITS.rows / MAX_PAGE_ROWS + 1);
+        let found = cached
+            .search("heavy", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .unwrap();
+        assert_eq!(titles(&found).len(), heavy);
     }
 
     #[test]
