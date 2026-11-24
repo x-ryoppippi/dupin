@@ -772,6 +772,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dupin-broker"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "dupin-core"
 version = "0.0.0"
 dependencies = [
@@ -839,10 +849,6 @@ dependencies = [
  "rune",
  "tempfile",
 ]
-
-[[package]]
-name = "dupin-plugin-policy"
-version = "0.0.0"
 
 [[package]]
 name = "dupin-plugin-protocol"
