@@ -55,7 +55,11 @@ use snippets::SnippetRun;
 enum PendingPaste {
     Snippet(SnippetRun),
     ClipboardEntry(u64),
-    Text(String),
+    /// An extension row's text, pasted only while the permit to paste for it still holds.
+    Extension {
+        text: String,
+        permit: dupin_extension_bridge::Permit,
+    },
 }
 
 pub struct Windows {

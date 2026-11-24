@@ -4,18 +4,18 @@ Type `emoji`, then Space, to pick an emoji or symbol ("Emoji & Symbols"). With n
 
 The selected row shows the character, its name, its Japanese name, its code points and the keywords that find it. Enter copies the character and closes the panel. Right Arrow, ⌘K or the Actions link opens its other actions:
 
-| Action                             | Does                                                                                                                                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Copy                               | Copies the character. Enter does this.                                                                                                                                                |
-| Paste                              | Pastes it into the app you were using, which needs Accessibility access; without it, the character is copied and a notice explains how to allow it ([Permissions](./permissions.md)). |
-| Copy 👍🏻 light skin tone, and so on | For an emoji that takes a skin tone, copies it in each of the five tones, light to dark.                                                                                              |
-| Send to…                           | Hands the character to another feature, as any text result does ([Send to](./send-to.md)).                                                                                            |
+| Action                             | Does                                                                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Copy                               | Copies the character. Enter does this.                                                                                                                                               |
+| Paste                              | Pastes it into the app you were using, which needs Accessibility access; without it, the character is copied and a notice explains why ([Permissions](./permissions.md#extensions)). |
+| Copy 👍🏻 light skin tone, and so on | For an emoji that takes a skin tone, copies it in each of the five tones, light to dark.                                                                                             |
+| Send to…                           | Hands the character to another feature, as any text result does ([Send to](./send-to.md)).                                                                                           |
 
 The list holds Emoji 15.1, which macOS 14.4 and later draw, with names and keywords from CLDR 45.
 
 ## Turning it on and off
 
-Emoji & Symbols is a [bundled extension](./extensions.md#bundled-extensions) called `emoji`: it ships inside Dupin and is on from the start, whether or not the extensions folder is on. Its switch is in Settings → Extensions. It declares no capabilities, so it has nothing to allow, and typing never runs extension code: Dupin holds the whole list and matches it itself.
+Emoji & Symbols is a [bundled extension](./extensions.md#bundled-extensions) called `emoji`: it ships inside Dupin and is on from the start, whether or not the extensions folder is on. Its switch is in Settings → Extensions. It declares one capability, `clipboard:paste`, which Paste needs and which the bundled copy holds from the start; Settings → Extensions can revoke it, and Settings → Permissions lists it under Accessibility. Typing never runs extension code: Dupin holds the whole list and matches it itself.
 
 To change it, such as to add your own keywords or other characters, copy it into the extensions folder and edit it there:
 

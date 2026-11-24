@@ -611,7 +611,6 @@ fn effect_json(action: &dupin_core::Action) -> Value {
     use dupin_core::Action;
     match action {
         Action::Copy(text) => serde_json::json!({"kind": "copy", "text": text}),
-        Action::Paste(text) => serde_json::json!({"kind": "paste", "text": text}),
         Action::OpenUrl(url) => serde_json::json!({"kind": "open_url", "url": url}),
         Action::Push(page) => serde_json::json!({
             "kind": "push", "view": page.view, "title": page.title, "context": page.context,
@@ -620,6 +619,10 @@ fn effect_json(action: &dupin_core::Action) -> Value {
             request: dupin_core::ExtensionRequest::Run { action, data },
             ..
         } => serde_json::json!({"kind": "run", "handler": action, "data": data}),
+        Action::Extension {
+            request: dupin_core::ExtensionRequest::Paste { text },
+            ..
+        } => serde_json::json!({"kind": "paste", "text": text}),
         other => serde_json::json!({"kind": format!("{other:?}")}),
     }
 }
@@ -682,13 +685,16 @@ fn describe_answer(batches: &[dupin_core::Batch]) -> String {
             for action in &item.actions {
                 let target = match item.action(&action.id).expect("listed") {
                     dupin_core::Action::Copy(text) => text.clone(),
-                    dupin_core::Action::Paste(text) => format!("paste {text}"),
                     dupin_core::Action::OpenUrl(url) => url.clone(),
                     dupin_core::Action::Push(page) => format!("view {}", page.view),
                     dupin_core::Action::Extension {
                         request: dupin_core::ExtensionRequest::Run { action, .. },
                         ..
                     } => format!("runs {action}"),
+                    dupin_core::Action::Extension {
+                        request: dupin_core::ExtensionRequest::Paste { text },
+                        ..
+                    } => format!("paste {text}"),
                     other => format!("{other:?}"),
                 };
                 out.push_str(&format!("  {}: {target}\n", action.title));

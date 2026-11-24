@@ -5,6 +5,11 @@
 	"dupin": {
 		"title": "Emoji & Symbols",
 		"keyword": "emoji",
-		"main": "main.ts"
+		"main": "main.ts",
+		"capabilities": {
+			"clipboard": [
+				"paste"
+			]
+		}
 	}
 }

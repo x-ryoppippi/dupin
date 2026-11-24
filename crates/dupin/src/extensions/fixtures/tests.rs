@@ -539,7 +539,7 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
 fn a_query_matches_the_items_catalogue_as_the_launcher_does() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_root, package) = capable(
-        json!({}),
+        json!({ "clipboard": ["paste"] }),
         "export function items(ctx) {\n\
          \tconst rows = [\n\
          \t\t{ id: 'tea', title: 'Green tea', keywords: ['matcha'], actions: [{ title: 'Paste', paste: 'tea' }] },\n\
@@ -575,4 +575,34 @@ fn a_query_matches_the_items_catalogue_as_the_launcher_does() {
     assert_eq!(steps[1]["outcome"]["rows"][0]["keywords"], json!(["matcha"]));
     assert_eq!(steps[2]["outcome"], json!({ "effect": { "paste": "tea" } }));
     assert_eq!(titles(3), ["Cocoa"]);
+}
+
+#[test]
+fn a_paste_the_package_may_not_make_copies_instead_and_says_why() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let main = "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: 'tea' }] }]; }\n";
+    for (capabilities, consent, code) in [
+        (json!({}), json!({}), "undeclared"),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "deny" }),
+            "revoked",
+        ),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "pending" }),
+            "needs-consent",
+        ),
+    ] {
+        let (_root, package) = capable(capabilities, main);
+        write_fixture(
+            &package,
+            "paste.json",
+            json!({ "fixture": 1, "replies": { "consent": consent }, "steps": [{ "query": "tea" }, { "activate": "paste" }] }),
+        );
+        let report = test(&package, false, &|| false).unwrap();
+        let outcome = &steps(&report, 0)[1]["outcome"];
+        assert_eq!(outcome["effect"], json!({ "copy": "tea" }), "{}", report.text);
+        assert_eq!(outcome["error"]["code"], code, "{}", report.text);
+    }
 }

@@ -17,7 +17,7 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 		"@script:open-in-zed": {}
 	},
 	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
-	"clipboard": ["read", "write", "watch"],
+	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }
 }
@@ -29,7 +29,7 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 | `files`      | Up to 16 named scopes, each a `file` or `directory` with `read` and, for a directory, `list` access. Writes are rejected until they are designed.                                                                | name              |
 | `exec`       | Up to 16 named profiles, each an argument template whose `{input}` placeholders the exec service fills, or `@script:<name>` targets for the user's script commands. `output` asks to return output to the guest. | profile or script |
 | `storage`    | A quota of 1 byte to 64 MiB and an optional retention of 1–3,650 days.                                                                                                                                           | the capability    |
-| `clipboard`  | `read`, `write` and `watch`.                                                                                                                                                                                     | access            |
+| `clipboard`  | `read`, `write`, `watch` and `paste`, which lets Dupin carry out the package's `paste` row actions.                                                                                                              | access            |
 | `dictionary` | `lookup`.                                                                                                                                                                                                        | the capability    |
 | `calendar`   | `read` within `pastDays` and `futureDays` of today, each 0–366.                                                                                                                                                  | the capability    |
 
@@ -45,7 +45,9 @@ A host service describes the operation as a `Request` and calls `Broker::check(p
 
 When the user grants it, the host passes that revision and scope back to `Broker::consent`. The broker refuses the approval if the package has since moved to another revision or declares the scope differently, so a consent never approves more than the user saw. Settings takes both from `Broker::revision` and `Broker::consents` when it renders the list.
 
-HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads and clipboard writes need an activation. Reads, storage of the package's own data and clipboard watching don't.
+HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads, clipboard writes and pastes need an activation. Reads, storage of the package's own data and clipboard watching don't.
+
+An effect the host performs itself on a package's behalf goes through the same check: a row's `paste` action is decided as `Request::Clipboard(Paste)` with the activation that chose it, through `Bridge::authorize`, and the host validates the permit again just before posting ⌘V. Pasting needs macOS Accessibility, so Settings → Permissions lists packages that declare it on that row.
 
 A service acts only within its permit: the HTTP service connects to the permit's origin, and the files service opens paths beneath the permit's binding, so its parsing can't disagree with the broker's. Redirects, resolved addresses and symlinks are still the service's to check.
 

@@ -55,6 +55,7 @@ impl Permission {
         match permission {
             OsPermission::Calendars => Self::Calendars,
             OsPermission::Pasteboard => Self::Pasteboard,
+            OsPermission::Accessibility => Self::Accessibility,
         }
     }
 
@@ -367,6 +368,10 @@ mod tests {
     fn extension_permissions_join_their_settings_rows() {
         assert_eq!(Permission::of(OsPermission::Calendars), Permission::Calendars);
         assert_eq!(Permission::of(OsPermission::Pasteboard), Permission::Pasteboard);
+        assert_eq!(
+            Permission::of(OsPermission::Accessibility),
+            Permission::Accessibility
+        );
         for permission in OsPermission::ALL {
             assert_eq!(Permission::of(permission).name(), permission.name());
         }

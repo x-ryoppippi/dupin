@@ -43,8 +43,6 @@ pub enum Action {
     /// Open a URL with its registered handler.
     OpenUrl(String),
     Copy(String),
-    /// Paste the text into the frontmost app, or copy it while Dupin may not paste.
-    Paste(String),
     Share {
         target: ShareTarget,
         paths: Vec<PathBuf>,
@@ -91,6 +89,9 @@ pub enum ExtensionRequest {
         action: String,
         data: Option<serde_json::Value>,
     },
+    /// Paste the text into the frontmost app while the extension holds `clipboard:paste`, or
+    /// copy it.
+    Paste { text: String },
     /// Grant the scope named `scope` as `revision` declares it, which the row showed.
     Allow { scope: String, revision: String },
     /// Turn the scope off, so the extension stops asking for it.

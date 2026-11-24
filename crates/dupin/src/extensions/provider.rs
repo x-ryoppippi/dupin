@@ -222,9 +222,14 @@ pub(super) fn row_item(
                 RowEffect::Copy { text } => {
                     ItemAction::new(&name(&mut copy, "copy"), &action.title, Action::Copy(text))
                 }
-                RowEffect::Paste { text } => {
-                    ItemAction::new(&name(&mut paste, "paste"), &action.title, Action::Paste(text))
-                }
+                RowEffect::Paste { text } => ItemAction::new(
+                    &name(&mut paste, "paste"),
+                    &action.title,
+                    Action::Extension {
+                        extension: extension.id.clone(),
+                        request: ExtensionRequest::Paste { text },
+                    },
+                ),
                 RowEffect::OpenUrl { url } => {
                     ItemAction::new(&name(&mut open, "open"), &action.title, Action::OpenUrl(url))
                 }
@@ -570,14 +575,20 @@ mod tests {
     }
 
     #[test]
-    fn a_paste_action_pastes_its_text_and_a_copy_is_its_payload() {
+    fn a_paste_action_asks_for_its_extension_and_a_copy_is_its_payload() {
         dupin_extension_host::skip_inside_a_sandbox!();
         let (_folder, provider) = javascript(
             "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: '🍵' }, { title: 'Copy', copy: '🍵' }] }]; }",
         );
         let rows = search(&provider, "tea");
         assert_eq!(rows[0].primary.as_deref(), Some("paste"));
-        assert_eq!(rows[0].action("paste"), Some(&Action::Paste("🍵".into())));
+        assert_eq!(
+            rows[0].action("paste"),
+            Some(&Action::Extension {
+                extension: provider.extension.id.clone(),
+                request: ExtensionRequest::Paste { text: "🍵".into() },
+            })
+        );
         assert_eq!(rows[0].payload, Payload::text("🍵"));
     }
 

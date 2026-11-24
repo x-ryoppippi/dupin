@@ -186,12 +186,12 @@ The detail's title is the item's.
 
 An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a one-line `title` of up to 512 bytes and exactly one of:
 
-| Action  | What it does                                                                                                                                                                                 |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `copy`  | Copies the text, 1 byte to 16 KiB.                                                                                                                                                           |
-| `paste` | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Pasting needs Accessibility access; without it, Dupin copies the text and explains how to allow it. |
-| `open`  | Opens the `http` or `https` URL.                                                                                                                                                             |
-| `run`   | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep.            |
+| Action  | What it does                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `copy`  | Copies the text, 1 byte to 16 KiB.                                                                                                                                                                                                            |
+| `paste` | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Only a package that [declares](#clipboard) `"clipboard": ["paste"]`, and that you allow to, may paste; otherwise Dupin copies the text and says why. |
+| `open`  | Opens the `http` or `https` URL.                                                                                                                                                                                                              |
+| `run`   | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep.                                                             |
 
 ```js
 import { items as catalogue, storage } from 'dupin';
@@ -251,7 +251,7 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
 	"exec": { "git-status": { "args": ["status", "--short", "{path}"], "output": true }, "@script:open-in-zed": {} },
 	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
-	"clipboard": ["read", "write", "watch"],
+	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 }
 }
@@ -262,9 +262,9 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 - An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer. Settings → Extensions lists the same requests, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
 - Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
-- While you type, an extension may use what you allowed to read: GET and HEAD, files, storage, the dictionary and calendars. Any other HTTP method, a program or script and reading or writing the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+- While you type, an extension may use what you allowed to read: GET and HEAD, files, storage, the dictionary and calendars. Any other HTTP method, a program or script and reading, writing or pasting from the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 - Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
-- Calendars, and reading or watching the clipboard, also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
+- Calendars, reading or watching the clipboard, and pasting also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
 [Permissions](./permissions.md#extensions) and [Capability broker](../capability-broker.md) have the full rules.
 
@@ -463,10 +463,11 @@ Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
 
 ### Clipboard
 
-`"clipboard": ["read", "write", "watch"]` declares each kind of access separately.
+`"clipboard": ["read", "write", "watch", "paste"]` declares each kind of access separately.
 
 - **Read**: `clipboard.read()` returns the current copy when you choose an action, or `null` when the clipboard is empty or the copy is one Dupin never reads; `clipboard.readText()` returns its text, if it is text.
 - **Write**: `clipboard.writeText(text)` puts up to 1 MiB of text on the clipboard when you choose an action.
+- **Paste**: a row's [`paste` action](#actions) puts its text in the app in front of Dupin when you choose it. Dupin presses ⌘V for it, which needs macOS Accessibility access; until both are allowed, choosing it copies the text, shows why, and leaves the request in the panel and Settings. The extension's code never pastes: the action is data, and `clipboard:paste` only lets Dupin carry it out.
 - **Watch**: [`events.clipboard`](#events) receives each new copy, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are; at most 16 run at once. Keeping a history is up to the extension, in its own `storage`.
 
 A copy is the most specific form it offers: `{ "type": "files", "files": [{ "path", "name" }] }`, then `{ "type": "url", "url" }`, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then `{ "type": "text", "text" }`. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`, followed from the next copy when it changes), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, so while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); writing needs no macOS permission.

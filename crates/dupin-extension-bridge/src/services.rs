@@ -38,6 +38,11 @@ impl Failure {
         }
     }
 
+    /// What went wrong, as `DupinError.code` names it, such as `needs-consent`.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self::new("invalid", message)
     }

@@ -452,6 +452,7 @@ impl Prefs {
             OsPermission::Pasteboard => {
                 std::thread::spawn(dupin_mac::clipboard::request_access);
             }
+            OsPermission::Accessibility => crate::extensions::access::request_accessibility(),
         }
         self.refresh_permissions();
     }

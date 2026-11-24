@@ -63,12 +63,15 @@ pub(crate) fn seen(provider: &dyn Provider, query: &str, limit: usize) -> Vec<Se
                     .map(|action| {
                         let effect = match item.action(&action.id).expect("listed") {
                             Action::Copy(text) => format!("copy {text}"),
-                            Action::Paste(text) => format!("paste {text}"),
                             Action::OpenUrl(url) => format!("open {url}"),
                             Action::Extension {
                                 request: dupin_core::ExtensionRequest::Run { action, .. },
                                 ..
                             } => format!("run {action}"),
+                            Action::Extension {
+                                request: dupin_core::ExtensionRequest::Paste { text },
+                                ..
+                            } => format!("paste {text}"),
                             other => format!("{other:?}"),
                         };
                         (action.title.clone(), effect)

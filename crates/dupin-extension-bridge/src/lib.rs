@@ -24,8 +24,8 @@ use std::time::{Instant, SystemTime};
 
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
-    Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Reconciliation, Revision,
-    SaveError, Scope, ScopeKey, StoreError, Trigger,
+    Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Permit, Reconciliation,
+    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
@@ -335,27 +335,50 @@ impl Bridge {
     /// Host services for one call of `id`, as `trigger` describes why it runs. The app sets the
     /// trigger from what it saw: typing, a chosen action or a watched event.
     pub fn call(&self, id: &PackageId, trigger: Trigger) -> Call {
+        match self.session(id, trigger) {
+            Some(session) => Call {
+                generation: Some(session.generation),
+                services: Arc::new(session),
+            },
+            None => Call {
+                services: Arc::new(dupin_extension_host::NoServices),
+                generation: None,
+            },
+        }
+    }
+
+    fn session(&self, id: &PackageId, trigger: Trigger) -> Option<Session> {
         self.inner.sync();
         let state = self.inner.lock();
         let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
         else {
-            return Call {
-                services: Arc::new(dupin_extension_host::NoServices),
-                generation: None,
-            };
+            return None;
         };
-        let session = Session {
+        Some(Session {
             bridge: self.inner.clone(),
             package: id.clone(),
             revision: revision.clone(),
             generation,
             trigger,
             namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
-        };
-        Call {
-            services: Arc::new(session),
-            generation: Some(generation),
-        }
+        })
+    }
+
+    /// Decides an effect Dupin performs itself for `id`, such as pasting a row's text, exactly
+    /// as a request from the package's own code would be decided: a refusal for want of consent
+    /// is kept for the panel and Settings. Pass the permit to [`Bridge::validate`] just before
+    /// performing the effect.
+    pub fn authorize(&self, id: &PackageId, request: &Request, trigger: Trigger) -> Result<Permit, Failure> {
+        let session = self
+            .session(id, trigger)
+            .ok_or_else(|| failure_for(&Denial::NotInstalled))?;
+        session.permit(request)
+    }
+
+    /// Whether a permit from [`Bridge::authorize`] still holds.
+    pub fn validate(&self, permit: &Permit) -> bool {
+        self.inner.sync();
+        self.inner.lock().broker.validate(permit)
     }
 
     /// Whether work stamped with `generation` may still be shown for `id`.
