@@ -425,7 +425,7 @@ fn shown(entry: &Entry, now: u64) -> Item {
 }
 
 /// How long before `now` the Unix second `then` was.
-pub fn ago(now: u64, then: u64) -> String {
+fn ago(now: u64, then: u64) -> String {
     let seconds = now.saturating_sub(then);
     match seconds {
         0..60 => "Just now".into(),

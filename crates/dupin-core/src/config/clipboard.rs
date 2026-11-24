@@ -7,15 +7,15 @@ pub struct Clipboard {
     pub enabled: bool,
     pub max_entries: usize,
     /// Larger copies are skipped rather than truncated, so a copied-back entry is never partial.
-    pub(crate) max_entry_bytes: usize,
+    max_entry_bytes: usize,
     /// How long an entry is kept after it was copied.
     pub retention: Retention,
     pub include_images: bool,
     pub include_files: bool,
     /// The largest image kept, after converting it to PNG.
-    pub(crate) max_image_bytes: usize,
+    max_image_bytes: usize,
     /// Bundle identifiers of apps whose copies are never recorded.
-    pub(crate) ignored_apps: Vec<String>,
+    ignored_apps: Vec<String>,
 }
 
 const CLIPBOARD_ENTRIES: std::ops::RangeInclusive<usize> = 1..=10_000;

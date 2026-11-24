@@ -21,7 +21,7 @@ const MAX_ENTRIES: usize = 10_000;
 /// One record's JSON and the blobs the guest sends with it, which cross from the guest whole.
 pub(crate) const MAX_ITEM_BYTES: u64 = 1024 * 1024;
 /// One record with a copied image the host stores for it, which never crosses to the guest.
-pub(crate) const MAX_STORED_ITEM_BYTES: u64 =
+const MAX_STORED_ITEM_BYTES: u64 =
     MAX_ITEM_BYTES + dupin_host_services::clipboard::MAX_WATCHED_IMAGE_BYTES as u64;
 const SWEEP_EVERY: Duration = Duration::from_secs(60 * 60);
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
