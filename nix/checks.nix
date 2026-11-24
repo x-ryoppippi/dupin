@@ -28,6 +28,7 @@ in
               nu scripts/tests/e2e-state.nu
               nu scripts/tests/e2e-file-fixtures.nu
               nu scripts/tests/e2e-script-fixtures.nu
+              nu scripts/tests/latency.nu
             '';
         hawk = pkgs.rustPlatform.buildRustPackage (
           dupin.passthru.commonArgs
