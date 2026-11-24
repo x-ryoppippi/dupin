@@ -93,7 +93,7 @@ impl Provider for CalendarSearch {
                     vec![row(
                         "unavailable",
                         "Calendar search isn't available",
-                        "Its bundled extension didn't load; Settings → Extensions says why.".into(),
+                        "Its extension is off or didn't load; Settings → Extensions says why.".into(),
                         None,
                     )]
                     .into(),

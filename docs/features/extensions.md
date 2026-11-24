@@ -20,7 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md) and [Snippets](./snippets.md): each keeps its own setting as its switch and its keyword, and Settings → Extensions doesn't list it. One that reads config.toml, as Snippets does, gets its settings from Dupin as [`ctx.preferences`](#itemsctx), and only the copy that shipped gets them: once an ejected copy is changed, it is third-party and gets none.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md) and [Snippets](./snippets.md): each keeps its own setting and keywords, and Settings → Extensions lists it as a built-in command. One that reads config.toml, as Snippets does, gets its settings from Dupin as [`ctx.preferences`](#itemsctx), and only the copy that shipped gets them: once an ejected copy is changed, it is third-party and gets none.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,6 +41,19 @@ dupin ext eject dupin
 `dupin ext eject NAME` copies the bundled package called `NAME` to `extensions/NAME` with files you can edit, and refuses if that folder exists. A package in the extensions folder with the same `name` as a bundled one replaces it while the extensions folder is on, and Settings → Extensions marks it as your copy. Once its `package.json` or a module differs from the bundled one by a byte, it is a third-party package with its own grants and switch: none of the bundled one's grants, consents or choices apply to it, and each capability it declares needs your consent. Deleting the folder, or turning the extensions folder off, brings back the bundled one with its grants. `dupin ext install` refuses a package named like a bundled one.
 
 A user extension can't take a bundled extension's keyword, as it can't take a built-in command's: `dupin ext install` refuses it, and Settings lists one already in the folder as skipped and marks its row as not answering. Extensions from the folder load only once the bundled ones have been read, so one never holds a bundled keyword for a moment at launch.
+
+### Overriding a built-in
+
+Every bundled extension follows the same rule, including one that answers a built-in command:
+
+- **Copy it.** `dupin ext eject NAME` copies it to `extensions/NAME`. While the extensions folder is on, a package there with the bundled one's `name` answers in its place: under its keyword and in the main search, or, for a built-in command, under that command's keywords.
+- **Unchanged, it is the bundled package.** It keeps the bundled grants and switch, and Settings → Extensions marks it as your unchanged copy.
+- **Changed, it is your own package.** Once a byte of its `package.json` or a module differs, none of the bundled grants, consents or choices apply: it answers what you type but can use nothing it declares until you turn it on, and each capability then needs your consent. Settings → Extensions marks it as replacing the bundled one.
+- **A built-in command keeps its setting and keywords.** The copy answers only while the command's own setting is on, under the keywords that setting gives, and the `keyword` in its `package.json` is ignored. A built-in command has two switches, both of which must be on: its setting registers the command, and the package's switch in Settings → Extensions lets the package run. Turning the package off leaves the command saying it isn't available; turning a copy off doesn't bring the bundled one back.
+- **Delete it to go back.** Deleting the folder, or turning the extensions folder off, brings back the bundled one with its grants and switch as you left them.
+- **Ejecting starts afresh.** `dupin ext eject` forgets what an earlier changed copy of the same name was allowed, turned on or stored, as `dupin ext install` does for a name installed afresh, so a new copy you change waits to be turned on again.
+
+Settings → Extensions lists every bundled extension, built-in commands' included, with where it comes from (bundled, your unchanged copy, or a changed copy that replaces it), its switch and its grants, so each can be adjusted there. A built-in command's row says it answers that command in place of a keyword. The `dupin` crate's `extensions::overrides` test takes each package in `extensions/` through ejecting, answering, editing, its grants, turning the copy and the extensions folder off, deleting the copy and ejecting again, and fails for a package added there without a case of its own.
 
 ## A JavaScript extension
 

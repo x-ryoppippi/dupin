@@ -11,6 +11,8 @@ mod fixtures;
 #[cfg(test)]
 mod items_tests;
 mod manifest;
+#[cfg(test)]
+mod overrides;
 pub mod packages;
 #[cfg(test)]
 pub(crate) mod parity;

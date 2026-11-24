@@ -2,10 +2,69 @@
 	"schema": 1,
 	"results": [
 		{
+			"id": "calendar.rev",
+			"feature": "calendar",
+			"implementation": "native",
+			"commit": "840fc1c733b66dabc5b7e5f94f6364f805c903c2",
+			"benchmark": "c1dcbfdb7fc27a7bf7081bb9cfe1073202f6a263b321ef1fab00ae1cb8d76436",
+			"runs": 2,
+			"p50_ms": 1.0635415,
+			"p95_ms": 1.4363335,
+			"p99_ms": 1.518688,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.014979,
+					"p95": 0.0233545
+				},
+				"provider_ms": {
+					"p50": 0.42045849999999996,
+					"p95": 0.5493745
+				},
+				"merge_ms": {
+					"p50": 0.376792,
+					"p95": 0.8909165
+				},
+				"layout_ms": {
+					"p50": 0.1730205,
+					"p95": 0.249875
+				}
+			}
+		},
+		{
+			"id": "clipboard.bak",
+			"feature": "clipboard",
+			"implementation": "native",
+			"commit": "bbad7a381ebe5559e5a60d689dc5109d5d16035f",
+			"benchmark": "d772a5460b8d2c417c1ddfec6c17465afb60640f2a6b668c79357aac5f38b318",
+			"runs": 2,
+			"p50_ms": 1.09525,
+			"p95_ms": 1.3874795,
+			"p99_ms": 1.5679790000000002,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.0200005,
+					"p95": 0.027042
+				},
+				"provider_ms": {
+					"p50": 0.0314375,
+					"p95": 0.0490625
+				},
+				"merge_ms": {
+					"p50": 0.8594584999999999,
+					"p95": 1.1135835
+				},
+				"layout_ms": {
+					"p50": 0.175375,
+					"p95": 0.2610625
+				}
+			}
+		},
+		{
 			"id": "dictionary.run",
 			"feature": "dictionary",
 			"implementation": "native",
 			"commit": "b11a968d9f607c82692d16c41a3efe50e2f88b43",
+			"benchmark": "1367102ad79af956eb2ccd289058e70cf96a12554d588c46f8bbe26af81d6378",
 			"runs": 2,
 			"p50_ms": 1.0889164999999998,
 			"p95_ms": 1.376625,
@@ -33,27 +92,57 @@
 			"id": "snippets.sig",
 			"feature": "snippets",
 			"implementation": "native",
-			"commit": "aeac2950af59c737c7b9095be886a36e913de8e9",
+			"commit": "bbad7a381ebe5559e5a60d689dc5109d5d16035f",
+			"benchmark": "56e85af899aaaba1ba58b1b11ad72dbc8be4683c974b978296a7e04069698006",
 			"runs": 2,
-			"p50_ms": 1.087812,
-			"p95_ms": 1.422167,
-			"p99_ms": 1.5095005000000001,
+			"p50_ms": 0.945854,
+			"p95_ms": 1.4472085,
+			"p99_ms": 1.5240205,
 			"stages": {
 				"dispatch_ms": {
-					"p50": 0.0210625,
-					"p95": 0.027124500000000003
+					"p50": 0.0149585,
+					"p95": 0.0239795
 				},
 				"provider_ms": {
-					"p50": 0.029271,
-					"p95": 0.0438335
+					"p50": 0.0279585,
+					"p95": 0.036833500000000005
 				},
 				"merge_ms": {
-					"p50": 0.8238544999999999,
-					"p95": 1.1532915
+					"p50": 0.738646,
+					"p95": 1.257854
 				},
 				"layout_ms": {
-					"p50": 0.178688,
-					"p95": 0.2887505
+					"p50": 0.13597900000000002,
+					"p95": 0.2213955
+				}
+			}
+		},
+		{
+			"id": "web.rust",
+			"feature": "web",
+			"implementation": "native",
+			"commit": "bbad7a381ebe5559e5a60d689dc5109d5d16035f",
+			"benchmark": "49a1dd474d9416fa34725117f58ea345cd7380bceacda10c3449199aeb827d67",
+			"runs": 2,
+			"p50_ms": 1.4991880000000002,
+			"p95_ms": 2.1009165000000003,
+			"p99_ms": 2.2837709999999998,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.06281250000000001,
+					"p95": 0.082
+				},
+				"provider_ms": {
+					"p50": 0.0616665,
+					"p95": 0.103229
+				},
+				"merge_ms": {
+					"p50": 0.983,
+					"p95": 1.2870415
+				},
+				"layout_ms": {
+					"p50": 0.3829585,
+					"p95": 0.7302915
 				}
 			}
 		}
