@@ -267,5 +267,27 @@ mod tests {
             .unwrap();
         assert_eq!(session.items().len(), config.snippets.len());
         assert_eq!(session.items()[0].primary.as_deref(), Some("copy"));
+
+        // What config.toml may hand over always fits the catalogue: as many snippets as it
+        // holds, or their whole text budget spent on the longest keywords and names.
+        let many = (0..=dupin_core::snippets::MAX_SNIPPETS).map(|i| (format!("s{i:05}"), snippet(None, "x")));
+        let long = (0..4000).map(|i| (format!("{i:032}"), snippet(Some(&"😀".repeat(80)), "😀")));
+        for snippets in [many.collect(), long.collect::<BTreeMap<_, _>>()] {
+            config.snippets = snippets;
+            config.snippet_paste = true;
+            let (held, notice) = dupin_core::snippets::preferences(&config);
+            assert!(notice.is_some());
+            let listed = held["snippets"].as_array().unwrap();
+            let last = listed.last().unwrap()["keyword"].as_str().unwrap().to_owned();
+            let count = listed.len();
+            preferences::set(extension.package.as_str(), held);
+            let found = rows(&ExtensionProvider::new(extension.clone()), &last, 10);
+            assert_eq!(
+                found.first().map(|row| row.id.clone()),
+                Some(format!("snippet:{last}")),
+                "{count} snippets: {:?}",
+                found.first().map(|row| &row.view)
+            );
+        }
     }
 }

@@ -6,8 +6,11 @@ use crate::config::Config;
 const MAX_KEYWORD_BYTES: usize = 32;
 const MAX_NAME_CHARS: usize = 80;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
-/// Every snippet's text together: the package gets them all with each catalogue it is asked
-/// for, and Dupin holds each text once for copying and again for pasting.
+/// As many rows as one extension's catalogue holds.
+pub const MAX_SNIPPETS: usize = 10_000;
+/// Every snippet's keyword, name and text together: the package gets them all with each
+/// catalogue it is asked for, and Dupin holds each text once for copying and again for
+/// pasting. Within this and [`MAX_SNIPPETS`], the rows they become fit in one catalogue.
 const MAX_TOTAL_TEXT_BYTES: usize = 1024 * 1024;
 
 /// The wall-clock time where the user is, as placeholders show it.
@@ -87,7 +90,7 @@ pub fn expand(text: &str, now: LocalTime, clipboard: &str) -> String {
 /// package reading config.toml, so it checks them here and the package lists what it gets.
 pub fn preferences(config: &Config) -> (serde_json::Map<String, serde_json::Value>, Option<String>) {
     let mut listed = Vec::new();
-    let (mut invalid, mut over) = (false, false);
+    let (mut invalid, mut too_many, mut over) = (false, false, false);
     let mut total = 0;
     for (keyword, snippet) in &config.snippets {
         let name = snippet.name.as_deref();
@@ -95,24 +98,30 @@ pub fn preferences(config: &Config) -> (serde_json::Map<String, serde_json::Valu
             invalid = true;
             continue;
         }
-        if total + snippet.text.len() > MAX_TOTAL_TEXT_BYTES {
+        if listed.len() == MAX_SNIPPETS {
+            too_many = true;
+            continue;
+        }
+        let size = keyword.len() + name.map_or(0, str::len) + snippet.text.len();
+        if total + size > MAX_TOTAL_TEXT_BYTES {
             over = true;
             continue;
         }
-        total += snippet.text.len();
+        total += size;
         listed.push(serde_json::json!({ "keyword": keyword, "name": name, "text": snippet.text }));
     }
-    let notice = match (invalid, over) {
-        (false, false) => None,
-        (true, _) => Some(
-            "Some snippets were ignored because a keyword, name or text is invalid. Review snippets in config.toml."
-                .to_owned(),
-        ),
-        (false, true) => Some(
-            "Some snippets were ignored because together they hold more than 1 MiB of text. Review snippets in config.toml."
-                .to_owned(),
-        ),
+    let reason = if invalid {
+        Some("a keyword, name or text is invalid")
+    } else if too_many {
+        Some("there are more than 10,000")
+    } else if over {
+        Some("together they hold more than 1 MiB of text")
+    } else {
+        None
     };
+    let notice = reason.map(|reason| {
+        format!("Some snippets were ignored because {reason}. Review snippets in config.toml.")
+    });
     let mut preferences = serde_json::Map::new();
     preferences.insert("snippets".into(), listed.into());
     preferences.insert("paste".into(), config.snippet_paste.into());
@@ -237,19 +246,37 @@ mod tests {
 
     #[test]
     fn preferences_leave_out_what_goes_past_the_text_budget() {
-        let big = "x".repeat(MAX_TEXT_BYTES);
+        let big = "x".repeat(MAX_TEXT_BYTES - "big00".len());
         let mut config = Config::default();
         for index in 0..MAX_TOTAL_TEXT_BYTES / MAX_TEXT_BYTES + 1 {
             config
                 .snippets
                 .insert(format!("big{index:02}"), snippet(None, &big));
         }
-        config.snippets.insert("small".into(), snippet(None, "fits"));
+        config
+            .snippets
+            .insert("named".into(), snippet(Some("Named"), "x"));
         let (preferences, notice) = preferences(&config);
         assert!(notice.unwrap().contains("1 MiB"));
         let listed = preferences["snippets"].as_array().unwrap();
         assert_eq!(listed.len(), MAX_TOTAL_TEXT_BYTES / MAX_TEXT_BYTES);
         assert_eq!(listed.last().unwrap()["keyword"], "big15");
-        assert!(listed.iter().all(|snippet| snippet["keyword"] != "small"));
+        assert!(
+            listed.iter().all(|snippet| snippet["keyword"] != "named"),
+            "a keyword and name count toward the budget too"
+        );
+    }
+
+    #[test]
+    fn preferences_leave_out_snippets_past_what_a_catalogue_holds() {
+        let mut config = Config::default();
+        for index in 0..=MAX_SNIPPETS {
+            config.snippets.insert(format!("s{index:05}"), snippet(None, "x"));
+        }
+        let (preferences, notice) = preferences(&config);
+        assert!(notice.unwrap().contains("more than 10,000"));
+        let listed = preferences["snippets"].as_array().unwrap();
+        assert_eq!(listed.len(), MAX_SNIPPETS);
+        assert_eq!(listed.last().unwrap()["keyword"], "s09999");
     }
 }
