@@ -209,7 +209,7 @@ mod tests {
             }
         }
         let dupin = crate::extensions::load_folder(&find(&source, "dupin").unwrap()).unwrap();
-        let outcome = dupin
+        let items = dupin
             .query(
                 "report",
                 None,
@@ -218,9 +218,6 @@ mod tests {
                 || false,
             )
             .unwrap();
-        let dupin_plugin_protocol::Outcome::Results { items, .. } = outcome else {
-            panic!("{outcome:?}");
-        };
         let views: Vec<_> = items.into_iter().map(|item| item.view).collect();
         assert_eq!(
             views,

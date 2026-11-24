@@ -234,11 +234,11 @@ fn bundled_id(extension: &Extension) -> Option<PackageId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extensions::tests::{extension, module};
+    use crate::extensions::tests::extension;
     use dupin_broker::{Capabilities, GrantSource, Revision};
 
     fn package(name: &str, keyword: &str, revision: &str) -> Arc<Extension> {
-        let mut extension = extension(name, keyword, module("{}"));
+        let mut extension = extension(name, keyword);
         extension.revision = Revision::new(revision).unwrap();
         extension.capabilities =
             Capabilities::parse(&serde_json::json!({ "clipboard": ["write"], "files": { "notes": { "kind": "directory", "access": ["read"] } } }))

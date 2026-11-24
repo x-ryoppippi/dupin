@@ -50,6 +50,15 @@ impl std::fmt::Debug for Compiled {
 }
 
 impl Compiled {
+    /// A package with no bytecode, for tests that route or list extensions without running one.
+    #[cfg(feature = "testing")]
+    pub fn empty() -> Self {
+        Self {
+            entry: dupin_js_runtime::DEFAULT_ENTRY.into(),
+            modules: Arc::from([]),
+        }
+    }
+
     fn entry(&self) -> &str {
         &self.entry
     }
@@ -585,8 +594,8 @@ fn footprint(_pid: u32) -> Option<u64> {
     None
 }
 
-/// The helper is another process, so its rows are checked again here, against the protocol
-/// limits a Wasm guest's answer meets.
+/// The helper is another process, so its rows are checked again here, against the protocol's
+/// limits.
 fn validate(items: &[PluginItem], limit: u32) -> Result<(), Diagnostic> {
     let request = protocol::Request {
         version: protocol::VERSION,
