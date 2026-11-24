@@ -210,6 +210,92 @@ Host services aren't connected yet. When they are, an extension will ask for the
 
 [Permissions](./permissions.md#extensions) has the rest, and [Capability broker](../capability-broker.md) the full rules.
 
+The services behind the OS-backed capabilities are in place, ready for the broker bridge to call: each checks its inputs, reads macOS access without ever prompting, bounds what it returns and answers with JSON-shaped data or an error. An error has a `code`, a `message` and, for macOS access, the `permission` (`calendars` or `pasteboard`):
+
+| `code`                  | Meaning                                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `needs-permission`      | macOS hasn't been asked yet. An extension's call never asks; you do, from Dupin, with Request Access. |
+| `permission-denied`     | macOS denied access; it changes in System Settings → Privacy & Security.                              |
+| `permission-restricted` | A configuration profile or parental controls decide.                                                  |
+| `needs-activation`      | The call needs you to choose the action.                                                              |
+| `invalid`               | An argument is malformed or out of range.                                                             |
+| `out-of-scope`          | The call reaches beyond what the extension declared.                                                  |
+| `unsupported`           | This Mac can't do what was asked.                                                                     |
+| `failed`                | macOS refused the operation.                                                                          |
+
+### Dictionary
+
+`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. A lookup takes a term of at most 200 characters and returns up to 8 entries, each with the structure Dupin's own `define` view lays out:
+
+```json
+{
+	"headword": "run",
+	"dictionary": null,
+	"pronunciation": "rʌn",
+	"groups": [
+		{
+			"partOfSpeech": "Verb",
+			"note": "(runs, running; past ran; past participle run)",
+			"senses": [
+				{
+					"definition": "[no object] move on foot faster than walking",
+					"examples": ["she ran to the station"],
+					"senses": [
+						{
+							"definition": "(of a machine) operate",
+							"examples": ["the engine runs on diesel."],
+							"senses": []
+						}
+					]
+				}
+			]
+		}
+	],
+	"sections": [{ "title": "Origin", "text": "Old English rinnan." }],
+	"truncated": false
+}
+```
+
+Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, so nothing is lost. An entry keeps at most 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`, and naming dictionaries to look in is `unsupported`.
+
+### Calendar
+
+`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. A read names a range in JavaScript milliseconds and may name calendars, a query and a limit:
+
+| Argument    | Bounds                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------- |
+| range       | `start` before `end`, both within the declared days; a wider range is `out-of-scope`, not quietly narrowed. |
+| `calendars` | 1–32 calendar names. Leave it out for every calendar.                                                       |
+| `query`     | At most 200 characters. Every word must appear in the title or location, ignoring case.                     |
+| `limit`     | 1–500 events, 100 by default.                                                                               |
+
+Events come earliest first:
+
+```json
+{
+	"id": "7F3C…:1795431600000",
+	"title": "Design review",
+	"start": 1795431600000,
+	"end": 1795435200000,
+	"allDay": false,
+	"calendar": { "name": "Work", "color": "#1badf8" },
+	"location": "Meeting room",
+	"url": null
+}
+```
+
+`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading needs macOS Calendars access. The service only checks it, and while macOS hasn't been asked a read returns `needs-permission`; an extension's call never asks. For now only Request Access on the Calendars row of Settings → Permissions asks macOS: turning the Extensions setting on doesn't, and nothing asks when you turn on one extension until the broker bridge connects these services.
+
+### Clipboard
+
+`"clipboard": ["read", "write", "watch"]` declares each kind of access separately.
+
+- **Read** returns the current copy when you choose an action: `{ "change": 42, "content": … }`, or `null` when the clipboard is empty or the copy is one Dupin never reads.
+- **Write** puts `{ "type": "text", "text": … }` (up to 1 MiB), `{ "type": "url", "url": … }` (an absolute URL of up to 8 KiB) or 1–64 files on the clipboard when you choose an action. Files are named by the handles that the extension's `files` reads and listings returned, never by path: an app you paste file references into acts on them as you, so an extension can only copy files inside a folder or file you granted it.
+- **Watch** calls the extension with each new copy, the same shape as a read, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are. At most 16 watches run at once; one that falls more than a few copies behind misses the newer ones rather than holding up clipboard history or other watches. Keeping a history is up to the extension, in its own `storage`.
+
+A read's `content` is the most specific form the copy offers: files, then a URL, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then text. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, not when the extension reads it. So while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); under the default policy they return `needs-permission`, and Dupin only asks when you choose Request Access. Writing needs no macOS permission.
+
 TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                                           | Value                                                                                         |

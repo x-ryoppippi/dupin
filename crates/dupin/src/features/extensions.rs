@@ -1,15 +1,33 @@
 use std::sync::Arc;
 
 use dupin_core::{CommandId, CommandSpec, Config, QueryEligibility};
+use dupin_host_services::{calendar, clipboard};
+use dupin_mac::privacy::Permission;
 
-use super::Feature;
 use super::apps::APPS;
+use super::{Capability, Feature, PermissionUse};
 use crate::commands::{ConfiguredCommands, id, presentation};
 use crate::extensions::{Extension, ExtensionProvider, QUERY_DEADLINE, Role};
 use crate::ui::Ui;
 
 pub(super) const FEATURE: Feature = Feature {
     reload,
+    // An extension's own grant decides whether it may use the access, so turning extensions on
+    // never asks macOS.
+    permissions: &[
+        PermissionUse {
+            capability: Capability::Permission(Permission::of(calendar::PERMISSION)),
+            label: "extensions that read calendars",
+            enabled: |config| config.extensions,
+            request_on_enable: false,
+        },
+        PermissionUse {
+            capability: Capability::Permission(Permission::of(clipboard::PERMISSION)),
+            label: "extensions that read the clipboard",
+            enabled: |config| config.extensions,
+            request_on_enable: false,
+        },
+    ],
     ..Feature::EMPTY
 };
 
