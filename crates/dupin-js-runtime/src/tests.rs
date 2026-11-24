@@ -227,6 +227,23 @@ fn deep_recursion_hits_the_stack_limit() {
 }
 
 #[test]
+fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
+    let looping = load(&fixture("startup-loop")).unwrap();
+    for result in [
+        looping.check(timeout(Duration::from_millis(100))),
+        looping
+            .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
+            .map(drop),
+    ] {
+        let diagnostic = failure(result.map(|()| Vec::new()));
+        assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
+    }
+    let allocating = load(&fixture("startup-allocation")).unwrap();
+    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|()| Vec::new()));
+    assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
+}
+
+#[test]
 fn a_promise_storm_spends_the_job_budget() {
     let package = load(&fixture("promise-storm")).unwrap();
     let diagnostic = failure(search(&package, ""));
@@ -617,6 +634,31 @@ fn source_nested_too_deeply_to_compile_is_reported_where_it_is() {
     assert_eq!(
         (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
         ("stack-limit", Some("lib.js")),
+        "{diagnostic:?}"
+    );
+
+    let typescript = format!(
+        "export const nested: unknown = {}0{};",
+        "[".repeat(depth),
+        "]".repeat(depth)
+    );
+    let sources = Sources::new(
+        "main.ts".into(),
+        vec![
+            ("lib.ts".to_owned(), typescript.into_bytes()),
+            (
+                "main.ts".to_owned(),
+                b"import './lib.ts'; export function search(): [] { return []; }".to_vec(),
+            ),
+        ],
+    )
+    .unwrap();
+    let Err(RunError::Failed(diagnostic)) = Package::compile(sources, timeout(DEADLINE)) else {
+        panic!("a TypeScript module nested {depth} deep compiled");
+    };
+    assert_eq!(
+        (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
+        ("stack-limit", Some("lib.ts")),
         "{diagnostic:?}"
     );
 }

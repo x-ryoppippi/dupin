@@ -11,7 +11,11 @@ use super::controls::{card, note, setting};
 use crate::features::{Capability, PermissionUse, permission_uses};
 use crate::icons;
 
-const ROW_ORDER: [Permission; 2] = [Permission::Accessibility, Permission::Calendars];
+const ROW_ORDER: [Permission; 3] = [
+    Permission::Accessibility,
+    Permission::Calendars,
+    Permission::Pasteboard,
+];
 const REQUEST_ORDER: [Capability; 3] = [
     Capability::Permission(Permission::Calendars),
     Capability::Permission(Permission::Accessibility),
@@ -41,7 +45,9 @@ pub(super) fn read(calendar: &CalendarAccess) -> Vec<PermissionStatus> {
                 return PermissionStatus::Access(Access::NotDetermined);
             }
             match permission {
-                Permission::Accessibility => PermissionStatus::Access(permission.status()),
+                Permission::Accessibility | Permission::Pasteboard => {
+                    PermissionStatus::Access(permission.status())
+                }
                 Permission::Calendars => calendar.status(),
             }
         })
@@ -52,6 +58,7 @@ fn glyph(permission: Permission) -> &'static Icon {
     match permission {
         Permission::Accessibility => &icons::ACCESSIBILITY,
         Permission::Calendars => &icons::CALENDAR,
+        Permission::Pasteboard => &icons::CLIPBOARD,
     }
 }
 
@@ -90,6 +97,12 @@ fn request_access(calendar: &CalendarAccess, capability: Capability) {
         Capability::Permission(permission @ Permission::Accessibility) => {
             if permission.status() == Access::NotDetermined {
                 dupin_mac::accessibility::request_once();
+            }
+        }
+        Capability::Permission(permission @ Permission::Pasteboard) => {
+            if permission.status() == Access::NotDetermined {
+                // The read that raises the prompt blocks until it is answered.
+                std::thread::spawn(dupin_mac::clipboard::request_access);
             }
         }
         Capability::PostEvent => {
@@ -160,6 +173,7 @@ fn entry_row(s: &Prefs, k: &Kit, index: usize, permission: Permission, status: P
                 detail.push_str(". Turn on a feature that uses Accessibility in General or Search.");
             }
             Permission::Calendars => detail = "Turn on Calendar search in Search to use it.".into(),
+            Permission::Pasteboard => detail = "Turn on Clipboard history in Search to use it.".into(),
         }
     }
     if status == PermissionStatus::Unavailable {
@@ -289,7 +303,14 @@ mod tests {
                         "window management",
                     ],
                 ),
-                (Permission::Calendars, vec!["calendar search"]),
+                (
+                    Permission::Calendars,
+                    vec!["extensions that read calendars", "calendar search"],
+                ),
+                (
+                    Permission::Pasteboard,
+                    vec!["extensions that read the clipboard", "clipboard history"],
+                ),
             ]
         );
     }

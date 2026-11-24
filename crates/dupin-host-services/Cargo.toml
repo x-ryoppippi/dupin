@@ -1,6 +1,6 @@
 [package]
 name = "dupin-host-services"
-description = "Scoped file reads and executable profiles that the extension broker exposes to guests."
+description = "Scoped file reads, executable profiles and the OS-backed dictionary, calendar and clipboard that the extension broker exposes to guests."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,9 +9,13 @@ homepage.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
+dupin-broker = { path = "../dupin-broker" }
 libc = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = "3"
 
 [lints]

@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 
 use dupin_js_runtime::Diagnostic;
 
-use crate::build::{BuildOptions, Bundler, bundle, missing_bundler};
+use crate::build::{BuildOptions, Rolldown, bundle, missing_rolldown};
 use crate::manifest::{MANIFEST_FILE, read_package};
 
 const REVISIONS: &str = ".dev";
@@ -32,7 +32,7 @@ pub struct Published {
 pub struct DevCopy<'a> {
     pub package_dir: &'a Path,
     pub extensions: &'a Path,
-    pub bundler: Option<&'a Bundler>,
+    pub rolldown: Option<&'a Rolldown>,
     pub options: BuildOptions,
     /// Checks a staged revision before it goes live.
     pub validate: &'a dyn Fn(&Path) -> Result<(), Diagnostic>,
@@ -45,7 +45,7 @@ impl DevCopy<'_> {
         publish(
             self.package_dir,
             self.extensions,
-            self.bundler,
+            self.rolldown,
             self.options,
             self.validate,
         )
@@ -84,7 +84,7 @@ impl DevCopy<'_> {
 fn publish(
     package_dir: &Path,
     extensions: &Path,
-    bundler: Option<&Bundler>,
+    rolldown: Option<&Rolldown>,
     options: BuildOptions,
     validate: &dyn Fn(&Path) -> Result<(), Diagnostic>,
 ) -> Result<Published, Diagnostic> {
@@ -97,7 +97,7 @@ fn publish(
 
     let revision = existing_revisions(&revisions).last().copied().unwrap_or(0) + 1;
     let staging = revisions.join(format!("r{revision}.partial"));
-    let filled = fill(package_dir, &staging, &package, bundler, options).and_then(|()| validate(&staging));
+    let filled = fill(package_dir, &staging, &package, rolldown, options).and_then(|()| validate(&staging));
     if let Err(error) = filled {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(error);
@@ -150,22 +150,22 @@ fn fill(
     package_dir: &Path,
     staging: &Path,
     package: &crate::PackageInfo,
-    bundler: Option<&Bundler>,
+    rolldown: Option<&Rolldown>,
     options: BuildOptions,
 ) -> Result<(), Diagnostic> {
     std::fs::create_dir_all(staging).map_err(|error| unwritable(staging, &error))?;
     copy(&package_dir.join(MANIFEST_FILE), &staging.join(MANIFEST_FILE))?;
     if package.needs_build() {
-        let bundler = bundler.ok_or_else(missing_bundler)?;
+        let rolldown = rolldown.ok_or_else(missing_rolldown)?;
         return bundle(
             package_dir,
             package,
-            bundler,
+            rolldown,
             &staging.join(&package.main),
             options,
         );
     }
-    for (name, path) in dupin_js_runtime::source_files(package_dir)? {
+    for (name, path) in dupin_js_runtime::source_files(package_dir, &package.main)? {
         copy(&path, &staging.join(name))?;
     }
     Ok(())

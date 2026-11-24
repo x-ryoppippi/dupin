@@ -450,8 +450,8 @@ fn next_entry(
     (entry, added, removed)
 }
 
-/// Checks a staged package before it is placed: its manifest, and that its entry is a built
-/// JavaScript module.
+/// Checks a staged package before it is placed: its manifest, and that its entry is a module
+/// the extension host runs without a build: JavaScript, or TypeScript it erases the types of.
 fn validate(folder: &Path) -> Result<Package, Error> {
     let package = manifest::read(folder)?;
     let main = Path::new(&package.main);
@@ -459,18 +459,21 @@ fn validate(folder: &Path) -> Result<Package, Error> {
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or_default();
-    let unbuilt = matches!(extension, "ts" | "mts" | "tsx" | "jsx");
-    if tree::check_path(&package.main).is_err() || !matches!(extension, "js" | "mjs") {
+    let declaration = [".d.ts", ".d.mts", ".d.tsx"]
+        .iter()
+        .any(|suffix| package.main.ends_with(suffix));
+    let module = matches!(extension, "js" | "mjs" | "ts" | "mts" | "tsx") && !declaration;
+    if tree::check_path(&package.main).is_err() || !module {
         let error = Error::new(
             "invalid-manifest",
-            "must be a relative path to a .js or .mjs file inside the package",
+            "must be a relative path to a .js, .mjs, .ts, .mts or .tsx module inside the package",
         )
         .file(manifest::PACKAGE_JSON)
         .field("dupin.main");
-        return Err(if unbuilt {
-            error.hint("Dupin runs built JavaScript only: build the entry (for example with esbuild), commit the output and point `dupin.main` at it.")
-        } else {
-            error
+        return Err(match extension {
+            "jsx" => error.hint("Dupin runs JavaScript and erasable TypeScript only: build the entry with `dupin ext build`, commit the output and point `dupin.main` at it."),
+            _ if declaration => error.hint("A declaration file only describes types: point `dupin.main` at the module itself."),
+            _ => error,
         });
     }
     let entry = folder.join(main);
@@ -478,12 +481,12 @@ fn validate(folder: &Path) -> Result<Package, Error> {
     if !is_file {
         return Err(Error::new("missing-entry", "is not in the package")
             .file(package.main.clone())
-            .hint("Commit the built JavaScript entry: Dupin never runs a build or a package manager when it installs."));
+            .hint("Commit the entry, built if the package has a build: Dupin never runs a build or a package manager when it installs."));
     }
     let source = std::fs::read(&entry)
         .map_err(|error| Error::io("io-error", format!("read {}", package.main), error))?;
     if std::str::from_utf8(&source).is_err() {
-        return Err(Error::new("invalid-entry", "is not UTF-8 JavaScript").file(package.main.clone()));
+        return Err(Error::new("invalid-entry", "is not UTF-8").file(package.main.clone()));
     }
     Ok(package)
 }

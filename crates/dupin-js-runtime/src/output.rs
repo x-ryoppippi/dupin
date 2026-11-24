@@ -1,5 +1,5 @@
-//! Reads what `search` returned into protocol rows, checking every value against the same
-//! limits a Wasm guest's response meets.
+//! Reads what `search` returned into protocol rows, checking every value against the
+//! protocol's limits.
 
 use std::collections::HashSet;
 

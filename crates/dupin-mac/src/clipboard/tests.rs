@@ -103,8 +103,7 @@ fn history(config: &str) -> Mutex<History> {
 
 /// Run one capture of `board` with the editor frontmost, and return what was recorded.
 fn capture_with(board: &Fixture, history: &Mutex<History>, apps: &[Option<App>]) -> Option<Arc<Record>> {
-    let (_stop, stopped) = mpsc::channel::<()>();
-    capture(board, board.count, apps, history, &stopped);
+    capture(board, board.count, apps, history, &AtomicBool::new(true));
     history.lock().unwrap().record(1)
 }
 
@@ -143,8 +142,8 @@ fn encoded(width: usize, height: usize, kind: &str) -> Vec<u8> {
 #[test]
 fn concealed_transient_and_generated_copies_are_never_read() {
     let plain = STRING_TYPE.to_owned();
-    assert!(!excludes_history(std::slice::from_ref(&plain)));
-    for marker in SKIPPED_TYPES {
+    assert!(!service::withheld(std::slice::from_ref(&plain)));
+    for marker in service::WITHHELD_TYPES {
         for kinds in [
             [STRING_TYPE, marker],
             [FILE_URL_TYPE, marker],
@@ -196,14 +195,12 @@ fn nothing_is_read_without_background_access_or_once_stopped() {
 
     let board = Fixture::new(&[STRING_TYPE]).text(STRING_TYPE, "note");
     let history = history("");
-    let (stop, stopped) = mpsc::channel::<()>();
-    drop(stop);
     capture(
         &board,
         board.count,
         &[app(EDITOR), app(EDITOR)],
         &history,
-        &stopped,
+        &AtomicBool::new(false),
     );
     assert!(history.lock().unwrap().record(1).is_none());
     assert!(board.reads().is_empty());
@@ -383,13 +380,35 @@ fn access_rows_offer_the_matching_macos_action() {
 
 #[test]
 fn background_reads_require_always_allow_when_macos_reports_a_policy() {
-    for (policy, expected) in [
-        (None, Access::Allowed),
-        (Some(NSPasteboardAccessBehavior::AlwaysAllow), Access::Allowed),
-        (Some(NSPasteboardAccessBehavior::Default), Access::Unasked),
-        (Some(NSPasteboardAccessBehavior::Ask), Access::Restricted),
-        (Some(NSPasteboardAccessBehavior::AlwaysDeny), Access::Restricted),
+    for (policy, expected, status, os) in [
+        (None, Access::Allowed, privacy::Access::Allowed, OsAccess::Allowed),
+        (
+            Some(NSPasteboardAccessBehavior::AlwaysAllow),
+            Access::Allowed,
+            privacy::Access::Allowed,
+            OsAccess::Allowed,
+        ),
+        (
+            Some(NSPasteboardAccessBehavior::Default),
+            Access::Unasked,
+            privacy::Access::NotDetermined,
+            OsAccess::NotDetermined,
+        ),
+        (
+            Some(NSPasteboardAccessBehavior::Ask),
+            Access::Restricted,
+            privacy::Access::NotAllowed,
+            OsAccess::Denied,
+        ),
+        (
+            Some(NSPasteboardAccessBehavior::AlwaysDeny),
+            Access::Restricted,
+            privacy::Access::Denied,
+            OsAccess::Denied,
+        ),
     ] {
         assert_eq!(background_access(policy), expected);
+        assert_eq!(policy_status(policy), status);
+        assert_eq!(status.os_access(), os);
     }
 }
