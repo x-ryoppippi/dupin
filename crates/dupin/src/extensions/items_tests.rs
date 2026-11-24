@@ -546,6 +546,7 @@ impl History {
                 ..dupin_extension_bridge::Services::none()
             },
         );
+        bridge.set_bundled(&extension.package, extension.revision.clone(), true);
         bridge.install_bundled(
             &extension.package,
             extension.revision.clone(),

@@ -583,6 +583,7 @@ fn a_users_copy_of_a_bundled_package_never_sees_its_data() {
     );
     let bundled = Revision::new("sha256:bundled").unwrap();
     let capabilities = Capabilities::parse(&capabilities).unwrap();
+    world.bridge.set_bundled(&world.id, bundled.clone(), true);
     world
         .bridge
         .install_bundled(&world.id, bundled.clone(), capabilities.clone());

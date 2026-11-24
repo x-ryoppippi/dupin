@@ -330,18 +330,14 @@ impl Bridge {
     }
 
     /// Loads a package that ships in Dupin, as [`Bridge::install`] does, into the bundled
-    /// origin, which names its own storage namespace. While `revision` is the one Dupin ships,
-    /// its scopes are granted without asking.
+    /// origin, which names its own storage namespace. While `revision` is the one
+    /// [`Bridge::set_bundled`] recorded, its scopes are granted without asking.
     pub fn install_bundled(
         &self,
         id: &PackageId,
         revision: Revision,
         capabilities: Capabilities,
     ) -> Reconciliation {
-        self.inner
-            .lock()
-            .broker
-            .set_bundled(id.clone(), revision.clone(), true);
         self.load(id, revision, capabilities, Origin::Bundled)
     }
 
