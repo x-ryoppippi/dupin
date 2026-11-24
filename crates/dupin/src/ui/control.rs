@@ -20,6 +20,24 @@ pub fn pick_indices(values: &[serde_json::Value], query: &str) -> Vec<usize> {
         .collect()
 }
 
+/// How long Enter stays inert after a caller shows the panel, so a key the user meant for
+/// another app can't choose a result someone else put in front of them.
+const CALLER_HOLD: f64 = 0.5;
+
+#[derive(Default)]
+pub(super) struct CallerHold(Option<f64>);
+
+impl CallerHold {
+    fn start(&mut self, now: f64) {
+        self.0 = Some(now);
+    }
+
+    pub(super) fn holds(&self, now: f64) -> bool {
+        self.0
+            .is_some_and(|shown| (shown..shown + CALLER_HOLD).contains(&now))
+    }
+}
+
 pub struct Picker {
     pub values: Vec<serde_json::Value>,
     pub selected: usize,
@@ -62,6 +80,7 @@ impl Ui {
                     self.edited(tx);
                 }
                 self.show(tx);
+                self.caller_hold.start(tx.clock());
                 call.finish(Ok(serde_json::Value::Null));
             }
             Command::Pick { values } => {
@@ -178,5 +197,25 @@ impl Ui {
         if self.picker.is_some() {
             tx.wake_at(clock + 0.05);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enter_stays_inert_just_after_a_caller_shows_the_panel() {
+        let mut hold = CallerHold::default();
+        assert!(!hold.holds(10.0));
+
+        hold.start(10.0);
+        assert!(hold.holds(10.0));
+        assert!(hold.holds(10.0 + CALLER_HOLD / 2.0));
+        assert!(!hold.holds(10.0 + CALLER_HOLD));
+
+        hold.start(10.3);
+        assert!(hold.holds(10.0 + CALLER_HOLD));
+        assert!(!hold.holds(10.3 + CALLER_HOLD));
     }
 }

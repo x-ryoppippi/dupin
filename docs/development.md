@@ -77,7 +77,7 @@ authentication, warmup or native E2E succeeded.
 
 ## Dependency builds
 
-The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
+The version lives in `VERSION` (see [releasing](./releasing.md)). `nix/cargo-vendor.nix` vendors the Cargo dependencies from `Cargo.lock`. crates.io packages come by their lock checksums, so a lock change needs no hash update. Git packages (only Rune) come by a hash per locked rev in that file, so a fully cached build evaluates without cloning them; evaluation fails with how to get the new hash when a locked rev has none. Every Nix build of the workspace uses that one vendor tree.
 
 Flake builds keep compiled dependencies in four outputs, one each for the
 release binary, Clippy and the tests, Hawk, whose toolchain differs, and the
@@ -90,8 +90,8 @@ if one would not. The two check builds leave out debug info, which a failing
 test does not need to report where it panicked.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
-builder and its vendor-hash definition; the hash update script evaluates it so
-updates still target `package.nix`. The non-flake `default.nix` build uses it too.
+builder. The non-flake `default.nix` build uses it too, with crane at the rev
+`flake.lock` pins.
 
 ## Build caching
 
@@ -202,9 +202,11 @@ verified by CI.
 
 ## Peak memory
 
-Dupin's physical footprint peaks at about 380–400 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's: the first render pass a process submits charges it about 185 MB, and the first blit (Rune's texture uploads) about 135 MB more, whatever the size of the work. The driver frees it within a second of the GPU going idle and charges it again on the next frame. A bare Metal blit and render pass from `osascript`, with no Rune, shows both charges and peaks at 327 MB; Rune's own `examples/hello` peaks at 373 MB and Dupin at 377 MB (headless `--snap` on an M5 Max). Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
+Dupin's physical footprint peaks at about 360–395 MB while it draws, then falls back to about 30 MB. Almost all of the peak is the Apple GPU driver's. It charges a process once per kind of encoder, whatever the size of the work: about 185 MB for a render pass and about 135 MB for a blit or compute encoder. It frees the charge within a second of the GPU going idle and charges it again on the next frame. Launchers drawn with AppKit don't pay this, because WindowServer composites their layers out of process.
 
-Dupin can't avoid this without drawing outside Metal. `scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over a budget (450 MB by default). The driver's charge scales with the GPU, so the budget only holds for one Mac and build configuration; pass `--budget` on others:
+Dupin encodes no blits itself. Rune's Metal backend does. Since Rune fcef33a2 ([anomalyco/rune#1764](https://github.com/anomalyco/rune/pull/1764)), textures the CPU fills, such as the glyph and image atlases, live in shared storage and are zeroed and written on the CPU, which took about 20 MB off every scenario's peak (`empty`: 383 MB to 361 MB). The blit's charge remains, because Rune still blits in other places. A buffer write that Rune can't make in place, because the GPU still reads that buffer, is staged and copied with a blit at the next flush, which happens on nearly every frame. Headless runs also zero their offscreen render target and read `--snap` frames back with blits. With every blit done on the CPU in a patched copy of Rune 86b903de, Rune's `examples/hello` peaks at 218 MB instead of 371 MB on an M5 Max, which leaves only the render pass's charge. What remains is tracked in [anomalyco/rune#1753](https://github.com/anomalyco/rune/issues/1753). The render pass's charge stays as long as Dupin draws with Metal.
+
+`scripts/footprint.nu` renders each headless scenario and fails if one's whole peak footprint, the driver's charge included, goes over `--budget` (405 MB by default), or if it rises more than `--share` (45 MB) above the `empty` scenario's. Every scenario pays the same driver charge, so the share measures Dupin's own memory rather than the GPU's; the whole-peak budget only holds for one Mac and build configuration, so pass `--budget` on others:
 
 ```sh
 cargo build -p dupin

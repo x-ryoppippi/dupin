@@ -1,6 +1,8 @@
 {
   lib,
+  runCommand,
   rustPlatform,
+  cargoVendorDir,
   resvg,
   oxipng,
   python3Packages,
@@ -44,18 +46,17 @@ let
     ];
   };
 
-  # fetchCargoVendor, not importCargoLock: Rune vendors a patched tiny-skia-path as a path
-  # dependency while resvg keeps the published one, so the lock holds two tiny-skia-path
-  # 0.11.4 packages, and importCargoLock's name-version directories collide.
-  # Update the hash whenever Cargo.lock changes: `nu scripts/update-cargo-hash.nu`.
-  # The name carries Cargo.lock's hash. A fixed-output derivation whose hash didn't change is
-  # taken from the store as it is, so with a constant name a stale vendor tree from before a
-  # lock change passed every local build and failed only on a clean CI store.
-  cargoDeps = rustPlatform.fetchCargoVendor {
-    inherit src;
-    name = "dupin-vendor-${builtins.substring 0 16 (builtins.hashFile "sha256" (root + /Cargo.lock))}";
-    hash = "sha256-H6Rjzr7jL493e+jQHNuIJ6eKWNHW7i0uZLrdTcfH7eM=";
-  };
+  # cargoSetupHook's layout over nix/cargo-vendor.nix: config.toml with `@vendor@` for the
+  # copy it makes, and the Cargo.lock it checks the source's against.
+  cargoDeps = runCommand "dupin-vendor" { } ''
+    mkdir -p "$out/.cargo"
+    for source in ${cargoVendorDir}/*/; do
+      ln -s "$(readlink -f "$source")" "$out/$(basename "$source")"
+    done
+    substitute ${cargoVendorDir}/config.toml "$out/.cargo/config.toml" \
+      --replace-fail ${cargoVendorDir} @vendor@
+    cp ${root + /Cargo.lock} "$out/Cargo.lock"
+  '';
 
   # What every Rust derivation of the workspace shares (the package here, clippy and the
   # tests in nix/checks.nix). The toolchain is nixpkgs' own, which matches the version
@@ -129,6 +130,7 @@ rustPlatform.buildRustPackage (
       inherit
         commonArgs
         packagingArgs
+        cargoVendorDir
         cargoSrc
         bundleSrc
         ;

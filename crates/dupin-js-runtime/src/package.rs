@@ -48,7 +48,7 @@ fn walk(
         }
         let relative = format!("{prefix}{name}");
         let path = entry.path();
-        let is_source = is_javascript(&name) || (typescript && is_typescript(&name));
+        let is_source = is_source_name(&name) || (typescript && is_typescript(&name));
         let followed = path.metadata();
         let is_dir = followed.as_ref().is_ok_and(|metadata| metadata.is_dir());
         if !is_dir && !is_source {
@@ -79,7 +79,7 @@ fn walk(
                     format!("nests folders more than {MAX_FOLDER_DEPTH} deep"),
                 )
                 .file(&relative)
-                .hint("Bundle the extension into fewer files with esbuild or Bun."));
+                .hint("Bundle the extension into one module with `dupin ext build`."));
             }
             walk(
                 root,
@@ -106,14 +106,16 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
-fn is_javascript(name: &str) -> bool {
+/// Whether the loader reads a file of this name as part of the package's code, whatever its
+/// entry. TypeScript files are read too when the entry is TypeScript.
+pub fn is_source_name(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
 /// Whether the file `name` can be a package's entry: JavaScript, or TypeScript other than a
 /// declaration file.
 pub fn is_module(name: &str) -> bool {
-    is_javascript(name) || is_typescript(name)
+    is_source_name(name) || is_typescript(name)
 }
 
 /// A package's modules, read from its folder within the package limits. Dupin reads it and
@@ -206,7 +208,7 @@ fn too_many_files() -> Diagnostic {
         "too-many-files",
         format!("The package has more than {MAX_SOURCE_FILES} modules"),
     )
-    .hint("Bundle the extension into fewer files with esbuild or Bun.")
+    .hint("Bundle the extension into one module with `dupin ext build`.")
 }
 
 fn too_large(name: &str) -> Diagnostic {
@@ -249,7 +251,7 @@ pub(crate) fn resolve(
             "is neither a relative path nor `dupin`",
         ))
         .hint(
-            "Import package files with `./`, and bundle dependencies with esbuild or Bun before installing.",
+            "Import package files with `./`, and bundle dependencies with `dupin ext build` before installing.",
         ));
     }
     let mut parts: Vec<&str> = base.split('/').collect();

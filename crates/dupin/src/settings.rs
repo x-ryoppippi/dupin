@@ -136,8 +136,13 @@ fn location(source: &str, offset: usize) -> (usize, usize) {
 }
 
 /// Rename a new file over the old one so a crash leaves the old one whole. A symlinked
-/// config.toml is written where it points, so the link, and whoever manages it, stays.
+/// config.toml is written where it points, so the link, and whoever manages it, stays. That
+/// folder may be one other users can write, so the new file takes a name no one can have
+/// put a link at. It keeps the old file's mode, so a file the user made private stays so.
 fn write(path: &Path, toml: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
     if !writable(path) {
         return Err(std::io::Error::other(format!("{} is read-only", path.display())));
     }
@@ -146,9 +151,22 @@ fn write(path: &Path, toml: &str) -> std::io::Result<()> {
         .parent()
         .ok_or_else(|| std::io::Error::other("no parent directory"))?;
     std::fs::create_dir_all(dir)?;
-    let tmp = target.with_extension("toml.tmp");
-    std::fs::write(&tmp, toml)?;
-    std::fs::rename(tmp, target)
+    let mut staged = tempfile::Builder::new()
+        .prefix(&format!(
+            ".{}.",
+            target.file_name().unwrap_or_default().to_string_lossy()
+        ))
+        .suffix(".tmp")
+        .tempfile_in(dir)?;
+    match std::fs::symlink_metadata(&target) {
+        Ok(old) => staged
+            .as_file()
+            .set_permissions(std::fs::Permissions::from_mode(old.permissions().mode() & 0o777))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    staged.write_all(toml.as_bytes())?;
+    staged.persist(target).map(drop).map_err(|error| error.error)
 }
 
 #[cfg(test)]
@@ -249,6 +267,45 @@ script = "missing.sh"
         write(&path, "a = 2\n").unwrap();
 
         assert!(std::fs::symlink_metadata(&path).unwrap().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
+    }
+
+    #[test]
+    fn keeps_the_mode_of_the_file_it_replaces() {
+        let dir = scratch("mode");
+        let fresh = dir.join("fresh/config.toml");
+        write(&fresh, "a = 1\n").unwrap();
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&fresh), 0o600);
+
+        let real = dir.join("dotfiles.toml");
+        let path = dir.join("config.toml");
+        std::fs::write(&real, "a = 1\n").unwrap();
+        symlink(&real, &path).unwrap();
+        for kept in [0o600, 0o640, 0o644] {
+            std::fs::set_permissions(&real, std::fs::Permissions::from_mode(kept)).unwrap();
+            write(&path, "a = 2\n").unwrap();
+            assert_eq!(mode(&real), kept);
+        }
+    }
+
+    #[test]
+    fn never_writes_through_a_link_beside_the_target() {
+        let dir = scratch("planted-link");
+        let real = dir.join("dotfiles.toml");
+        std::fs::write(&real, "a = 1\n").unwrap();
+        let path = dir.join("config.toml");
+        symlink(&real, &path).unwrap();
+        let victim = dir.join("victim");
+        std::fs::write(&victim, "keep").unwrap();
+        let planted = real.with_extension("toml.tmp");
+        symlink(&victim, &planted).unwrap();
+
+        write(&path, "a = 2\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep");
+        assert!(std::fs::symlink_metadata(&planted).unwrap().is_symlink());
+        assert!(std::fs::symlink_metadata(&real).unwrap().is_file());
         assert_eq!(std::fs::read_to_string(&real).unwrap(), "a = 2\n");
     }
 

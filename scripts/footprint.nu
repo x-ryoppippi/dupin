@@ -3,14 +3,17 @@
 use headless-config.nu scenario-env
 
 # Render each headless scenario in scripts/headless and fail if any run's peak physical footprint
-# (what Activity Monitor shows as "Memory" at its highest) goes over `--budget`.
+# (what Activity Monitor shows as "Memory" at its highest) goes over `--budget`, or if what a
+# scenario adds over the empty panel goes over `--share`.
 #
 # Most of the peak belongs to the GPU driver, not Dupin: see "Peak memory" in
-# docs/development.md. That share scales with the Mac's GPU, so the default budget fits the
-# M5 Max it was measured on; pass `--budget` elsewhere.
+# docs/development.md. The driver's charge scales with the Mac's GPU, so the default `--budget`
+# fits the M5 Max it was measured on; pass it elsewhere. Every scenario pays the same charge, so
+# `--share`, measured against the `empty` scenario, leaves it out.
 def main [
     --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
-    --budget: filesize = 450MB # The highest peak footprint a scenario may reach
+    --budget: filesize = 405MB # The highest peak footprint a scenario may reach
+    --share: filesize = 45MB # How far a scenario's peak may rise above the empty panel's
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
@@ -25,9 +28,19 @@ def main [
         {name: $name, peak: $peak}
     }
     rm --recursive $tmp
-    let over = $runs | where peak > $budget
+    let empty = $runs | where name == empty
+    if ($empty | is-empty) {
+        error make {
+            msg: "scripts/headless/empty.json is the baseline for --share, and it is missing"
+        }
+    }
+    let floor = $empty | first | get peak
+    let runs = $runs | insert share {|run| $run.peak - $floor }
+    let over = $runs | where peak > $budget or share > $share
     if ($over | is-not-empty) {
-        error make {msg: $"peak footprint over the ($budget) budget:\n($over | table)"}
+        error make {
+            msg: $"over the ($budget) peak or ($share) share budget:\n($over | table)"
+        }
     }
     $runs
 }

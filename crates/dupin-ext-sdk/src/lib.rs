@@ -8,7 +8,7 @@ pub mod dev;
 mod manifest;
 mod scaffold;
 
-pub use build::{BuildOptions, Built, Bundler, BundlerKind, build};
+pub use build::{BuildOptions, Built, Rolldown, build};
 pub use dupin_js_runtime::Diagnostic;
 pub use manifest::PackageInfo;
 pub use scaffold::{Template, scaffold};
