@@ -1,5 +1,6 @@
 //! `extensions.lock` in Dupin's data directory: what `dupin ext install` placed, pinned by
-//! commit and content hash, with the scopes the user granted.
+//! commit and content hash, with the scopes each package requests. The broker's grant files,
+//! not the lock, hold what the user granted.
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -42,13 +43,11 @@ pub struct Entry {
     /// The scopes the package's manifest requests.
     #[serde(default)]
     pub requested: Vec<String>,
-    /// The scopes the user granted; always a subset of `requested`.
-    #[serde(default)]
-    pub granted: Vec<String>,
-    /// Scopes an update added that the user hasn't consented to yet.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pending_consent: Vec<String>,
 }
+
+/// Keys locks written before the broker owned grants carry. Nothing ever filled them, since no
+/// consent existed then, so they are dropped rather than migrated.
+const RETIRED_KEYS: [&str; 2] = ["granted", "pending_consent"];
 
 impl Lock {
     /// The lock at `path`, or an empty one when there is none yet.
@@ -68,11 +67,22 @@ impl Lock {
                 ));
             }
         };
-        let lock: Self = toml::from_str(&source).map_err(|error| {
+        let invalid = |error: toml::de::Error| {
             Error::new("invalid-lock", error.message().trim_end().to_owned())
                 .file(LOCK_FILE)
                 .hint("Restore extensions.lock, or delete it and reinstall your extensions.")
-        })?;
+        };
+        let mut table: toml::Table = toml::from_str(&source).map_err(invalid)?;
+        if let Some(toml::Value::Table(packages)) = table.get_mut("packages") {
+            for (_, entry) in packages.iter_mut() {
+                if let toml::Value::Table(entry) = entry {
+                    for key in RETIRED_KEYS {
+                        entry.remove(key);
+                    }
+                }
+            }
+        }
+        let lock: Self = table.try_into().map_err(invalid)?;
         if lock.version != VERSION {
             return Err(Error::new(
                 "invalid-lock",
@@ -205,14 +215,20 @@ mod tests {
                 version: "1.0.0".into(),
                 keyword: "wc".into(),
                 requested: vec!["http:https://example.com".into()],
-                granted: vec![],
-                pending_consent: vec![],
             },
         );
         lock.write(&path).unwrap();
         assert_eq!(Lock::read(&path).unwrap(), lock);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("[packages.word-count]"), "{text}");
+        assert!(!text.contains("granted"), "{text}");
+
+        let retired = text.replace(
+            "requested = [",
+            "granted = []\npending_consent = [\"files:notes\"]\nrequested = [",
+        );
+        std::fs::write(&path, &retired).unwrap();
+        assert_eq!(Lock::read(&path).unwrap(), lock);
 
         std::fs::write(&path, format!("{text}\nsurprise = 1\n")).unwrap();
         assert_eq!(Lock::read(&path).unwrap_err().code, "invalid-lock");

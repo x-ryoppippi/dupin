@@ -41,7 +41,10 @@ let
             _module.args.pkgs = pkgs;
             programs.dupin = {
               enable = true;
-              package = pkgs.emptyDirectory;
+              # Stands in for `dupin ext revision`, which names the revision of the folder.
+              package = pkgs.writeShellScriptBin "dupin" ''
+                [ "$1 $2" = "ext revision" ] && printf 'blake3:%s\n' "$(basename "$3" | cut -c1-8)"
+              '';
             }
             // dupin;
           };
@@ -55,11 +58,17 @@ let
     extensions = [
       {
         src = fixture;
-        grants = [ "clipboard:write" ];
+        grants = [
+          "clipboard:write"
+          "files:notes"
+        ];
+        bindings."files:notes" = "/Users/me/Notes";
       }
       {
         src = fixture;
         name = "word-count-copy";
+        deny = [ "clipboard:read" ];
+        enable = false;
       }
     ];
   };
@@ -84,12 +93,29 @@ pkgs.runCommand "dupin-home-manager-module"
     ];
     grants = declared.xdg.configFile."dupin/extension-grants.toml".source;
     expected = builtins.toJSON {
-      word-count.grants = [ "clipboard:write" ];
-      word-count-copy.grants = [ ];
+      version = 1;
+      packages = {
+        word-count = {
+          enabled = true;
+          grant = [
+            "clipboard:write"
+            "files:notes"
+          ];
+          deny = [ ];
+          bindings."files:notes" = "/Users/me/Notes";
+        };
+        word-count-copy = {
+          enabled = false;
+          grant = [ ];
+          deny = [ "clipboard:read" ];
+          bindings = { };
+        };
+      };
     };
   }
   ''
-    toml2json "$grants" | jq --sort-keys . > actual.json
+    toml2json "$grants" | jq --sort-keys 'del(.packages[].revision)' > actual.json
+    toml2json "$grants" | jq -e '[.packages[].revision] | all(startswith("blake3:"))'
     printf '%s' "$expected" | jq --sort-keys . > expected.json
     diff expected.json actual.json
     touch $out

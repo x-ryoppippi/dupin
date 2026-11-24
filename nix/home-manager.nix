@@ -10,6 +10,39 @@
     let
       cfg = config.programs.dupin;
       toml = pkgs.formats.toml { };
+      # The capability broker's declarative base. Its grants name the revision Dupin computes
+      # from the package, which only the package's own Dupin can compute, so it is filled in
+      # when the file builds rather than while Nix evaluates.
+      grantsFile =
+        pkgs.runCommand "dupin-extension-grants.toml"
+          {
+            nativeBuildInputs = [
+              pkgs.jq
+              pkgs.remarshal
+            ];
+            packages = builtins.toJSON (
+              map (extension: {
+                inherit (extension)
+                  name
+                  src
+                  grants
+                  deny
+                  bindings
+                  ;
+                enabled = extension.enable;
+              }) cfg.extensions
+            );
+            passAsFile = [ "packages" ];
+          }
+          ''
+            jq -c '.[]' "$packagesPath" | while read -r package; do
+              src=$(jq -r .src <<<"$package")
+              revision=$(${lib.getExe' cfg.package "dupin"} ext revision "$src")
+              jq --arg revision "$revision" \
+                '{(.name): {revision: $revision, enabled, grant: .grants, deny, bindings}}' <<<"$package"
+            done | jq -s '{version: 1, packages: (add // {})}' > grants.json
+            json2toml grants.json "$out"
+          '';
       extension = lib.types.submodule (
         { config, ... }:
         {
@@ -48,8 +81,36 @@
               description = ''
                 Capability scopes granted ahead of time, named as the capability broker names
                 the scopes the package's `dupin.capabilities` declares, such as
-                `http:https://api.example.com`, `files:notes` or `clipboard:write`. They are the read-only base; grants
-                chosen in Dupin overlay them. macOS still asks for its own permissions on first use.
+                `http:https://api.example.com`, `files:notes` or `clipboard:write`. They apply to
+                exactly this `src`: Dupin's own revision of it is computed when the
+                configuration builds. A `files` or `exec` scope also needs its path in
+                `bindings`. They are the read-only base; choices made in Dupin can take them
+                away but never widen them. macOS still asks for its own permissions on first use.
+              '';
+            };
+            deny = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "clipboard:read" ];
+              description = "Scopes the package may never be granted, even from Dupin.";
+            };
+            bindings = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              example = {
+                "files:notes" = "/Users/me/Notes";
+              };
+              description = ''
+                The absolute path a granted `files` or `exec` scope is bound to: the file or
+                folder it may read, or the program it runs.
+              '';
+            };
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = ''
+                Whether the package may use what it is granted. `false` keeps it off for every
+                revision, whatever Dupin's own switch says.
               '';
             };
           };
@@ -117,11 +178,7 @@
               source = toml.generate "dupin-config.toml" cfg.settings;
             };
             "dupin/extension-grants.toml" = lib.mkIf (cfg.extensions != [ ]) {
-              source = toml.generate "dupin-extension-grants.toml" (
-                lib.listToAttrs (
-                  map (extension: lib.nameValuePair extension.name { inherit (extension) grants; }) cfg.extensions
-                )
-              );
+              source = grantsFile;
             };
           }
           (lib.listToAttrs (
