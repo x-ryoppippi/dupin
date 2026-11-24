@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use dupin_core::{CommandId, ExtensionRequest};
+use dupin_core::{CommandId, ExtensionRequest, Provider};
 use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
 use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
-use crate::extensions::packages::Packages;
+use crate::extensions::packages::{Listed, Packages};
 use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
 use crate::features::extensions::Port;
 
 /// The bundled extensions, always, and the extensions folder while `extensions = true`; which
 /// of them run; and which own a command and searcher now.
-pub(super) struct Extensions {
+pub(crate) struct Extensions {
     bundled: Folder,
     user: Folder,
     packages: Packages,
@@ -38,7 +38,7 @@ struct Folder {
 }
 
 impl Extensions {
-    pub(super) fn new(bridge: Bridge, ports: HashMap<CommandId, Arc<Port>>) -> Self {
+    pub(crate) fn new(bridge: Bridge, ports: HashMap<CommandId, Arc<Port>>) -> Self {
         Self {
             bundled: Folder::default(),
             user: Folder::default(),
@@ -68,6 +68,108 @@ impl Extensions {
             Origin::User => &mut self.user,
         }
     }
+
+    /// Takes a folder's latest scan.
+    pub(crate) fn scanned(&mut self, origin: Origin, catalog: Catalog) {
+        self.folder(origin).problems = catalog.problems;
+        self.packages.set(origin, catalog.extensions);
+    }
+
+    /// Forgets a folder's packages and stops reading it, as turning the extensions folder off
+    /// does, so a bundled extension a copy there replaced answers again.
+    pub(crate) fn stop(&mut self, origin: Origin) {
+        let folder = self.folder(origin);
+        folder.epoch += 1;
+        folder.problems.clear();
+        folder.watch = None;
+        self.packages.set(origin, Vec::new());
+    }
+
+    /// Registers the extensions that run now in `registration`, hands each command's extension
+    /// to its built-in's port or back for a searcher, and takes it back from a command it no
+    /// longer answers. `current` is the command on screen.
+    pub(crate) fn install(
+        &mut self,
+        registration: &mut crate::commands::ConfiguredCommands,
+        current: &CommandId,
+    ) -> Installed {
+        let active = self.packages.active();
+        let added = crate::features::extensions::add_extensions(registration, &active);
+        self.active = active;
+        let registered: HashMap<_, _> = added
+            .registered
+            .into_iter()
+            .map(|(id, extension, role)| (id, (extension, role)))
+            .collect();
+        let answers = |registered: &HashMap<CommandId, (Arc<Extension>, Role)>| {
+            registered
+                .get(current)
+                .map(|(extension, _)| Arc::as_ptr(extension))
+        };
+        let current_changed = answers(&registered) != answers(&self.registered)
+            && (self.registered.contains_key(current) || self.ports.contains_key(current));
+        let ports = &self.ports;
+        let mut dropped = Vec::new();
+        self.registered.retain(|id, (extension, _)| {
+            let keep = registered
+                .get(id)
+                .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
+            if !keep {
+                match ports.get(id) {
+                    Some(port) => port.set(None),
+                    None => dropped.push(id.clone()),
+                }
+            }
+            keep
+        });
+        let mut searchers = Vec::new();
+        for (id, (extension, role)) in registered {
+            if self.registered.contains_key(&id) {
+                continue;
+            }
+            let provider =
+                crate::features::extensions::provider(extension.clone(), role, self.bridge.clone());
+            if let Some(provider) = crate::features::extensions::hand_over(&self.ports, &id, provider) {
+                searchers.push((id.clone(), provider));
+            }
+            self.registered.insert(id, (extension, role));
+        }
+        let routed: Vec<_> = self.registered.values().cloned().collect();
+        let listing = self.packages.listing(|extension| {
+            routed
+                .iter()
+                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+        });
+        let problems = self
+            .bundled
+            .problems
+            .iter()
+            .chain(&self.user.problems)
+            .cloned()
+            .chain(added.problems)
+            .collect();
+        Installed {
+            dropped,
+            searchers,
+            listing,
+            problems,
+            current_changed,
+        }
+    }
+}
+
+/// What a registry install changed, for the launcher to carry out on its searchers and show in
+/// Settings.
+pub(crate) struct Installed {
+    /// Commands whose extension no longer answers them, so their searcher goes.
+    pub dropped: Vec<CommandId>,
+    /// Commands that need a searcher of their own, over the extension that answers them now.
+    pub searchers: Vec<(CommandId, Arc<dyn Provider>)>,
+    /// Every present extension, as Settings → Extensions lists it.
+    pub listing: Vec<Listed>,
+    pub problems: Vec<String>,
+    /// Whether another extension, or none, now answers the command on screen.
+    pub current_changed: bool,
 }
 
 impl Ui {
@@ -90,11 +192,7 @@ impl Ui {
     }
 
     fn stop_extensions(&mut self, origin: Origin) {
-        let folder = self.extensions.folder(origin);
-        folder.epoch += 1;
-        folder.problems.clear();
-        folder.watch = None;
-        self.extensions.packages.set(origin, Vec::new());
+        self.extensions.stop(origin);
         self.install_declarations();
     }
 
@@ -135,8 +233,7 @@ impl Ui {
         if epoch != folder.epoch || folder.watch.is_none() {
             return;
         }
-        folder.problems = catalog.problems;
-        self.extensions.packages.set(origin, catalog.extensions);
+        self.extensions.scanned(origin, catalog);
         self.install_declarations();
         let config = self.configuration.values.borrow().clone();
         self.apply_config(&config, tx);
@@ -146,77 +243,23 @@ impl Ui {
         &mut self,
         registration: &mut crate::commands::ConfiguredCommands,
     ) -> bool {
-        let active = self.extensions.packages.active();
-        let added = crate::features::extensions::add_extensions(registration, &active);
-        self.extensions.active = active;
-        let registered: HashMap<_, _> = added
-            .registered
-            .into_iter()
-            .map(|(id, extension, role)| (id, (extension, role)))
-            .collect();
-        let current = self.session.command_id();
-        let answers = |registered: &HashMap<CommandId, (Arc<Extension>, Role)>| {
-            registered
-                .get(current)
-                .map(|(extension, _)| Arc::as_ptr(extension))
-        };
-        let active_changed = answers(&registered) != answers(&self.extensions.registered)
-            && (self.extensions.registered.contains_key(current)
-                || self.extensions.ports.contains_key(current));
-        let ports = &self.extensions.ports;
-        self.extensions.registered.retain(|id, (extension, _)| {
-            let keep = registered
-                .get(id)
-                .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
-            if !keep {
-                match ports.get(id) {
-                    Some(port) => port.set(None),
-                    None => {
-                        self.searchers.remove(id);
-                        self.deadlines.remove(id);
-                    }
-                }
-            }
-            keep
-        });
-        for (id, (extension, role)) in registered {
-            if self.extensions.registered.contains_key(&id) {
-                continue;
-            }
-            let provider = crate::features::extensions::provider(
-                extension.clone(),
-                role,
-                self.extensions.bridge.clone(),
-            );
-            if let Some(provider) =
-                crate::features::extensions::hand_over(&self.extensions.ports, &id, provider)
-            {
-                let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
-                self.searchers.insert(id.clone(), searcher);
-            }
-            self.extensions.registered.insert(id, (extension, role));
+        let current = self.session.command_id().clone();
+        let installed = self.extensions.install(registration, &current);
+        for id in &installed.dropped {
+            self.searchers.remove(id);
+            self.deadlines.remove(id);
         }
-        let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
-        let listing = self.extensions.packages.listing(|extension| {
-            routed
-                .iter()
-                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
-        });
-        let problems: Vec<_> = self
-            .extensions
-            .bundled
-            .problems
-            .iter()
-            .chain(&self.extensions.user.problems)
-            .cloned()
-            .chain(added.problems)
-            .collect();
+        for (id, provider) in installed.searchers {
+            let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
+            self.searchers.insert(id, searcher);
+        }
+        let (listing, problems) = (installed.listing, installed.problems);
         let bridge = self.extensions.bridge.clone();
         self.prefs.update(move |prefs, _| {
             prefs.reflect_extensions(listing, problems);
             prefs.reflect_extension_access(bridge);
         });
-        active_changed
+        installed.current_changed
     }
 
     /// Watches the clipboard for each present package that declares it; [`Packages::set`]
