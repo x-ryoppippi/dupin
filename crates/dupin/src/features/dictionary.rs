@@ -18,6 +18,7 @@ pub(super) const FEATURE: Feature = Feature {
     bundled: Some(Bundled {
         package: PACKAGE,
         command: DICTIONARY,
+        paste_notice: None,
         enabled: |_| true,
     }),
     ..Feature::EMPTY

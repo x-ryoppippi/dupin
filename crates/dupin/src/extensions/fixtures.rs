@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
@@ -18,10 +19,10 @@ use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::{Call, ClipboardAccess, Request, Trigger};
 use dupin_extension_host::{ActionEffect, Host};
 use dupin_js_runtime::row::{Row, RowEffect};
-use dupin_js_runtime::{Diagnostic, RunError};
+use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
 
-use super::catalogue::{Cached, Convert};
+use super::catalogue::{Asking, Cached, Convert};
 use super::provider::row_item;
 use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
 
@@ -154,38 +155,37 @@ impl<'a> Held<'a> {
     }
 
     /// The catalogue's matches for `query`, as the launcher ranks and groups them, asking the
-    /// package through `host` first when the catalogue is missing, invalidated or expired.
+    /// package through `host` with `preferences` first when the catalogue is missing,
+    /// invalidated, expired or asked for with others.
     fn search(
         &self,
         host: &Host,
         query: &str,
         limit: usize,
+        preferences: &Arc<Preferences>,
         call: &Call,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let preferences = self.extension.preferences();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, settings: &Preferences| {
             host.items(
                 &self.extension.compiled,
                 cursor,
                 reason,
-                &preferences,
+                self.extension.preferences_with(settings),
                 deadline,
                 cancelled,
                 &call.services,
             )
         };
+        let asking = Asking {
+            preferences,
+            generation: call.generation,
+            role: super::Role::Keyword,
+        };
         let batches = self
             .cached
-            .search(
-                query,
-                limit,
-                &mut fetch,
-                self,
-                call.generation,
-                super::Role::Keyword,
-            )
+            .search(query, limit, asking, &mut fetch, self)
             .map_err(|error| self.extension.located(error))?;
         let held = self.rows.borrow();
         Ok(batches
@@ -214,6 +214,7 @@ fn query_rows(
     extension: &Extension,
     held: &Held<'_>,
     query: &str,
+    preferences: &Arc<Preferences>,
     call: &Call,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Vec<Row>, RunError> {
@@ -232,7 +233,7 @@ fn query_rows(
     }
     if exports.items {
         let left = limit.saturating_sub(rows.len());
-        rows.extend(held.search(host, query, left, call, cancelled)?);
+        rows.extend(held.search(host, query, left, preferences, call, cancelled)?);
     }
     Ok(rows)
 }
@@ -248,6 +249,7 @@ fn replay(
     let host = fixture_host(name, fixture)?;
     let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
     let call = |trigger| world.bridge.call(&extension.package, trigger);
+    let preferences = Arc::new(fixture.preferences.clone());
     let held = Held::new(extension);
     let mut rows: Vec<Row> = Vec::new();
     let mut selected: Option<usize> = None;
@@ -258,7 +260,15 @@ fn replay(
         let mut problem = None;
         match action {
             Action::Query(query) => {
-                let answer = query_rows(&host, extension, &held, query, &call(Trigger::Query), cancelled);
+                let answer = query_rows(
+                    &host,
+                    extension,
+                    &held,
+                    query,
+                    &preferences,
+                    &call(Trigger::Query),
+                    cancelled,
+                );
                 rows = match answer {
                     Ok(items) => items,
                     Err(error) => {
@@ -297,7 +307,7 @@ fn replay(
                 });
                 match chosen {
                     Some(action) => {
-                        outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        outcome.insert("effect".into(), Value::Object(fixture::chosen(action)));
                         if let RowEffect::Paste { text } = &action.effect {
                             let paste = Request::Clipboard(ClipboardAccess::Paste);
                             // The launcher copies instead, so the fixture sees what the user would.
@@ -306,8 +316,11 @@ fn replay(
                                     .bridge
                                     .authorize(&extension.package, &paste, Trigger::Activation)
                             {
-                                let copied = RowEffect::Copy { text: text.clone() };
-                                outcome.insert("effect".into(), Value::Object(fixture::effect(&copied)));
+                                let copied = dupin_js_runtime::row::RowAction {
+                                    effect: RowEffect::Copy { text: text.clone() },
+                                    ..action.clone()
+                                };
+                                outcome.insert("effect".into(), Value::Object(fixture::chosen(&copied)));
                                 outcome.insert(
                                     "error".into(),
                                     fixture::error(&Diagnostic::new(
@@ -322,7 +335,7 @@ fn replay(
                                 &extension.compiled,
                                 handler,
                                 data.as_ref().unwrap_or(&Value::Null),
-                                &extension.preferences(),
+                                &extension.preferences_with(&preferences),
                                 Instant::now() + ACTION_DEADLINE,
                                 cancelled,
                                 &call(Trigger::Activation).services,
@@ -369,7 +382,7 @@ fn replay(
                     &extension.compiled,
                     event,
                     data,
-                    &extension.preferences(),
+                    &extension.preferences_with(&preferences),
                     Instant::now() + ACTION_DEADLINE,
                     cancelled,
                     &call(Trigger::Background).services,

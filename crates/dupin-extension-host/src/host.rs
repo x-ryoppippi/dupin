@@ -306,7 +306,7 @@ impl Host {
         package: &Compiled,
         cursor: Option<&str>,
         reason: Reason,
-        preferences: &serde_json::Value,
+        preferences: serde_json::Value,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -314,7 +314,7 @@ impl Host {
         let call = Call::Items {
             cursor: cursor.map(str::to_owned),
             reason,
-            preferences: preferences.clone(),
+            preferences,
         };
         let request = Request::run(package, call, Work::Items);
         match self.call(package.domain, request, deadline, is_cancelled, services)? {

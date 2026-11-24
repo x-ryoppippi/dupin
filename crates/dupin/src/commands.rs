@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::snippets::SnippetCatalog;
 use dupin_core::{
     CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
@@ -15,7 +14,6 @@ pub struct Registration {
     pub providers: HashMap<CommandId, Arc<dyn Provider>>,
     pub notice: Option<String>,
     pub web: Arc<RwLock<crate::web::WebCatalog>>,
-    pub snippets: Arc<RwLock<SnippetCatalog>>,
     pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
     pub system_provider: Arc<system_commands::SystemProvider>,
@@ -27,7 +25,8 @@ pub struct ConfiguredCommands {
     pub registry: CommandRegistry,
     pub notice: Option<String>,
     pub web: crate::web::WebCatalog,
-    pub snippets: SnippetCatalog,
+    /// What the bundled snippets package reads as `ctx.preferences`.
+    pub snippets: dupin_js_runtime::Preferences,
 }
 
 pub(super) fn id(value: &str) -> CommandId {
@@ -58,7 +57,7 @@ pub(super) struct Configure {
     pub pinned: Option<CommandId>,
     pub notices: Vec<String>,
     pub web: crate::web::WebCatalog,
-    pub snippets: SnippetCatalog,
+    pub snippets: dupin_js_runtime::Preferences,
 }
 
 impl Configure {
@@ -84,7 +83,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
         pinned: None,
         notices: Vec::new(),
         web: crate::web::WebCatalog::default(),
-        snippets: SnippetCatalog::default(),
+        snippets: dupin_js_runtime::Preferences::new(),
     };
     for feature in MANIFEST {
         (feature.configure)(config, &mut commands)?;
@@ -137,7 +136,7 @@ pub fn register(
     } = configured(config)?;
     let session = Session::new(history, registry)?;
     let web = Arc::new(RwLock::new(web));
-    let snippets = Arc::new(RwLock::new(snippets));
+    crate::features::snippets::hand_over(snippets);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
     let system_provider = Arc::new(system_commands::SystemProvider::new(config.system_automation));
@@ -146,7 +145,6 @@ pub fn register(
         providers: HashMap::new(),
         notice,
         web,
-        snippets,
         file_demotions,
         scripts,
         system_provider,
@@ -179,7 +177,6 @@ mod tests {
         system::SYSTEM,
         web::WEB_KEYWORDS,
     };
-    use dupin_core::snippets::SnippetProvider;
 
     #[test]
     fn manifest_preserves_command_ids_provider_order_and_keywords() {
@@ -851,63 +848,13 @@ mod tests {
         let notice = configured.notice.unwrap();
         assert!(notice.contains("snippet_keywords"));
         assert!(notice.contains("web searches"));
-        assert_ne!(configured.snippets, SnippetCatalog::default());
+        assert_eq!(configured.snippets["snippets"].as_array().unwrap().len(), 1);
         let mut session = Session::new(History::default(), configured.registry).unwrap();
         assert!(matches!(
             session.set_query("s ").as_slice(),
             [Effect::ReplaceQuery(text), Effect::Search { command, query, .. }]
                 if text.is_empty() && *command == id(SNIPPETS) && query.is_empty()
         ));
-    }
-
-    #[test]
-    fn empty_snippet_search_lists_the_whole_catalogue() {
-        use dupin_core::config::Snippet;
-        use dupin_core::{Delivery, Effect, Request};
-
-        let config = Config {
-            snippets: (0..64)
-                .map(|i| {
-                    (
-                        format!("snippet-{i:02}"),
-                        Snippet {
-                            name: None,
-                            text: format!("Example {i}"),
-                        },
-                    )
-                })
-                .collect(),
-            ..Config::default()
-        };
-        let configured = configured(&config).unwrap();
-        let provider = SnippetProvider::new(Arc::new(RwLock::new(configured.snippets)));
-        let mut session = Session::new(History::default(), configured.registry).unwrap();
-        let effects = session.set_query("snip ");
-        let [
-            Effect::ReplaceQuery(_),
-            Effect::Search {
-                command,
-                generation,
-                query,
-                ..
-            },
-        ] = effects.as_slice()
-        else {
-            panic!("expected a search in snippets mode, got {effects:?}");
-        };
-        let limit = session.provider_spec(command).unwrap().candidate_limit();
-        provider
-            .search(&Request::detached(query, limit), &mut |items| {
-                session.deliver_from(
-                    command.clone(),
-                    Delivery::Batch {
-                        generation: *generation,
-                        items,
-                    },
-                );
-            })
-            .unwrap();
-        assert_eq!(session.items().len(), config.snippets.len());
     }
 
     #[test]

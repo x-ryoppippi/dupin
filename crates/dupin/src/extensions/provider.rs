@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use dupin_core::catalogue::Entry;
 use dupin_core::{
     Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page,
-    Payload, Provider, ProviderError, Request, View,
+    Payload, Provider, ProviderError, Request, View, snippets,
 };
 use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_js_runtime::RunError;
@@ -163,6 +163,7 @@ fn sectioned(rows: impl Iterator<Item = (Item, Option<Arc<Detail>>, Option<Strin
 impl Convert for Extension {
     /// A catalogue row as the launcher holds it.
     fn entry(&self, mut row: Row) -> Entry {
+        let aliases = std::mem::take(&mut row.aliases);
         let keywords = std::mem::take(&mut row.keywords);
         let match_text = row.match_text.take();
         let time = row.time.map(|ms| ms / 1000);
@@ -171,6 +172,7 @@ impl Convert for Extension {
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
+            aliases,
             keywords,
             section: section.map(Into::into),
             detail,
@@ -181,8 +183,12 @@ impl Convert for Extension {
         }
     }
 
-    /// Carries the extension's ID, since usage history keys rows by ID across every command.
+    /// Carries the extension's ID, since usage history keys rows by ID across every command. A
+    /// built-in's port keeps the IDs the built-in gave its rows, so what was used carries over.
     fn entry_id(&self, id: &str) -> String {
+        if crate::features::ported_command(&self.id).is_some() {
+            return id.to_owned();
+        }
         format!("extension:{}/{id}", self.id)
     }
 }
@@ -206,6 +212,7 @@ pub(super) fn row_item(
         id,
         title,
         subtitle,
+        aliases: _,
         keywords: _,
         match_text: _,
         time: _,
@@ -226,10 +233,19 @@ pub(super) fn row_item(
         }
         Arc::new(shown)
     });
+    // Dupin reads the clipboard unfiltered to fill a template, as the built-in it ports did, so
+    // only the package Dupin shipped for a built-in gets templates; any other copies as written.
+    let templates = crate::features::fills_templates(&extension.package);
+    // Text Dupin fills in only when it is chosen isn't the row's text until then.
     let payload = offered
         .iter()
         .find_map(|action| match &action.effect {
-            RowEffect::Copy { text } => Some(Payload::text(text.clone())),
+            RowEffect::Copy { text }
+                if !(templates && action.template) || !snippets::has_placeholders(text) =>
+            {
+                Some(Payload::text(text.clone()))
+            }
+            RowEffect::Copy { .. } => Some(Payload::default()),
             _ => None,
         })
         .unwrap_or_default();
@@ -246,7 +262,13 @@ pub(super) fn row_item(
                     first.to_owned()
                 }
             };
+            let template = templates && action.template;
             match action.effect {
+                RowEffect::Copy { text } if template => ItemAction::new(
+                    &name(&mut copy, "copy"),
+                    &action.title,
+                    Action::Snippet { text, paste: false },
+                ),
                 RowEffect::Copy { text } => {
                     ItemAction::new(&name(&mut copy, "copy"), &action.title, Action::Copy(text))
                 }
@@ -255,7 +277,7 @@ pub(super) fn row_item(
                     &action.title,
                     Action::Extension {
                         extension: extension.id.clone(),
-                        request: ExtensionRequest::Paste { text },
+                        request: ExtensionRequest::Paste { text, template },
                     },
                 ),
                 RowEffect::OpenUrl { url } => {
@@ -306,7 +328,14 @@ pub(super) fn row_item(
         completion: None,
         score: None,
         primary: actions.first().map(|action| action.id.clone()),
-        alternate,
+        // Without an `alternate` of its own, ⌘Enter copies what Enter would paste, as it does
+        // for snippets.
+        alternate: alternate.or_else(|| {
+            actions
+                .first()
+                .filter(|action| action.id == "paste")
+                .and(copy.then(|| "copy".to_owned()))
+        }),
         actions,
     };
     (item, detail, section)
@@ -656,10 +685,59 @@ mod tests {
             rows[0].action("paste"),
             Some(&Action::Extension {
                 extension: provider.extension.id.clone(),
-                request: ExtensionRequest::Paste { text: "🍵".into() },
+                request: ExtensionRequest::Paste {
+                    text: "🍵".into(),
+                    template: false,
+                },
             })
         );
         assert_eq!(rows[0].payload, Payload::text("🍵"));
+    }
+
+    #[test]
+    fn only_the_package_dupin_shipped_for_a_built_in_fills_templates() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(super::super::manifest::PACKAGE_JSON),
+            r#"{"name": "snippets", "version": "0.1.0", "dupin": {"title": "Snippets", "keyword": "snip"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            folder.path().join("main.js"),
+            "export function search() { return [{ title: 'Quote', actions: [{ title: 'Paste', paste: '> {clipboard}', template: true }, { title: 'Copy', copy: '> {clipboard}', template: true }] }]; }",
+        )
+        .unwrap();
+        let paste = |template| Action::Extension {
+            extension: "snippets".into(),
+            request: ExtensionRequest::Paste {
+                text: "> {clipboard}".into(),
+                template,
+            },
+        };
+
+        let copy = super::super::load_folder(folder.path()).unwrap();
+        assert_eq!(crate::features::paste_notice(&copy.package), None);
+        let rows = search(&ExtensionProvider::new(copy), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(false)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Copy("> {clipboard}".into()))
+        );
+        assert_eq!(rows[0].payload, Payload::text("> {clipboard}"));
+
+        let shipped = super::super::load_bundled(folder.path()).unwrap();
+        assert!(crate::features::paste_notice(&shipped.package).is_some());
+        let rows = search(&ExtensionProvider::new(shipped), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(true)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Snippet {
+                text: "> {clipboard}".into(),
+                paste: false,
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::default());
     }
 
     #[test]

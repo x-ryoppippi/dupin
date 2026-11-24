@@ -54,6 +54,12 @@ fn case(name: &str) -> Option<Override> {
             "emoji",
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        "snippets" => Override::built_in(
+            "snippets",
+            Config::default(),
+            None,
+            Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
+        ),
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),

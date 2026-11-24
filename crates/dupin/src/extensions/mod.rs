@@ -28,7 +28,11 @@ use std::time::{Instant, SystemTime};
 use dupin_core::{Batch, Page};
 use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
 use dupin_extension_host::{Compiled, Host, Services, Trust};
-use dupin_js_runtime::{Acted, Diagnostic, Exports, Handled, Row, RunError, Sources};
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
+};
+
+use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
@@ -161,11 +165,12 @@ impl Extension {
     }
 
     /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
-    /// holds none, it went stale or it was made under another generation than `call`'s. Its
-    /// host requests go through `call`, as a search's do. Typing never cancels that, since the
-    /// next keystroke needs the same catalogue. Every part of it must arrive before `deadline`,
-    /// the search's own, so a slow catalogue fails with its own diagnostic before the search
-    /// expires. For the main search, `role` holds off asking again after a failure.
+    /// holds none, it went stale, its preferences changed or it was made under another
+    /// generation than `call`'s. Its host requests go through `call`, as a search's do. Typing
+    /// never cancels that, since the next keystroke needs the same catalogue. Every part of it
+    /// must arrive before `deadline`, the search's own, so a slow catalogue fails with its own
+    /// diagnostic before the search expires. For the main search, `role` holds off asking again
+    /// after a failure.
     pub fn catalogue(
         &self,
         query: &str,
@@ -174,21 +179,33 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<Batch>, RunError> {
-        let preferences = self.preferences();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let settings = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &settings,
+            generation: call.generation,
+            role,
+        };
+        self.catalogue
+            .search(query, limit, asking, &mut self.fetch(deadline, call), self)
+            .map_err(|error| self.located(error))
+    }
+
+    fn fetch(
+        &self,
+        deadline: Instant,
+        call: &Call,
+    ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
+        move |cursor, reason, settings| {
             host().items(
                 &self.compiled,
                 cursor,
                 reason,
-                &preferences,
+                self.preferences_with(settings),
                 deadline,
                 &|| false,
                 &call.services,
             )
-        };
-        self.catalogue
-            .search(query, limit, &mut fetch, self, call.generation, role)
-            .map_err(|error| self.located(error))
+        }
     }
 
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
@@ -198,7 +215,17 @@ impl Extension {
 
     /// What `ctx.preferences` holds for the package's calls.
     pub fn preferences(&self) -> serde_json::Value {
-        self.preferences.values(&self.id)
+        self.preferences_with(&preferences::of(&self.package))
+    }
+
+    /// The package's declared preferences with `settings`, a built-in's config.toml settings
+    /// for the package Dupin shipped for it.
+    fn preferences_with(&self, settings: &Preferences) -> serde_json::Value {
+        let mut values = self.preferences.values(&self.id);
+        if let serde_json::Value::Object(values) = &mut values {
+            values.extend(settings.clone());
+        }
+        values
     }
 
     /// A catalogue's failure, named after the package's entry when nothing else locates it.
@@ -409,6 +436,12 @@ pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     load(folder, None, false).map(|loaded| loaded.extension)
 }
 
+/// Loads the package in `folder` as one bundled with Dupin, without checking its seal.
+#[cfg(test)]
+pub(crate) fn load_bundled(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    load(folder, None, true).map(|loaded| loaded.extension)
+}
+
 /// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
 /// reports, and what `dupin ext build` and `dupin ext dev` require before a result is kept.
 pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
@@ -498,11 +531,13 @@ fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, D
         .map_err(|error| Diagnostic::new("host-error", error))
 }
 
+pub(crate) const BUNDLED_PREFIX: &str = "bundled:";
+
 /// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
 /// A bundled package is `bundled:<name>`, which no package.json name can be, so grants and
 /// choices never pass between it and a package in the extensions folder that reuses its name.
 fn package_id(manifest: &manifest::Manifest, bundled: bool) -> Result<PackageId, Diagnostic> {
-    let prefix = if bundled { "bundled:" } else { "" };
+    let prefix = if bundled { BUNDLED_PREFIX } else { "" };
     PackageId::new(format!("{prefix}{}", manifest.id)).map_err(|error| {
         Diagnostic::new("invalid-manifest", error)
             .file(manifest::PACKAGE_JSON)

@@ -69,6 +69,8 @@ declare module 'dupin' {
 		 * remembers which items are picked by it.
 		 */
 		id: string;
+		/** Up to 16 other names of up to 64 bytes, such as a short code, matched as the title is. */
+		aliases?: string[];
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
 		/** With `"match": "words"`, more text, up to 64 KiB, that finds the item; it never shows. */
@@ -110,9 +112,17 @@ declare module 'dupin' {
 		metadata?: Metadata[];
 	}
 
+	/**
+	 * `copy` and `paste` take 1 byte to 64 KiB of text. With `template`, Dupin fills `{date}`
+	 * (`2026-01-31`), `{time}` (`09:05`), `{datetime}` and `{clipboard}` (the clipboard's text)
+	 * when the action is chosen, so the package never sees the clipboard; other braces stay as
+	 * written. Only a bundled package that replaces a built-in gets templates; any other's text
+	 * is copied or pasted as written. `paste` needs the `clipboard: ['paste']` scope, and copies
+	 * without it.
+	 */
 	export type Action =
-		| { title: string; copy: string }
-		| { title: string; paste: string }
+		| { title: string; copy: string; template?: boolean }
+		| { title: string; paste: string; template?: boolean }
 		| { title: string; open: string }
 		/** Shows the file at the absolute path selected in Finder; it opens nothing. */
 		| { title: string; reveal: string }
@@ -148,8 +158,12 @@ declare module 'dupin' {
 		readonly preferences: Preferences;
 	}
 
-	/** What the user chose for each of the manifest's `preferences`, or its default. */
-	export type Preferences = Readonly<Record<string, string | boolean | number>>;
+	/**
+	 * What the user chose for each of the manifest's `preferences`, or its default. The package
+	 * Dupin shipped for a built-in that reads config.toml also finds that built-in's settings
+	 * here; a change asks `items` again with reason `load`.
+	 */
+	export type Preferences = Readonly<Record<string, Json>>;
 
 	interface CatalogueAnswer {
 		/** Seconds, from 1 to 86,400, until Dupin asks again. Without it, it asks again only when invalidated. */
@@ -185,10 +199,11 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
-	 * user types, asking again only on first use, after `ttl` or when an action or event handler
-	 * invalidates it. At most 10,000 items and 8 MiB of text. It may use host services as
-	 * `search` does: what reads, and `storage` writes too, but nothing that needs an action
-	 * the user chose. With `defaultSearch`, it may run as the user types in the main search.
+	 * user types, asking again only on first use, after `ttl`, when an action or event handler
+	 * invalidates it or when its preferences change. At most 10,000 items and 8 MiB of text. It
+	 * may use host services as `search` does: what reads, and `storage` writes too, but nothing
+	 * that needs an action the user chose. With `defaultSearch`, it may run as the user types in
+	 * the main search.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
 

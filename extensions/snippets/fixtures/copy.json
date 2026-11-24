@@ -1,0 +1,93 @@
+{
+	"fixture": 1,
+	"description": "Snippets from config.toml are listed by keyword, found by name or keyword, and copied with their placeholders left for Dupin to fill.",
+	"preferences": {
+		"snippets": [
+			{ "keyword": "addr", "name": "Home address", "text": "221B Baker Street, London NW1 6XE" },
+			{ "keyword": "quote", "name": "Quote the clipboard", "text": "> {clipboard}" },
+			{ "keyword": "sig", "name": "Email signature", "text": "Best wishes,\nSherlock" },
+			{ "keyword": "today", "name": null, "text": "{date}" }
+		],
+		"paste": false
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"id": "snippet:addr",
+						"title": "Home address",
+						"subtitle": "addr  ·  221B Baker Street, London NW1 6XE",
+						"aliases": ["addr"],
+						"actions": [
+							{
+								"title": "Copy to Clipboard",
+								"copy": "221B Baker Street, London NW1 6XE",
+								"template": true
+							}
+						]
+					},
+					{
+						"id": "snippet:quote",
+						"title": "Quote the clipboard",
+						"subtitle": "quote  ·  > {clipboard}",
+						"aliases": ["quote"],
+						"actions": [{ "title": "Copy to Clipboard", "copy": "> {clipboard}", "template": true }]
+					},
+					{
+						"id": "snippet:sig",
+						"title": "Email signature",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"aliases": ["sig"],
+						"actions": [
+							{ "title": "Copy to Clipboard", "copy": "Best wishes,\nSherlock", "template": true }
+						]
+					},
+					{
+						"id": "snippet:today",
+						"title": "today",
+						"subtitle": "today  ·  {date}",
+						"actions": [{ "title": "Copy to Clipboard", "copy": "{date}", "template": true }]
+					}
+				]
+			}
+		},
+		{
+			"query": "email",
+			"expect": {
+				"rows": [
+					{
+						"id": "snippet:sig",
+						"title": "Email signature",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"aliases": ["sig"],
+						"actions": [
+							{ "title": "Copy to Clipboard", "copy": "Best wishes,\nSherlock", "template": true }
+						]
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy to Clipboard",
+			"expect": {
+				"effect": { "copy": "Best wishes,\nSherlock", "template": true }
+			}
+		},
+		{
+			"query": "today",
+			"expect": {
+				"rows": [
+					{
+						"id": "snippet:today",
+						"title": "today",
+						"subtitle": "today  ·  {date}",
+						"actions": [{ "title": "Copy to Clipboard", "copy": "{date}", "template": true }]
+					}
+				]
+			}
+		}
+	]
+}

@@ -4,12 +4,21 @@ use super::*;
 use crate::row::{self, PageChange, RowAction, RowEffect};
 
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
+    items_with(source, cursor, reason, &Preferences::new())
+}
+
+fn items_with(
+    source: &str,
+    cursor: Option<&str>,
+    reason: Reason,
+    preferences: &Preferences,
+) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded.unwrap().items(
         &engine(),
         cursor,
         reason,
-        "{}",
+        &serde_json::Value::Object(preferences.clone()),
         timeout(DEADLINE),
         &mut Unavailable::default(),
     )
@@ -41,9 +50,9 @@ fn a_package_may_export_items_search_or_both() {
             &engine(),
             None,
             Reason::Load,
-            "{}",
+            &serde_json::json!({}),
             timeout(DEADLINE),
-            &mut Unavailable::default()
+            &mut Unavailable::default(),
         ))
         .code,
         "missing-items"
@@ -235,6 +244,33 @@ fn items_problems_name_the_field_at_fault() {
 }
 
 #[test]
+fn a_part_may_carry_its_full_text_and_a_cursor() {
+    let source = format!(
+        "export function items() {{
+           const items = [];
+           for (let left = {MAX_PAGE_BYTES}, i = 0; left > 0; i++) {{
+             const copy = 'y'.repeat(Math.min(left - 4, {MAX_ACTION_TEXT_BYTES}));
+             items.push({{ id: String(i).padStart(2, '0'), title: 'a', actions: [{{ title: 'b', copy }}] }});
+             left -= 4 + copy.length;
+           }}
+           return {{ items, cursor: 'x'.repeat(256), more: true }};
+         }}",
+        MAX_PAGE_BYTES = row::MAX_PAGE_BYTES,
+        MAX_ACTION_TEXT_BYTES = row::MAX_ACTION_TEXT_BYTES,
+    );
+    let page = items(&source, None, Reason::Load).unwrap();
+    let PageChange::Reset { rows } = &page.change else {
+        panic!("expected a list, got {:?}", page.change);
+    };
+    assert_eq!(
+        rows.iter().map(row::Row::text_bytes).sum::<usize>(),
+        row::MAX_PAGE_BYTES
+    );
+    assert_eq!(page.cursor.as_deref().map(str::len), Some(256));
+    page.validate().unwrap();
+}
+
+#[test]
 fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
     let (_folder, loaded) = package(&[(
         "main.js",
@@ -253,7 +289,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
             &engine(),
             name,
             data,
-            "{}",
+            &serde_json::json!({}),
             timeout(DEADLINE),
             &mut Unavailable::default(),
         )
@@ -370,6 +406,7 @@ fn rows_from_another_process_are_checked_again() {
             id: "a".into(),
             title: "A".into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             match_text: None,
             time: None,
@@ -409,6 +446,19 @@ fn rows_from_another_process_are_checked_again() {
                 data: None,
             })]
         }),
+        row(&|row| {
+            row.actions = vec![RowAction {
+                template: true,
+                ..action(RowEffect::OpenUrl {
+                    url: "https://example.com/".into(),
+                })
+            }]
+        }),
+        row(&|row| {
+            row.actions = vec![action(RowEffect::Copy {
+                text: "x".repeat(64 * 1024 + 1),
+            })]
+        }),
     ] {
         assert!(broken.validate(row::Source::Search).is_err(), "{broken:?}");
     }
@@ -417,4 +467,70 @@ fn rows_from_another_process_are_checked_again() {
             .validate(row::Source::Items)
             .is_ok()
     );
+}
+
+#[test]
+fn items_sees_the_preferences_frozen_through_and_through() {
+    let preferences: Preferences =
+        serde_json::from_str(r#"{ "snippets": [{ "keyword": "sig", "text": "Best" }], "paste": true }"#)
+            .unwrap();
+    let source = r#"export function items(ctx) {
+         const [first] = ctx.preferences.snippets;
+         const frozen = Object.isFrozen(ctx.preferences) && Object.isFrozen(ctx.preferences.snippets)
+           && Object.isFrozen(first);
+         return [{ id: first.keyword, title: `${first.text} ${ctx.preferences.paste} ${frozen}` }];
+       }"#;
+    let page = items_with(source, None, Reason::Load, &preferences).unwrap();
+    let PageChange::Reset { rows } = page.change else {
+        panic!("expected the whole catalogue, got {:?}", page.change);
+    };
+    assert_eq!(rows[0].title, "Best true true");
+    let none = "export function items(ctx) { return [{ id: 'a', title: String(Object.keys(ctx.preferences).length) }]; }";
+    let PageChange::Reset { rows } = items(none, None, Reason::Load).unwrap().change else {
+        panic!("expected the whole catalogue");
+    };
+    assert_eq!(rows[0].title, "0");
+}
+
+#[test]
+fn copy_and_paste_actions_may_be_templates_of_up_to_64_kib() {
+    let long = "x".repeat(64 * 1024);
+    let source = format!(
+        "export function items() {{ return [{{ id: 'a', title: 'A', actions: [\
+         {{ title: 'Paste', paste: '{{date}}', template: true }},\
+         {{ title: 'Copy', copy: '{long}', template: false }}] }}]; }}"
+    );
+    let PageChange::Reset { rows } = items(&source, None, Reason::Load).unwrap().change else {
+        panic!("expected the whole catalogue");
+    };
+    assert_eq!(
+        rows[0].actions,
+        [
+            RowAction {
+                template: true,
+                ..RowAction::new(
+                    "Paste",
+                    RowEffect::Paste {
+                        text: "{date}".into(),
+                    },
+                )
+            },
+            RowAction::new("Copy", RowEffect::Copy { text: long }),
+        ]
+    );
+    for (action, code) in [
+        (
+            "{ title: 'Open', open: 'https://example.com/', template: true }",
+            "unknown-field",
+        ),
+        ("{ title: 'Copy', copy: 'x', template: 'yes' }", "invalid-field"),
+    ] {
+        let source =
+            format!("export function items() {{ return [{{ id: 'a', title: 'A', actions: [{action}] }}]; }}");
+        assert_eq!(
+            failure_of(items(&source, None, Reason::Load)).code,
+            code,
+            "{action}"
+        );
+    }
 }

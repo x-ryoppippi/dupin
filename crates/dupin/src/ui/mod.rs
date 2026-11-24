@@ -50,7 +50,7 @@ use notices::Notices;
 use reload::backdrop_source;
 use search::spawn_searcher;
 use selection::SelectionRequest;
-use snippets::SnippetRun;
+use snippets::{RowText, SnippetRun};
 
 enum PendingPaste {
     Snippet(SnippetRun),
@@ -61,7 +61,7 @@ enum PendingPaste {
     },
     /// An extension row's text, pasted only while the permit to paste for it still holds.
     Extension {
-        text: String,
+        text: RowText,
         permit: dupin_extension_bridge::Permit,
     },
 }
@@ -122,7 +122,6 @@ pub struct Ui {
     searchers: HashMap<CommandId, Searcher>,
     pub(crate) currency: crate::calculator::Currency,
     pub(crate) web: Arc<RwLock<crate::web::WebCatalog>>,
-    pub(crate) snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
     /// What to paste once the panel has closed and the front app has its keys back.
     paste_after_close: Option<PendingPaste>,
     /// Why something wasn't pasted, to show once the panel has closed.
@@ -289,7 +288,6 @@ impl Ui {
             searchers,
             currency,
             web: registration.web,
-            snippets: registration.snippets,
             paste_after_close: None,
             notice_after_close: None,
             sharing: dupin_mac::sharing::Picker::default(),

@@ -49,7 +49,7 @@ When the user grants it, the host passes that revision and scope back to `Broker
 
 HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads, clipboard writes and pastes need an activation. Reads, storage of the package's own data and clipboard watching don't.
 
-An effect the host performs itself on a package's behalf goes through the same check: a row's `paste` action is decided as `Request::Clipboard(Paste)` with the activation that chose it, through `Bridge::authorize`, and the host validates the permit again just before posting ⌘V. Pasting needs macOS Accessibility, so Settings → Permissions lists packages that declare it on that row.
+An effect the host performs itself on a package's behalf goes through the same check: a row's `paste` action is decided as `Request::Clipboard(Paste)` with the activation that chose it, through `Bridge::authorize`, and the host validates the permit again just before posting ⌘V. Pasting needs macOS Accessibility, so Settings → Permissions lists packages that declare it on that row. The package that ports a built-in feature that pastes, as `snippets` does, pastes as that feature did: Dupin asks macOS for its own Accessibility access on the first paste and explains a refusal with the feature's notice before the broker decides the scope.
 
 A service acts only within its permit: the HTTP service connects to the permit's origin, and the files service opens paths beneath the permit's binding, so its parsing can't disagree with the broker's. Redirects, resolved addresses and symlinks are still the service's to check.
 

@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dupin_js_runtime::Diagnostic;
-use dupin_js_runtime::row::{Row, RowEffect};
+use dupin_js_runtime::row::{Row, RowAction, RowEffect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -46,6 +46,9 @@ pub struct Fixture {
     pub environment: Environment,
     #[serde(default, skip_serializing_if = "Replies::is_empty")]
     pub replies: Replies,
+    /// What `items` sees as `ctx.preferences`.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub preferences: Map<String, Value>,
     pub steps: Vec<Step>,
 }
 
@@ -607,6 +610,9 @@ pub fn rows(rows: &[Row]) -> Value {
             if !row.subtitle.is_empty() {
                 out.insert("subtitle".into(), row.subtitle.clone().into());
             }
+            if !row.aliases.is_empty() {
+                out.insert("aliases".into(), row.aliases.clone().into());
+            }
             if !row.keywords.is_empty() {
                 out.insert("keywords".into(), row.keywords.clone().into());
             }
@@ -632,7 +638,7 @@ pub fn rows(rows: &[Row]) -> Value {
                 .actions
                 .iter()
                 .map(|action| {
-                    let mut entry = effect(&action.effect);
+                    let mut entry = chosen(action);
                     entry.insert("title".into(), action.title.clone().into());
                     Value::Object(entry)
                 })
@@ -645,7 +651,7 @@ pub fn rows(rows: &[Row]) -> Value {
 
 /// What choosing an action does, as `{ "copy": … }`, `{ "paste": … }`, `{ "url": … }` or
 /// `{ "run": … }`.
-pub fn effect(effect: &RowEffect) -> Map<String, Value> {
+fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
         RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
@@ -654,6 +660,16 @@ pub fn effect(effect: &RowEffect) -> Map<String, Value> {
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };
     Map::from_iter([(key.to_owned(), value)])
+}
+
+/// What choosing `action` does, as [`effect`] states it, with `"template": true` when Dupin
+/// fills its placeholders.
+pub fn chosen(action: &RowAction) -> Map<String, Value> {
+    let mut entry = effect(&action.effect);
+    if action.template {
+        entry.insert("template".into(), true.into());
+    }
+    entry
 }
 
 /// The error an answer failed with, as fixtures state it.

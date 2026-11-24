@@ -1,0 +1,18 @@
+{
+	"fixture": 1,
+	"description": "Without snippets in config.toml, the list is empty.",
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "sig",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}

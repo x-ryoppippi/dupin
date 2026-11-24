@@ -19,7 +19,7 @@ use dupin_core::Batch;
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits, Matching};
 use dupin_extension_bridge::Generation;
 use dupin_js_runtime::row::{MAX_PAGE_BYTES, MAX_PAGE_ROWS, PageChange};
-use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
+use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
 
 use super::Role;
 
@@ -40,7 +40,8 @@ pub(crate) struct Cached {
 }
 
 /// Asks the package for the next part of its catalogue, after the cursor it gave.
-pub(crate) type Fetch<'a> = dyn FnMut(Option<&str>, Reason) -> Result<CataloguePage, RunError> + 'a;
+pub(crate) type Fetch<'a> =
+    dyn FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> + 'a;
 
 /// How the rows a package sends become the entries Dupin holds. An entry's ID need not be the
 /// row's, so the IDs an update removes are mapped the same way before they reach the catalogue.
@@ -48,6 +49,15 @@ pub(crate) trait Convert {
     fn entry(&self, row: Row) -> Entry;
     /// The ID of the entry [`Convert::entry`] makes from a row whose ID is `id`.
     fn entry_id(&self, id: &str) -> String;
+}
+
+/// How a catalogue is asked for: with the preferences the package is handed, under the broker
+/// generation its host requests run in, and for which search.
+#[derive(Clone, Copy)]
+pub(crate) struct Asking<'a> {
+    pub preferences: &'a Arc<Preferences>,
+    pub generation: Option<Generation>,
+    pub role: Role,
 }
 
 struct Shared {
@@ -66,12 +76,15 @@ struct State {
     expires: Option<Instant>,
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
+    /// The preferences the catalogue was asked for with.
+    preferences: Option<Arc<Preferences>>,
     /// The broker generation the rows were asked under.
     generation: Option<Generation>,
     /// The [`Shared::forgotten`] count the rows were asked after.
     forgotten: u64,
-    /// The last ask failed, and nothing has changed since that could make the next one succeed.
-    failed: bool,
+    /// The preferences the last ask failed with, while nothing else has changed since that
+    /// could make the next one succeed.
+    failed: Option<Arc<Preferences>>,
 }
 
 impl Default for Cached {
@@ -88,9 +101,10 @@ impl Cached {
                 cursor: None,
                 expires: None,
                 due: Some(Reason::Load),
+                preferences: None,
                 generation: None,
                 forgotten: 0,
-                failed: false,
+                failed: None,
             }),
             bytes: AtomicUsize::new(0),
             used: AtomicU64::new(0),
@@ -112,40 +126,43 @@ impl Cached {
     /// Asks the package again before the next use, with the cursor it last gave.
     pub fn invalidate(&self) {
         let mut state = self.shared.lock();
-        state.failed = false;
+        state.failed = None;
         if state.due.is_none() {
             state.due = Some(Reason::Invalidated);
         }
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated, expired, forgotten or held from another `generation` than the one
-    /// `fetch` asks under. The main search doesn't ask again after a failure until one of those
-    /// changes or the keyword's search succeeds, so a package that can't answer it, such as for
-    /// want of consent, costs no call per keystroke.
+    /// missing, invalidated, expired, forgotten, asked for with other preferences or held from
+    /// another generation than the one `fetch` asks under. The main search doesn't ask again
+    /// after a failure until one of those changes or the keyword's search succeeds, so a
+    /// package that can't answer it, such as for want of consent, costs no call per keystroke.
     pub fn search(
         &self,
         query: &str,
         limit: usize,
+        asking: Asking<'_>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
-        generation: Option<Generation>,
-        role: Role,
     ) -> Result<Vec<Batch>, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
         let forgotten = self.shared.forgotten.load(Ordering::Acquire);
-        if state.generation != generation || state.forgotten != forgotten {
+        if state.generation != asking.generation || state.forgotten != forgotten {
             state.forget();
-            state.generation = generation;
+            state.generation = asking.generation;
             state.forgotten = forgotten;
         }
-        if state.failed && role == Role::DefaultSearch {
+        let held_off = state
+            .failed
+            .as_ref()
+            .is_some_and(|failed| Arc::ptr_eq(failed, asking.preferences));
+        if held_off && asking.role == Role::DefaultSearch {
             self.shared.bytes.store(0, Ordering::Relaxed);
             return Ok(Vec::new());
         }
-        let refreshed = state.refresh(Instant::now(), fetch, convert);
-        state.failed = refreshed.is_err();
+        let refreshed = state.refresh(Instant::now(), asking.preferences, fetch, convert);
+        state.failed = refreshed.is_err().then(|| asking.preferences.clone());
         self.shared
             .bytes
             .store(state.catalogue.bytes(), Ordering::Relaxed);
@@ -205,17 +222,27 @@ impl State {
         self.cursor = None;
         self.expires = None;
         self.due = Some(Reason::Load);
-        self.failed = false;
+        self.preferences = None;
+        self.failed = None;
     }
 
     fn refresh(
         &mut self,
         now: Instant,
+        preferences: &Arc<Preferences>,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
     ) -> Result<(), RunError> {
         let expired = self.expires.is_some_and(|expires| now >= expires);
-        let Some(mut reason) = self.due.or(expired.then_some(Reason::Expired)) else {
+        let changed = self
+            .preferences
+            .as_ref()
+            .is_some_and(|held| !Arc::ptr_eq(held, preferences));
+        let Some(mut reason) = changed
+            .then_some(Reason::Load)
+            .or(self.due)
+            .or(expired.then_some(Reason::Expired))
+        else {
             return Ok(());
         };
         if reason == Reason::Load {
@@ -227,7 +254,7 @@ impl State {
             } else {
                 self.cursor.clone()
             };
-            let page = fetch(cursor.as_deref(), reason).inspect_err(|_| self.forget())?;
+            let page = fetch(cursor.as_deref(), reason, preferences).inspect_err(|_| self.forget())?;
             let change = match page.change {
                 PageChange::Reset { rows } => {
                     Change::Reset(rows.into_iter().map(|row| convert.entry(row)).collect())
@@ -252,6 +279,7 @@ impl State {
             self.expires = page.ttl.map(|seconds| now + Duration::from_secs(seconds.into()));
             if !page.more {
                 self.due = None;
+                self.preferences = Some(preferences.clone());
                 return Ok(());
             }
             reason = Reason::More;
@@ -306,6 +334,7 @@ mod tests {
             id: id.into(),
             title: title.into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             match_text: None,
             time: None,
@@ -341,6 +370,7 @@ mod tests {
                     alternate: None,
                     actions: Vec::new(),
                 },
+                aliases: row.aliases,
                 keywords: row.keywords,
                 section: None,
                 detail: None,
@@ -357,6 +387,19 @@ mod tests {
     }
 
     const ENTRY: &Prefixed = &Prefixed;
+
+    fn none() -> Arc<Preferences> {
+        static NONE: OnceLock<Arc<Preferences>> = OnceLock::new();
+        NONE.get_or_init(Arc::default).clone()
+    }
+
+    fn keyword(preferences: &Arc<Preferences>) -> Asking<'_> {
+        Asking {
+            preferences,
+            generation: None,
+            role: Role::Keyword,
+        }
+    }
 
     fn page(change: PageChange, cursor: &str, more: bool) -> CataloguePage {
         CataloguePage {
@@ -379,7 +422,7 @@ mod tests {
     fn the_package_is_asked_once_and_typing_only_matches_what_is_held() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -391,13 +434,13 @@ mod tests {
         };
         for query in ["", "s", "sa", "saf"] {
             cached
-                .search(query, 10, &mut fetch, ENTRY, None, Role::Keyword)
+                .search(query, 10, keyword(&none()), &mut fetch, ENTRY)
                 .unwrap();
         }
         assert_eq!(
             titles(
                 &cached
-                    .search("no", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("no", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["Notes"]
@@ -409,7 +452,7 @@ mod tests {
     fn parts_and_updates_follow_the_cursor_and_invalidation_asks_with_it() {
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(match (cursor, reason) {
                 (None, Reason::Load) => page(
@@ -445,7 +488,7 @@ mod tests {
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["Alpha", "Beta"]
@@ -454,7 +497,7 @@ mod tests {
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["Bravo"]
@@ -483,12 +526,13 @@ mod tests {
             },
         ]
         .into_iter();
-        let mut fetch =
-            |_: Option<&str>, _| Ok(page(answers.next().expect("asked once per change"), "1", false));
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            Ok(page(answers.next().expect("asked once per change"), "1", false))
+        };
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["First", "Second"]
@@ -497,7 +541,7 @@ mod tests {
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["Second"]
@@ -506,7 +550,7 @@ mod tests {
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["Second", "Again"]
@@ -517,7 +561,7 @@ mod tests {
     fn an_expired_catalogue_is_asked_again_and_a_failure_starts_over() {
         let cached = Cached::default();
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason| {
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
             reasons.push(reason);
             match reasons.len() {
                 1 => Ok(CataloguePage {
@@ -541,19 +585,19 @@ mod tests {
             }
         };
         cached
-            .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .search("", 10, keyword(&none()), &mut fetch, ENTRY)
             .unwrap();
         cached.shared.lock().expires = Some(Instant::now());
         assert!(
             cached
-                .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                 .is_err()
         );
         assert_eq!(cached.len(), 0);
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["B"]
@@ -569,7 +613,7 @@ mod tests {
         let calls = RefCell::new(Vec::new());
         let failing = Cell::new(true);
         let ask = |role| {
-            let mut fetch = |_: Option<&str>, reason| {
+            let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
                 calls.borrow_mut().push(reason);
                 if failing.get() {
                     Err(RunError::Failed(Diagnostic::new("items-threw", "needs-consent")))
@@ -583,7 +627,17 @@ mod tests {
                     ))
                 }
             };
-            cached.search("a", 10, &mut fetch, ENTRY, None, role)
+            cached.search(
+                "a",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: None,
+                    role,
+                },
+                &mut fetch,
+                ENTRY,
+            )
         };
         assert!(ask(Role::DefaultSearch).is_err());
         for _ in 0..3 {
@@ -625,7 +679,7 @@ mod tests {
         let filling = std::thread::spawn({
             let cached = cached.clone();
             move || {
-                let mut fetch = |_: Option<&str>, _| {
+                let mut fetch = |_: Option<&str>, _, _: &Preferences| {
                     asked.send(()).unwrap();
                     answered.recv().unwrap();
                     Ok(page(
@@ -638,7 +692,7 @@ mod tests {
                 };
                 titles(
                     &cached
-                        .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                        .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                         .unwrap(),
                 )
             }
@@ -649,7 +703,7 @@ mod tests {
         assert_eq!(filling.join().unwrap(), ["Before"]);
 
         let mut reasons = Vec::new();
-        let mut fetch = |_: Option<&str>, reason| {
+        let mut fetch = |_: Option<&str>, reason, _: &Preferences| {
             reasons.push(reason);
             Ok(page(
                 PageChange::Reset {
@@ -662,7 +716,7 @@ mod tests {
         assert_eq!(
             titles(
                 &cached
-                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .search("", 10, keyword(&none()), &mut fetch, ENTRY)
                     .unwrap()
             ),
             ["After"],
@@ -698,7 +752,7 @@ mod tests {
 
         let cached = Cached::default();
         let mut calls = Vec::new();
-        let mut fetch = |cursor: Option<&str>, reason| {
+        let mut fetch = |cursor: Option<&str>, reason, _: &Preferences| {
             calls.push((cursor.map(str::to_owned), reason));
             Ok(page(
                 PageChange::Reset {
@@ -709,14 +763,44 @@ mod tests {
             ))
         };
         cached
-            .search("", 10, &mut fetch, ENTRY, before, Role::Keyword)
+            .search(
+                "",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: before,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
             .unwrap();
         cached
-            .search("c", 10, &mut fetch, ENTRY, before, Role::Keyword)
+            .search(
+                "c",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: before,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
             .unwrap();
         cached.invalidate();
         cached
-            .search("", 10, &mut fetch, ENTRY, after, Role::Keyword)
+            .search(
+                "",
+                10,
+                Asking {
+                    preferences: &none(),
+                    generation: after,
+                    role: Role::Keyword,
+                },
+                &mut fetch,
+                ENTRY,
+            )
             .unwrap();
         assert_eq!(
             calls,
@@ -731,7 +815,7 @@ mod tests {
         let heavy = 7;
         let full = 19;
         let mut sent = 0;
-        let mut fetch = |_: Option<&str>, _| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             sent += 1;
             let rows = if sent <= heavy {
                 let mut large = row(&format!("heavy-{sent}"), "Heavy");
@@ -756,7 +840,7 @@ mod tests {
         };
         assert!(heavy + full > LIMITS.rows / MAX_PAGE_ROWS + 1);
         let found = cached
-            .search("heavy", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .search("heavy", 10, keyword(&none()), &mut fetch, ENTRY)
             .unwrap();
         assert_eq!(titles(&found).len(), heavy);
     }
@@ -764,7 +848,7 @@ mod tests {
     #[test]
     fn a_rejected_change_or_endless_parts_drop_the_catalogue() {
         let cached = Cached::default();
-        let mut fetch = |_: Option<&str>, _| {
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             Ok(page(
                 PageChange::Update {
                     prepend: Vec::new(),
@@ -777,19 +861,79 @@ mod tests {
             ))
         };
         let error = cached
-            .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .search("", 10, keyword(&none()), &mut fetch, ENTRY)
             .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
-        let mut endless = |_: Option<&str>, _| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
+        let mut endless =
+            |_: Option<&str>, _, _: &Preferences| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
         let error = cached
-            .search("", 10, &mut endless, ENTRY, None, Role::Keyword)
+            .search("", 10, keyword(&none()), &mut endless, ENTRY)
             .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"
         );
+    }
+
+    #[test]
+    fn other_preferences_load_the_catalogue_again() {
+        let cached = Cached::default();
+        let mut seen = Vec::new();
+        let mut fetch = |_: Option<&str>, reason, preferences: &Preferences| {
+            seen.push((reason, preferences.len()));
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("a", "Alpha")],
+                },
+                "1",
+                false,
+            ))
+        };
+        let first = none();
+        cached.search("", 10, keyword(&first), &mut fetch, ENTRY).unwrap();
+        cached
+            .search("a", 10, keyword(&first), &mut fetch, ENTRY)
+            .unwrap();
+        let changed = Arc::new(Preferences::from_iter([("paste".into(), true.into())]));
+        cached
+            .search("a", 10, keyword(&changed), &mut fetch, ENTRY)
+            .unwrap();
+        cached
+            .search("al", 10, keyword(&changed), &mut fetch, ENTRY)
+            .unwrap();
+        assert_eq!(seen, [(Reason::Load, 0), (Reason::Load, 1)]);
+    }
+
+    #[test]
+    fn other_preferences_ask_a_failed_catalogue_again_from_the_main_search() {
+        let cached = Cached::default();
+        let mut calls = 0;
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            calls += 1;
+            Err(RunError::Failed(Diagnostic::new(
+                "items-threw",
+                "bad preferences",
+            )))
+        };
+        let main = |preferences| Asking {
+            preferences,
+            generation: None,
+            role: Role::DefaultSearch,
+        };
+        let first = none();
+        assert!(cached.search("a", 10, main(&first), &mut fetch, ENTRY).is_err());
+        assert!(
+            cached
+                .search("a", 10, main(&first), &mut fetch, ENTRY)
+                .unwrap()
+                .is_empty(),
+            "held off with the same preferences"
+        );
+        let changed = Arc::new(Preferences::from_iter([("paste".into(), true.into())]));
+        assert!(cached.search("a", 10, main(&changed), &mut fetch, ENTRY).is_err());
+        assert_eq!(calls, 2);
     }
 }

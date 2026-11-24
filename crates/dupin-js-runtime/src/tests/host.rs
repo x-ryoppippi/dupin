@@ -287,7 +287,14 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
-        .action(&engine(), name, data, "{}", timeout(DEADLINE), bridge)
+        .action(
+            &engine(),
+            name,
+            data,
+            &serde_json::json!({}),
+            timeout(DEADLINE),
+            bridge,
+        )
         .map(|acted| acted.effect)
 }
 
@@ -360,7 +367,7 @@ fn items_reaches_host_services_like_search() {
             &engine(),
             None,
             Reason::Load,
-            "{}",
+            &serde_json::json!({}),
             timeout(DEADLINE),
             &mut bridge,
         )
@@ -394,7 +401,7 @@ fn an_event_handler_may_invalidate_the_catalogue() {
                 &engine(),
                 "clipboard",
                 event,
-                "{}",
+                &serde_json::json!({}),
                 timeout(DEADLINE),
                 &mut bridge,
             )
@@ -422,7 +429,7 @@ fn event_handlers_receive_a_frozen_event() {
             &engine(),
             "clipboard",
             r#"{"type":"text","text":"hi"}"#,
-            "{}",
+            &serde_json::json!({}),
             timeout(DEADLINE),
             &mut bridge,
         )
@@ -435,7 +442,15 @@ fn event_handlers_receive_a_frozen_event() {
         )]
     );
     assert_eq!(
-        failure_of(package.event(&engine(), "other", "{}", "{}", timeout(DEADLINE), &mut bridge)).code,
+        failure_of(package.event(
+            &engine(),
+            "other",
+            "{}",
+            &serde_json::json!({}),
+            timeout(DEADLINE),
+            &mut bridge
+        ))
+        .code,
         "missing-handler"
     );
 }

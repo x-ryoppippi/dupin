@@ -28,6 +28,7 @@ pub(super) const FEATURE: Feature = Feature {
     bundled: Some(Bundled {
         package: PACKAGE,
         command: CLIPBOARD,
+        paste_notice: None,
         enabled: |config| config.clipboard.enabled,
     }),
     ..Feature::EMPTY
