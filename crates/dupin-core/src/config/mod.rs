@@ -42,7 +42,9 @@ pub struct Config {
     pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
-    pub window_management: bool,
+    /// Window management is the optional Window Management extension now.
+    #[serde(skip_serializing)]
+    pub window_management: Retired,
     pub calculator: bool,
     pub calculator_currency: bool,
     /// Web search keywords and their URL templates, which replace the bundled web-search
@@ -88,7 +90,7 @@ impl Default for Config {
             file_demotions: files::default_demotions(),
             dictionary_keywords: dictionary::default_keywords(),
             display: DisplaySelection::default(),
-            window_management: false,
+            window_management: Retired,
             calculator: calculator::DEFAULT_ENABLED,
             calculator_currency: calculator::DEFAULT_CURRENCY,
             web_searches: None,
@@ -115,6 +117,17 @@ impl Config {
     }
 }
 
+/// A key Dupin no longer reads. Settings wrote every key to each config.toml it saved, so a
+/// retired one is still accepted, whatever its value, and is dropped at the next save.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Retired;
+
+impl<'de> Deserialize<'de> for Retired {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
@@ -122,5 +135,13 @@ mod tests {
     #[test]
     fn rejects_unknown_keys() {
         assert!(Config::parse("hotkye = \"alt+space\"").is_err());
+    }
+
+    #[test]
+    fn a_retired_key_loads_and_is_never_written() {
+        let config = Config::parse("window_management = true\nshow_recent = false").unwrap();
+        assert!(!config.show_recent);
+        assert_eq!(config, Config::parse("show_recent = false").unwrap());
+        assert!(!toml::to_string(&config).unwrap().contains("window_management"));
     }
 }

@@ -25,7 +25,7 @@ use std::time::{Instant, SystemTime};
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Permit, Reconciliation,
-    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger,
+    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger, WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
@@ -317,9 +317,10 @@ impl Bridge {
     }
 
     /// Records a package that ships inside Dupin at `revision`: while that revision is the one
-    /// installed, the package is on and its scopes are pre-granted. Call it before installing.
-    pub fn set_bundled(&self, id: &PackageId, revision: Revision) {
-        self.inner.lock().broker.set_bundled(id.clone(), revision);
+    /// installed, its scopes are pre-granted and it is on, or waits for the user to turn it on
+    /// when `on` is false. Call it before installing.
+    pub fn set_bundled(&self, id: &PackageId, revision: Revision, on: bool) {
+        self.inner.lock().broker.set_bundled(id.clone(), revision, on);
     }
 
     /// Loads or updates a package's declaration at `revision`. It never grants anything; what
@@ -329,15 +330,14 @@ impl Bridge {
     }
 
     /// Loads a package that ships in Dupin, as [`Bridge::install`] does, into the bundled
-    /// origin, which names its own storage namespace. While `revision` is the one Dupin ships,
-    /// its scopes are granted without asking.
+    /// origin, which names its own storage namespace. While `revision` is the one
+    /// [`Bridge::set_bundled`] recorded, its scopes are granted without asking.
     pub fn install_bundled(
         &self,
         id: &PackageId,
         revision: Revision,
         capabilities: Capabilities,
     ) -> Reconciliation {
-        self.inner.lock().broker.set_bundled(id.clone(), revision.clone());
         self.load(id, revision, capabilities, Origin::Bundled)
     }
 
@@ -409,6 +409,12 @@ impl Bridge {
 
     pub fn is_enabled(&self, id: &PackageId) -> bool {
         self.inner.lock().broker.is_enabled(id)
+    }
+
+    /// Whether `id` is the shipped revision of a bundled package that ships off, whose switch is
+    /// then its feature's switch.
+    pub fn ships_off(&self, id: &PackageId) -> bool {
+        self.inner.lock().broker.ships_off(id)
     }
 
     /// Whether the user or the base turned `id` off, rather than never turning it on.

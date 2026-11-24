@@ -21,7 +21,7 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 11] = [
+const EXPECTATIONS: [&str; 12] = [
     "rows",
     "selected",
     "effect",
@@ -33,6 +33,7 @@ const EXPECTATIONS: [&str; 11] = [
     "detail",
     "storage",
     "invalidated",
+    "windows",
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -199,6 +200,10 @@ pub struct Replies {
     /// The events a calendar read sees, in the calendar service's shape.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calendar: Vec<Value>,
+    /// The displays and the focused window the windows service reports. Left out, reading or
+    /// moving a window fails as `unavailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<WindowsReply>,
     /// Your decision on each declared scope, named as grant files name it, such as
     /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -262,6 +267,16 @@ impl HttpResponse {
             (None, None) => Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsReply {
+    /// Each display in the windows service's shape, the primary one first.
+    pub displays: Vec<Value>,
+    /// The focused window and its app in the windows service's shape, which a move updates,
+    /// or `null` for none.
+    pub focused: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

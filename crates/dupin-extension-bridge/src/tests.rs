@@ -59,6 +59,7 @@ struct World {
     storage: Arc<PackageStorage>,
     clock: FakeClock,
     clipboard: Arc<fixture::Clipboard>,
+    windows: Arc<fixture::Windows>,
     folder: tempfile::TempDir,
 }
 
@@ -95,6 +96,7 @@ fn world_with(
             .with_clock(clock.clone()),
     ));
     let clipboard = Arc::new(fixture::Clipboard::default());
+    let windows = Arc::new(fixture::Windows::default());
     let services = Services {
         http: Box::new(http.clone()),
         exec: Box::new(exec.clone()),
@@ -102,6 +104,7 @@ fn world_with(
         clipboard: Box::new(clipboard.clone()),
         dictionary: Box::new(fixture::Dictionary),
         calendar: Box::new(fixture::Calendar { today: 0 }),
+        windows: Box::new(windows.clone()),
     };
     let grants = folder.path().join("grants.toml");
     let bridge = Bridge::new(Broker::new(base, Local::default()), Some(grants), services);
@@ -118,6 +121,7 @@ fn world_with(
         storage,
         clock,
         clipboard,
+        windows,
         folder,
     };
     adjust(&mut world);
@@ -219,7 +223,7 @@ const report = async (run) => { try { return `ok ${JSON.stringify(await run())}`
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calendar }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -579,6 +583,7 @@ fn a_users_copy_of_a_bundled_package_never_sees_its_data() {
     );
     let bundled = Revision::new("sha256:bundled").unwrap();
     let capabilities = Capabilities::parse(&capabilities).unwrap();
+    world.bridge.set_bundled(&world.id, bundled.clone(), true);
     world
         .bridge
         .install_bundled(&world.id, bundled.clone(), capabilities.clone());
@@ -716,6 +721,13 @@ fn hostile_requests_are_refused_before_any_service_runs() {
         ("exec.run", br#"{"profile":"../bin/sh"}"#),
         ("dictionary.lookup", br#"{"word":"\u0007"}"#),
         ("calendar.events", br#"{"from":1,"to":0}"#),
+        ("windows.focused", br#"{"pid":1}"#),
+        ("windows.setFrame", br#"{"x":0,"y":0,"width":10}"#),
+        (
+            "windows.setFrame",
+            br#"{"x":0,"y":0,"width":10,"height":10,"pid":1}"#,
+        ),
+        ("windows.setFrame", br#"{"x":"0","y":0,"width":10,"height":10}"#),
     ] {
         assert_eq!(
             ask(op, args)["error"]["code"],
@@ -1152,5 +1164,46 @@ fn an_effect_dupin_performs_for_a_package_is_decided_like_its_own_requests() {
             .unwrap_err()
             .code(),
         "not-installed"
+    );
+}
+
+#[test]
+fn a_search_may_read_windows_but_only_a_chosen_action_moves_one() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "windows": ["read", "arrange"] }),
+        &guest(
+            "const half = async () => {
+               const [display] = await windows.displays();
+               const focused = await windows.focused();
+               const { x, y, width, height } = display.visibleFrame;
+               const frame = await windows.setFrame({ x, y, width: width / 2, height });
+               return `${focused.app.name} ${frame.width}x${frame.height}`;
+             };
+             export async function search() {
+               return [{ title: `${await report(() => windows.focused().then((w) => w.frame.width))} ${await report(half)}` }];
+             }
+             export const actions = {
+               async arrange() { return { type: 'toast', text: await report(half) }; },
+             };",
+        ),
+    );
+    world.enable();
+    world.grant("windows:read");
+    world.grant("windows:arrange");
+    assert_eq!(
+        world.first(""),
+        "needs-consent needs-consent",
+        "nothing reaches a window until macOS allows Accessibility"
+    );
+    world
+        .bridge
+        .set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    assert_eq!(world.first(""), "ok 300 needs-activation");
+    assert!(world.windows.moves.lock().unwrap().is_empty());
+    assert_eq!(world.toast("arrange"), "ok \"Notes 720x875\"");
+    assert_eq!(
+        *world.windows.moves.lock().unwrap(),
+        [dupin_host_services::windows::Frame::new(0.0, 25.0, 720.0, 875.0)]
     );
 }

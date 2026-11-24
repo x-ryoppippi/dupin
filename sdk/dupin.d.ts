@@ -345,6 +345,8 @@ declare module 'dupin' {
 		dictionary?: ['lookup'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
+		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
+		windows?: ('read' | 'arrange')[];
 	}
 
 	export interface PackageJson {
@@ -604,6 +606,45 @@ declare module 'dupin' {
 			limit?: number;
 			order?: 'earliest' | 'latest';
 		}): Promise<CalendarEvent[]>;
+	};
+
+	/**
+	 * A rectangle in points. Every display shares one space: the origin is the primary display's
+	 * top-left corner and `y` grows downwards.
+	 */
+	export interface WindowFrame {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	}
+
+	export interface WindowDisplay {
+		readonly frame: Readonly<WindowFrame>;
+		/** The part windows may use, outside the menu bar and the Dock. */
+		readonly visibleFrame: Readonly<WindowFrame>;
+		/** Pixels per point. */
+		readonly scale: number;
+	}
+
+	export interface FocusedWindow {
+		readonly frame: Readonly<WindowFrame>;
+		/** The app that was in front when the panel opened. */
+		readonly app: { readonly name: string; readonly bundleId: string | null };
+	}
+
+	/** `windows` capability: the focused window of the app that was in front when the panel opened. */
+	export const windows: {
+		/** Every display, the primary one first. Needs `read`. */
+		displays(): Promise<WindowDisplay[]>;
+		/** That window, or `null` when the app has none. Needs `read`. */
+		focused(): Promise<FocusedWindow | null>;
+		/**
+		 * Moves and resizes that window and resolves to the frame it took, which the app may
+		 * constrain. The frame must lie at least partly on a display. Needs `arrange` and an action
+		 * the user chose.
+		 */
+		setFrame(frame: WindowFrame): Promise<WindowFrame>;
 	};
 
 	/**

@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::scope::{ClipboardAccess, FilesAccess, FilesKind, Method, Origin, Scope, ScopeKey, ScopeName};
+use crate::scope::{
+    ClipboardAccess, FilesAccess, FilesKind, Method, Origin, Scope, ScopeKey, ScopeName, WindowsAccess,
+};
 
 const MAX_HTTP: usize = 32;
 const MAX_NAMED: usize = 16;
@@ -48,12 +50,15 @@ impl Capabilities {
                     "clipboard" => parser.clipboard(value, &field),
                     "dictionary" => parser.dictionary(value, &field),
                     "calendar" => parser.calendar(value, &field),
+                    "windows" => parser.windows(value, &field),
                     _ => {
                         parser.report(
                             "unknown-capability",
                             field,
                             format!("`{name}` isn't a capability"),
-                            Some("Use http, files, exec, storage, clipboard, dictionary or calendar."),
+                            Some(
+                                "Use http, files, exec, storage, clipboard, dictionary, calendar or windows.",
+                            ),
                         );
                         Vec::new()
                     }
@@ -585,6 +590,26 @@ impl Parser {
             }],
             _ => Vec::new(),
         }
+    }
+
+    fn windows(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| match text {
+            "read" => Some(WindowsAccess::Read),
+            "arrange" => Some(WindowsAccess::Arrange),
+            _ => {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't a windows access"),
+                    Some("Use read or arrange."),
+                );
+                None
+            }
+        })
+        .into_iter()
+        .flatten()
+        .map(|access| Scope::Windows { access })
+        .collect()
     }
 }
 

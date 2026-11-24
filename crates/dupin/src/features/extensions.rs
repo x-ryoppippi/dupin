@@ -31,7 +31,7 @@ pub(super) const FEATURE: Feature = Feature {
         },
         PermissionUse {
             capability: Capability::Permission(Permission::of(OsPermission::Accessibility)),
-            label: "extensions that paste",
+            label: "extensions that paste or arrange windows",
             enabled: |config| config.extensions,
             request_on_enable: false,
         },

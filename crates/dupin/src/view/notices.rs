@@ -99,36 +99,7 @@ pub(super) fn panel_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Co
     panel
 }
 
-pub(super) fn search_notices(mut panel: El, s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
-    if s.window_permission_required {
-        let other_notice_links_to_settings =
-            s.selection_permission_required || s.display_notice == Some(DisplayNotice::AccessibilityRequired);
-        panel = panel.child(divider(t)).child(
-            col()
-                .key("window-permission")
-                .w_full()
-                .px(18.0)
-                .py(12.0)
-                .gap(8.0)
-                .fill(WARNING)
-                .child(
-                    text(dupin_mac::window_management::Error::PermissionRequired.message())
-                        .font(t.font(type_::BODY.lh(18.0)))
-                        .color(t.text)
-                        .wrap()
-                        .w_full(),
-                )
-                .children((!other_notice_links_to_settings).then(|| {
-                    text("Open Accessibility Settings")
-                        .font(t.font(type_::BODY))
-                        .color(accent)
-                        .key("open-accessibility-settings")
-                        .role("button")
-                        .focusable(true)
-                        .on_press_tx(Ui::open_accessibility_settings)
-                })),
-        );
-    }
+pub(super) fn search_notices(mut panel: El, s: &Ui, t: &ResolvedTheme) -> El {
     for (origin, failure) in s.session.failures() {
         panel = panel.child(
             row()

@@ -1,6 +1,8 @@
 use std::path::{Component, Path};
 
-use crate::scope::{ClipboardAccess, FilesAccess, Method, Origin, Scope, ScopeKey, ScopeName, StorageOp};
+use crate::scope::{
+    ClipboardAccess, FilesAccess, Method, Origin, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess,
+};
 
 /// One operation a host service is about to perform for a package.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub enum Request {
         past_days: u32,
         future_days: u32,
     },
+    Windows(WindowsAccess),
 }
 
 pub(crate) enum Resolved {
@@ -60,6 +63,7 @@ impl Request {
             Self::Clipboard(access) => ScopeKey::Clipboard(*access),
             Self::DictionaryLookup => ScopeKey::Dictionary,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
+            Self::Windows(access) => ScopeKey::Windows(*access),
         })
     }
 
@@ -69,6 +73,7 @@ impl Request {
             Self::Http { method, .. } => method.mutates(),
             Self::Exec { .. } | Self::Script { .. } => true,
             Self::Clipboard(access) => *access != ClipboardAccess::Watch,
+            Self::Windows(access) => *access == WindowsAccess::Arrange,
             Self::Files { .. }
             | Self::Storage { .. }
             | Self::DictionaryLookup

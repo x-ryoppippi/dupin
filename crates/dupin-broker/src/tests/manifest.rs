@@ -243,6 +243,26 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
 }
 
 #[test]
+fn windows_declares_read_and_arrange_only() {
+    assert_eq!(
+        problem(json!({ "windows": ["move"] })),
+        ("invalid-value", "capabilities.windows[0]".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": [] })),
+        ("empty", "capabilities.windows".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": ["read", "read"] })),
+        ("duplicate", "capabilities.windows[1]".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": "arrange" })),
+        ("invalid-type", "capabilities.windows".into())
+    );
+}
+
+#[test]
 fn every_problem_is_reported_at_once_with_hints_where_useful() {
     let diagnostics = Capabilities::parse(&json!({
         "http": [{ "origin": "http://a.example", "methods": ["GET"] }],

@@ -39,6 +39,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "clipboard:paste",
         "dictionary",
         "calendar",
+        "windows:read",
+        "windows:arrange",
     ] {
         assert_eq!(key(written).to_string(), written);
     }
@@ -47,6 +49,8 @@ fn scope_keys_round_trip_through_their_written_form() {
         "http:https://a.example/",
         "files:",
         "clipboard:type",
+        "windows:move",
+        "windows",
         "network",
         "storage:x",
     ] {
@@ -149,6 +153,33 @@ fn only_calendar_and_clipboard_reads_need_an_os_permission() {
             ("calendar".to_string(), OsPermission::Calendars),
         ]
     );
+}
+
+#[test]
+fn windows_scopes_need_accessibility_and_describe_themselves() {
+    let windows = caps(json!({ "windows": ["read", "arrange"] }));
+    let described: Vec<_> = windows
+        .scopes()
+        .map(|scope| (scope.key().to_string(), scope.to_string(), scope.os_permission()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "windows:read".to_string(),
+                "see your displays and the focused window".to_string(),
+                Some(OsPermission::Accessibility)
+            ),
+            (
+                "windows:arrange".to_string(),
+                "move and resize the focused window".to_string(),
+                Some(OsPermission::Accessibility)
+            ),
+        ]
+    );
+    let scope = |access| Scope::Windows { access };
+    assert!(scope(WindowsAccess::Read).covers(&scope(WindowsAccess::Read)));
+    assert!(!scope(WindowsAccess::Arrange).covers(&scope(WindowsAccess::Read)));
 }
 
 #[test]
