@@ -119,9 +119,12 @@ jobs:
         env:
           DUPIN_REQUIRE_EXTENSION_HOST: '1'
         run: |
-          mapfile -t crates < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
-          echo "Testing ${crates[*]}"
-          nix develop --command cargo test --locked "${crates[@]/#/--package=}"
+          while IFS= read -r crate; do
+            set -- "$@" "--package=$crate"
+          done < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
+          test "$#" -gt 0
+          echo "Testing $*"
+          nix develop --command cargo test --locked "$@"
 
   # Keypress latency, and the bundled extensions' parity with native (latency.yml).
   latency:
