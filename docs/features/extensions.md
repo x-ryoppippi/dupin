@@ -215,12 +215,18 @@ Without a ref, Dupin installs the highest version tag (`v1.2.3` or `1.2.3`; a pr
 
 The installer reads the package as the [extension platform design](../design/extension-platform.md#packaging-and-distribution) describes it: the manifest is the `dupin` key of `package.json` (`title`, `keyword`, optionally `main` and `capabilities`), and the entry is built JavaScript committed to the repository.
 
-Installing never runs anything from the package. Dupin runs `git` to fetch the one commit into a scratch repository and reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run, and there is no package manager, install script or build. Git sources need Git (`xcode-select --install`); a folder source doesn't. Before placing anything, Dupin checks that:
+Installing never runs anything from the package, and there is no package manager, install script or build. How Dupin fetches depends on the source:
+
+- **`github:`** needs no developer tools. Dupin asks GitHub's REST API which commit the ref names, downloads GitHub's tarball of exactly that commit with the macOS system curl (`/usr/bin/curl`, ignoring `~/.curlrc`), and unpacks it itself. Every file must match the commit's tree, read from the API first: the same path, mode, size and Git blob id, so a package locks the same as it would from Git. A file that `.gitattributes` drops from archives (`export-ignore`) or rewrites in them (`export-subst`, line endings) fails the install, as does a Git LFS file when the repository's "Include Git LFS objects in archives" setting is on, because the archive then holds the object where the commit holds its pointer. If `GITHUB_TOKEN` is set, Dupin sends it to the API, for a private repository or a higher rate limit than GitHub's 60 requests an hour; it is never required, and never sent to the host the archive comes from.
+- **A Git URL** runs `git` to fetch the one commit into a scratch repository, and Dupin reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run. It needs Git. Without it, the install fails with a message instead of running `/usr/bin/git`, which on a Mac without the Command Line Tools only opens their installer.
+- **A folder** needs neither.
+
+`dupin ext update` and `dupin ext sync` fetch the same way. Before placing anything, Dupin checks that:
 
 - `package.json` has a valid `dupin` key and `name`;
 - `dupin.main` (default `main.js`) is a `.js` or `.mjs` file in the package. A TypeScript entry, or a build output that isn't committed, fails with a hint to commit the built JavaScript;
 - there are no symbolic links, submodules or `.git` folders, and no two names that differ only in case;
-- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch that writes more than 64 MiB is stopped before it finishes;
+- there are at most 1,024 files, 4 MiB per file and 16 MiB in all, with paths up to 512 bytes and 16 folders deep. A fetch or download of more than 64 MiB is stopped before it finishes, and a tarball whose entries aren't plain files and folders inside its one top-level folder is refused;
 - the keyword isn't already used by a built-in command, a web search keyword or another folder in the extensions folder;
 - a folder with the package's name, if there is one, was installed by `dupin ext install` from the same source. Grants belong to that source, so installing another package under an installed name fails until you remove the old one.
 

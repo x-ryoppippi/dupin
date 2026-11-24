@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 
-use dupin_extension_install::{Change, Error, Git, Installer, LOCK_FILE, Listed, Outcomes, State, grants};
+use dupin_extension_install::{
+    Change, Error, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State, grants,
+};
 use dupin_js_runtime::Diagnostic;
 use serde_json::{Value, json};
 
@@ -28,6 +30,7 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         lock: lock_path()
             .ok_or_else(|| Diagnostic::new("no-directory", "neither XDG_DATA_HOME nor HOME is set"))?,
         git: Git::default(),
+        github: GitHub::default(),
     };
     let taken = routed_keywords();
     let cwd = std::env::current_dir().map_err(|error| Diagnostic::new("io-error", error.to_string()))?;
