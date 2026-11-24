@@ -8,6 +8,9 @@ pub enum Error {
     Key(String),
     /// The namespace was written with another data key. Nothing was read or removed.
     WrongKey,
+    /// The stored data was written by a newer Dupin in a format this build can't read.
+    /// Nothing was read or removed.
+    NewerFormat,
     /// Another `Store` for this namespace is open, in this process or another.
     Busy,
     InvalidNamespace(String),
@@ -33,6 +36,7 @@ impl fmt::Display for Error {
             Error::Io(error) => write!(f, "storage I/O failed: {error}"),
             Error::Key(error) => write!(f, "couldn't get the storage key: {error}"),
             Error::WrongKey => f.write_str("the stored data was sealed with a different key"),
+            Error::NewerFormat => f.write_str("the stored data was written by a newer version of Dupin"),
             Error::Busy => f.write_str("the storage namespace is already open"),
             Error::InvalidNamespace(namespace) => write!(f, "{namespace:?} is not a valid storage namespace"),
             Error::InvalidLimits(why) => write!(f, "invalid storage limits: {why}"),
