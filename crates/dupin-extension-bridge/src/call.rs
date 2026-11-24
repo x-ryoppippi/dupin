@@ -1,0 +1,646 @@
+//! One host request: decoded strictly from what the guest sent, checked by the broker, run by
+//! its service and released only while the permit still holds.
+
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use dupin_broker::{
+    ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
+};
+use dupin_extension_http as http;
+use dupin_host_services::{exec, files};
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use crate::services::{Failure, entry_size};
+use crate::{Session, failure_for};
+
+const MAX_URL_BYTES: usize = 8 * 1024;
+const MAX_HEADERS: usize = 64;
+const MAX_HEADER_BYTES: usize = 8 * 1024;
+const MAX_BODY_BYTES: usize = 1024 * 1024;
+/// A response a guest receives whole; its heap is 16 MiB.
+const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_KEY_BYTES: usize = 256;
+const MAX_VALUE_BYTES: usize = 1024 * 1024;
+const MAX_WORD_CHARS: usize = 200;
+const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
+const MAX_INPUTS: usize = 32;
+const MAX_INPUT_BYTES: usize = 4 * 1024;
+const MAX_EVENTS: usize = 500;
+/// The guest's own read limit can lower these but never raise them past the service's.
+const DEFAULT_READ_BYTES: usize = 256 * 1024;
+const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
+const SCRIPT_PREFIX: &str = "@script:";
+
+fn decode<'a, T: Deserialize<'a>>(args: &'a [u8]) -> Result<T, Failure> {
+    serde_json::from_slice(args).map_err(|error| Failure::invalid(format!("invalid arguments: {error}")))
+}
+
+fn bounded(text: &str, name: &str, max: usize) -> Result<(), Failure> {
+    if text.len() > max {
+        return Err(Failure::invalid(format!("`{name}` is longer than {max} bytes")));
+    }
+    Ok(())
+}
+
+fn scope_name(name: &str) -> Result<ScopeName, Failure> {
+    ScopeName::new(name).map_err(|error| Failure::invalid(format!("`{name}`: {error}")))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Fetch {
+    url: String,
+    #[serde(default = "get")]
+    method: String,
+    #[serde(default)]
+    headers: BTreeMap<String, String>,
+    body: Option<String>,
+}
+
+fn get() -> String {
+    "GET".into()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilesArgs {
+    scope: String,
+    #[serde(default)]
+    path: String,
+    limit: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecArgs {
+    profile: String,
+    #[serde(default)]
+    inputs: BTreeMap<String, Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Key {
+    key: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Set {
+    key: String,
+    value: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Nothing {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Text {
+    text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Word {
+    word: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Range {
+    from: f64,
+    to: f64,
+    limit: Option<u64>,
+}
+
+impl Session {
+    pub(crate) fn dispatch(
+        &self,
+        op: &str,
+        args: &[u8],
+        deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Result<Value, Failure> {
+        match op {
+            "http.fetch" => self.fetch(decode(args)?, deadline, cancelled),
+            "files.read" => self.files(decode(args)?, FilesAccess::Read),
+            "files.list" => self.files(decode(args)?, FilesAccess::List),
+            "exec.run" => self.exec(decode(args)?, cancelled),
+            "storage.get" => {
+                let Key { key } = decode(args)?;
+                key_valid(&key)?;
+                let permit = self.permit(&Request::Storage {
+                    op: StorageOp::Read,
+                    size_after: 0,
+                })?;
+                let value = self.bridge.services.storage.get(self.package.as_str(), &key)?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "value": value }))
+            }
+            "storage.keys" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Storage {
+                    op: StorageOp::Read,
+                    size_after: 0,
+                })?;
+                let keys = self.bridge.services.storage.keys(self.package.as_str())?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "keys": keys }))
+            }
+            "storage.set" => {
+                let Set { key, value } = decode(args)?;
+                key_valid(&key)?;
+                if value.to_string().len() > MAX_VALUE_BYTES {
+                    return Err(Failure::new(
+                        "too-large",
+                        format!("a stored value is at most {MAX_VALUE_BYTES} bytes as JSON"),
+                    ));
+                }
+                let storage = &self.bridge.services.storage;
+                let package = self.package.as_str();
+                let before = storage.size(package)?;
+                let replaced = storage
+                    .get(package, &key)?
+                    .map_or(0, |old| entry_size(&key, &old));
+                let size_after = before - replaced.min(before) + entry_size(&key, &value);
+                let permit = self.permit(&Request::Storage {
+                    op: StorageOp::Write,
+                    size_after,
+                })?;
+                let retention = match permit.scope() {
+                    Scope::Storage { retention_days, .. } => *retention_days,
+                    _ => None,
+                };
+                // A write is an effect, so the permit is checked again just before it.
+                self.release(&permit, cancelled)?;
+                storage.set(package, &key, &value, retention)?;
+                Ok(Value::Null)
+            }
+            "storage.delete" => {
+                let Key { key } = decode(args)?;
+                key_valid(&key)?;
+                let permit = self.permit(&Request::Storage {
+                    op: StorageOp::Write,
+                    size_after: 0,
+                })?;
+                self.release(&permit, cancelled)?;
+                self.bridge.services.storage.delete(self.package.as_str(), &key)?;
+                Ok(Value::Null)
+            }
+            "clipboard.read" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Read))?;
+                let clip = self.bridge.services.clipboard.read()?;
+                self.release(&permit, cancelled)?;
+                Ok(clip.unwrap_or(Value::Null))
+            }
+            "clipboard.write" => {
+                let Text { text } = decode(args)?;
+                bounded(&text, "text", MAX_CLIPBOARD_TEXT_BYTES)?;
+                let permit = self.permit(&Request::Clipboard(ClipboardAccess::Write))?;
+                self.release(&permit, cancelled)?;
+                self.bridge.services.clipboard.write_text(&text)?;
+                Ok(Value::Null)
+            }
+            "dictionary.lookup" => {
+                let Word { word } = decode(args)?;
+                let word = word.trim();
+                if word.is_empty()
+                    || word.chars().count() > MAX_WORD_CHARS
+                    || word.chars().any(char::is_control)
+                {
+                    return Err(Failure::invalid(format!(
+                        "a word is 1–{MAX_WORD_CHARS} characters without control characters"
+                    )));
+                }
+                let permit = self.permit(&Request::DictionaryLookup)?;
+                let entries = self.bridge.services.dictionary.lookup(word)?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "entries": entries }))
+            }
+            "calendar.events" => {
+                let Range { from, to, limit } = decode(args)?;
+                let instant = |value: f64, name: &str| {
+                    if value.is_finite() && value.fract() == 0.0 && value.abs() < 8.64e15 {
+                        Ok(value as i64)
+                    } else {
+                        Err(Failure::invalid(format!("`{name}` must be a valid date")))
+                    }
+                };
+                let (from, to) = (instant(from, "from")?, instant(to, "to")?);
+                if to <= from {
+                    return Err(Failure::invalid("`to` must come after `from`"));
+                }
+                let calendar = &self.bridge.services.calendar;
+                let (past_days, future_days) = calendar.window(from, to)?;
+                let permit = self.permit(&Request::CalendarRead {
+                    past_days,
+                    future_days,
+                })?;
+                let limit = limit.map_or(MAX_EVENTS, |limit| (limit as usize).min(MAX_EVENTS));
+                let events = calendar.events(from, to, limit, permit.scope())?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "events": events }))
+            }
+            _ => Err(Failure::new(
+                "unknown-operation",
+                format!(
+                    "`{}` isn't a host service",
+                    op.chars().take(64).collect::<String>()
+                ),
+            )),
+        }
+    }
+
+    fn fetch(&self, args: Fetch, deadline: Instant, cancelled: &AtomicBool) -> Result<Value, Failure> {
+        bounded(&args.url, "url", MAX_URL_BYTES)?;
+        let method = match args.method.to_ascii_uppercase().as_str() {
+            "GET" => (Method::Get, http::Method::Get),
+            "HEAD" => (Method::Head, http::Method::Head),
+            "POST" => (Method::Post, http::Method::Post),
+            "PUT" => (Method::Put, http::Method::Put),
+            "PATCH" => (Method::Patch, http::Method::Patch),
+            "DELETE" => (Method::Delete, http::Method::Delete),
+            _ => {
+                return Err(Failure::invalid(format!(
+                    "`{}` isn't a supported method",
+                    args.method
+                )));
+            }
+        };
+        if args.headers.len() > MAX_HEADERS {
+            return Err(Failure::invalid(format!("at most {MAX_HEADERS} headers")));
+        }
+        let header_bytes: usize = args
+            .headers
+            .iter()
+            .map(|(name, value)| name.len() + value.len())
+            .sum();
+        if header_bytes > MAX_HEADER_BYTES {
+            return Err(Failure::invalid(format!(
+                "headers are at most {MAX_HEADER_BYTES} bytes"
+            )));
+        }
+        if let Some(body) = &args.body {
+            bounded(body, "body", MAX_BODY_BYTES)?;
+        }
+        let permit = self.permit(&Request::Http {
+            url: args.url.clone(),
+            method: method.0,
+        })?;
+        let Scope::Http { origin, methods } = permit.scope() else {
+            return Err(Failure::new("failed", "the permit doesn't name an origin"));
+        };
+        let origin = http::Origin::parse(&origin.to_string()).map_err(Failure::invalid)?;
+        let methods = methods
+            .iter()
+            .filter_map(|method| http::Method::parse(method.as_str()).ok())
+            .collect();
+        let scope = http::HttpScope::new(vec![http::HttpRule { origin, methods }]);
+        let request = http::Request {
+            method: method.1,
+            url: args.url,
+            headers: args.headers.into_iter().collect(),
+            body: args.body.map(String::into_bytes),
+        };
+        let cancel = http::CancelToken::new();
+        let response = with_cancel(&cancel, deadline, cancelled, || {
+            self.bridge.services.http.fetch(request, &scope, &cancel)
+        })
+        .map_err(|error| Failure::new(error.code(), error.to_string()))?;
+        self.release(&permit, cancelled)?;
+        let truncated = response.body.len() > MAX_RESPONSE_BYTES;
+        let mut body = response.body;
+        body.truncate(MAX_RESPONSE_BYTES);
+        let body = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&body);
+        let headers: BTreeMap<_, _> = response.headers.into_iter().collect();
+        Ok(json!({
+            "status": response.status,
+            "url": response.url,
+            "redirected": response.redirected,
+            "headers": headers,
+            "body": String::from_utf8_lossy(body),
+            "truncated": truncated,
+        }))
+    }
+
+    fn files(&self, args: FilesArgs, access: FilesAccess) -> Result<Value, Failure> {
+        let name = scope_name(&args.scope)?;
+        bounded(&args.path, "path", 4096)?;
+        let permit = self.permit(&Request::Files {
+            scope: name.clone(),
+            access,
+            path: args.path.clone(),
+        })?;
+        let (Scope::Files { kind, .. }, Some(binding)) = (permit.scope(), permit.binding()) else {
+            return Err(Failure::new(
+                "failed",
+                "the permit doesn't name a picked file or folder",
+            ));
+        };
+        let kind = match kind {
+            FilesKind::File => files::ScopeKind::File,
+            FilesKind::Directory => files::ScopeKind::Directory,
+        };
+        let generation = permit.generation();
+        let table = self.bridge.files(&self.package);
+        let mut table = table.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let table = &mut *table;
+        let table = table.get_or_insert_with(|| (generation, files::Files::new()));
+        // Handles belong to one generation: a revocation or a new pick invalidates them all.
+        if table.0 != generation {
+            *table = (generation, files::Files::new());
+        }
+        let table = &mut table.1;
+        let picked = table
+            .scopes()
+            .find(|scope| scope.name() == name.as_str())
+            .is_some_and(|scope| scope.kind() == kind);
+        if !picked {
+            let scope = files::Scope::pick(name.as_str(), kind, binding).map_err(file_failure)?;
+            table.grant(scope);
+        }
+        let target = files::Target::Path {
+            scope: name.as_str(),
+            path: &args.path,
+        };
+        let value = match access {
+            FilesAccess::Read => {
+                let limit = args
+                    .limit
+                    .map_or(DEFAULT_READ_BYTES, |limit| (limit as usize).min(MAX_READ_BYTES));
+                let contents = table.read(target, limit).map_err(file_failure)?;
+                json!({
+                    "text": String::from_utf8_lossy(&contents.bytes),
+                    "size": contents.size,
+                    "truncated": contents.truncated,
+                    "handle": contents.handle.to_string(),
+                })
+            }
+            FilesAccess::List => {
+                let limit = args
+                    .limit
+                    .map_or(files::DEFAULT_LIST_ENTRIES, |limit| limit as usize);
+                let listing = table.list(target, limit).map_err(file_failure)?;
+                let entries: Vec<_> = listing
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        json!({
+                            "name": entry.name,
+                            "kind": match entry.kind {
+                                files::EntryKind::File => "file",
+                                files::EntryKind::Directory => "directory",
+                                files::EntryKind::Symlink => "symlink",
+                                files::EntryKind::Other => "other",
+                            },
+                            "size": entry.size,
+                            "handle": entry.handle.map(|handle| handle.to_string()),
+                        })
+                    })
+                    .collect();
+                json!({ "entries": entries, "truncated": listing.truncated })
+            }
+        };
+        self.release(&permit, &AtomicBool::new(false))?;
+        Ok(value)
+    }
+
+    fn exec(&self, args: ExecArgs, cancelled: &AtomicBool) -> Result<Value, Failure> {
+        if args.inputs.len() > MAX_INPUTS {
+            return Err(Failure::invalid(format!("at most {MAX_INPUTS} inputs")));
+        }
+        let mut values = BTreeMap::new();
+        for (name, value) in args.inputs {
+            let value = match value {
+                Value::String(text) => {
+                    bounded(&text, &name, MAX_INPUT_BYTES)?;
+                    exec::Value::Text(text)
+                }
+                Value::Number(number) => match number.as_i64() {
+                    Some(number) => exec::Value::Integer(number),
+                    None => return Err(Failure::invalid(format!("`{name}` must be a whole number"))),
+                },
+                _ => {
+                    return Err(Failure::invalid(format!(
+                        "`{name}` must be text or a whole number"
+                    )));
+                }
+            };
+            values.insert(name, value);
+        }
+        let (request, script) = match args.profile.strip_prefix(SCRIPT_PREFIX) {
+            Some(name) => {
+                let name = scope_name(name)?;
+                let output = self.declares_output(&ScopeKey::Script(name.clone()));
+                (Request::Script { name, output }, true)
+            }
+            None => (
+                Request::Exec {
+                    profile: scope_name(&args.profile)?,
+                },
+                false,
+            ),
+        };
+        let permit = self.permit(&request)?;
+        let profile = profile(&permit, script)?;
+        self.release(&permit, cancelled)?;
+        let outcome = self
+            .bridge
+            .services
+            .exec
+            .run(&profile, &values, cancelled)
+            .map_err(|error| match error {
+                exec::ExecError::InvalidInput { .. }
+                | exec::ExecError::UnknownInput(_)
+                | exec::ExecError::InvalidProfile(_) => Failure::invalid(error.to_string()),
+                exec::ExecError::Unavailable(_) => Failure::new("unavailable", error.to_string()),
+                exec::ExecError::Failed(_) => Failure::new("failed", error.to_string()),
+            })?;
+        self.release(&permit, cancelled)?;
+        let (code, signal, timed_out) = match outcome.exit {
+            exec::Exit::Code(code) => (Some(code), false, false),
+            exec::Exit::Signal => (None, true, false),
+            exec::Exit::TimedOut => (None, false, true),
+            exec::Exit::Cancelled => return Err(Failure::new("cancelled", "the command was cancelled")),
+        };
+        let mut result = json!({ "code": code, "signal": signal, "timedOut": timed_out });
+        if let Some(output) = outcome.output {
+            result["stdout"] = output.stdout.into();
+            result["stderr"] = output.stderr.into();
+            result["truncated"] = output.truncated.into();
+        }
+        Ok(result)
+    }
+
+    /// Asks the broker for `request` under this call's trigger.
+    fn permit(&self, request: &Request) -> Result<Permit, Failure> {
+        let mut state = self.bridge.lock();
+        if state.broker.generation(&self.package) != Some(self.generation) {
+            return Err(revoked());
+        }
+        match state
+            .broker
+            .check(&self.package, &self.revision, request, self.trigger)
+        {
+            dupin_broker::Decision::Allow(permit) => Ok(permit),
+            dupin_broker::Decision::Deny(denial) => {
+                if denial == dupin_broker::Denial::Disabled
+                    && state.asked_while_off.insert(self.package.clone())
+                {
+                    drop(state);
+                    self.bridge
+                        .notify(crate::Notice::ConsentNeeded(self.package.clone()));
+                }
+                Err(failure_for(&denial))
+            }
+            dupin_broker::Decision::NeedsConsent(needed) => {
+                let failure = self.bridge.needs_consent(&mut state, &self.package, needed);
+                drop(state);
+                self.bridge
+                    .notify(crate::Notice::ConsentNeeded(self.package.clone()));
+                Err(failure)
+            }
+        }
+    }
+
+    /// Checks the permit again before a result is released or an effect performed, so a
+    /// revocation during the operation drops what it produced.
+    fn release(&self, permit: &Permit, cancelled: &AtomicBool) -> Result<(), Failure> {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(Failure::new(
+                "cancelled",
+                "the call ended before the request finished",
+            ));
+        }
+        let state = self.bridge.lock();
+        if permit.generation() != self.generation || !state.broker.validate(permit) {
+            return Err(revoked());
+        }
+        Ok(())
+    }
+
+    fn declares_output(&self, key: &ScopeKey) -> bool {
+        self.bridge
+            .lock()
+            .broker
+            .consents(&self.package)
+            .iter()
+            .any(|(scope, _)| scope.key() == *key && matches!(scope, Scope::Script { output: true, .. }))
+    }
+}
+
+fn key_valid(key: &str) -> Result<(), Failure> {
+    if key.is_empty() || key.len() > MAX_KEY_BYTES {
+        return Err(Failure::invalid(format!("a key is 1–{MAX_KEY_BYTES} bytes")));
+    }
+    Ok(())
+}
+
+fn revoked() -> Failure {
+    Failure::new(
+        "revoked",
+        "The extension's access changed while the request ran, so its result was dropped.",
+    )
+}
+
+fn file_failure(error: files::FileError) -> Failure {
+    let code = match error {
+        files::FileError::InvalidPath(_) | files::FileError::InvalidScopeName => "invalid",
+        files::FileError::NotFound => "not-found",
+        files::FileError::ScopeChanged => "scope-changed",
+        _ => "failed",
+    };
+    Failure::new(code, error.to_string())
+}
+
+/// The profile the permit approves. Its placeholders become required one-line text inputs; a
+/// script target takes none.
+fn profile(permit: &Permit, script: bool) -> Result<exec::Profile, Failure> {
+    let unavailable = |error: exec::ExecError| Failure::new("unavailable", error.to_string());
+    match permit.scope() {
+        Scope::Script { name, output } if script => exec::Profile::new(
+            name.as_str(),
+            exec::Target::Script(name.to_string()),
+            &[],
+            BTreeMap::new(),
+            exec::Options {
+                return_output: *output,
+                ..exec::Options::default()
+            },
+        )
+        .map_err(unavailable),
+        Scope::Exec { name, args, output } if !script => {
+            let binding = permit
+                .binding()
+                .ok_or_else(|| Failure::new("failed", "no program was picked for the profile"))?;
+            let inputs = args
+                .iter()
+                .filter_map(|arg| placeholder(arg))
+                .map(|name| {
+                    (
+                        name,
+                        exec::Input {
+                            kind: exec::InputKind::Text {
+                                max_bytes: MAX_INPUT_BYTES,
+                                multiline: false,
+                                option_like: false,
+                            },
+                            required: true,
+                        },
+                    )
+                })
+                .collect();
+            let template: Vec<&str> = args.iter().map(String::as_str).collect();
+            exec::Profile::new(
+                name.as_str(),
+                exec::Target::Executable(binding.to_path_buf()),
+                &template,
+                inputs,
+                exec::Options {
+                    return_output: *output,
+                    ..exec::Options::default()
+                },
+            )
+            .map_err(unavailable)
+        }
+        _ => Err(Failure::new("failed", "the permit doesn't name a program")),
+    }
+}
+
+/// The input an argument template element names, as in `--count={count}`.
+pub(crate) fn placeholder(arg: &str) -> Option<String> {
+    let unescaped = arg.replace("{{", "").replace("}}", "");
+    let start = unescaped.find('{')?;
+    let end = start + unescaped[start..].find('}')?;
+    Some(unescaped[start + 1..end].to_owned())
+}
+
+/// Runs `fetch` while a watcher cancels it once the call ends or its deadline passes.
+fn with_cancel<T>(
+    cancel: &http::CancelToken,
+    deadline: Instant,
+    cancelled: &AtomicBool,
+    fetch: impl FnOnce() -> T,
+) -> T {
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !done.load(Ordering::Relaxed) {
+                if cancelled.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                    cancel.cancel();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let result = fetch();
+        done.store(true, Ordering::Relaxed);
+        result
+    })
+}

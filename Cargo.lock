@@ -779,9 +779,12 @@ name = "dupin"
 version = "0.0.0"
 dependencies = [
  "blake3",
+ "dupin-broker",
  "dupin-core",
  "dupin-ext-sdk",
+ "dupin-extension-bridge",
  "dupin-extension-host",
+ "dupin-extension-http",
  "dupin-extension-install",
  "dupin-host-services",
  "dupin-js-runtime",
@@ -834,6 +837,21 @@ version = "0.0.0"
 dependencies = [
  "dupin-js-runtime",
  "dupin-plugin-protocol",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "dupin-extension-bridge"
+version = "0.0.0"
+dependencies = [
+ "dupin-broker",
+ "dupin-extension-host",
+ "dupin-extension-http",
+ "dupin-host-services",
+ "dupin-js-runtime",
+ "dupin-plugin-protocol",
+ "serde",
  "serde_json",
  "tempfile",
 ]
@@ -898,6 +916,7 @@ dependencies = [
  "oxc_span",
  "rquickjs",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 
