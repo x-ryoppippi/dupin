@@ -36,6 +36,23 @@ pub struct Event {
     pub calendar: CalendarInfo,
     pub location: Option<String>,
     pub url: Option<String>,
+    /// Opens this occurrence in the Mac's Calendar.
+    pub link: Option<String>,
+    pub labels: Labels,
+}
+
+/// The event's dates as this Mac's locale writes them, in its time zone, which a guest
+/// without `Intl` can't do itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Labels {
+    /// The day it starts, such as “Wednesday 25 November”, with the year when that isn't
+    /// this year.
+    pub day: String,
+    /// Only its time, such as “10:00–11:00”, or “All day”, when it falls within one day.
+    pub time: Option<String>,
+    /// Its dates as well, with the year when either isn't this year.
+    pub dates: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -134,6 +151,11 @@ pub trait Calendars: Send + Sync {
     fn day_offset(&self, at: Millis) -> Result<i64, ServiceError>;
     /// Events overlapping `start..end`, in any order.
     fn events(&self, start: Millis, end: Millis) -> Result<Vec<Event>, ServiceError>;
+    /// Fills in the `link` and `labels` of the events a read returns, once the rest are left
+    /// out, since writing dates takes far longer than matching them.
+    fn describe(&self, events: &mut [Event]) {
+        let _ = events;
+    }
 }
 
 pub struct Calendar<C> {
@@ -196,6 +218,7 @@ impl<C: Calendars> Calendar<C> {
             .collect();
         events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
         events.truncate(query.limit);
+        self.backend.describe(&mut events);
         Ok(events.into_iter().map(Event::bounded).collect())
     }
 }
@@ -214,6 +237,7 @@ impl Event {
                 .filter(|location| !location.trim().is_empty())
                 .map(|location| bounded(location, MAX_TEXT_BYTES)),
             url: self.url.filter(|url| url.len() <= MAX_URL_BYTES),
+            link: self.link.filter(|link| link.len() <= MAX_URL_BYTES),
             ..self
         }
     }

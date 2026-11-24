@@ -31,6 +31,12 @@ provider = "apps.search"
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
 
+# The bundled Calendar extension, under its own keyword while the built-in is off.
+[features.calendar.extension]
+extends = "native"
+settings = { calendar = { enabled = false } }
+provider = "extension.calendar"
+
 [features.dictionary.native]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"

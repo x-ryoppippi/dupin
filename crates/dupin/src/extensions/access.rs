@@ -56,15 +56,30 @@ pub struct Platform {
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service; a headless render may still declare a base beside its own config.
+/// and reaches no service but a headless run's fixture calendar, as the built-in Calendar
+/// search reads it; a headless render may still declare a base beside its own config.
 pub fn open(platform: Platform) -> Bridge {
-    if cfg!(test) || rune::tooling::is_headless() {
+    if cfg!(test) {
+        return Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+    }
+    if rune::tooling::is_headless() {
         let base = base_path()
-            .filter(|_| !cfg!(test))
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|source| Base::parse(&source).ok())
             .unwrap_or_default();
-        return Bridge::new(Broker::new(base, Local::default()), None, Services::none());
+        let services = Services {
+            calendar: Box::new(Calendars(calendar::Calendar::new(
+                dupin_mac::CalendarProvider::fixtures(),
+            ))),
+            ..Services::none()
+        };
+        let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
+        bridge.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+        return bridge;
     }
     let services = Services {
         http: Box::new(HttpService::new(HttpConfig {
@@ -206,8 +221,15 @@ impl services::Calendar for Calendars {
         Ok((bounds.past_days, bounds.future_days))
     }
 
-    fn events(&self, from: i64, to: i64, limit: usize, scope: &Scope) -> Result<Value, Failure> {
-        let query = calendar::Query::new(from, to, None, None, Some(limit)).map_err(Failure::from)?;
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        scope: &Scope,
+    ) -> Result<Value, Failure> {
+        let query = calendar::Query::new(from, to, None, query, Some(limit)).map_err(Failure::from)?;
         let bounds = calendar::Bounds::of(scope)
             .ok_or_else(|| Failure::new("failed", "the permit isn't for calendars"))?;
         encoded(self.0.events(&query, bounds).map_err(Failure::from)?)

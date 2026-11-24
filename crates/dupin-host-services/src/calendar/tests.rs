@@ -16,6 +16,8 @@ fn event(id: &str, title: &str, calendar: &str, start: Millis, end: Millis) -> E
         },
         location: None,
         url: None,
+        link: None,
+        labels: Labels::default(),
     }
 }
 
@@ -236,6 +238,7 @@ fn events_serialize_for_javascript_within_their_bounds() {
         events: vec![Event {
             location: Some("  ".into()),
             url: Some(format!("https://example.com/{}", "a".repeat(MAX_URL_BYTES))),
+            link: Some(format!("ical://ekevent/{}", "a".repeat(MAX_URL_BYTES))),
             calendar: CalendarInfo {
                 name: "Work".into(),
                 color: Some("red".into()),
@@ -248,6 +251,7 @@ fn events_serialize_for_javascript_within_their_bounds() {
     assert!(event.title.len() <= MAX_TEXT_BYTES);
     assert_eq!(event.location, None);
     assert_eq!(event.url, None);
+    assert_eq!(event.link, None);
     assert_eq!(event.calendar.color, None);
 
     let json = serde_json::to_value(&fixture(OsAccess::Allowed).events[0]).unwrap();
@@ -262,6 +266,8 @@ fn events_serialize_for_javascript_within_their_bounds() {
             "calendar": { "name": "Work", "color": "#1badf8" },
             "location": "Meeting room",
             "url": "https://example.com/review",
+            "link": null,
+            "labels": { "day": "", "time": null, "dates": "" },
         })
     );
 }

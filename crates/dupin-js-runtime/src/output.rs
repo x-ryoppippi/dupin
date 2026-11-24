@@ -845,7 +845,16 @@ impl<'a> Reader<'a> {
                     let url = self
                         .string(&action, &field, "open", MAX_URL_BYTES)?
                         .expect("present");
-                    self.web_url(&field, &url)?;
+                    if !row::is_openable(&url) {
+                        return Err(self
+                            .invalid(
+                                "invalid-url",
+                                &field,
+                                "must be an http or https URL with a host, or a calendar event's `link`",
+                            )
+                            .hint("Use a full URL such as `https://example.com/`; other schemes can't be opened.")
+                            .into());
+                    }
                     RowEffect::OpenUrl { url }
                 }
                 _ => {

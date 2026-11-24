@@ -102,8 +102,9 @@ pub fn answer(
     }
     let exports = extension.check(deadline)?;
     let mut batches = Vec::new();
-    // Like any keyword command, `search` runs once there is something to search for.
-    if exports.search && !query.trim().is_empty() {
+    // Like any keyword command, `search` runs once there is something to search for, unless
+    // the package has something to show before that.
+    if exports.search && (extension.empty_query || !query.trim().is_empty()) {
         let scored = exports.items;
         let rows = extension.query(query, None, limit, deadline, is_cancelled, services)?;
         let rows = rows.into_iter().enumerate().map(|(index, row)| {

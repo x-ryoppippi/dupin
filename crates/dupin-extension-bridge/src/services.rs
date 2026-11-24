@@ -135,10 +135,17 @@ pub trait Calendar: Send + Sync {
     /// The whole local days before and after today that `[from, to)` (milliseconds since the
     /// epoch) reaches, which the broker checks against the declared window.
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure>;
-    /// Events overlapping `[from, to)`, at most `limit`, inside `scope`'s window, as a JSON
-    /// array whose `start` and `end` are milliseconds since the epoch.
-    fn events(&self, from: i64, to: i64, limit: usize, scope: &dupin_broker::Scope)
-    -> Result<Value, Failure>;
+    /// Events overlapping `[from, to)` whose title or location holds every word of `query`, at
+    /// most `limit`, inside `scope`'s window, as a JSON array whose `start` and `end` are
+    /// milliseconds since the epoch.
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        scope: &dupin_broker::Scope,
+    ) -> Result<Value, Failure>;
 }
 
 /// What a host service is missing, such as one a headless run has no use for.
@@ -211,6 +218,7 @@ impl Calendar for Unavailable {
         &self,
         _from: i64,
         _to: i64,
+        _query: Option<&str>,
         _limit: usize,
         _scope: &dupin_broker::Scope,
     ) -> Result<Value, Failure> {
@@ -419,9 +427,13 @@ pub(crate) mod fixture {
             &self,
             from: i64,
             to: i64,
+            query: Option<&str>,
             limit: usize,
             _scope: &dupin_broker::Scope,
         ) -> Result<Value, Failure> {
+            if query.is_some_and(|query| !"standup".contains(&query.trim().to_lowercase())) {
+                return Ok(Value::Array(Vec::new()));
+            }
             let first = (from - self.today).div_euclid(DAY);
             let events: Vec<_> = (first..)
                 .map(|day| self.today + day * DAY + DAY / 2)

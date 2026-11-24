@@ -12,7 +12,9 @@ use objc2_foundation::{
 
 use crate::privacy::{Access, CalendarAccess, Permission, PermissionStatus, calendar_authorization};
 
-const FIXTURE_NOW: f64 = 1_795_420_800.0;
+/// When the fixture events are laid out around, in milliseconds: 23 November 2026, 08:00 UTC.
+pub const FIXTURE_CLOCK: i64 = 1_795_420_800_000;
+const FIXTURE_NOW: f64 = FIXTURE_CLOCK as f64 / 1000.0;
 
 thread_local! {
     static STORE: Retained<EKEventStore> = unsafe { EKEventStore::new() };
@@ -258,6 +260,65 @@ impl Calendars for CalendarProvider {
             Ok(events.into_iter().map(Event::into_service).collect())
         })
     }
+
+    fn describe(&self, events: &mut [service::Event]) {
+        if events.is_empty() {
+            return;
+        }
+        autoreleasepool(|_| {
+            let (now, calendar) = self.clock();
+            let zone = calendar.timeZone();
+            let key = format!(
+                "{} {} {}",
+                zone.name(),
+                NSLocale::currentLocale().localeIdentifier(),
+                calendar.calendarIdentifier()
+            );
+            WRITERS.with_borrow_mut(|kept| {
+                let writers = match kept {
+                    Some(writers) if writers.key == key => {
+                        writers.days.at(&now);
+                        writers.times.at(&now);
+                        writers
+                    }
+                    _ => kept.insert(Writers {
+                        days: Days::new(&now, &calendar),
+                        times: Times::new(&now, &calendar, &zone),
+                        links: Links::new(&zone),
+                        key,
+                    }),
+                };
+                describe(events, &writers.days, &writers.times, &writers.links);
+            });
+        })
+    }
+}
+
+/// What `describe` writes dates and links with, kept for as long as the time zone, locale and
+/// calendar stay the same: building a date formatter takes far longer than using it.
+struct Writers {
+    key: String,
+    days: Days,
+    times: Times,
+    links: Links,
+}
+
+thread_local! {
+    static WRITERS: std::cell::RefCell<Option<Writers>> = const { std::cell::RefCell::new(None) };
+}
+
+fn describe(events: &mut [service::Event], days: &Days, times: &Times, links: &Links) {
+    for event in events {
+        let local = Event::from_service(event);
+        event.link = Some(links.url(&local));
+        event.labels = service::Labels {
+            day: days.date(&local.start),
+            time: times
+                .within_one_day(&local)
+                .then(|| times.text(&local, Some(day_number(&times.calendar, &local.start)))),
+            dates: times.text(&local, None),
+        };
+    }
 }
 
 impl CalendarProvider {
@@ -283,9 +344,12 @@ fn millis(date: &NSDate) -> Millis {
 }
 
 impl Event {
+    /// Its `id` names the EventKit event and, after the last `:`, the occurrence.
     fn into_service(self) -> service::Event {
         let occurrence = self.occurrence.as_ref().unwrap_or(&self.start);
         service::Event {
+            link: None,
+            labels: service::Labels::default(),
             id: format!("{}:{}", self.id, millis(occurrence)),
             start: millis(&self.start),
             end: millis(&self.end),
@@ -299,6 +363,27 @@ impl Event {
             title: self.title,
         }
     }
+
+    /// What dates and links are written from.
+    fn from_service(event: &service::Event) -> Self {
+        let (id, occurrence) = event
+            .id
+            .rsplit_once(':')
+            .and_then(|(id, at)| Some((id, date(at.parse().ok()?))))
+            .map_or((event.id.as_str(), None), |(id, at)| (id, Some(at)));
+        Self {
+            id: id.into(),
+            title: String::new(),
+            location: String::new(),
+            calendar: String::new(),
+            start: date(event.start),
+            end: date(event.end),
+            all_day: event.all_day,
+            occurrence,
+            url: None,
+            color: None,
+        }
+    }
 }
 
 struct Window<'a> {
@@ -310,41 +395,52 @@ struct Window<'a> {
 }
 
 /// Section titles for the day an event is under way or next starts.
-struct Days<'a> {
-    calendar: &'a NSCalendar,
+struct Days {
+    calendar: Retained<NSCalendar>,
     today: usize,
     year: isize,
     same_year: Retained<NSDateFormatter>,
     other_year: Retained<NSDateFormatter>,
 }
 
-impl<'a> Days<'a> {
-    fn new(window: &Window<'a>) -> Self {
+impl Days {
+    /// Writes dates in `calendar`'s time zone.
+    fn new(now: &NSDate, calendar: &NSCalendar) -> Self {
+        let zone = calendar.timeZone();
         let formatter = |template: &str| {
             let formatter = NSDateFormatter::new();
-            formatter.setTimeZone(Some(window.zone));
+            formatter.setTimeZone(Some(&zone));
             formatter.setLocalizedDateFormatFromTemplate(&NSString::from_str(template));
             formatter
         };
         Self {
-            calendar: window.calendar,
-            today: day_number(window.calendar, window.now),
-            year: window
-                .calendar
-                .component_fromDate(NSCalendarUnit::Year, window.now),
+            calendar: calendar.retain(),
+            today: day_number(calendar, now),
+            year: calendar.component_fromDate(NSCalendarUnit::Year, now),
             same_year: formatter("EEEEdMMMM"),
             other_year: formatter("EEEEdMMMMy"),
         }
+    }
+
+    fn at(&mut self, now: &NSDate) {
+        self.today = day_number(&self.calendar, now);
+        self.year = self.calendar.component_fromDate(NSCalendarUnit::Year, now);
     }
 
     fn title(&self, day: usize, date: &NSDate) -> String {
         match day.checked_sub(self.today) {
             Some(0) => "Today".into(),
             Some(1) => "Tomorrow".into(),
-            _ if self.calendar.component_fromDate(NSCalendarUnit::Year, date) == self.year => {
-                self.same_year.stringFromDate(date).to_string()
-            }
-            _ => self.other_year.stringFromDate(date).to_string(),
+            _ => self.date(date),
+        }
+    }
+
+    /// The weekday and date, with the year when it isn't this year.
+    fn date(&self, date: &NSDate) -> String {
+        if self.calendar.component_fromDate(NSCalendarUnit::Year, date) == self.year {
+            self.same_year.stringFromDate(date).to_string()
+        } else {
+            self.other_year.stringFromDate(date).to_string()
         }
     }
 }
@@ -357,7 +453,7 @@ fn day_number(calendar: &NSCalendar, date: &NSDate) -> usize {
 const ENDED: &str = "Earlier";
 
 fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Window) -> Vec<Batch> {
-    let days = Days::new(window);
+    let days = Days::new(window.now, window.calendar);
     let zone = window.zone;
     let now_date = window.now;
     let now = window.now.timeIntervalSince1970();
@@ -390,7 +486,7 @@ fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Win
             .then_with(|| a_start.total_cmp(&b_start))
             .then_with(|| a.id.cmp(&b.id))
     });
-    let times = Times::new(window);
+    let times = Times::new(window.now, window.calendar, window.zone);
     let mut batches: Vec<Batch> = Vec::new();
     for event in events.into_iter().take(limit) {
         let occurrence = event.occurrence.as_ref().unwrap_or(&event.start);
@@ -423,24 +519,52 @@ fn event_rows(mut events: Vec<Event>, terms: &[&str], limit: usize, window: &Win
 }
 
 /// Formats when an event happens, leaving out what its section heading already says.
-struct Times<'a> {
-    calendar: &'a NSCalendar,
+struct Times {
+    calendar: Retained<NSCalendar>,
+    zone: Retained<NSTimeZone>,
     year: isize,
-    formatter: Retained<NSDateIntervalFormatter>,
+    /// The locale's, unless set.
+    locale: Option<Retained<NSLocale>>,
+    /// One formatter for each template, since setting a template works the pattern out again.
+    formatters: std::cell::RefCell<Vec<(&'static str, Retained<NSDateIntervalFormatter>)>>,
 }
 
-impl<'a> Times<'a> {
-    fn new(window: &Window<'a>) -> Self {
-        let formatter = NSDateIntervalFormatter::new();
-        formatter.setTimeZone(Some(window.zone));
-        formatter.setCalendar(Some(window.calendar));
+impl Times {
+    fn new(now: &NSDate, calendar: &NSCalendar, zone: &NSTimeZone) -> Self {
         Self {
-            calendar: window.calendar,
-            year: window
-                .calendar
-                .component_fromDate(NSCalendarUnit::Year, window.now),
-            formatter,
+            calendar: calendar.retain(),
+            zone: zone.retain(),
+            year: calendar.component_fromDate(NSCalendarUnit::Year, now),
+            locale: None,
+            formatters: std::cell::RefCell::default(),
         }
+    }
+
+    fn between(&self, template: &'static str, from: &NSDate, to: &NSDate) -> String {
+        let mut formatters = self.formatters.borrow_mut();
+        let formatter = match formatters.iter().find(|(made, _)| *made == template) {
+            Some((_, formatter)) => formatter,
+            None => {
+                let formatter = NSDateIntervalFormatter::new();
+                formatter.setTimeZone(Some(&self.zone));
+                formatter.setCalendar(Some(&self.calendar));
+                formatter.setLocale(self.locale.as_deref());
+                formatter.setDateTemplate(Some(&NSString::from_str(template)));
+                formatters.push((template, formatter));
+                &formatters.last().expect("just pushed").1
+            }
+        };
+        formatter.stringFromDate_toDate(from, to).to_string()
+    }
+
+    fn at(&mut self, now: &NSDate) {
+        self.year = self.calendar.component_fromDate(NSCalendarUnit::Year, now);
+    }
+
+    /// Whether the event starts and ends on one day, counting one that ends at midnight as
+    /// the day before's.
+    fn within_one_day(&self, event: &Event) -> bool {
+        day_number(&self.calendar, &event.start) == day_number(&self.calendar, &last_moment(event))
     }
 
     /// Only the time when the event falls within `heading_day`, the day its section names;
@@ -448,21 +572,15 @@ impl<'a> Times<'a> {
     fn text(&self, event: &Event, heading_day: Option<usize>) -> String {
         let start = event.start.timeIntervalSince1970();
         let end = NSDate::dateWithTimeIntervalSince1970(event.end.timeIntervalSince1970().max(start));
-        // All-day events end at the start of the next day, and a timed event that ends at
-        // midnight belongs to the day before.
-        let last = NSDate::dateWithTimeIntervalSince1970((end.timeIntervalSince1970() - 1.0).max(start));
-        let first_day = day_number(self.calendar, &event.start);
-        let one_day = first_day == day_number(self.calendar, &last);
-        let between = |template: &str, from: &NSDate, to: &NSDate| {
-            self.formatter
-                .setDateTemplate(Some(&NSString::from_str(template)));
-            self.formatter.stringFromDate_toDate(from, to).to_string()
-        };
-        let range = |template: &str, to: &NSDate| between(template, &event.start, to);
+        let last = last_moment(event);
+        let first_day = day_number(&self.calendar, &event.start);
+        let one_day = self.within_one_day(event);
+        let between = |template, from: &NSDate, to: &NSDate| self.between(template, from, to);
+        let range = |template, to: &NSDate| between(template, &event.start, to);
         if one_day && heading_day == Some(first_day) {
             return if event.all_day {
                 "All day".into()
-            } else if day_number(self.calendar, &end) == first_day {
+            } else if day_number(&self.calendar, &end) == first_day {
                 range("jmm", &end)
             } else {
                 // The formatter spells out both dates whenever the range crosses midnight.
@@ -473,29 +591,61 @@ impl<'a> Times<'a> {
         let other_year = [&*event.start, &*last]
             .into_iter()
             .any(|date| self.calendar.component_fromDate(NSCalendarUnit::Year, date) != self.year);
-        let date = if other_year { "dMMMy" } else { "dMMM" };
         if event.all_day {
-            format!("{} · All day", range(date, &last))
+            format!(
+                "{} · All day",
+                range(if other_year { "dMMMy" } else { "dMMM" }, &last)
+            )
         } else {
-            range(&format!("{date}jmm"), &end)
+            range(if other_year { "dMMMyjmm" } else { "dMMMjmm" }, &end)
         }
     }
 }
 
+/// All-day events end at the start of the next day, and a timed event that ends at midnight
+/// belongs to the day before.
+fn last_moment(event: &Event) -> Retained<NSDate> {
+    let start = event.start.timeIntervalSince1970();
+    let end = event.end.timeIntervalSince1970().max(start);
+    NSDate::dateWithTimeIntervalSince1970((end - 1.0).max(start))
+}
+
+/// Calendar links, which name an occurrence by a date stamp: a local one for floating all-day
+/// occurrences, otherwise UTC.
+struct Links {
+    local: Retained<NSDateFormatter>,
+    utc: Retained<NSDateFormatter>,
+}
+
+impl Links {
+    fn new(zone: &NSTimeZone) -> Self {
+        let stamp = |zone: &NSTimeZone| {
+            let formatter = NSDateFormatter::new();
+            formatter.setLocale(Some(&NSLocale::localeWithLocaleIdentifier(&NSString::from_str(
+                "en_US_POSIX",
+            ))));
+            formatter.setTimeZone(Some(zone));
+            formatter.setDateFormat(Some(&NSString::from_str("yyyyMMdd'T'HHmmss'Z'")));
+            formatter
+        };
+        Self {
+            local: stamp(zone),
+            utc: stamp(&NSTimeZone::timeZoneForSecondsFromGMT(0)),
+        }
+    }
+
+    fn url(&self, event: &Event) -> String {
+        let id = crate::workspace::encode_url_component(&event.id);
+        let occurrence = event.occurrence.as_ref().map_or_else(String::new, |date| {
+            let formatter = if event.all_day { &self.local } else { &self.utc };
+            format!("{}/", formatter.stringFromDate(date))
+        });
+        format!("ical://ekevent/{occurrence}{id}?method=show&options=more")
+    }
+}
+
 fn event_url(event: &Event, zone: &NSTimeZone) -> String {
-    let id = crate::workspace::encode_url_component(&event.id);
-    let occurrence = event.occurrence.as_ref().map_or_else(String::new, |date| {
-        let formatter = NSDateFormatter::new();
-        formatter.setLocale(Some(&NSLocale::localeWithLocaleIdentifier(&NSString::from_str(
-            "en_US_POSIX",
-        ))));
-        let utc = NSTimeZone::timeZoneForSecondsFromGMT(0);
-        // Calendar uses a local date stamp for floating all-day occurrences.
-        formatter.setTimeZone(Some(if event.all_day { zone } else { &utc }));
-        formatter.setDateFormat(Some(&NSString::from_str("yyyyMMdd'T'HHmmss'Z'")));
-        format!("{}/", formatter.stringFromDate(date))
-    });
-    format!("ical://ekevent/{occurrence}{id}?method=show&options=more")
+    Links::new(zone).url(event)
 }
 
 fn row(id: &str, title: &str, subtitle: String, open: Option<(&str, String)>) -> Item {
@@ -709,17 +859,13 @@ mod tests {
             zone: &zone,
             calendar: &calendar,
         };
-        let times = Times::new(&window);
-        times
-            .formatter
-            .setLocale(Some(&NSLocale::localeWithLocaleIdentifier(&NSString::from_str(
-                "en_GB",
-            ))));
+        let mut times = Times::new(window.now, window.calendar, window.zone);
+        times.locale = Some(NSLocale::localeWithLocaleIdentifier(&NSString::from_str("en_GB")));
         check(&times, &now, fixture_events(&now));
     }
 
     fn day_of(times: &Times, event: &Event) -> Option<usize> {
-        Some(day_number(times.calendar, &event.start))
+        Some(day_number(&times.calendar, &event.start))
     }
 
     #[test]
@@ -860,6 +1006,21 @@ mod tests {
         ));
     }
 
+    /// `event` as the extension service hands it over, written in en_GB and UTC.
+    fn service_event(event: Event) -> service::Event {
+        let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
+        let zone = NSTimeZone::timeZoneForSecondsFromGMT(0);
+        let calendar = NSCalendar::currentCalendar();
+        calendar.setTimeZone(&zone);
+        let days = Days::new(&now, &calendar);
+        let mut times = Times::new(&now, &calendar, &zone);
+        times.locale = Some(NSLocale::localeWithLocaleIdentifier(&NSString::from_str("en_GB")));
+        let mut events = [event.into_service()];
+        describe(&mut events, &days, &times, &Links::new(&zone));
+        let [event] = events;
+        event
+    }
+
     #[test]
     fn events_reach_extensions_in_milliseconds_with_occurrence_ids() {
         let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
@@ -869,26 +1030,75 @@ mod tests {
         planning.color = Some("#1badf8".into());
         planning.occurrence = Some(now.clone());
         let base = FIXTURE_NOW as Millis * 1000;
+        let planning = service_event(planning);
         assert_eq!(
-            planning.into_service(),
-            service::Event {
-                id: format!("project-planning:{base}"),
-                title: "Project planning".into(),
-                start: base + 7_200_000,
-                end: base + 10_800_000,
-                all_day: false,
-                calendar: CalendarInfo {
+            (
+                planning.id.as_str(),
+                planning.title.as_str(),
+                planning.start,
+                planning.end,
+                planning.all_day,
+                &planning.calendar,
+                planning.location.as_deref(),
+                planning.url.as_deref(),
+            ),
+            (
+                format!("project-planning:{base}").as_str(),
+                "Project planning",
+                base + 7_200_000,
+                base + 10_800_000,
+                false,
+                &CalendarInfo {
                     name: "Work".into(),
                     color: Some("#1badf8".into()),
                 },
-                location: Some("Studio".into()),
-                url: Some("https://example.com/plan".into()),
-            }
+                Some("Studio"),
+                Some("https://example.com/plan"),
+            )
         );
-        let holiday = events.nth(1).unwrap().into_service();
+        let holiday = service_event(events.nth(1).unwrap());
         assert!(holiday.all_day);
         assert_eq!(holiday.location, None);
         assert_eq!(holiday.start, base + 57_600_000);
         assert_eq!(millis(&date(holiday.start)), holiday.start);
+    }
+
+    #[test]
+    fn events_carry_their_calendar_link_and_dates_as_the_mac_writes_them() {
+        let now = NSDate::dateWithTimeIntervalSince1970(FIXTURE_NOW);
+        let mut events = fixture_events(&now).into_iter();
+        let mut planning = events.next().unwrap();
+        planning.occurrence = Some(planning.start.clone());
+        let planning = service_event(planning);
+        assert_eq!(
+            planning.link.as_deref(),
+            Some("ical://ekevent/20261123T100000Z/project-planning?method=show&options=more")
+        );
+        assert_eq!(
+            planning.labels.time.as_deref(),
+            Some("10:00\u{2009}–\u{2009}11:00")
+        );
+        let dates = &planning.labels.dates;
+        assert!(dates.contains("23 Nov") && dates.contains("10:00"), "{dates}");
+        assert!(planning.labels.day.contains("23"), "{:?}", planning.labels);
+
+        let holiday = service_event(events.nth(1).unwrap());
+        assert_eq!(holiday.labels.time.as_deref(), Some("All day"));
+        assert!(
+            holiday.labels.dates.ends_with(" · All day"),
+            "{:?}",
+            holiday.labels
+        );
+        assert!(holiday.labels.day.contains("24"), "{:?}", holiday.labels);
+
+        let mut overnight = events.next().unwrap();
+        overnight.end = overnight.start.dateByAddingTimeInterval(86_400.0);
+        let overnight = service_event(overnight);
+        assert_eq!(overnight.labels.time, None);
+        assert!(
+            overnight.labels.dates.contains("26 Nov"),
+            "{:?}",
+            overnight.labels
+        );
     }
 }
