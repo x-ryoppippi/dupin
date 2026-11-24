@@ -83,7 +83,7 @@ impl Fixture {
         for permission in OsPermission::ALL {
             bridge.set_os_access(permission, OsAccess::Allowed);
         }
-        let refused = |error: dupin_extension_bridge::BrokerError| {
+        let refused = |error: dupin_extension_bridge::SaveError| {
             Diagnostic::new(
                 "invalid-fixture",
                 format!("the broker refused the fixture's consent: {error}"),

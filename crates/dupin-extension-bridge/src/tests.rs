@@ -266,15 +266,15 @@ fn a_request_without_consent_fails_and_waits_for_the_user_who_runs_nothing_by_gr
     );
 
     // A consent for another revision than the installed one is refused.
-    assert_eq!(
+    assert!(matches!(
         world.bridge.allow(
             &world.id,
             &Revision::new("sha256:other").unwrap(),
             &pending[0].scope,
             None
         ),
-        Err(BrokerError::StaleRevision)
-    );
+        Err(SaveError::Refused(BrokerError::StaleRevision))
+    ));
 }
 
 #[test]
@@ -634,6 +634,19 @@ fn wait_for(done: impl Fn() -> bool) {
 }
 
 #[test]
+fn a_choice_that_cannot_be_saved_changes_nothing() {
+    let folder = tempfile::tempdir().unwrap();
+    let local = folder.path().join("grants.toml");
+    let bridge = Bridge::open(&folder.path().join("base.toml"), &local, Services::none());
+    let id = PackageId::new("weather").unwrap();
+    bridge.install(&id, revision(), Capabilities::default());
+    std::fs::create_dir(folder.path().join("grants.toml.tmp")).unwrap();
+    assert!(matches!(bridge.set_enabled(&id, true), Err(SaveError::Store(_))));
+    assert!(!bridge.is_enabled(&id));
+    assert!(!bridge.is_turned_off(&id));
+}
+
+#[test]
 fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
     let folder = tempfile::tempdir().unwrap();
     let local = folder.path().join("grants.toml");
@@ -646,7 +659,10 @@ fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
         revision(),
         Capabilities::parse(&serde_json::json!({ "dictionary": ["lookup"] })).unwrap(),
     );
-    assert_eq!(bridge.set_enabled(&id, true), Err(BrokerError::GrantsUnreadable));
+    assert!(matches!(
+        bridge.set_enabled(&id, true),
+        Err(SaveError::Refused(BrokerError::GrantsUnreadable))
+    ));
     assert_eq!(std::fs::read_to_string(&local).unwrap(), "not = [valid");
 }
 

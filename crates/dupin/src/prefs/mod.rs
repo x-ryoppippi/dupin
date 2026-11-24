@@ -28,8 +28,6 @@ use crate::icons;
 use crate::ui::Ui;
 use crate::update::Updater;
 
-pub use self::extensions::InstalledExtension;
-
 pub const SIZE: (f32, f32) = (760.0, 480.0);
 
 /// Room above the sidebar's rows for the traffic lights, which sit over a full-size content view.
@@ -111,12 +109,10 @@ pub struct Prefs {
     pub(crate) scripts_notice: Option<String>,
     preview_dark: Option<bool>,
     active_radius: u16,
-    /// Loaded extensions as "Name (keyword)", and why others were skipped.
-    extensions: (Vec<String>, Vec<String>),
+    /// Loaded extensions, and why others were skipped.
+    extensions: (Vec<crate::extensions::packages::Listed>, Vec<String>),
     /// The broker bridge the panel's extensions go through, once the panel has one.
     access: Option<dupin_extension_bridge::Bridge>,
-    /// Loaded JavaScript packages, for Extensions.
-    installed: Vec<InstalledExtension>,
     /// Why the last Allow, Revoke or switch on Extensions didn't apply.
     extension_problem: Option<String>,
 }
@@ -158,7 +154,6 @@ impl Prefs {
             config_problem: None,
             extensions: Default::default(),
             access: None,
-            installed: Vec::new(),
             extension_problem: None,
             hotkey_problem: None,
             scripts_notice: None,
@@ -184,8 +179,12 @@ impl Prefs {
         self.refresh_permissions();
     }
 
-    pub fn reflect_extensions(&mut self, loaded: Vec<String>, problems: Vec<String>) {
-        self.extensions = (loaded, problems);
+    pub fn reflect_extensions(
+        &mut self,
+        listed: Vec<crate::extensions::packages::Listed>,
+        problems: Vec<String>,
+    ) {
+        self.extensions = (listed, problems);
     }
 
     pub fn reflect_config(
@@ -614,29 +613,69 @@ mod tests {
     }
 
     #[test]
-    fn skipped_extension_problems_follow_the_extensions_switch() {
-        let config = Config {
-            snippet_paste: false,
-            ..Config::default()
-        };
-        let current = Rc::new(RefCell::new(config));
+    fn the_extensions_page_lists_each_extension_with_its_switch_and_problems() {
+        use crate::extensions::packages::{Kind, Listed};
+        use dupin_extension_bridge::{Bridge, Broker, Capabilities, PackageId, Revision, Services};
+        use rune::accesskit::Role;
+
+        let current = Rc::new(RefCell::new(Config::default()));
         let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
         let mut state = state(current, settings, false);
-        state.reflect_extensions(Vec::new(), vec!["fixture: invalid manifest".into()]);
-        state.show(Page::Search);
+        let bridge = Bridge::new(
+            Broker::new(Default::default(), Default::default()),
+            None,
+            Services::none(),
+        );
+        let (dupin, words) = (
+            PackageId::new("bundled:dupin").unwrap(),
+            PackageId::new("words").unwrap(),
+        );
+        let revision = Revision::new("blake3:fixture").unwrap();
+        bridge.set_bundled(&dupin, revision.clone());
+        bridge.install(&dupin, revision.clone(), Capabilities::default());
+        bridge.install(&words, revision, Capabilities::default());
+        bridge.set_enabled(&words, false).unwrap();
+        let listed = |package: &PackageId, title: &str, kind| Listed {
+            package: package.clone(),
+            title: title.into(),
+            keyword: title.to_lowercase(),
+            kind,
+            registered: true,
+            main_search: false,
+        };
+        state.reflect_extensions(
+            vec![
+                listed(&dupin, "Dupin", Kind::Bundled),
+                listed(&words, "Words", Kind::Modified),
+            ],
+            vec!["fixture: invalid manifest".into()],
+        );
+        state.reflect_extension_access(bridge);
+        // Not `show`, which reads macOS access.
+        state.page = Page::Extensions;
         let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
 
-        for (extensions, window_management) in [(true, false), (false, true)] {
-            runtime.update(|s, _| {
-                s.config.extensions = extensions;
-                s.config.window_management = window_management;
-            });
-            runtime.frame(0.0);
-            let shows_problems = runtime
-                .elements()
+        let keys: Vec<_> = runtime
+            .elements()
+            .iter()
+            .filter_map(|element| element.key.clone())
+            .collect();
+        for key in ["extension-0", "extension-1", "extension-problems"] {
+            assert!(keys.iter().any(|k| k == key), "{key}");
+        }
+        let tree = runtime.accessibility_tree();
+        for (label, on) in [("Dupin", true), ("Words", false), ("Extensions folder", false)] {
+            let (_, switch) = tree
+                .nodes
                 .iter()
-                .any(|element| element.key.as_deref() == Some("extension-problems"));
-            assert_eq!(shows_problems, extensions);
+                .find(|(_, node)| node.role() == Role::Switch && node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing switch {label}"));
+            assert_eq!(
+                switch.toggled() == Some(rune::accesskit::Toggled::True),
+                on,
+                "{label}"
+            );
         }
     }
 
@@ -677,14 +716,18 @@ mod tests {
             &Default::default(),
         );
         assert!(String::from_utf8(reply).unwrap().contains("needs-consent"));
-        state.reflect_extension_access(
-            bridge.clone(),
-            vec![InstalledExtension {
+        state.reflect_extensions(
+            vec![crate::extensions::packages::Listed {
                 package: id.clone(),
-                name: "Weather".into(),
+                title: "Weather".into(),
                 keyword: "wx".into(),
+                kind: crate::extensions::packages::Kind::User,
+                registered: true,
+                main_search: false,
             }],
+            Vec::new(),
         );
+        state.reflect_extension_access(bridge.clone());
         // Not `show`, which reads macOS access, and the pasteboard is out of reach in the Nix
         // build sandbox.
         state.page = Page::Extensions;

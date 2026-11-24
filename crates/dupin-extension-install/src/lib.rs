@@ -49,6 +49,9 @@ pub struct Installer {
     /// For Git URLs other than `github:`.
     pub git: Git,
     pub github: GitHub,
+    /// The names of the packages bundled with the launcher, which no installed package may
+    /// take: one would replace the bundled package under its name.
+    pub bundled: BTreeSet<String>,
 }
 
 /// What an install, update or sync did to one package.
@@ -315,6 +318,21 @@ impl Installer {
                 ),
             )
             .hint("Move or delete that folder first, or give the package another name."));
+        }
+        if self.bundled.contains(&package.name) {
+            return Err(Error::new(
+                "name-bundled",
+                format!(
+                    "`{}` is the name of an extension bundled with Dupin",
+                    package.name
+                ),
+            )
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+            .hint(format!(
+                "Give the package another name, or run `dupin ext eject {}` to edit the bundled one.",
+                package.name
+            )));
         }
         self.check_keyword(&package, taken)?;
 

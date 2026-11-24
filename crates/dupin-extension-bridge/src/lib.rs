@@ -24,7 +24,7 @@ use std::time::{Instant, SystemTime};
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
     Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Reconciliation, Revision,
-    Scope, ScopeKey, StoreError, Trigger,
+    SaveError, Scope, ScopeKey, StoreError, Trigger,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
@@ -271,6 +271,12 @@ impl Bridge {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(listener));
     }
 
+    /// Records a package that ships inside Dupin at `revision`: while that revision is the one
+    /// installed, the package is on and its scopes are pre-granted. Call it before installing.
+    pub fn set_bundled(&self, id: &PackageId, revision: Revision) {
+        self.inner.lock().broker.set_bundled(id.clone(), revision);
+    }
+
     /// Loads or updates a package's declaration at `revision`. It never grants anything; what
     /// a new revision widens needs consent again, and what it no longer declares is dropped.
     pub fn install(&self, id: &PackageId, revision: Revision, capabilities: Capabilities) -> Reconciliation {
@@ -328,8 +334,13 @@ impl Bridge {
         self.inner.lock().broker.is_enabled(id)
     }
 
+    /// Whether the user or the base turned `id` off, rather than never turning it on.
+    pub fn is_turned_off(&self, id: &PackageId) -> bool {
+        self.inner.lock().broker.is_turned_off(id)
+    }
+
     /// Turns a package's capabilities on or off. Turning off drops its in-flight results.
-    pub fn set_enabled(&self, id: &PackageId, enabled: bool) -> Result<(), BrokerError> {
+    pub fn set_enabled(&self, id: &PackageId, enabled: bool) -> Result<(), SaveError> {
         self.change(id, |broker| broker.set_enabled(id, enabled))?;
         self.inner.lock().asked_while_off.remove(id);
         Ok(())
@@ -349,7 +360,7 @@ impl Bridge {
         revision: &Revision,
         scope: &Scope,
         binding: Option<PathBuf>,
-    ) -> Result<(), BrokerError> {
+    ) -> Result<(), SaveError> {
         let key = scope.key();
         self.change(id, |broker| {
             broker.consent(id, revision, scope, binding)?;
@@ -368,7 +379,7 @@ impl Bridge {
 
     /// Takes `key` away at once, whoever granted it. In-flight results of the package are
     /// dropped, and the scope stays off until the user grants it again.
-    pub fn revoke(&self, id: &PackageId, key: &ScopeKey) -> Result<(), BrokerError> {
+    pub fn revoke(&self, id: &PackageId, key: &ScopeKey) -> Result<(), SaveError> {
         self.change(id, |broker| broker.revoke(id, key))?;
         self.inner
             .lock()
@@ -476,21 +487,32 @@ impl Bridge {
         self.inner.watches.unregister(id);
     }
 
+    /// Makes `change` and saves it, or leaves the decisions as they were if either fails, so
+    /// the broker never enforces a choice the local grant file doesn't hold.
     fn change(
         &self,
         id: &PackageId,
         change: impl FnOnce(&mut Broker) -> Result<(), BrokerError>,
-    ) -> Result<(), BrokerError> {
+    ) -> Result<(), SaveError> {
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
         let before = state.broker.generation(id);
-        if let Err(error) = change(&mut state.broker) {
+        let changed = match &self.inner.local {
+            Some(path) => {
+                let changed = state.broker.change_saved(path, change);
+                if changed.is_ok() {
+                    state.seen.local = stamp(path);
+                }
+                changed
+            }
+            None => change(&mut state.broker).map_err(SaveError::Refused),
+        };
+        if let Err(error) = changed {
             drop(state);
             self.inner.announce(synced);
             return Err(error);
         }
         let bumped = state.broker.generation(id) != before;
-        self.inner.save(&mut state);
         drop(state);
         if bumped {
             self.inner.forget_files(id);

@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"lib": ["ES2023"],
+		"types": [],
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"allowJs": true,
+		"checkJs": true,
+		"strict": true,
+		"noEmit": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"erasableSyntaxOnly": true,
+		"allowImportingTsExtensions": true
+	},
+	"include": [
+		"*/**/*.js",
+		"*/**/*.mjs",
+		"*/**/*.ts",
+		"*/**/*.mts",
+		"*/**/*.tsx",
+		"../sdk/dupin.d.ts"
+	]
+}
