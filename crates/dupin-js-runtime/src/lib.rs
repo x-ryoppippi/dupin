@@ -1,6 +1,9 @@
 //! JavaScript extensions on QuickJS-ng. Each call runs in a fresh runtime with a bounded heap,
 //! stack, deadline and promise-job budget, and with no APIs beyond the language itself and the
 //! host's `dupin` module: no files, network, processes or timers.
+//!
+//! Dupin itself only reads a package's [`Sources`]; compiling and running them is the extension
+//! host's work.
 
 mod diagnostic;
 mod output;
@@ -8,7 +11,6 @@ mod package;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,7 +22,7 @@ use rquickjs::promise::PromiseState;
 use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runtime, Value, WriteOptions};
 
 pub use diagnostic::Diagnostic;
-pub use package::source_files;
+pub use package::{Sources, source_files};
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
@@ -28,9 +30,8 @@ const STACK_BYTES: usize = 512 * 1024;
 const MAX_JOBS: usize = 10_000;
 /// Items one `search` may return.
 pub const MAX_ROWS: usize = 50;
-/// Compiling is the host's work on files it has already bounded, but one large bundle needs more
-/// than a call's heap while its parser runs.
-const COMPILE_HEAP_BYTES: usize = 64 * 1024 * 1024;
+/// One large bundle needs more than a call's heap while its parser runs.
+pub const COMPILE_HEAP_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_ENTRY: &str = "main.js";
 const HOST_MODULE: &str = "dupin";
 const HOST_SOURCE: &str = "export const apiVersion = 1;\n";
@@ -55,7 +56,16 @@ impl From<Diagnostic> for RunError {
     }
 }
 
-/// A package's modules, compiled once when it is loaded. A changed file means a new package.
+/// The QuickJS-ng release this build runs, which decides the bytecode format.
+pub fn engine_version() -> &'static str {
+    // SAFETY: QuickJS returns a pointer to a static, NUL-terminated string.
+    unsafe { std::ffi::CStr::from_ptr(rquickjs::qjs::JS_GetVersion()) }
+        .to_str()
+        .unwrap_or("unknown")
+}
+
+/// A package's modules as bytecode. Only the extension host makes or loads one: QuickJS's parser
+/// and bytecode loader are reachable from package source and bytes, so they never run in Dupin.
 pub struct Package {
     entry: String,
     modules: Arc<HashMap<String, Box<[u8]>>>,
@@ -70,24 +80,40 @@ impl std::fmt::Debug for Package {
 }
 
 impl Package {
-    /// Reads and compiles every JavaScript file in `root`. `entry` is the module that exports
-    /// `search`, relative to `root`.
-    pub fn load(root: &Path, entry: &str) -> Result<Self, Diagnostic> {
-        let entry = entry.strip_prefix("./").unwrap_or(entry).to_owned();
-        let files = source_files(root)?;
-        if !files.iter().any(|(name, _)| *name == entry) {
-            return Err(Diagnostic::new("missing-entry", "is not a JavaScript file in the package folder")
-                .file(&entry)
-                .hint(format!(
-                    "Create `{DEFAULT_ENTRY}` exporting `search`, or point `dupin.main` in package.json at the module that does."
-                )));
-        }
-        let sources = package::read_sources(&files)?;
-        let modules = compile(sources)?;
+    /// Compiles every module of `sources` to bytecode, within the call limits and `control`.
+    /// QuickJS links a module's static imports as it compiles it, so this also catches imports
+    /// that leave the package or name a missing file.
+    pub fn compile(sources: Sources, control: Control) -> Result<Self, RunError> {
+        let entry = sources.entry().to_owned();
+        let modules = compile(sources, control)?;
         Ok(Self {
             entry,
             modules: Arc::new(modules),
         })
+    }
+
+    /// Rebuilds a package from what [`Package::modules`] gave out, in a later call.
+    ///
+    /// # Safety
+    ///
+    /// QuickJS does not validate bytecode. Every module must be bytes that [`Package::compile`]
+    /// wrote, unchanged, in a build whose [`engine_version`] is this one's.
+    pub unsafe fn from_compiled(entry: String, modules: HashMap<String, Box<[u8]>>) -> Self {
+        Self {
+            entry,
+            modules: Arc::new(modules),
+        }
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    /// Each module's name and bytecode.
+    pub fn modules(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.modules
+            .iter()
+            .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
     }
 
     /// Links and evaluates the entry module, and checks that it exports `search`.
@@ -121,37 +147,66 @@ impl Package {
     }
 }
 
-/// Compiles every module to bytecode. QuickJS links a module's static imports as it compiles
-/// it, so this also catches imports that leave the package or name a missing file.
-fn compile(sources: Vec<(String, String)>) -> Result<HashMap<String, Box<[u8]>>, Diagnostic> {
-    let names: Vec<String> = sources.iter().map(|(name, _)| name.clone()).collect();
-    let mut sources: HashMap<String, String> = sources.into_iter().collect();
+fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {
+    let entry = sources.entry().to_owned();
+    let names: Vec<String> = sources.files().map(|(name, _)| name.to_owned()).collect();
+    let mut sources: HashMap<String, String> = sources
+        .files()
+        .map(|(name, source)| (name.to_owned(), source.to_owned()))
+        .collect();
     sources.insert(HOST_MODULE.into(), HOST_SOURCE.into());
     let compiler = Compiler {
         sources: Rc::new(sources),
         compiled: Rc::default(),
         problem: LinkProblem::default(),
     };
+    let watchdog = Watchdog::new(control);
+    let stopped = |watchdog: &Watchdog| match watchdog.stop.get() {
+        Some(Stop::Cancelled) | None => RunError::Cancelled,
+        Some(Stop::Deadline) => RunError::Failed(
+            Diagnostic::new(
+                "deadline",
+                "compiling the package didn't finish before its deadline",
+            )
+            .file(&entry)
+            .hint(
+                "Bundle the extension into less JavaScript: Dupin stops compiling a package after 2 seconds.",
+            ),
+        ),
+    };
     let runtime = Runtime::new().map_err(|error| internal(&error))?;
     runtime.set_memory_limit(COMPILE_HEAP_BYTES);
     runtime.set_max_stack_size(STACK_BYTES);
+    let interrupt = watchdog.clone();
+    runtime.set_interrupt_handler(Some(Box::new(move || interrupt.tripped())));
     runtime.set_loader(compiler.clone(), compiler.clone());
     let context = Context::full(&runtime).map_err(|error| internal(&error))?;
-    context.with(|ctx| {
+    let compiled = context.with(|ctx| {
         for name in &names {
+            if watchdog.tripped() {
+                return Err(stopped(&watchdog));
+            }
             if compiler.compiled.borrow().contains_key(name) {
                 continue;
             }
             compiler.declare(&ctx, name).map_err(|error| {
-                compiler
-                    .problem
-                    .take()
-                    .unwrap_or_else(|| syntax(&ctx, error, name))
+                RunError::Failed(
+                    compiler
+                        .problem
+                        .take()
+                        .unwrap_or_else(|| syntax(&ctx, error, name)),
+                )
             })?;
         }
-        Ok::<_, Diagnostic>(())
-    })?;
+        Ok(())
+    });
     drop(context);
+    // The parser never polls the interrupt handler, so a module that took too long to parse is
+    // only caught here.
+    if watchdog.tripped() {
+        return Err(stopped(&watchdog));
+    }
+    compiled?;
     Ok(compiler.compiled.take())
 }
 
@@ -227,7 +282,24 @@ fn syntax(ctx: &Ctx<'_>, error: rquickjs::Error, file: &str) -> Diagnostic {
     if !matches!(error, rquickjs::Error::Exception) {
         return internal(&error).file(file);
     }
-    let thrown = describe_thrown(&ctx.catch());
+    let value = ctx.catch();
+    let thrown = describe_thrown(&value);
+    if value.is_null() || thrown.message.contains("out of memory") {
+        return Diagnostic::new(
+            "memory-limit",
+            format!(
+                "compiling it used more than {} MiB of memory",
+                COMPILE_HEAP_BYTES / 1024 / 1024
+            ),
+        )
+        .file(file)
+        .hint("Bundle and minify the extension, and leave out code it doesn't run.");
+    }
+    if thrown.message.contains("stack overflow") || thrown.message.contains("call stack size exceeded") {
+        return Diagnostic::new("stack-limit", "nests too deeply to compile")
+            .file(file)
+            .hint("Flatten deeply nested expressions, arrays or objects.");
+    }
     let mut diagnostic = Diagnostic::new("syntax-error", thrown.message)
         .file(file)
         .hint("Fix the syntax. Dupin runs plain JavaScript modules; build TypeScript or JSX first.");
@@ -252,6 +324,14 @@ struct Watchdog {
 }
 
 impl Watchdog {
+    fn new(control: Control) -> Self {
+        Self {
+            deadline: control.deadline,
+            is_cancelled: Rc::from(control.is_cancelled),
+            stop: Rc::default(),
+        }
+    }
+
     fn tripped(&self) -> bool {
         if self.stop.get().is_some() {
             return true;
@@ -312,8 +392,9 @@ impl Loader for PackageModules {
             .modules
             .get(name)
             .ok_or_else(|| rquickjs::Error::new_loading(name))?;
-        // SAFETY: `compile` wrote these bytes with this same engine, in this process, from a
-        // module it had just parsed; nothing else can put bytes in the map.
+        // SAFETY: `compile` wrote these bytes from a module it had just parsed, and only
+        // `Package::compile` or `Package::from_compiled`, whose contract is the same, fill the
+        // map.
         unsafe { Module::load(ctx.clone(), bytecode) }
     }
 }
@@ -332,11 +413,7 @@ impl<'a> Sandbox<'a> {
         let runtime = Runtime::new().map_err(|error| internal(&error))?;
         runtime.set_memory_limit(HEAP_BYTES);
         runtime.set_max_stack_size(STACK_BYTES);
-        let watchdog = Watchdog {
-            deadline: control.deadline,
-            is_cancelled: Rc::from(control.is_cancelled),
-            stop: Rc::default(),
-        };
+        let watchdog = Watchdog::new(control);
         let interrupt = watchdog.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || interrupt.tripped())));
         let problem = LinkProblem::default();

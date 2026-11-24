@@ -80,11 +80,7 @@ fn walk(
         } else {
             files.push((relative, canonical));
             if files.len() > MAX_SOURCE_FILES {
-                return Err(Diagnostic::new(
-                    "too-many-files",
-                    format!("The package has more than {MAX_SOURCE_FILES} JavaScript files"),
-                )
-                .hint("Bundle the extension into fewer files with esbuild or Bun."));
+                return Err(too_many_files());
             }
         }
     }
@@ -102,43 +98,115 @@ fn is_source_name(name: &str) -> bool {
     name.ends_with(".js") || name.ends_with(".mjs")
 }
 
-/// Reads every source file of the package, within [`MAX_SOURCE_BYTES`] in total.
-pub(crate) fn read_sources(files: &[(String, PathBuf)]) -> Result<Vec<(String, String)>, Diagnostic> {
-    let mut remaining = MAX_SOURCE_BYTES;
-    let mut sources = Vec::with_capacity(files.len());
-    for (name, path) in files {
-        let too_large = || {
-            Diagnostic::new(
-                "package-too-large",
-                format!(
-                    "The package's JavaScript is larger than {} MiB",
-                    MAX_SOURCE_BYTES / 1024 / 1024
-                ),
-            )
-            .file(name)
-            .hint("Bundle and minify the extension, and leave out code it doesn't run.")
-        };
-        let file = std::fs::File::open(path).map_err(|error| {
-            Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
-        })?;
-        let mut bytes = Vec::new();
-        file.take(remaining as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|error| {
-                Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
-            })?;
-        if bytes.len() > remaining {
-            return Err(too_large());
+/// A package's JavaScript, read from its folder within the package limits. Dupin reads it and
+/// hands it to the extension host, which alone parses and compiles it.
+#[derive(Clone, Debug)]
+pub struct Sources {
+    entry: String,
+    files: Vec<(String, String)>,
+}
+
+impl Sources {
+    /// Reads every JavaScript file in `root`. `entry` is the module that exports `search`,
+    /// relative to `root`.
+    pub fn read(root: &Path, entry: &str) -> Result<Self, Diagnostic> {
+        let files = source_files(root)?;
+        let entry = entry.strip_prefix("./").unwrap_or(entry);
+        if !files.iter().any(|(name, _)| name == entry) {
+            return Err(missing_entry(entry));
         }
-        remaining -= bytes.len();
-        let source = String::from_utf8(bytes).map_err(|_| {
-            Diagnostic::new("not-utf8", "is not UTF-8 text")
-                .file(name)
-                .hint("Save the file as UTF-8.")
-        })?;
-        sources.push((name.clone(), source));
+        let mut remaining = MAX_SOURCE_BYTES;
+        let mut sources = Vec::with_capacity(files.len());
+        for (name, path) in &files {
+            let unreadable = |error: std::io::Error| {
+                Diagnostic::new("package-unreadable", format!("Couldn't read it: {error}")).file(name)
+            };
+            let file = std::fs::File::open(path).map_err(unreadable)?;
+            let mut bytes = Vec::new();
+            file.take(remaining as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(unreadable)?;
+            if bytes.len() > remaining {
+                return Err(too_large(name));
+            }
+            remaining -= bytes.len();
+            let source = String::from_utf8(bytes).map_err(|_| not_utf8(name))?;
+            sources.push((name.clone(), source));
+        }
+        Ok(Self {
+            entry: entry.to_owned(),
+            files: sources,
+        })
     }
-    Ok(sources)
+
+    /// Sources that crossed a process boundary, held to the limits [`Sources::read`] applies.
+    pub fn new(entry: String, files: Vec<(String, Vec<u8>)>) -> Result<Self, Diagnostic> {
+        if files.len() > MAX_SOURCE_FILES {
+            return Err(too_many_files());
+        }
+        let mut remaining = MAX_SOURCE_BYTES;
+        let mut sources = Vec::with_capacity(files.len());
+        for (name, bytes) in files {
+            remaining = remaining
+                .checked_sub(bytes.len())
+                .ok_or_else(|| too_large(&name))?;
+            let source = String::from_utf8(bytes).map_err(|_| not_utf8(&name))?;
+            sources.push((name, source));
+        }
+        if !sources.iter().any(|(name, _)| *name == entry) {
+            return Err(missing_entry(&entry));
+        }
+        Ok(Self {
+            entry,
+            files: sources,
+        })
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    /// Each file's name, relative to the package folder, and its text.
+    pub fn files(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.files
+            .iter()
+            .map(|(name, source)| (name.as_str(), source.as_str()))
+    }
+}
+
+fn missing_entry(entry: &str) -> Diagnostic {
+    Diagnostic::new("missing-entry", "is not a JavaScript file in the package folder")
+        .file(entry)
+        .hint(format!(
+            "Create `{}` exporting `search`, or point `dupin.main` in package.json at the module that does.",
+            crate::DEFAULT_ENTRY
+        ))
+}
+
+fn too_many_files() -> Diagnostic {
+    Diagnostic::new(
+        "too-many-files",
+        format!("The package has more than {MAX_SOURCE_FILES} JavaScript files"),
+    )
+    .hint("Bundle the extension into fewer files with esbuild or Bun.")
+}
+
+fn too_large(name: &str) -> Diagnostic {
+    Diagnostic::new(
+        "package-too-large",
+        format!(
+            "The package's JavaScript is larger than {} MiB",
+            MAX_SOURCE_BYTES / 1024 / 1024
+        ),
+    )
+    .file(name)
+    .hint("Bundle and minify the extension, and leave out code it doesn't run.")
+}
+
+fn not_utf8(name: &str) -> Diagnostic {
+    Diagnostic::new("not-utf8", "is not UTF-8 text")
+        .file(name)
+        .hint("Save the file as UTF-8.")
 }
 
 /// Resolves `specifier`, imported by the module `base`, to a module name: the host module, or a

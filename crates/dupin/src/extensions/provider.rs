@@ -335,6 +335,7 @@ mod tests {
 
     #[test]
     fn the_javascript_word_counter_answers_like_the_wasm_one() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let root =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
         let extension = super::super::load_folder(&root).unwrap();
@@ -359,6 +360,7 @@ mod tests {
 
     #[test]
     fn javascript_urls_open_first_and_text_copies() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         let (_folder, provider) = javascript(
             "export function search(query) { return [{ id: 'docs', title: 'Docs', subtitle: query, url: 'https://example.com/?q=2', text: '2' }]; }",
         );
@@ -375,6 +377,7 @@ mod tests {
 
     #[test]
     fn javascript_failures_become_a_visible_error_row_with_the_location() {
+        dupin_extension_host::skip_inside_a_sandbox!();
         for (source, subtitle) in [
             (
                 "export function search() {\n  throw new Error('boom');\n}",

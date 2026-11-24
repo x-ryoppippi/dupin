@@ -31,16 +31,31 @@ fn manifest(name: &str, extra: Value) -> String {
     manifest.to_string()
 }
 
-/// What `search(query)` answers, as `{ title, subtitle, text }` objects like the fixture's.
-fn answer(dir: &Path, query: &str) -> Vec<Value> {
-    let package = crate::manifest::read_package(dir).unwrap();
-    let module = dupin_js_runtime::Package::load(dir, &package.main).unwrap();
-    let control = dupin_js_runtime::Control {
+fn control() -> dupin_js_runtime::Control {
+    dupin_js_runtime::Control {
         deadline: Instant::now() + Duration::from_secs(2),
         is_cancelled: Box::new(|| false),
-    };
-    module
-        .search(query, 10, control)
+    }
+}
+
+fn failure(error: dupin_js_runtime::RunError) -> Diagnostic {
+    match error {
+        dupin_js_runtime::RunError::Failed(diagnostic) => diagnostic,
+        dupin_js_runtime::RunError::Cancelled => unreachable!("never cancelled"),
+    }
+}
+
+fn compile(dir: &Path) -> Result<dupin_js_runtime::Package, Diagnostic> {
+    let package = crate::manifest::read_package(dir)?;
+    let sources = dupin_js_runtime::Sources::read(dir, &package.main)?;
+    dupin_js_runtime::Package::compile(sources, control()).map_err(failure)
+}
+
+/// What `search(query)` answers, as `{ title, subtitle, text }` objects like the fixture's.
+fn answer(dir: &Path, query: &str) -> Vec<Value> {
+    compile(dir)
+        .unwrap()
+        .search(query, 10, control())
         .unwrap()
         .into_iter()
         .map(|item| {
@@ -73,16 +88,7 @@ fn assert_fixture_matches(dir: &Path) {
 /// Links the entry with the launcher's JavaScript runtime. The launcher's full loader, which
 /// `dupin ext build` and `dupin ext dev` really validate with, is exercised by the `dupin` crate.
 fn validate(dir: &Path) -> Result<(), Diagnostic> {
-    let package = crate::manifest::read_package(dir)?;
-    dupin_js_runtime::Package::load(dir, &package.main)?
-        .check(dupin_js_runtime::Control {
-            deadline: Instant::now() + Duration::from_secs(2),
-            is_cancelled: Box::new(|| false),
-        })
-        .map_err(|error| match error {
-            dupin_js_runtime::RunError::Failed(diagnostic) => diagnostic,
-            dupin_js_runtime::RunError::Cancelled => unreachable!("never cancelled"),
-        })
+    compile(dir)?.check(control()).map_err(failure)
 }
 
 fn bundlers() -> Vec<Bundler> {

@@ -34,6 +34,12 @@ mod web;
 mod window_management;
 
 fn main() {
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == dupin_extension_host::FLAG)
+    {
+        dupin_extension_host::serve();
+    }
     if cli::run() {
         return;
     }
