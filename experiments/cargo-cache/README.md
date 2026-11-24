@@ -83,3 +83,25 @@ not establish the exact cause of each miss or show that path settings would
 resolve it. The development shell and CI keep their existing
 configuration. Sharing compiled Nix dependency outputs remains a separate
 experiment tracked by [#95](https://github.com/x-ryoppippi/dupin/issues/95).
+
+## Testbox run
+
+[A second run](results/2026-11-23-testbox-aarch64-darwin.json) on a Blacksmith
+Testbox (`VirtualMac2,1`, 6 CPUs, macOS 26.3) from `5f1ea19`, with Rust 1.99.1
+and sccache 0.19.0, used the same script unchanged:
+
+| Case                                                | Seconds | Rust hits | Rust misses |
+| --------------------------------------------------- | ------: | --------: | ----------: |
+| Native, fresh target                                |  48.776 |         — |           — |
+| sccache, cold cache, fresh target                   |  49.987 |         0 |         236 |
+| sccache, warm cache, different fresh target path    |  46.469 |       194 |          42 |
+| Native, fresh-target control                        |  49.521 |         — |           — |
+| sccache, existing target                            |   0.298 |         — |           — |
+| Native, existing target                             |   0.341 |         — |           — |
+| sccache, warm cache, same target path after removal |  18.089 |       236 |           0 |
+| Native, same target path after removal              |  47.474 |         — |           — |
+
+It repeats the local pattern: a warm cache saves about 3 seconds in a target
+directory at a new path, and about 29 seconds when the same path is rebuilt
+after removal. The working tree carried this branch's Nix changes, which do
+not affect Cargo builds.

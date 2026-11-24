@@ -2,6 +2,7 @@
   pkgs,
   crane,
   native,
+  cargo-hawk,
 }:
 let
   inherit (native.passthru)
@@ -11,7 +12,10 @@ let
     bundleSrc
     ;
   craneLib = (crane.mkLib pkgs).overrideScope (
-    _: _: {
+    _: prev: {
+      # Dependencies never see VERSION, so a release bump must not rebuild them. Crate versions
+      # stay 0.0.0 (see Cargo.toml). buildPackage calls this too when given no cargoArtifacts.
+      buildDepsOnly = args: prev.buildDepsOnly (args // { version = "0.0.0"; });
       cargo = pkgs.buildPackages.cargo-auditable-cargo-wrapper.override {
         cargo = pkgs.rustPlatform.rust.cargo;
         inherit (pkgs) cargo-auditable;
@@ -58,7 +62,13 @@ let
     cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
+  # The checks never read debug info: a failing test still prints where it panicked. Without
+  # it, the debug dependency output each lockfile change adds to CI's cache is half the size.
+  checkEnv = baseArgs.env // {
+    CARGO_PROFILE_DEV_DEBUG = "false";
+  };
   debugArgs = baseArgs // {
+    env = checkEnv;
     CARGO_PROFILE = "dev";
     cargoExtraArgs = "--offline --locked --workspace";
     nativeBuildInputs = [ pkgs.clippy ];
@@ -87,6 +97,40 @@ let
       '';
       checkPhaseCargoCommand = "cargo test --workspace --offline --locked";
       doCheck = true;
+      doInstallCargoArtifacts = false;
+      installPhaseCommand = "touch $out";
+    }
+  );
+  # Hawk compiles with its own toolchain, so it can't reuse the other dependency outputs.
+  hawkArgs = baseArgs // {
+    pname = "dupin-hawk";
+    env = checkEnv;
+    nativeBuildInputs = [ cargo-hawk ];
+    doCheck = false;
+  };
+  # Exclusions and entry points change what Hawk reports, not what it compiles, so the
+  # dependency run leaves out hawk.toml and scripts/hawk.nu, which change with every new crate.
+  hawkDepsConfig = pkgs.writeText "hawk.toml" ''
+    [[production]]
+    package = "dupin"
+    bin = "dupin"
+    reason = "the dependency build"
+  '';
+  hawkArtifacts = craneLib.buildDepsOnly (
+    hawkArgs
+    // {
+      buildPhaseCargoCommand = "cargo-hawk check --manifest-path Cargo.toml --config ${hawkDepsConfig}";
+    }
+  );
+  hawk = craneLib.mkCargoDerivation (
+    hawkArgs
+    // {
+      nativeBuildInputs = hawkArgs.nativeBuildInputs ++ [ pkgs.nushell ];
+      postPatch = ''
+        cp ${../hawk.toml} hawk.toml
+      '';
+      buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
+      cargoArtifacts = hawkArtifacts;
       doInstallCargoArtifacts = false;
       installPhaseCommand = "touch $out";
     }
@@ -127,6 +171,8 @@ pkgs.stdenv.mkDerivation (
         releaseArtifacts
         debugArtifacts
         lintAndTest
+        hawkArtifacts
+        hawk
         cargoVendorDir
         cargoBinary
         latencyBinary
