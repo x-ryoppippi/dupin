@@ -134,7 +134,7 @@ fn item(
             subtitle: subtitle.into(),
         },
         record_usage: true,
-        icon,
+        icon: icon.map(dupin_core::Icon::File),
         matched: found.positions,
         completion: None,
         score: Some(found.score),

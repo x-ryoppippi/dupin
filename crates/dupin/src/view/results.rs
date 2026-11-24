@@ -280,7 +280,7 @@ fn result_row(
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let icon = item_icon(s, item.icon.as_deref(), gutter);
+    let icon = item_icon(s, item.icon.as_ref(), gutter);
     let id = s.session.result_key(index);
     text_row(
         t,
@@ -299,16 +299,16 @@ fn result_row(
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
 }
 
-/// The icon for `path`, an empty slot while it loads, or nothing when there is no icon and
-/// `gutter` is false.
-pub(super) fn item_icon(s: &Ui, path: Option<&std::path::Path>, gutter: bool) -> Option<El> {
-    if path.is_none() && !gutter {
+/// The icon, an empty slot while it loads, or nothing when there is no icon and `gutter` is
+/// false.
+pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool) -> Option<El> {
+    if icon.is_none() && !gutter {
         return None;
     }
-    let icon = el().size(ICON_SIZE, ICON_SIZE);
-    Some(match path.and_then(|path| s.icons.get(path)) {
-        Some(image) => icon.pixels(image.pixels()),
-        None => icon,
+    let slot = el().size(ICON_SIZE, ICON_SIZE);
+    Some(match icon.and_then(|icon| s.icons.get(icon)) {
+        Some(image) => slot.pixels(image.pixels()),
+        None => slot,
     })
 }
 

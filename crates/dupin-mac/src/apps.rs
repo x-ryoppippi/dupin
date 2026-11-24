@@ -142,7 +142,7 @@ impl Provider for AppsProvider {
 impl App {
     fn item(&self, matched: Vec<usize>) -> Item {
         let mut item = Item {
-            icon: Some(self.icon.clone()),
+            icon: Some(dupin_core::Icon::File(self.icon.clone())),
             ..Item::path(self.path.clone(), self.name.clone(), matched)
         };
         crate::quick_look::add_action(&mut item);
@@ -381,7 +381,7 @@ mod tests {
             item.action("open"),
             Some(&dupin_core::Action::Open(app.path.clone()))
         );
-        assert_eq!(item.icon, Some(app.icon));
+        assert_eq!(item.icon, Some(dupin_core::Icon::File(app.icon)));
     }
 
     fn app(name: &str, aliases: &[&str]) -> App {

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use dupin_plugin_protocol::View;
 
@@ -179,6 +179,38 @@ impl ItemAction {
     }
 }
 
+/// What a row's icon shows.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Icon {
+    /// The Finder icon of a file, folder or app.
+    File(PathBuf),
+    /// An image file drawn as it is, such as an extension's or a script's own icon.
+    Image(PathBuf),
+}
+
+impl Icon {
+    /// An icon a script or extension named: the image itself when the path names an image
+    /// file, otherwise that file's Finder icon.
+    pub fn declared(path: PathBuf) -> Self {
+        const IMAGES: [&str; 8] = ["png", "jpg", "jpeg", "gif", "svg", "pdf", "icns", "tiff"];
+        let image = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| IMAGES.contains(&extension.to_ascii_lowercase().as_str()));
+        if image {
+            Self::Image(path)
+        } else {
+            Self::File(path)
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::File(path) | Self::Image(path) => path,
+        }
+    }
+}
+
 /// One candidate row, as every provider returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
@@ -188,8 +220,7 @@ pub struct Item {
     pub payload: Payload,
     /// Participate in usage recording and history ranking.
     pub record_usage: bool,
-    /// The file whose icon represents the row, if any.
-    pub icon: Option<PathBuf>,
+    pub icon: Option<Icon>,
     /// Character indices in `display_title()` that matched the query, for highlighting.
     pub matched: Vec<usize>,
     /// Text to put in the query field when the user completes this result.
@@ -219,7 +250,7 @@ impl Item {
                 paths: vec![path.clone()],
             },
             record_usage: true,
-            icon: Some(path.clone()),
+            icon: Some(Icon::File(path.clone())),
             matched,
             completion: None,
             score: None,

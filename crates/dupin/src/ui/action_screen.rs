@@ -311,7 +311,7 @@ impl Ui {
         {
             for app in apps {
                 self.icons
-                    .entry(app.path.clone())
+                    .entry(dupin_core::Icon::File(app.path.clone()))
                     .or_insert_with(|| cache.app_icon(&app.path, ICON_SIZE));
             }
         }

@@ -7,7 +7,10 @@ use super::theme::ResolvedTheme;
 
 /// What is being renamed, and what Enter will do with the name typed so far.
 pub(super) fn rename_status(s: &Ui, renaming: &dupin_core::session::Renaming, t: &ResolvedTheme) -> El {
-    let icon = match s.icons.get(renaming.path()) {
+    let icon = match s
+        .icons
+        .get(&dupin_core::Icon::File(renaming.path().to_path_buf()))
+    {
         Some(image) => el().size(ICON_SIZE, ICON_SIZE).pixels(image.pixels()),
         None => el().size(ICON_SIZE, ICON_SIZE),
     };

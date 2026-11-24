@@ -48,7 +48,10 @@ impl Provider for ScriptsProvider {
                         },
                     },
                     record_usage: true,
-                    icon: Some(script.header.icon.as_ref().unwrap_or(&script.path).clone()),
+                    icon: Some(match &script.header.icon {
+                        Some(icon) => dupin_core::Icon::declared(icon.clone()),
+                        None => dupin_core::Icon::File(script.path.clone()),
+                    }),
                     matched: matched.positions,
                     completion: None,
                     score: Some(matched.score),

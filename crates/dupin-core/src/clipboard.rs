@@ -300,7 +300,7 @@ fn item(entry: &Entry, title: String, matched: Vec<usize>, now: u64) -> Item {
             };
             (
                 format!("{when} · {place}"),
-                paths.first().cloned(),
+                paths.first().cloned().map(crate::Icon::File),
                 Payload {
                     text: None,
                     paths: paths.clone(),

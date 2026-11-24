@@ -142,9 +142,13 @@ impl Ui {
                 .collect();
             self.icons.retain(|path, _| current.contains(path));
         }
-        for path in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
-            if !self.icons.contains_key(path) {
-                self.icons.insert(path.clone(), cache.app_icon(path, ICON_SIZE));
+        for icon in self.session.items().iter().filter_map(|item| item.icon.as_ref()) {
+            if !self.icons.contains_key(icon) {
+                let image = match icon {
+                    dupin_core::Icon::File(path) => cache.app_icon(path, ICON_SIZE),
+                    dupin_core::Icon::Image(path) => cache.file(path, ICON_SIZE, 2.0),
+                };
+                self.icons.insert(icon.clone(), image);
             }
         }
     }

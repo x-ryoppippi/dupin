@@ -71,7 +71,7 @@ mod tests {
         std::fs::create_dir_all(&app).unwrap();
         std::fs::write(&file, "fixture").unwrap();
         let expected = Item {
-            icon: Some(root.join("resolved-icon.app")),
+            icon: Some(dupin_core::Icon::File(root.join("resolved-icon.app"))),
             ..Item::path(app.clone(), "Localized name".into(), Vec::new())
         };
         let apps = HashMap::from([(app.clone(), expected.clone())]);
