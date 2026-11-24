@@ -44,6 +44,16 @@ declare module 'dupin' {
 		actions?: Action[];
 	}
 
+	/** Runs `actions[run](data, ctx)` when the user chooses it. */
+	export interface ItemAction {
+		/** One line, up to 512 bytes. */
+		title: string;
+		/** A key of the module's `actions` export: up to 64 letters, digits, `_` or `$`. */
+		run: string;
+		/** Passed to the handler as JSON, or `null` without it: at most 4 KiB, nested at most 16 deep. */
+		data?: Json;
+	}
+
 	/** An item of an `items` catalogue, which may carry words that also find it. */
 	export interface CatalogueItem extends Item {
 		/**
@@ -72,8 +82,7 @@ declare module 'dupin' {
 	export type Action =
 		| { title: string; copy: string }
 		| { title: string; open: string }
-		/** Calls `actions[run](data)` in the package. `data` is up to 4 KiB of JSON. */
-		| { title: string; run: string; data?: Json };
+		| ItemAction;
 
 	export interface Section<T extends Item = Item> {
 		title: string;
@@ -85,7 +94,7 @@ declare module 'dupin' {
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
 
-	/** The entry module's `search` export: answers computed for each query. */
+	/** The entry module's `search` export: answers computed for each query. It runs as the user types, so it may only read. */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
 
 	/** What `items` receives. Dupin freezes it. */
@@ -132,18 +141,62 @@ declare module 'dupin' {
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
 	 * user types, asking again only on first use, after `ttl` or when an action invalidates it.
-	 * At most 10,000 items and 8 MiB of text.
+	 * At most 10,000 items and 8 MiB of text. It reaches no host service: a request fails with
+	 * `unavailable`.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
-
-	/** The entry module's `actions` export: handlers an item's `run` action calls when chosen. */
-	export type Actions = Record<string, (data: Json | undefined) => void | Promise<void>>;
 
 	/** The host's catalogue controls. */
 	export const items: {
 		/** From an action handler: ask `items` again, with its cursor, before the next use. */
 		invalidate(): void;
 	};
+
+	/** What an action may ask Dupin to do once it has run. */
+	export type ActionEffect = { type: 'toast'; text: string };
+
+	/**
+	 * The entry module's `actions` export. A handler runs only because the user chose its item
+	 * action, so it may also write, send and run programs. Dupin stops it after 30 seconds.
+	 */
+	export type Actions = Record<
+		string,
+		(
+			data: Json,
+			ctx: Readonly<Record<string, never>>,
+		) => ActionEffect | void | Promise<ActionEffect | void>
+	>;
+
+	/** What `events.clipboard` receives for each copy, as `clipboard.read()` returns it. */
+	export type ClipboardChange = Clip & { truncated?: true };
+
+	/**
+	 * The entry module's `events` export: handlers for what Dupin watches on the package's
+	 * behalf, while it is on and holds the scope. Copies that arrive while one runs are coalesced
+	 * to the newest. Handlers may read and use storage; they can't write the clipboard, send or
+	 * run programs.
+	 */
+	export interface Events {
+		clipboard?(change: ClipboardChange): void | Promise<void>;
+	}
+
+	/**
+	 * Why a host request failed. `code` is stable: `needs-consent` (the user hasn't allowed the
+	 * scope yet; Dupin shows them a request to allow it), `needs-activation` (only an action the
+	 * user chose may do this), `disabled`, `denied`, `revoked`, `os-denied`, `undeclared`,
+	 * `out-of-scope`, `quota-exceeded`, `invalid`, `too-many-calls`, `too-large`, `unavailable`,
+	 * or the service's own code, such as `not-found` or `timeout`.
+	 */
+	export class DupinError extends Error {
+		readonly name: 'DupinError';
+		readonly code: string;
+		/** The scope at stake, as grant files name it, such as `clipboard:read`. */
+		readonly scope?: string;
+		/** What allowing the scope lets the extension do, as Dupin shows it. */
+		readonly description?: string;
+		/** The macOS access the scope also needs, such as `Calendars`. */
+		readonly permission?: string;
+	}
 
 	/** The `dupin` key of `package.json`, which Dupin reads as plain JSON before running code. */
 	export interface Manifest {
@@ -152,14 +205,33 @@ declare module 'dupin' {
 		/** Typed before a space to reach the extension. Up to 32 bytes, no spaces. */
 		keyword: string;
 		/** The module that exports `search` or `items`, inside the package. Defaults to `main.js`. */
-		main?: `${string}.js` | `${string}.mjs`;
+		main?: `${string}.js` | `${string}.mjs` | `${string}.ts` | `${string}.mts` | `${string}.tsx`;
 		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */
 		defaultSearch?: boolean;
+		/** The most the extension may do. The user allows each scope separately. */
+		capabilities?: Capabilities;
+	}
+
+	export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+	/** Each entry of a map or list is one scope the user allows on its own. */
+	export interface Capabilities {
+		/** Up to 32 `https://host[:port]` origins, lowercase, without a path or `:443`. */
+		http?: { origin: `https://${string}`; methods: HttpMethod[] }[];
+		/** Up to 16 named scopes; the user picks the file or folder each one is. */
+		files?: Record<string, { kind: 'file' | 'directory'; access: ('read' | 'list')[] }>;
 		/**
-		 * Reserved: no apiVersion grants capabilities yet, so any entry is an error.
-		 * `planned.Capabilities` drafts what it may take later.
+		 * Up to 16 named profiles: an argument template whose `{input}` placeholders take one line
+		 * of text each, run with a program the user picks; or `@script:<name>` for one of the
+		 * user's script commands. `output` asks to receive stdout and stderr.
 		 */
-		capabilities?: Record<string, never>;
+		exec?: Record<string, { args?: string[]; output?: boolean }>;
+		/** Encrypted key-value data private to the package. */
+		storage?: { quotaBytes: number; retentionDays?: number };
+		clipboard?: ('read' | 'write' | 'watch')[];
+		dictionary?: ['lookup'];
+		/** Each 0–366 days from today. */
+		calendar?: { access: ['read']; pastDays: number; futureDays: number };
 	}
 
 	export interface PackageJson {
@@ -178,11 +250,127 @@ declare module 'dupin' {
 		[key: string]: unknown;
 	}
 
+	export interface HttpResponse {
+		readonly ok: boolean;
+		readonly status: number;
+		/** The final URL, after redirects inside the declared origin. */
+		readonly url: string;
+		readonly redirected: boolean;
+		/** Lowercase names, without cookies. */
+		readonly headers: Readonly<Record<string, string>>;
+		/** Whether the body was cut at 2 MiB. */
+		readonly truncated: boolean;
+		text(): Promise<string>;
+		json(): Promise<unknown>;
+	}
+
 	/**
-	 * Drafts of what a later apiVersion may add, from docs/design/extension-platform.md. None of it
-	 * is part of apiVersion 2 or works yet: the `dupin` module exports no such values, an item with
-	 * these fields is rejected, and a manifest that declares capabilities is an error. Shapes may
-	 * change before they ship.
+	 * `http` capability. GET and HEAD may run while the user types; other methods only in an
+	 * action. No cookies or credentials are sent, and private addresses are refused.
+	 */
+	export const http: {
+		fetch(
+			url: string,
+			init?: { method?: HttpMethod; headers?: Record<string, string>; body?: string },
+		): Promise<HttpResponse>;
+	};
+
+	export interface FileEntry {
+		name: string;
+		kind: 'file' | 'directory' | 'symlink' | 'other';
+		size?: number;
+		/** Names the entry for Dupin's own actions; valid while it stays the same file. */
+		handle?: string;
+	}
+
+	export interface FileContents {
+		/** Lossy UTF-8 of the bytes read. */
+		text: string;
+		size: number;
+		truncated: boolean;
+		handle: string;
+	}
+
+	/** `files` capability. Paths are relative to the scope, with `/`; `..` is refused. */
+	export const files: {
+		/** At most `limit` bytes, 256 KiB by default and 2 MiB at most. */
+		read(scope: string, path: string, options?: { limit?: number }): Promise<FileContents>;
+		readText(scope: string, path: string, options?: { limit?: number }): Promise<string>;
+		/** At most `limit` entries, 200 by default and 1,000 at most. */
+		list(scope: string, path?: string, options?: { limit?: number }): Promise<FileEntry[]>;
+	};
+
+	export interface ExecResult {
+		/** The exit code, or null when a signal or the timeout ended it. */
+		readonly code: number | null;
+		readonly signal: boolean;
+		readonly timedOut: boolean;
+		/** Present only when the profile declares `output` and the user allowed it. */
+		readonly stdout?: string;
+		readonly stderr?: string;
+		readonly truncated?: boolean;
+	}
+
+	/** `exec` capability, only in an action. `profile` is a key of `exec`, such as `@script:open-in-zed`. */
+	export const exec: {
+		run(profile: string, inputs?: Record<string, string | number>): Promise<ExecResult>;
+	};
+
+	/** `storage` capability. Keys are 1–256 bytes; a value is at most 1 MiB of JSON. */
+	export const storage: {
+		get(key: string): Promise<Json | undefined>;
+		set(key: string, value: Json): Promise<void>;
+		delete(key: string): Promise<void>;
+		keys(): Promise<string[]>;
+	};
+
+	export type Clip =
+		| { type: 'text'; text: string }
+		| { type: 'url'; url: string }
+		| { type: 'files'; files: { path: string; name: string }[] }
+		| { type: 'image'; [key: string]: unknown };
+
+	/** `clipboard` capability. Reading and writing happen only in an action. */
+	export const clipboard: {
+		read(): Promise<Clip | null>;
+		readText(): Promise<string | undefined>;
+		writeText(text: string): Promise<void>;
+	};
+
+	export interface DictionaryEntry {
+		headword: string;
+		[key: string]: unknown;
+	}
+
+	/** `dictionary` capability. */
+	export const dictionary: {
+		lookup(word: string): Promise<DictionaryEntry[]>;
+	};
+
+	export interface CalendarEvent {
+		title: string;
+		/** ISO 8601, UTC. */
+		start: string;
+		end: string;
+		allDay: boolean;
+		calendar: unknown;
+		location?: string;
+		[key: string]: unknown;
+	}
+
+	/** `calendar` capability, inside the declared window around today. `to` is exclusive. */
+	export const calendar: {
+		events(range: {
+			from: Date | string | number;
+			to: Date | string | number;
+			limit?: number;
+		}): Promise<CalendarEvent[]>;
+	};
+
+	/**
+	 * Drafts of what later API versions are planned to add, from docs/design/extension-platform.md.
+	 * apiVersion 2 hosts provide none of it: the `dupin` module exports no such values and an
+	 * item with these fields is rejected. Shapes may change before they ship.
 	 */
 	export namespace planned {
 		type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -258,105 +446,5 @@ declare module 'dupin' {
 			string,
 			(data: Json, ctx: ViewContext) => Effect | void | Promise<Effect | void>
 		>;
-
-		/** The most a package may ask for. The user grants each scope separately. */
-		interface Capabilities {
-			/** HTTPS origins and methods. No ambient cookies or authentication. */
-			http?: { origin: `https://${string}`; methods: HttpMethod[] }[];
-			/** Named file or directory scopes the user picks. */
-			files?: Record<string, { description: string; access: ('read' | 'list')[] }>;
-			/**
-			 * Named executable profiles, bound to an executable the user selects, or to a
-			 * user-installed script command with an `@script:<name>` key.
-			 */
-			exec?: Record<string, { description: string; args?: string[]; returnsOutput?: boolean }>;
-			/** Encrypted key-value storage private to the package. */
-			storage?: true;
-			clipboard?: { read?: boolean; write?: boolean };
-			dictionary?: true;
-			calendar?: { read: true };
-		}
-
-		type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-
-		interface HttpResponse {
-			readonly ok: boolean;
-			readonly status: number;
-			readonly headers: Readonly<Record<string, string>>;
-			text(): Promise<string>;
-			json(): Promise<unknown>;
-		}
-
-		/** Planned `import { http } from "dupin"`. */
-		interface Http {
-			fetch(
-				url: string,
-				init?: { method?: HttpMethod; headers?: Record<string, string>; body?: string },
-			): Promise<HttpResponse>;
-		}
-
-		interface FileEntry {
-			name: string;
-			kind: 'file' | 'directory';
-			size?: number;
-		}
-
-		/** Planned `import { files } from "dupin"`. Paths are relative to the named scope. */
-		interface Files {
-			readText(scope: string, path: string): Promise<string>;
-			list(scope: string, path?: string): Promise<FileEntry[]>;
-		}
-
-		interface ExecResult {
-			readonly code: number;
-			/** Present only when the profile returns output and the user approved it. */
-			readonly stdout?: string;
-			readonly stderr?: string;
-		}
-
-		/** Planned `import { exec } from "dupin"`. Runs on explicit activation only. */
-		interface Exec {
-			run(profile: string, inputs?: Record<string, string>): Promise<ExecResult>;
-		}
-
-		/** Planned `import { storage } from "dupin"`. */
-		interface Storage {
-			get(key: string): Promise<Json | undefined>;
-			set(key: string, value: Json): Promise<void>;
-			delete(key: string): Promise<void>;
-			keys(): Promise<string[]>;
-		}
-
-		/** Planned `import { clipboard } from "dupin"`. */
-		interface Clipboard {
-			readText(): Promise<string | undefined>;
-			writeText(text: string): Promise<void>;
-		}
-
-		interface DictionaryEntry {
-			headword: string;
-			definition: string;
-			dictionary: string;
-		}
-
-		/** Planned `import { dictionary } from "dupin"`. */
-		interface Dictionary {
-			lookup(word: string): Promise<DictionaryEntry[]>;
-		}
-
-		interface CalendarEvent {
-			title: string;
-			/** ISO 8601. */
-			start: string;
-			end: string;
-			allDay: boolean;
-			calendar: string;
-			location?: string;
-		}
-
-		/** Planned `import { calendar } from "dupin"`. Times are ISO 8601. */
-		interface Calendar {
-			events(range: { from: string; to: string }): Promise<CalendarEvent[]>;
-		}
 	}
 }

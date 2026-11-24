@@ -3,9 +3,8 @@
 
 use std::path::PathBuf;
 
-use dupin_extension_install::{
-    Change, Error, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State, grants,
-};
+use dupin_broker::{Base, Broker, ConsentState, Local, PackageId};
+use dupin_extension_install::{Change, Error, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State};
 use dupin_js_runtime::Diagnostic;
 use serde_json::{Value, json};
 
@@ -37,6 +36,9 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
     let (lines, value) = match command {
         Command::Install(spec) => {
             let change = installer.install(&spec, &cwd, &taken).map_err(diagnostic)?;
+            if change.previous.is_none() {
+                forget_grants(&change.name)?;
+            }
             (describe(&change, "Installed"), change_json(&change))
         }
         Command::Update(name) => batch(
@@ -46,29 +48,34 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         Command::Sync => batch(installer.sync(&taken).map_err(diagnostic)?, "Restored")?,
         Command::Remove(name) => {
             let entry = installer.remove(&name).map_err(diagnostic)?;
+            forget_grants(&name)?;
             (
                 vec![format!("Removed {name} {} and its grants.", entry.version)],
                 json!({"removed": name}),
             )
         }
         Command::List => {
-            let mut listed = installer.list().map_err(diagnostic)?;
-            let base = grants_base()?;
-            for listed in &mut listed {
-                listed.entry.granted =
-                    grants::effective(&base, Some(&listed.entry), &listed.name, &listed.entry.requested)
-                        .into_iter()
-                        .collect();
-            }
+            let listed = installer.list().map_err(diagnostic)?;
+            let mut broker = grants().0;
+            let granted: Vec<_> = listed
+                .iter()
+                .map(|listed| granted(&mut broker, &installer.extensions.join(&listed.name)))
+                .collect();
             let lines = if listed.is_empty() {
                 vec!["No extensions were installed with `dupin ext install`.".to_owned()]
             } else {
-                listed.iter().map(list_line).collect()
+                listed
+                    .iter()
+                    .zip(&granted)
+                    .map(|(listed, granted)| list_line(listed, granted))
+                    .collect()
             };
-            (
-                lines,
-                json!({"packages": listed.iter().map(listed_json).collect::<Vec<_>>()}),
-            )
+            let packages: Vec<_> = listed
+                .iter()
+                .zip(&granted)
+                .map(|(listed, granted)| listed_json(listed, granted))
+                .collect();
+            (lines, json!({ "packages": packages }))
         }
     };
     if json {
@@ -80,16 +87,55 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
     Ok(Value::Null)
 }
 
-/// The grants Home Manager declares in extension-grants.toml beside config.toml, which local
-/// grants overlay.
-fn grants_base() -> Result<grants::Base, Diagnostic> {
-    match crate::settings::path()
-        .as_deref()
-        .and_then(std::path::Path::parent)
-    {
-        Some(dir) => grants::Base::read(&dir.join(grants::GRANTS_FILE)).map_err(diagnostic),
-        None => Ok(grants::Base::default()),
+/// The broker over the grant files: the declarative base Home Manager writes, and the grants
+/// chosen in Dupin with the path they are saved to. A local file that exists but can't be read
+/// grants nothing and is never written.
+fn grants() -> (Broker, Option<std::path::PathBuf>) {
+    let read =
+        |path: &Option<std::path::PathBuf>| path.as_ref().and_then(|path| std::fs::read_to_string(path).ok());
+    let base = read(&crate::extensions::access::base_path())
+        .and_then(|source| Base::parse(&source).ok())
+        .unwrap_or_default();
+    let path = crate::extensions::access::local_path();
+    let local = match (read(&path), path.as_ref().is_some_and(|path| path.exists())) {
+        (Some(source), _) => Local::parse(&source).unwrap_or_else(|_| Local::unreadable()),
+        (None, true) => Local::unreadable(),
+        (None, false) => Local::default(),
+    };
+    (Broker::new(base, local), path)
+}
+
+/// The scopes of the package in `folder` granted for the revision installed there.
+fn granted(broker: &mut Broker, folder: &std::path::Path) -> Vec<String> {
+    let Ok((id, revision, capabilities)) = crate::extensions::declaration_of(folder) else {
+        return Vec::new();
+    };
+    let _ = broker.install(id.clone(), revision, capabilities);
+    broker
+        .consents(&id)
+        .into_iter()
+        .filter(|(_, state)| matches!(state, ConsentState::Granted(_)))
+        .map(|(scope, _)| scope.key().to_string())
+        .collect()
+}
+
+/// Uninstalling forgets the user's decisions, and so does installing a name afresh, since the
+/// decisions left under it were about another package. A running Dupin reads the file again
+/// before it next decides or saves.
+fn forget_grants(name: &str) -> Result<(), Diagnostic> {
+    let (mut broker, Some(path)) = grants() else {
+        return Ok(());
+    };
+    let Ok(id) = PackageId::new(name) else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
     }
+    broker.uninstall(&id);
+    broker.save(&path).map_err(|error| {
+        Diagnostic::new("grants-unsaved", error.to_string()).file(crate::extensions::access::LOCAL_FILE)
+    })
 }
 
 /// Who already answers a keyword in the launcher, from the effective configuration.
@@ -175,7 +221,7 @@ fn describe(change: &Change, verb: &str) -> Vec<String> {
     lines
 }
 
-fn list_line(listed: &Listed) -> String {
+fn list_line(listed: &Listed, granted: &[String]) -> String {
     let entry = &listed.entry;
     let pinned = entry
         .commit
@@ -187,18 +233,13 @@ fn list_line(listed: &Listed) -> String {
         State::Missing => " — missing; run `dupin ext sync`".into(),
         State::Modified(reason) => format!(" — disabled: {reason}; run `dupin ext sync`"),
     };
-    let pending = if entry.pending_consent.is_empty() {
+    let granted = if granted.is_empty() {
         String::new()
     } else {
-        format!(" — awaiting consent for {}", entry.pending_consent.join(", "))
-    };
-    let granted = if entry.granted.is_empty() {
-        String::new()
-    } else {
-        format!(" — granted {}", entry.granted.join(", "))
+        format!(" — granted {}", granted.join(", "))
     };
     format!(
-        "{} {} (`{}`) from {}{pinned}{state}{granted}{pending}",
+        "{} {} (`{}`) from {}{pinned}{state}{granted}",
         listed.name, entry.version, entry.keyword, entry.source
     )
 }
@@ -216,11 +257,10 @@ fn change_json(change: &Change) -> Value {
         "requested": change.entry.requested,
         "added": change.added,
         "removed": change.removed,
-        "pending_consent": change.entry.pending_consent,
     })
 }
 
-fn listed_json(listed: &Listed) -> Value {
+fn listed_json(listed: &Listed, granted: &[String]) -> Value {
     let (state, problem) = match &listed.state {
         State::Installed => ("installed", None),
         State::Missing => ("missing", None),
@@ -238,8 +278,7 @@ fn listed_json(listed: &Listed) -> Value {
         "content_hash": listed.entry.content_hash,
         "installed_at": listed.entry.installed_at,
         "requested": listed.entry.requested,
-        "granted": listed.entry.granted,
-        "pending_consent": listed.entry.pending_consent,
+        "granted": granted,
     })
 }
 

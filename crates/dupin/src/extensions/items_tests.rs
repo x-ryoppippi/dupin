@@ -27,6 +27,10 @@ fn package(manifest: &str, files: &[(&str, &str)]) -> (tempfile::TempDir, Arc<Ex
     (folder, extension)
 }
 
+fn no_services() -> Arc<dyn dupin_extension_host::Services> {
+    Arc::new(dupin_extension_host::NoServices)
+}
+
 fn batches(provider: &ExtensionProvider, query: &str) -> Vec<Batch> {
     let mut batches = Vec::new();
     provider
@@ -86,7 +90,10 @@ fn the_catalogue_lists_its_sections_and_typing_ranks_it_natively() {
     assert_eq!(dupin.primary.as_deref(), Some("open"));
     assert!(matches!(
         dupin.action("action-1"),
-        Some(Action::Extension(run)) if run.handler == "forget" && run.data == Some(serde_json::json!({"id": "dupin"}))
+        Some(Action::Extension {
+            request: dupin_core::ExtensionRequest::Run { action, data },
+            ..
+        }) if action == "forget" && *data == Some(serde_json::json!({"id": "dupin"}))
     ));
     let detail = &listed[0].details[&dupin.id];
     assert_eq!(
@@ -109,10 +116,11 @@ fn the_catalogue_lists_its_sections_and_typing_ranks_it_natively() {
 
     // The handler invalidates the catalogue; the next search asks again with the cursor.
     let acted = extension
-        .run_action(
+        .act(
             "forget",
-            Some(&serde_json::json!({"id": "dupin"})),
-            std::time::Instant::now() + QUERY_DEADLINE,
+            &serde_json::json!({"id": "dupin"}),
+            Instant::now() + QUERY_DEADLINE,
+            &no_services(),
         )
         .unwrap();
     assert!(acted.invalidated);
@@ -230,7 +238,12 @@ fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
     assert_eq!(titles_of(&main, "secret"), ["Secret token"]);
 
     let acted = extension
-        .run_action("forget", None, Instant::now() + QUERY_DEADLINE)
+        .act(
+            "forget",
+            &serde_json::Value::Null,
+            Instant::now() + QUERY_DEADLINE,
+            &no_services(),
+        )
         .unwrap();
     assert!(acted.invalidated);
     assert_eq!(titles_of(&keyword, ""), ["Shopping list"]);

@@ -109,6 +109,28 @@ impl SearchState {
         self.remove_visible(id, |id| id == origin);
     }
 
+    fn forget_rows(&mut self, origin: &CommandId, forget: &dyn Fn(&Item) -> bool) {
+        let candidates = self
+            .providers
+            .get(origin)
+            .into_iter()
+            .flat_map(|provider| &provider.items);
+        let visible = self
+            .origins
+            .iter()
+            .zip(&self.items)
+            .filter(|(shown, _)| *shown == origin)
+            .map(|(_, item)| item);
+        let ids: HashSet<String> = candidates
+            .chain(visible)
+            .filter(|item| forget(item))
+            .map(|item| item.id.clone())
+            .collect();
+        for id in ids {
+            self.remove(origin, &id);
+        }
+    }
+
     fn forget_path(&mut self, id: &str) {
         for provider in self.providers.values_mut() {
             provider.items.retain(|row| row.id != id);
@@ -174,6 +196,14 @@ impl Session {
             .as_mut()
             .map_or(&mut self.search, |destination| &mut destination.original);
         search.forget(key)
+    }
+
+    /// Remove `origin`'s rows that `forget` picks, shown or not, without searching again.
+    pub fn forget_rows(&mut self, origin: &CommandId, forget: impl Fn(&Item) -> bool) {
+        self.search.forget_rows(origin, &forget);
+        if let Some(destination) = &mut self.destination {
+            destination.original.forget_rows(origin, &forget);
+        }
     }
 
     /// Remove a moved path even if the search changed while the operation ran.

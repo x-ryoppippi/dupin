@@ -162,6 +162,23 @@ fn consuming_an_earlier_row_keeps_the_same_item_selected() {
     assert_eq!(s.selected_item().unwrap().id, selected);
 }
 
+#[test]
+fn forgetting_rows_by_kind_keeps_the_rest_and_searches_nothing() {
+    let (mut s, _, generation) = file_action_session();
+    s.deliver(Delivery::Batch {
+        generation,
+        items: vec![item("notice:a"), item("next")],
+    });
+    let origin = s.search.origins[0].clone();
+    s.forget_rows(&command("other.search"), |_| true);
+    assert_eq!(s.items().len(), 3);
+    s.forget_rows(&origin, |item| item.id.ends_with("notice:a"));
+    let mut ids: Vec<_> = s.items().iter().map(|item| item.id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["/x/file", "/x/next"]);
+    assert!(s.pending(&origin, generation), "no new search started");
+}
+
 fn command(value: &str) -> CommandId {
     CommandId::new(value).unwrap()
 }

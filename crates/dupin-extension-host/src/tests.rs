@@ -92,7 +92,11 @@ fn counting_host() -> (Host, Arc<AtomicUsize>) {
 }
 
 fn search(host: &Host, package: &Compiled, query: &str, within: Duration) -> Result<Vec<Row>, RunError> {
-    host.search(package, query, 10, Instant::now() + within, &|| false)
+    host.search(package, query, 10, Instant::now() + within, &|| false, &none())
+}
+
+fn none() -> Arc<dyn Services> {
+    Arc::new(NoServices)
 }
 
 fn titles(rows: &[Row]) -> Vec<String> {
@@ -432,9 +436,14 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
     let pid = host.helper_pid().expect("the starting helper is kept");
 
     let started = Instant::now();
-    let result = host.search(&echo, "", 10, Instant::now() + Duration::from_secs(10), &|| {
-        started.elapsed() > Duration::from_millis(50)
-    });
+    let result = host.search(
+        &echo,
+        "",
+        10,
+        Instant::now() + Duration::from_secs(10),
+        &|| started.elapsed() > Duration::from_millis(50),
+        &none(),
+    );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
         started.elapsed() < Duration::from_millis(400),
@@ -486,9 +495,16 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         .unwrap();
     assert!(!next.more);
     assert!(
-        host.action(&package, "refresh", None, deadline(), &|| false)
-            .unwrap()
-            .invalidated
+        host.action(
+            &package,
+            "refresh",
+            &serde_json::Value::Null,
+            deadline(),
+            &|| false,
+            &none()
+        )
+        .unwrap()
+        .invalidated
     );
 }
 
@@ -626,6 +642,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -647,6 +664,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         10,
         Instant::now() + Duration::from_secs(10),
         &is_cancelled,
+        &none(),
     );
     assert_eq!(result, Err(RunError::Cancelled));
     assert!(
@@ -830,3 +848,5 @@ fn a_helper_inside_another_sandbox_refuses_and_says_why() {
         "{stdout}"
     );
 }
+
+mod services;

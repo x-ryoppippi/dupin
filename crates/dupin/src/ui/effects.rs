@@ -76,6 +76,9 @@ impl Ui {
                         }
                     }
                     Action::CopyFiles(paths) => self.copy_files(&paths, tx),
+                    Action::RestoreClipboardEntry { entry, paste } => {
+                        self.restore_clipboard_entry(entry, paste, tx)
+                    }
                     Action::ChooseApplication(_)
                     | Action::Trash(_)
                     | Action::Browse(_)
@@ -85,7 +88,9 @@ impl Ui {
                     | Action::DeleteClipboardEntry(_)
                     | Action::ClearClipboardHistory => {}
                     Action::RequestClipboardAccess => self.request_clipboard_access(),
-                    Action::Extension(run) => self.run_extension_action(run),
+                    Action::Extension { extension, request } => {
+                        self.run_extension_request(extension, request, tx)
+                    }
                     Action::Duplicate(path) => self.duplicate_file(path),
                     Action::Compress(path) => self.compress_file(path),
                     Action::OpenWith { path, application } => self
@@ -105,11 +110,15 @@ impl Ui {
                 Effect::RunConsuming {
                     id,
                     action: Action::DeleteClipboardEntry(entry),
-                } => self.delete_clipboard_entry(&id, entry),
+                } => self.delete_clipboard_entry(&id, entry, tx),
                 Effect::RunConsuming {
                     action: Action::ClearClipboardHistory,
                     ..
                 } => self.clear_clipboard_history(tx),
+                Effect::RunConsuming {
+                    id,
+                    action: Action::Extension { extension, request },
+                } => self.answer_extension_consent(id, extension, request, tx),
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
                 Effect::RevealSelection => {

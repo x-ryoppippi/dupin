@@ -232,26 +232,23 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
            };"#,
     )]);
     let package = loaded.unwrap();
-    let data = serde_json::json!({ "id": "rune" });
+    let act =
+        |name: &str, data: &str| package.action(name, data, timeout(DEADLINE), &mut Unavailable::default());
     assert_eq!(
-        package.action("forget", Some(&data), timeout(DEADLINE)).unwrap(),
-        Acted { invalidated: true }
+        act("forget", r#"{"id":"rune"}"#).unwrap(),
+        Acted {
+            invalidated: true,
+            effect: None
+        }
     );
-    let other = serde_json::json!({ "id": "dupin" });
-    assert_eq!(
-        package.action("forget", Some(&other), timeout(DEADLINE)).unwrap(),
-        Acted { invalidated: false }
-    );
-    assert_eq!(
-        package.action("later", None, timeout(DEADLINE)).unwrap(),
-        Acted { invalidated: false }
-    );
-    let returned = failure_of(package.action("answer", None, timeout(DEADLINE)));
-    assert_eq!(returned.code, "invalid-result");
-    let missing = failure_of(package.action("absent", None, timeout(DEADLINE)));
+    assert_eq!(act("forget", r#"{"id":"dupin"}"#).unwrap(), Acted::default());
+    assert_eq!(act("later", "null").unwrap(), Acted::default());
+    let returned = failure_of(act("answer", "null"));
+    assert_eq!(returned.code, "invalid-effect");
+    let missing = failure_of(act("absent", "null"));
     assert_eq!(
         (missing.code.as_ref(), missing.field.as_deref()),
-        ("missing-action", Some("actions.absent"))
+        ("missing-handler", Some("actions.absent"))
     );
     let outside = failure_of(package.search("", 5, timeout(DEADLINE)));
     assert_eq!(outside.code, "search-threw");
@@ -266,12 +263,12 @@ fn the_host_hook_is_gone_before_package_code_runs() {
     let rows = run(
         r#"import { apiVersion } from 'dupin';
            export function search() {
-             return [{ title: `${apiVersion} ${typeof globalThis[Symbol.for('dupin.host')]}` }];
+             return [{ title: `${apiVersion} ${typeof globalThis.__dupinHost} ${typeof globalThis.__dupinInvalidate}` }];
            }"#,
         "",
     )
     .unwrap();
-    assert_eq!(rows[0].title, "2 undefined");
+    assert_eq!(rows[0].title, "2 undefined undefined");
 }
 
 #[test]

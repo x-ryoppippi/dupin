@@ -39,8 +39,12 @@ fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredCommands) -> bo
     ui.install_extensions(commands)
 }
 
-pub(crate) fn provider(extension: Arc<Extension>, role: Role) -> Arc<ExtensionProvider> {
-    Arc::new(ExtensionProvider::with_role(extension, role))
+pub(crate) fn provider(
+    extension: Arc<Extension>,
+    role: Role,
+    bridge: dupin_extension_bridge::Bridge,
+) -> Arc<ExtensionProvider> {
+    Arc::new(ExtensionProvider::with_bridge(extension, role, bridge))
 }
 
 /// Extensions whose commands were registered, and why the others were not. Built-in and

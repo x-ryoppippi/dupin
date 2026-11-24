@@ -21,7 +21,7 @@ pub(crate) const MAX_LABEL_BYTES: usize = 64;
 pub(crate) const MAX_METADATA_TEXT_BYTES: usize = 512;
 /// Every action of a row, counting the Open URL and Copy that `url` and `text` add.
 pub(crate) const MAX_ACTIONS: usize = 8;
-pub(crate) const MAX_ACTION_TITLE_BYTES: usize = 128;
+pub(crate) const MAX_ACTION_TITLE_BYTES: usize = 512;
 pub(crate) const MAX_HANDLER_BYTES: usize = 64;
 const MAX_DATA_BYTES: usize = 4096;
 const MAX_DATA_DEPTH: usize = 16;

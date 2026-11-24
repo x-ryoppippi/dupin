@@ -14,7 +14,7 @@ A source that hands over its whole list rather than answering each query keeps i
 
 The host renders each item in declared order. All-text lists retain fixed-height virtualisation; a sectioned list adds a heading row where the section changes and lays out every row, and mixed results use a bounded scrolling column with selectable detail/pair cards and stable row/action anchors. Text rows keep an icon column only when some row in the list has an icon, so an icon-less list such as calendar events or snippets starts its titles at the row's edge while a mixed list keeps them aligned. Keyboard selection moves between rows only; a heading shares its first row's key, so revealing that row shows the heading too. A pressed link goes back to the session, which opens it only if the current row's detail links to it.
 
-Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly. `dupin-broker` holds the extension authority model, with declared capabilities, per-revision grants and revocable permits ([capability broker](./capability-broker.md)), but no host service goes through it yet. User extensions get no host operations at all, so they need neither.
+Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly. `dupin-broker` holds the extension authority model, with declared capabilities, per-revision grants and revocable permits ([capability broker](./capability-broker.md)). A JavaScript guest reaches host services only through `dupin-extension-bridge`: its requests cross the helper's socket to the app, where a session made for that call checks each with the broker, under the trigger the app saw, before `dupin-host-services` or `dupin-extension-http` acts, and drops the result if authority changed meanwhile. Native providers don't go through it.
 
 Extension authoring runs outside the launcher. `dupin-ext-sdk` backs `dupin ext new`, `build` and `dev`: it scaffolds packages with the declarations in `sdk/dupin.d.ts`, bundles packages with npm dependencies with the author's own Rolldown, and publishes development revisions behind a symlink the extensions scan already follows. It checks packages with `dupin-js-runtime`, as the launcher loads them. Dupin never bundles, downloads a bundler or type-checks at run time; extension providers load the JavaScript and erasable TypeScript these commands produce or check.
 
@@ -39,6 +39,10 @@ Switching commands clears the previous rows. Generation checks reject late answe
 The resident panel owns the active configuration and hotkey binding; the Settings window reflects accepted values. One worker orders settings writes and watches the configured path and its symlink targets through the shared FSEvents watcher. Reloaded values use the same panel apply path as Settings and are never written back merely because they were read.
 
 Each queued save has a revision. Reads carry the last revision the worker processed, and both views reject a snapshot older than the newest submitted save. Settings queues its panel update before submitting a save, so the worker's own file event cannot register the same hotkey twice. Parse and hotkey errors preserve the active values and remain visible without opening a window.
+
+## Stored data
+
+Data that must survive a restart without sitting on disk in the clear goes through `dupin-storage`, which has no OS dependencies. It gives each owner a namespace of sealed JSON records and content-addressed blobs with its own retention limits, and takes its data key from a `KeyProvider`: `dupin-mac::keychain::KeychainKey` on macOS, a private key file elsewhere, an in-memory key in tests. The host owns the files and the key; an extension will reach its own namespace only through the broker's `storage` capability. See [Encrypted storage](./features/storage.md).
 
 ## The panel
 

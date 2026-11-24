@@ -63,12 +63,17 @@ pub fn paste(key: u16, text: &str) -> Result<(), String> {
             Err("Couldn't copy the snippet to the clipboard.".to_owned())
         }
     })?;
+    press(key)
+}
+
+/// Press ⌘V in the frontmost app, pasting what the clipboard holds.
+pub fn press(key: u16) -> Result<(), String> {
     for down in [true, false] {
         // SAFETY: A null source is allowed; the event is released after it is posted.
         unsafe {
             let event = CGEventCreateKeyboardEvent(std::ptr::null(), key, down);
             if event.is_null() {
-                return Err("Couldn't paste the snippet into the front app.".into());
+                return Err("Couldn't paste into the front app.".into());
             }
             CGEventSetFlags(event, COMMAND_FLAG);
             CGEventPost(HID_EVENT_TAP, event);

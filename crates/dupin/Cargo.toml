@@ -19,7 +19,10 @@ pico-args = "0.5"
 roxmltree = "0.21.2"
 dupin-plugin-protocol = { workspace = true }
 dupin-js-runtime = { path = "../dupin-js-runtime" }
+dupin-broker = { path = "../dupin-broker" }
+dupin-extension-bridge = { path = "../dupin-extension-bridge" }
 dupin-extension-host = { path = "../dupin-extension-host" }
+dupin-extension-http = { path = "../dupin-extension-http" }
 dupin-extension-install = { path = "../dupin-extension-install" }
 dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }

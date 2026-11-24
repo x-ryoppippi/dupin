@@ -1,7 +1,9 @@
 //! Messages between Dupin and its extension host, over one Unix socket. A frame is two
 //! big-endian `u32` lengths, then a JSON header and a binary tail of those lengths. A `run`
 //! carries the package in its tail, module after module: its source to compile, or the bytecode
-//! a compile returned. A `compiled` answer carries that bytecode the same way.
+//! a compile returned. A `compiled` answer carries that bytecode the same way. While a run is
+//! going, the helper may send `host` requests, each with its JSON arguments as the tail, and Dupin
+//! answers each with a `reply` whose tail is the JSON result.
 
 use std::io::{self, Read, Write};
 
@@ -11,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -33,6 +35,8 @@ pub enum ToHelper {
     },
     /// Stop run `id` if it is still running.
     Cancel { id: u64 },
+    /// Dupin's answer to request `call` of run `id`, as JSON in the tail.
+    Reply { id: u64, call: u32 },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,9 +61,15 @@ pub enum Call {
         cursor: Option<String>,
         reason: Reason,
     },
+    /// `actions[name](data)`, which the user chose.
     Action {
-        handler: String,
-        data: Option<serde_json::Value>,
+        name: String,
+        data: serde_json::Value,
+    },
+    /// `events[name](event)`, for something Dupin watched on the package's behalf.
+    Event {
+        name: String,
+        event: serde_json::Value,
     },
 }
 
@@ -78,6 +88,12 @@ pub enum FromHelper {
     Done {
         id: u64,
         answer: Answer,
+    },
+    /// A host request of run `id`, numbered `call` from one, with its JSON arguments as the tail.
+    Host {
+        id: u64,
+        call: u32,
+        op: String,
     },
 }
 
@@ -100,6 +116,7 @@ pub enum Answer {
     Acted {
         acted: Acted,
     },
+    Handled,
     Cancelled,
     Failed {
         diagnostic: Diagnostic,

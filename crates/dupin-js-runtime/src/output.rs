@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, MAX_URL_BYTES, is_web_url};
 use rquickjs::{Array, Object, Value};
+use serde::{Deserialize, Serialize};
 
 use crate::row::{
     self, CataloguePage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_ID_BYTES,
@@ -14,6 +15,64 @@ use crate::row::{
     RowEffect,
 };
 use crate::{Diagnostic, Failure, MAX_ROWS};
+
+const MAX_TOAST_BYTES: usize = 512;
+
+/// What an action asks Dupin to do once it has run.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum ActionEffect {
+    /// One line Dupin shows briefly in the panel.
+    Toast { text: String },
+}
+
+/// Reads an action's answer: nothing, or one effect.
+pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffect>, Failure> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(None);
+    }
+    let invalid = |field: &str, message: &str| {
+        Failure::Report(
+            Diagnostic::new("invalid-effect", message)
+                .file(entry)
+                .field(field)
+                .hint("Return nothing, or `{ type: \"toast\", text: \"Saved\" }`."),
+        )
+    };
+    let Some(object) = plain_object(value) else {
+        return Err(invalid(
+            "effect",
+            &format!("is {}, not an effect", describe(value)),
+        ));
+    };
+    for key in object.keys::<String>() {
+        let key = key?;
+        if key != "type" && key != "text" {
+            return Err(invalid(&key, "is not an effect field"));
+        }
+    }
+    let kind: Value = object.get("type")?;
+    if kind
+        .as_string()
+        .map(|kind| kind.to_string())
+        .transpose()?
+        .as_deref()
+        != Some("toast")
+    {
+        return Err(invalid("type", "must be \"toast\""));
+    }
+    let text: Value = object.get("text")?;
+    let Some(text) = text.as_string().map(|text| text.to_string()).transpose()? else {
+        return Err(invalid("text", "must be a string"));
+    };
+    if text.is_empty() || text.len() > MAX_TOAST_BYTES || printable(&text).is_err() {
+        return Err(invalid(
+            "text",
+            &format!("must be one line of 1–{MAX_TOAST_BYTES} bytes"),
+        ));
+    }
+    Ok(Some(ActionEffect::Toast { text }))
+}
 
 const ITEM_FIELDS: [&str; 9] = [
     "id", "title", "subtitle", "text", "url", "icon", "section", "detail", "actions",

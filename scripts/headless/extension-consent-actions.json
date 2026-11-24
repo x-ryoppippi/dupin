@@ -1,0 +1,19 @@
+{
+	"events": [
+		{
+			"t": 1.0,
+			"type": "type",
+			"text": "nt milk"
+		},
+		{
+			"t": 2.0,
+			"type": "key",
+			"name": "Right"
+		},
+		{
+			"t": 2.5,
+			"type": "mark",
+			"name": "end"
+		}
+	]
+}

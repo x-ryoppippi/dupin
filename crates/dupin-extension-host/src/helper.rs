@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use dupin_js_runtime::{Acted, CataloguePage, Control, Diagnostic, Exports, Package, Row, RunError, Sources};
+use dupin_js_runtime::{
+    Acted, Bridge, CataloguePage, Control, Diagnostic, Exports, Package, Reply, Row, RunError, Sources,
+};
 
 use crate::sandbox;
 use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
@@ -35,11 +37,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
     let mut writer = socket.try_clone()?;
     let cancelled = Arc::new(AtomicU64::new(0));
     let (messages, received) = mpsc::sync_channel(4);
+    let (replies, answered) = mpsc::sync_channel(dupin_js_runtime::MAX_PENDING);
     let _reader = {
         let cancelled = cancelled.clone();
         std::thread::Builder::new()
             .name("extension-host-reader".into())
-            .spawn(move || read(socket, &cancelled, &messages))?
+            .spawn(move || read(socket, &cancelled, &messages, &replies))?
     };
     // The C library reads the time zone on first use, which the sandbox would deny, leaving
     // every local-time `Date` method in UTC.
@@ -75,7 +78,12 @@ fn run(socket: UnixStream) -> io::Result<()> {
             deadline: Instant::now() + Duration::from_millis(deadline_ms),
             is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed) == id),
         };
-        let answer = match execute(entry, modules, call, control) {
+        let mut bridge = HelperBridge {
+            id,
+            writer: &mut writer,
+            replies: &answered,
+        };
+        let answer = match execute(entry, modules, call, control, &mut bridge) {
             Ok(Outcome::Compiled(package)) => {
                 let (modules, tail) = wire::spans(package.modules());
                 let bytes: usize = tail.iter().map(|part| part.len()).sum();
@@ -97,6 +105,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Ok(Outcome::Rows(items)) => Answer::Rows { items },
             Ok(Outcome::Catalogue(page)) => Answer::Catalogue { page },
             Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
+            Ok(Outcome::Handled) => Answer::Handled,
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
@@ -105,12 +114,63 @@ fn run(socket: UnixStream) -> io::Result<()> {
     Ok(())
 }
 
-/// Forwards every message but `cancel`, which it applies at once so a running call sees it.
-/// When Dupin goes away, so does the helper, even with a call still running.
-fn read(mut socket: UnixStream, cancelled: &AtomicU64, messages: &mpsc::SyncSender<(ToHelper, Vec<u8>)>) {
+/// Carries one run's host requests to Dupin and its replies back.
+struct HelperBridge<'a> {
+    id: u64,
+    writer: &'a mut UnixStream,
+    replies: &'a mpsc::Receiver<(u64, u32, Vec<u8>)>,
+}
+
+impl Bridge for HelperBridge<'_> {
+    fn send(&mut self, call: u32, op: &str, args: &str) -> Result<(), Diagnostic> {
+        let message = FromHelper::Host {
+            id: self.id,
+            call,
+            op: op.into(),
+        };
+        wire::write(self.writer, &message, &[args.as_bytes()])
+            .map_err(|error| Diagnostic::new("host-error", format!("couldn't reach Dupin: {error}")))
+    }
+
+    fn receive(&mut self, stop: &dyn Fn() -> bool) -> Option<Reply> {
+        loop {
+            match self.replies.recv_timeout(TICK) {
+                Ok((id, call, json)) if id == self.id => {
+                    let json = String::from_utf8(json).unwrap_or_else(|_| {
+                        r#"{"error":{"code":"host-error","message":"Dupin's reply wasn't UTF-8"}}"#.into()
+                    });
+                    return Some(Reply { call, json });
+                }
+                // A reply to a run that has ended, which nothing waits for any more.
+                Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return None,
+            }
+            if stop() {
+                return None;
+            }
+        }
+    }
+}
+
+const TICK: Duration = Duration::from_millis(5);
+
+/// Forwards runs to the main loop and replies to the running call's bridge, and applies `cancel`
+/// at once so a running call sees it. When Dupin goes away, so does the helper, even with a
+/// call still running.
+fn read(
+    mut socket: UnixStream,
+    cancelled: &AtomicU64,
+    messages: &mpsc::SyncSender<(ToHelper, Vec<u8>)>,
+    replies: &mpsc::SyncSender<(u64, u32, Vec<u8>)>,
+) {
     loop {
         match wire::read::<ToHelper>(&mut socket) {
             Ok(Some((ToHelper::Cancel { id }, _))) => cancelled.store(id, Ordering::Relaxed),
+            Ok(Some((ToHelper::Reply { id, call }, json))) => {
+                if replies.send((id, call, json)).is_err() {
+                    return;
+                }
+            }
             Ok(Some(message)) => {
                 if messages.send(message).is_err() {
                     return;
@@ -127,6 +187,7 @@ enum Outcome {
     Rows(Vec<Row>),
     Catalogue(CataloguePage),
     Acted(Acted),
+    Handled,
 }
 
 fn execute(
@@ -134,31 +195,16 @@ fn execute(
     modules: Vec<(String, &[u8])>,
     call: Call,
     control: Control,
+    bridge: &mut dyn Bridge,
 ) -> Result<Outcome, RunError> {
-    match call {
-        Call::Compile => {
-            let files = modules
-                .into_iter()
-                .map(|(name, source)| (name, source.to_vec()))
-                .collect();
-            let sources = Sources::new(entry, files)?;
-            Package::compile(sources, control).map(Outcome::Compiled)
-        }
-        Call::Check => load(entry, modules).check(control).map(Outcome::Checked),
-        Call::Search { query, limit } => load(entry, modules)
-            .search(&query, limit as usize, control)
-            .map(Outcome::Rows),
-        Call::Items { cursor, reason } => load(entry, modules)
-            .items(cursor.as_deref(), reason, control)
-            .map(Outcome::Catalogue),
-        Call::Action { handler, data } => load(entry, modules)
-            .action(&handler, data.as_ref(), control)
-            .map(Outcome::Acted),
+    if let Call::Compile = call {
+        let files = modules
+            .into_iter()
+            .map(|(name, source)| (name, source.to_vec()))
+            .collect();
+        let sources = Sources::new(entry, files)?;
+        return Package::compile(sources, control).map(Outcome::Compiled);
     }
-}
-
-/// The package a call carries as bytecode.
-fn load(entry: String, modules: Vec<(String, &[u8])>) -> Package {
     let bytecode = modules
         .into_iter()
         .map(|(name, bytes)| (name, Box::from(bytes)))
@@ -169,5 +215,21 @@ fn load(entry: String, modules: Vec<(String, &[u8])>) -> Package {
     // compile this package alone, so these are bytes `Package::compile` wrote from this
     // package's source, or ones that source subverted its own compile into writing, which can
     // do no more than running the source could.
-    unsafe { Package::from_compiled(entry, bytecode) }
+    let package = unsafe { Package::from_compiled(entry, bytecode) };
+    match call {
+        Call::Compile => unreachable!("compiled above"),
+        Call::Check => package.check(control).map(Outcome::Checked),
+        Call::Search { query, limit } => package
+            .search_with(&query, limit as usize, control, bridge)
+            .map(Outcome::Rows),
+        Call::Items { cursor, reason } => package
+            .items(cursor.as_deref(), reason, control)
+            .map(Outcome::Catalogue),
+        Call::Action { name, data } => package
+            .action(&name, &data.to_string(), control, bridge)
+            .map(Outcome::Acted),
+        Call::Event { name, event } => package
+            .event(&name, &event.to_string(), control, bridge)
+            .map(|()| Outcome::Handled),
+    }
 }

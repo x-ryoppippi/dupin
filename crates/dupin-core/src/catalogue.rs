@@ -323,9 +323,10 @@ fn entry_bytes(entry: &Entry) -> usize {
                 + action.title.len()
                 + match &action.action {
                     Action::Copy(text) | Action::OpenUrl(text) => text.len(),
-                    Action::Extension(run) => {
-                        run.handler.len() + run.data.as_ref().map_or(0, |data| data.to_string().len())
-                    }
+                    Action::Extension {
+                        request: crate::ExtensionRequest::Run { action, data },
+                        ..
+                    } => action.len() + data.as_ref().map_or(0, |data| data.to_string().len()),
                     _ => 0,
                 }
         })

@@ -61,7 +61,7 @@ The manifest is the `dupin` key of `package.json`, so a package keeps one file f
 | `dupin.keyword`       | Required. Up to 32 bytes, no spaces.                                                                                                                                                     |
 | `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`. |
 | `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                      |
-| `dupin.capabilities`  | Reserved. Dupin grants no capabilities yet, so any entry in it is an error.                                                                                                              |
+| `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                    |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
 
@@ -141,7 +141,7 @@ export function items(ctx) {
 
 `append` adds items Dupin doesn't hold after the others, `replace` swaps the items with those IDs in place, and `remove` lists IDs to drop; an ID Dupin doesn't hold is ignored. An update that appends an ID Dupin already holds, or replaces one it doesn't, is refused whole: Dupin shows the failure, drops the catalogue and asks again from the start, with `reason` `"load"` and no cursor. So does any failure of `items`.
 
-Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say. A package that wants its list to outlast a restart keeps it in its own storage once extensions can have one, and lists it from there.
+Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say. `items` reaches no host service, so it can't read the package's `storage`: a request from it fails with `unavailable`.
 
 #### The main search
 
@@ -160,18 +160,31 @@ The detail's title is the item's.
 
 ### Actions
 
-An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a `title` of up to 128 bytes and exactly one of:
+An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a one-line `title` of up to 512 bytes and exactly one of:
 
-| Action | What it does                                                                                                     |
-| ------ | ---------------------------------------------------------------------------------------------------------------- |
-| `copy` | Copies the text, 1 byte to 16 KiB.                                                                               |
-| `open` | Opens the `http` or `https` URL.                                                                                 |
-| `run`  | Calls `actions[run](data)` in the package, with the action's `data`: up to 4 KiB of JSON, nested 16 levels deep. |
+| Action | What it does                                                                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `copy` | Copies the text, 1 byte to 16 KiB.                                                                                                                                                |
+| `open` | Opens the `http` or `https` URL.                                                                                                                                                  |
+| `run`  | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. |
 
 ```js
-import { items as catalogue } from 'dupin';
+import { items as catalogue, storage } from 'dupin';
+
+export async function search(query) {
+	const saved = (await storage.get('notes')) ?? [];
+	return [
+		{ title: `Save “${query}”`, actions: [{ title: 'Save', run: 'save', data: { text: query } }] },
+		...saved.map((text) => ({ title: text, text })),
+	];
+}
 
 export const actions = {
+	async save({ text }) {
+		const saved = (await storage.get('notes')) ?? [];
+		await storage.set('notes', [text, ...saved].slice(0, 20));
+		return { type: 'toast', text: 'Saved' };
+	},
 	forget(data) {
 		forgetEntry(data.id);
 		catalogue.invalidate();
@@ -179,53 +192,161 @@ export const actions = {
 };
 ```
 
-A `run` action keeps the launcher open. Its handler runs when you choose the action, with the same limits as a query, and returns nothing. Calling `items.invalidate()` from `dupin` there asks `items` again, with its cursor and `reason` `"invalidated"`, and Dupin searches the current query again so the change shows at once; called anywhere else, it throws. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
+A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen, empty `ctx`, and may return nothing or `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there asks `items` again, with its cursor and `reason` `"invalidated"`; called anywhere else, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
 
 ### What the module can reach
 
-The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`, which exports `apiVersion` (2) and `items`, whose `invalidate()` an action handler calls. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
+The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-There are no files, network, processes, clipboard, timers or console. Each query, `items` call and action runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
+There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`2`), `DupinError`, `items`, whose `invalidate()` an action calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, and only from `search`, actions and events: a request from `items` fails with `unavailable`. Each query, `items` call, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
+
+### Events
+
+The `events` export receives what Dupin watches for the package. `events.clipboard(change)` gets each new copy while the package is on and holds `clipboard:watch`:
+
+```js
+import { storage } from 'dupin';
+
+export const events = {
+	async clipboard(change) {
+		if (change.type !== 'text') return;
+		const recent = (await storage.get('recent')) ?? [];
+		await storage.set('recent', [change.text, ...recent].slice(0, 50));
+	},
+};
+```
+
+`change` is frozen and shaped as `clipboard.read()` returns a copy, with text cut to 64 KiB and `truncated: true` when it was. One delivery runs at a time for each package; copies that land meanwhile are coalesced to the newest, so a slow handler never builds a queue. A handler runs in the background: it may read and use `storage`, but anything that needs an action you chose fails with `needs-activation`. Revoking the scope, turning the extension off or macOS withdrawing access stops the deliveries at once.
 
 ### Asking for more
 
-Host services aren't connected yet. When they are, an extension will ask for them by declaring `capabilities` in the `dupin` field of its `package.json`, and Dupin will check every call against that declaration and your grants:
+An extension asks for host services by declaring `capabilities` in the `dupin` key of its `package.json`. Dupin checks every request against that declaration, the version you allowed and your choices:
 
 ```json
 "capabilities": {
 	"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }],
 	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
-	"exec": { "@script:open-in-zed": {} },
-	"storage": { "quotaBytes": 1048576 },
-	"clipboard": ["write"],
+	"exec": { "git-status": { "args": ["status", "--short", "{path}"], "output": true }, "@script:open-in-zed": {} },
+	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
+	"clipboard": ["read", "write", "watch"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 }
 }
 ```
 
-- A declaration is the most an extension can get. Anything malformed, unknown or out of range rejects it with a diagnostic naming the field.
-- You grant each item separately, such as one origin or one named folder, and can revoke it at any time. Your grants belong to the version you approved: an update that asks for more asks again.
-- Searching may use granted reads. Sending anything but GET or HEAD, running a program or script, and reading or writing the clipboard need you to choose the action.
-- Calendar and clipboard reads also need macOS access, requested when you turn the extension on or first use it.
+- A declaration is the most an extension can get. Anything malformed, unknown or out of range rejects the package with a diagnostic naming the field, such as `dupin.capabilities.http[0].origin`.
+- Each item is a scope you allow on its own: one origin, one named folder, one profile. A scope's name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary` or `calendar`, is what errors, Settings and grant files call it.
+- An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
+- A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer. Settings → Extensions lists the same requests, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
+- Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
+- While you type, an extension may use what you allowed to read: GET and HEAD, files, storage, the dictionary and calendars. Any other HTTP method, a program or script and reading or writing the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+- Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
+- Calendars, and reading or watching the clipboard, also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
-[Permissions](./permissions.md#extensions) has the rest, and [Capability broker](../capability-broker.md) the full rules.
+[Permissions](./permissions.md#extensions) and [Capability broker](../capability-broker.md) have the full rules.
 
-The services behind the OS-backed capabilities are in place, ready for the broker bridge to call: each checks its inputs, reads macOS access without ever prompting, bounds what it returns and answers with JSON-shaped data or an error. An error has a `code`, a `message` and, for macOS access, the `permission` (`calendars` or `pasteboard`):
+A request that fails rejects with a `DupinError` whose `code` the extension can branch on; `scope`, `description` and `permission` say what consent is missing:
 
-| `code`                  | Meaning                                                                                               |
-| ----------------------- | ----------------------------------------------------------------------------------------------------- |
-| `needs-permission`      | macOS hasn't been asked yet. An extension's call never asks; you do, from Dupin, with Request Access. |
-| `permission-denied`     | macOS denied access; it changes in System Settings → Privacy & Security.                              |
-| `permission-restricted` | A configuration profile or parental controls decide.                                                  |
-| `needs-activation`      | The call needs you to choose the action.                                                              |
-| `invalid`               | An argument is malformed or out of range.                                                             |
-| `out-of-scope`          | The call reaches beyond what the extension declared.                                                  |
-| `unsupported`           | This Mac can't do what was asked.                                                                     |
-| `failed`                | macOS refused the operation.                                                                          |
+```js
+import { clipboard, DupinError } from 'dupin';
+
+export const actions = {
+	async paste() {
+		try {
+			return { type: 'toast', text: (await clipboard.readText()) ?? 'Nothing to paste' };
+		} catch (error) {
+			if (error instanceof DupinError && error.code === 'needs-consent') {
+				return { type: 'toast', text: `Allow ${error.description} first` };
+			}
+			throw error;
+		}
+	},
+};
+```
+
+| `code`             | Meaning                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `needs-consent`    | You haven't allowed the scope, an update widened it, or macOS hasn't been asked. Dupin shows the request. |
+| `needs-activation` | Only an action you chose may do this.                                                                     |
+| `disabled`         | The extension is off.                                                                                     |
+| `revoked`          | You revoked the scope, or its access changed while the request ran and the result was dropped.            |
+| `denied`           | Your declared configuration denies the scope.                                                             |
+| `os-denied`        | macOS denied or restricts the access; it changes in System Settings → Privacy & Security.                 |
+| `undeclared`       | The package doesn't declare the scope, such as an origin it didn't list.                                  |
+| `out-of-scope`     | The request goes beyond the declaration: another method, a files access or a wider calendar window.       |
+| `quota-exceeded`   | A storage write would pass the declared quota.                                                            |
+| `invalid`          | An argument is malformed or out of range.                                                                 |
+| `too-many-calls`   | More than 16 requests wait at once, or one call made more than 256.                                       |
+| `too-large`        | A request or its result is larger than Dupin passes (2 MiB out, 4 MiB back).                              |
+| `unavailable`      | No service answers here, as in `dupin ext run`, or this build has none for the capability yet.            |
+| a service's code   | Such as `not-found`, `timeout`, `blocked-address` or `failed`, with the service's message.                |
+
+A request counts against its call's deadline: 2 seconds while you type, 30 seconds for an action.
+
+### HTTP
+
+`"http": [{ "origin": "https://api.github.com", "methods": ["GET"] }]` declares up to 32 HTTPS origins, each with the methods it may use. `http.fetch(url, { method, headers, body })` returns a response with `ok`, `status`, `url`, `redirected`, `headers` (lowercase names, without cookies), `truncated`, `text()` and `json()`:
+
+```js
+import { http } from 'dupin';
+
+export async function search(query) {
+	const response = await http.fetch(
+		`https://api.github.com/search/repositories?q=${encodeURIComponent(query)}`,
+		{
+			headers: { accept: 'application/vnd.github+json' },
+		},
+	);
+	if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+	const { items } = await response.json();
+	return items.slice(0, 10).map((repo) => ({ title: repo.full_name, url: repo.html_url }));
+}
+```
+
+Dupin sends no cookies or credentials of its own, connects only to the permit's origin, follows a redirect only within it, refuses private and reserved addresses, and caps a request at 64 headers and 1 MiB of body and a response at 2 MiB, past which `truncated` is set.
+
+### Files
+
+`"files": { "notes": { "kind": "directory", "access": ["read", "list"] } }` declares named scopes; you pick the file or folder each one is when you allow it in Settings. `files.list(scope, path?)` returns entries with `name`, `kind`, `size` and a `handle`; `files.readText(scope, path)` the text of a file, and `files.read` also its `size` and whether it was `truncated`. A files scope's name is lowercase letters, digits, `-` and `_`. Paths are relative to the scope with `/`, and the [files capability](../extension-capabilities.md#files) describes how they are checked.
+
+```js
+import { files } from 'dupin';
+
+export async function search(query) {
+	const notes = await files.list('notes');
+	return notes
+		.filter((entry) => entry.kind === 'file' && entry.name.includes(query))
+		.map((entry) => ({ title: entry.name }));
+}
+```
+
+### Exec
+
+`"exec"` declares named profiles, each an argument template whose `{input}` placeholders take one line of text, or `@script:<name>` for one of your [script commands](./scripts.md). You pick the program a profile runs when you allow it; a script needs no pick. `output: true` asks to receive stdout and stderr. `exec.run(profile, inputs)` runs only in an action and returns `code`, `signal`, `timedOut` and, with output allowed, `stdout`, `stderr` and `truncated`:
+
+```js
+import { exec } from 'dupin';
+
+export const actions = {
+	async status({ path }) {
+		const result = await exec.run('git-status', { path });
+		return {
+			type: 'toast',
+			text: result.code === 0 ? result.stdout.trim() || 'Clean' : `git exited ${result.code}`,
+		};
+	},
+};
+```
+
+Programs and scripts run with your own access, without a shell, as the [exec capability](../extension-capabilities.md#exec) describes; consent shows the program and every argument.
+
+### Storage
+
+`"storage": { "quotaBytes": 1048576, "retentionDays": 30 }` gives the package a key-value store of its own, up to the quota counted as each key and its value as JSON. `storage.get(key)`, `set(key, value)`, `delete(key)` and `keys()` work while you type, in actions and in event handlers; a write past the quota fails with `quota-exceeded`. Keys are 1–256 bytes and a value at most 1 MiB of JSON. The data is meant to be kept encrypted at rest, but this build has no storage service yet, so every request fails with `unavailable`.
 
 ### Dictionary
 
-`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. A lookup takes a term of at most 200 characters and returns up to 8 entries, each with the structure Dupin's own `define` view lays out:
+`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. `dictionary.lookup(term)` takes a term of at most 200 characters and returns up to 8 entries, each with the structure Dupin's own `define` view lays out:
 
 ```json
 {
@@ -256,27 +377,34 @@ The services behind the OS-backed capabilities are in place, ready for the broke
 }
 ```
 
-Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, so nothing is lost. An entry keeps at most 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`, and naming dictionaries to look in is `unsupported`.
+Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, so nothing is lost. An entry keeps at most 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`.
 
 ### Calendar
 
-`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. A read names a range in JavaScript milliseconds and may name calendars, a query and a limit:
+`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, limit })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed:
 
-| Argument    | Bounds                                                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------- |
-| range       | `start` before `end`, both within the declared days; a wider range is `out-of-scope`, not quietly narrowed. |
-| `calendars` | 1–32 calendar names. Leave it out for every calendar.                                                       |
-| `query`     | At most 200 characters. Every word must appear in the title or location, ignoring case.                     |
-| `limit`     | 1–500 events, 100 by default.                                                                               |
+```js
+import { calendar } from 'dupin';
 
-Events come earliest first:
+export async function search() {
+	const now = new Date();
+	const tomorrow = new Date(now.getTime() + 864e5);
+	const events = await calendar.events({ from: now, to: tomorrow });
+	return events.map((event) => ({
+		title: event.title,
+		subtitle: `${event.start} · ${event.calendar.name}`,
+	}));
+}
+```
+
+Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
 
 ```json
 {
 	"id": "7F3C…:1795431600000",
 	"title": "Design review",
-	"start": 1795431600000,
-	"end": 1795435200000,
+	"start": "2026-11-24T10:00:00.000Z",
+	"end": "2026-11-24T11:00:00.000Z",
 	"allDay": false,
 	"calendar": { "name": "Work", "color": "#1badf8" },
 	"location": "Meeting room",
@@ -284,17 +412,17 @@ Events come earliest first:
 }
 ```
 
-`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading needs macOS Calendars access. The service only checks it, and while macOS hasn't been asked a read returns `needs-permission`; an extension's call never asks. For now only Request Access on the Calendars row of Settings → Permissions asks macOS: turning the Extensions setting on doesn't, and nothing asks when you turn on one extension until the broker bridge connects these services.
+`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading also needs macOS Calendars access, which only **Request Access** asks for.
 
 ### Clipboard
 
 `"clipboard": ["read", "write", "watch"]` declares each kind of access separately.
 
-- **Read** returns the current copy when you choose an action: `{ "change": 42, "content": … }`, or `null` when the clipboard is empty or the copy is one Dupin never reads.
-- **Write** puts `{ "type": "text", "text": … }` (up to 1 MiB), `{ "type": "url", "url": … }` (an absolute URL of up to 8 KiB) or 1–64 files on the clipboard when you choose an action. Files are named by the handles that the extension's `files` reads and listings returned, never by path: an app you paste file references into acts on them as you, so an extension can only copy files inside a folder or file you granted it.
-- **Watch** calls the extension with each new copy, the same shape as a read, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are. At most 16 watches run at once; one that falls more than a few copies behind misses the newer ones rather than holding up clipboard history or other watches. Keeping a history is up to the extension, in its own `storage`.
+- **Read**: `clipboard.read()` returns the current copy when you choose an action, or `null` when the clipboard is empty or the copy is one Dupin never reads; `clipboard.readText()` returns its text, if it is text.
+- **Write**: `clipboard.writeText(text)` puts up to 1 MiB of text on the clipboard when you choose an action.
+- **Watch**: [`events.clipboard`](#events) receives each new copy, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are; at most 16 run at once. Keeping a history is up to the extension, in its own `storage`.
 
-A read's `content` is the most specific form the copy offers: files, then a URL, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then text. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, not when the extension reads it. So while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); under the default policy they return `needs-permission`, and Dupin only asks when you choose Request Access. Writing needs no macOS permission.
+A copy is the most specific form it offers: `{ "type": "files", "files": [{ "path", "name" }] }`, then `{ "type": "url", "url" }`, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then `{ "type": "text", "text" }`. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`, followed from the next copy when it changes), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, so while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); writing needs no macOS permission.
 
 TypeScript whose types can simply be erased runs as written; see [TypeScript without a build](#typescript-without-a-build). JSX, TypeScript that needs compiling and npm packages are built on your machine: bundle the extension into one JavaScript module (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin never type-checks and never runs a package manager or the package's scripts.
 
@@ -374,7 +502,7 @@ With `--ts`, `dupin.main` is `src/main.ts`, which Dupin runs as written. With `-
 
 The `--bundle` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 2 has is in the `dupin` module, `items(ctx)`, sections, details and action handlers among it; what the [design](../design/extension-platform.md) plans next, such as accessories, pushed Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `planned` namespace. Nothing in `planned` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 2 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, item actions, `actions` and `events`, the capabilities and `DupinError`. What the [design](../design/extension-platform.md) plans next, such as accessories and pushed Detail and Form views, is drafted as types in its `planned` namespace. Nothing in `planned` works yet: an item with those fields fails the answer.
 
 ### TypeScript without a build
 
@@ -442,7 +570,7 @@ A folder source skips `.git` and its top-level `node_modules`. The package is wr
 
 | Command                   | What it does                                                                                                                                                     |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dupin ext list`          | Lists installed packages with their source, commit and state: installed, missing or modified.                                                                    |
+| `dupin ext list`          | Lists installed packages with their source, commit, state (installed, missing or modified) and the scopes granted for the installed revision.                    |
 | `dupin ext update [NAME]` | Moves one package, or all, to the newest version tag (or the default branch), or copies a folder source again, and shows the capability scopes it adds or drops. |
 | `dupin ext remove NAME`   | Deletes the package's folder and its entry, with its grants.                                                                                                     |
 | `dupin ext sync`          | Reinstalls every package that is missing or modified from its locked commit, and checks it has the locked content hash.                                          |
@@ -465,10 +593,9 @@ installed_at = "2026-11-23T09:00:00Z"
 version = "1.2.0"
 keyword = "wc"
 requested = ["http:https://api.example.com"]
-granted = []
 ```
 
-`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't connected yet.
+`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. The lock holds no grants: what you allow is in `grants.toml` beside it, which the broker owns. When Dupin loads an updated package, its grants of scopes the new revision declares no wider carry over, scopes it widens or adds wait for you to allow them, and scopes it drops are forgotten; `dupin ext update` lists what it adds and drops. `dupin ext remove` forgets the package's grants too, and so does installing a name that wasn't installed, so a package never inherits what you allowed another of that name. A running Dupin reads `grants.toml` again before it next decides or saves, so it neither keeps nor writes back what the command forgot. A lock written by an earlier Dupin may still have `granted` and `pending_consent` lists, which nothing ever filled; they are ignored.
 
 When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Search shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
 
@@ -490,13 +617,38 @@ programs.dupin = {
         rev = "0123456789abcdef0123456789abcdef01234567";
         hash = "sha256-…";
       };
-      grants = [ "http:https://api.example.com" ];
+      grants = [
+        "http:https://api.example.com"
+        "files:notes"
+      ];
+      bindings."files:notes" = "/Users/me/Notes";
+      deny = [ "clipboard:read" ];
     }
   ];
 };
 ```
 
-Each package links read-only into the extensions folder under `name`, which defaults to `name` in its `package.json`; set `name` to avoid reading the package while Nix evaluates. `grants` go to `extension-grants.toml` beside `config.toml`, the read-only base that grants chosen in Dupin overlay, as `settings.toml` overlays `config.toml`. macOS still asks for its own permissions when an extension first needs them. These packages are pinned by Nix, so they aren't in `extensions.lock`, and `dupin ext update` and `remove` leave them to Home Manager.
+Each package links read-only into the extensions folder under `name`, which defaults to `name` in its `package.json`; set `name` to avoid reading the package while Nix evaluates. Its grants go to `extension-grants.toml` beside `config.toml`, the broker's read-only base, in the broker's own format:
+
+```toml
+version = 1
+
+[packages.word-count]
+revision = "blake3:…"
+enabled = true
+grant = ["http:https://api.example.com", "files:notes"]
+deny = ["clipboard:read"]
+bindings = { "files:notes" = "/Users/me/Notes" }
+```
+
+| Option     | Meaning                                                                                                               |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| `grants`   | Scopes allowed ahead of time, for exactly this `src`. A `files` or `exec` scope also needs its path in `bindings`.    |
+| `bindings` | The absolute path a granted `files` or `exec` scope is bound to: the file or folder it reads, or the program it runs. |
+| `deny`     | Scopes the package may never be granted, even from Dupin.                                                             |
+| `enable`   | `true` by default. `false` keeps the package off whatever you choose in Dupin.                                        |
+
+A grant applies only to the `revision` it names: `dupin ext revision DIR` prints it, and Home Manager runs it on `src` when the configuration builds, so changing `src` needs the new revision and nothing in an edited copy is granted. Choices made in Dupin, in `grants.toml`, can take a declared grant away but never widen it, and a denied scope can't be allowed. The base applies to each package by its `package.json` name, whatever `name` calls its folder, and two packages of one name fail the build. Dupin reads the base again as soon as it changes, so a denial, `enable = false` or a grant taken away applies at once, but a new grant waits until Dupin restarts. macOS still asks for its own permissions only when you choose Request Access. These packages are pinned by Nix, so they aren't in `extensions.lock`, and `dupin ext update` and `remove` leave them to Home Manager.
 
 ## Wasm extensions
 

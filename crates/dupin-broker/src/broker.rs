@@ -293,12 +293,40 @@ impl Broker {
         revision: Revision,
         capabilities: Capabilities,
     ) -> Reconciliation {
+        let report = self.reconcile(&id, &revision, &capabilities);
+        let same = self
+            .installed
+            .get(&id)
+            .filter(|installed| installed.revision == revision && installed.capabilities == capabilities)
+            .map(|installed| installed.generation);
+        let generation = match same {
+            Some(generation) => generation,
+            None => self.next(),
+        };
+        self.installed.insert(
+            id,
+            Installed {
+                revision,
+                capabilities,
+                generation,
+            },
+        );
+        report
+    }
+
+    /// Brings the user's decisions about `id` in line with what `revision` declares.
+    fn reconcile(
+        &mut self,
+        id: &PackageId,
+        revision: &Revision,
+        capabilities: &Capabilities,
+    ) -> Reconciliation {
         let mut report = Reconciliation::default();
         if let Some(package) = self
             .local
             .packages
             .as_mut()
-            .and_then(|packages| packages.get_mut(&id))
+            .and_then(|packages| packages.get_mut(id))
         {
             package.scopes.retain(|key, record| {
                 let Some(declared) = capabilities.get(key) else {
@@ -327,23 +355,6 @@ impl Broker {
                 true
             });
         }
-        let same = self
-            .installed
-            .get(&id)
-            .filter(|installed| installed.revision == revision && installed.capabilities == capabilities)
-            .map(|installed| installed.generation);
-        let generation = match same {
-            Some(generation) => generation,
-            None => self.next(),
-        };
-        self.installed.insert(
-            id,
-            Installed {
-                revision,
-                capabilities,
-                generation,
-            },
-        );
         report
     }
 
@@ -479,16 +490,48 @@ impl Broker {
     }
 
     /// Takes a newly read declarative base. Denials and removals apply at once; grants and
-    /// enables it adds wait for the next launch.
-    pub fn replace_base(&mut self, base: Base) {
+    /// enables it adds wait for the next launch. Returns the packages whose in-flight work is
+    /// dropped.
+    pub fn replace_base(&mut self, base: Base) -> Vec<PackageId> {
         if base == self.base {
-            return;
+            return Vec::new();
         }
         self.base = base;
         let ids: Vec<_> = self.installed.keys().cloned().collect();
-        for id in ids {
-            self.bump(&id);
+        for id in &ids {
+            self.bump(id);
         }
+        ids
+    }
+
+    /// Takes the user's decisions as read again from their file, which another Dupin process,
+    /// such as `dupin ext remove`, may have changed since. Each installed package is reconciled
+    /// with its declaration as [`Broker::install`] does. Returns the packages whose decisions
+    /// changed, whose in-flight work is dropped.
+    pub fn replace_local(&mut self, local: Local) -> Vec<PackageId> {
+        let previous = std::mem::replace(&mut self.local, local);
+        let installed: Vec<_> = self
+            .installed
+            .iter()
+            .map(|(id, installed)| {
+                (
+                    id.clone(),
+                    installed.revision.clone(),
+                    installed.capabilities.clone(),
+                )
+            })
+            .collect();
+        let mut changed = Vec::new();
+        for (id, revision, capabilities) in installed {
+            self.reconcile(&id, &revision, &capabilities);
+            let decisions =
+                |local: &Local| local.packages.as_ref().map(|packages| packages.get(&id).cloned());
+            if decisions(&previous) != decisions(&self.local) {
+                self.bump(&id);
+                changed.push(id);
+            }
+        }
+        changed
     }
 
     pub fn set_os_access(&mut self, permission: OsPermission, access: OsAccess) {

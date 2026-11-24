@@ -16,8 +16,6 @@ const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
 const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch` and `capabilities`";
 const DEFAULT_SEARCH_HINT: &str =
     "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
-/// The capabilities the extension platform design names. None can be granted yet.
-const PLANNED_CAPABILITIES: [&str; 3] = ["http", "exec", "files"];
 
 pub(super) struct Manifest {
     pub id: String,
@@ -28,6 +26,8 @@ pub(super) struct Manifest {
     pub entry: String,
     /// The package's `items()` catalogue also answers the default search.
     pub default_search: bool,
+    /// The most the package may do; the user grants each scope.
+    pub capabilities: dupin_broker::Capabilities,
 }
 
 /// The manifest files in one folder, so a later scan can tell whether any appeared, changed or
@@ -172,6 +172,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
                 ));
             }
         },
+        capabilities: dupin_broker::Capabilities::default(),
     };
     validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
@@ -183,39 +184,30 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
                 MAIN_HINT,
             )
         })?;
-    if let Some(capabilities) = dupin.get("capabilities") {
-        check_capabilities(capabilities)?;
-    }
-    Ok(Manifest { entry, ..manifest })
+    let capabilities = match dupin.get("capabilities") {
+        Some(capabilities) => parse_capabilities(capabilities)?,
+        None => dupin_broker::Capabilities::default(),
+    };
+    Ok(Manifest {
+        entry,
+        capabilities,
+        ..manifest
+    })
 }
 
-fn check_capabilities(capabilities: &Value) -> Result<(), Diagnostic> {
-    let Value::Object(capabilities) = capabilities else {
-        return Err(Diagnostic::new("invalid-manifest", "must be an object")
+/// The capability broker's own reading of the declaration, so what Settings lists and what a
+/// call is checked against can't differ. The first problem is reported; fixing it shows the next.
+pub(super) fn parse_capabilities(capabilities: &Value) -> Result<dupin_broker::Capabilities, Diagnostic> {
+    dupin_broker::Capabilities::parse(capabilities).map_err(|problems| {
+        let problem = &problems[0];
+        let diagnostic = Diagnostic::new(problem.code, problem.message.clone())
             .file(PACKAGE_JSON)
-            .field("dupin.capabilities")
-            .hint("Leave `capabilities` out: Dupin can't grant any yet."));
-    };
-    let Some(kind) = capabilities.keys().next() else {
-        return Ok(());
-    };
-    let field = format!("dupin.capabilities.{kind}");
-    if PLANNED_CAPABILITIES.contains(&kind.as_str()) {
-        Err(Diagnostic::new(
-            "unsupported-capability",
-            "can't be granted by this version of Dupin yet",
-        )
-        .file(PACKAGE_JSON)
-        .field(field)
-        .hint("Remove it: extensions run without capabilities for now."))
-    } else {
-        Err(
-            Diagnostic::new("unknown-capability", "is not a capability Dupin knows")
-                .file(PACKAGE_JSON)
-                .field(field)
-                .hint("Capabilities will be `http`, `exec` and `files`, and none can be granted yet."),
-        )
-    }
+            .field(format!("dupin.{}", problem.field));
+        match problem.hint {
+            Some(hint) => diagnostic.hint(hint),
+            None => diagnostic.hint("See the capability sections of docs/features/extensions.md."),
+        }
+    })
 }
 
 /// `path` spelt as the folder-relative file name the loaders compare entries with, or `None`
@@ -393,18 +385,18 @@ mod tests {
                 "dupin.main",
             ),
             (
-                r#"{"title": "W", "keyword": "wc", "capabilities": {"http": []}}"#,
-                "unsupported-capability",
-                "dupin.capabilities.http",
+                r#"{"title": "W", "keyword": "wc", "capabilities": {"http": [{"origin": "http://example.com", "methods": ["GET"]}]}}"#,
+                "invalid-origin",
+                "dupin.capabilities.http[0].origin",
             ),
             (
-                r#"{"title": "W", "keyword": "wc", "capabilities": {"clipboard": true}}"#,
+                r#"{"title": "W", "keyword": "wc", "capabilities": {"camera": true}}"#,
                 "unknown-capability",
-                "dupin.capabilities.clipboard",
+                "dupin.capabilities.camera",
             ),
             (
                 r#"{"title": "W", "keyword": "wc", "capabilities": []}"#,
-                "invalid-manifest",
+                "invalid-type",
                 "dupin.capabilities",
             ),
             ("[]", "invalid-manifest", "dupin"),
