@@ -11,6 +11,8 @@ use oxc_span::{GetSpan, SourceType, Span};
 
 use crate::Diagnostic;
 
+mod nesting;
+
 const NEEDS_BUILD: &str = "typescript-needs-build";
 
 /// Whether the package file `name` is TypeScript that Dupin erases, rather than a declaration
@@ -25,8 +27,54 @@ pub(crate) fn is_typescript(name: &str) -> bool {
     module && !declaration
 }
 
+/// The stack an erasure needs besides its nesting.
+const STACK_BASE_BYTES: usize = 256 * 1024;
+/// Twice the most stack that oxc's parser and the eraser's walk took for a byte of source,
+/// measured over every kind of nesting, so no file can overflow it. A level of nesting takes
+/// at least a byte.
+const STACK_BYTES_PER_SOURCE_BYTE: usize = if cfg!(debug_assertions) { 4096 } else { 2048 };
+
 /// `source`, the package file `name`, as JavaScript with every TypeScript-only span blanked.
 pub(crate) fn erase(name: &str, source: &str) -> Result<String, Diagnostic> {
+    if let Some(offset) = nesting::too_deep(source.as_bytes()) {
+        let (line, column) = position(source, offset as u32);
+        return Err(Diagnostic::new(
+            "stack-limit",
+            format!(
+                "nests too deeply to compile, past {} levels of brackets",
+                nesting::MAX_DEPTH
+            ),
+        )
+        .file(name)
+        .at(line, column)
+        .hint("Flatten deeply nested expressions, arrays, objects or types."));
+    }
+    // oxc's parser recurses once per level of nesting and sets no limit of its own. Brackets
+    // are limited above, but a chain such as `!!!…1` or `a = a = …` nests without them, so the
+    // stack is sized to the source, which no nesting can overflow.
+    let stack = source
+        .len()
+        .saturating_mul(STACK_BYTES_PER_SOURCE_BYTE)
+        .saturating_add(STACK_BASE_BYTES);
+    std::thread::scope(|scope| {
+        let erasing = std::thread::Builder::new()
+            .name("typescript".into())
+            .stack_size(stack)
+            .spawn_scoped(scope, || erase_on_this_stack(name, source));
+        match erasing {
+            Ok(erasing) => erasing
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            Err(error) => Err(Diagnostic::new(
+                "engine-error",
+                format!("Couldn't start erasing the types: {error}"),
+            )
+            .file(name)),
+        }
+    })
+}
+
+fn erase_on_this_stack(name: &str, source: &str) -> Result<String, Diagnostic> {
     let source_type = if name.ends_with(".tsx") {
         SourceType::tsx()
     } else {
@@ -83,6 +131,7 @@ enum Construct {
     Jsx,
     ImportEquals,
     ExportAssignment,
+    TypeAssertion,
 }
 
 impl Construct {
@@ -99,6 +148,9 @@ impl Construct {
             Self::Jsx => "uses JSX, which only a build turns into JavaScript",
             Self::ImportEquals => "uses `import … =`, which only a TypeScript build turns into JavaScript",
             Self::ExportAssignment => "uses `export =`, which only a TypeScript build turns into JavaScript",
+            Self::TypeAssertion => {
+                "uses a `<T>value` assertion, whose erased type can end a `return` before its value"
+            }
         }
     }
 
@@ -115,6 +167,7 @@ impl Construct {
             Self::Jsx => "Build it with `dupin ext build`.",
             Self::ImportEquals => "Use `import … from` instead, or build it with `dupin ext build`.",
             Self::ExportAssignment => "Use `export default` instead, or build it with `dupin ext build`.",
+            Self::TypeAssertion => "Write `value as T` instead, or build it with `dupin ext build`.",
         }
     }
 }
@@ -308,24 +361,54 @@ impl Eraser<'_> {
         }
     }
 
+    /// The words in `start..end` outside comments, as spans. Only for a stretch of keywords
+    /// and names, which holds no string to look inside.
+    fn words(&self, start: u32, end: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
+        let end = end as usize;
+        let mut at = start as usize;
+        std::iter::from_fn(move || {
+            loop {
+                let (next, _) = self.next_token(at);
+                if next >= end {
+                    return None;
+                }
+                let length = self.text[next..end]
+                    .iter()
+                    .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_' || **byte == b'$')
+                    .count();
+                at = next + length.max(1);
+                if length > 0 {
+                    return Some((next as u32, (next + length) as u32));
+                }
+            }
+        })
+    }
+
+    /// Where the keyword `word` starts in `start..end`.
+    fn find_word(&self, start: u32, end: u32, word: &[u8]) -> Option<u32> {
+        self.words(start, end)
+            .find(|&(from, to)| &self.text[from as usize..to as usize] == word)
+            .map(|(from, _)| from)
+    }
+
     /// Blanks TypeScript's modifiers among the words in `start..end`, the part of a class
     /// member before its name.
     fn blank_modifiers(&mut self, start: u32, end: u32) {
-        let mut at = start as usize;
-        while at < end as usize {
-            let (next, _) = self.next_token(at);
-            if next >= end as usize {
-                return;
-            }
-            let word = self.text[next..end as usize]
-                .iter()
-                .take_while(|byte| byte.is_ascii_alphanumeric() || **byte == b'_' || **byte == b'$')
-                .count();
-            if MODIFIERS.contains(&&self.text[next..next + word]) {
-                self.blank(next as u32, (next + word) as u32);
-            }
-            at = next + word.max(1);
+        let modifiers: Vec<_> = self
+            .words(start, end)
+            .filter(|&(from, to)| MODIFIERS.contains(&&self.text[from as usize..to as usize]))
+            .collect();
+        for (from, to) in modifiers {
+            self.blank(from, to);
         }
+    }
+
+    fn has_line_break(&self, start: u32, end: u32) -> bool {
+        let text = &self.text[start as usize..end as usize];
+        text.iter().any(|&byte| byte == b'\n' || byte == b'\r')
+            || text
+                .windows(3)
+                .any(|character| character == "\u{2028}".as_bytes() || character == "\u{2029}".as_bytes())
     }
 
     /// Blanks the `?` or `!` TypeScript writes after a name, in `start..end`.
@@ -389,7 +472,16 @@ impl<'a> Visit<'a> for Eraser<'_> {
         }
         match statement(it) {
             Outcome::Keep => walk::walk_statement(self, it),
-            Outcome::Erase => self.erase(it.span()),
+            Outcome::Erase => {
+                // A build inlines a `declare const enum`'s members where they are used, which
+                // erasing it would leave naming nothing.
+                let mut found = ConstEnum(None);
+                found.visit_statement(it);
+                match found.0 {
+                    Some(span) => self.reject(span, Construct::Enum),
+                    None => self.erase(it.span()),
+                }
+            }
             Outcome::Reject(span, construct) => self.reject(span, construct),
         }
     }
@@ -414,17 +506,31 @@ impl<'a> Visit<'a> for Eraser<'_> {
     }
 
     fn visit_class(&mut self, it: &Class<'a>) {
+        let class = self.find_word(it.span.start, it.body.span.start, b"class");
         if it.r#abstract
-            && let Some(keyword) = self.text[it.span.start as usize..]
-                .windows(5)
-                .position(|word| word == b"class")
+            && let Some(class) = class
         {
-            self.blank_modifiers(it.span.start, it.span.start + keyword as u32);
+            self.blank_modifiers(it.span.start, class);
         }
         if let (Some(first), Some(last)) = (it.implements.first(), it.implements.last()) {
-            let before = &self.text[..first.span.start as usize];
-            if let Some(keyword) = before.windows(10).rposition(|word| word == b"implements") {
-                self.blank(keyword as u32, last.span.end);
+            let heritage = it.heritage.as_ref().map(|heritage| {
+                heritage
+                    .type_arguments
+                    .as_ref()
+                    .map_or(heritage.expression.span().end, |arguments| arguments.span.end)
+            });
+            let after = [
+                class.map(|class| class + 5),
+                it.id.as_ref().map(|id| id.span.end),
+                it.type_parameters.as_ref().map(|parameters| parameters.span.end),
+                heritage,
+            ]
+            .into_iter()
+            .flatten()
+            .max()
+            .unwrap_or(it.span.start);
+            if let Some(implements) = self.find_word(after, first.span.start, b"implements") {
+                self.blank(implements, last.span.end);
             }
         }
         walk::walk_class(self, it);
@@ -516,13 +622,20 @@ impl<'a> Visit<'a> for Eraser<'_> {
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        // A line break left where multi-line type parameters were would end `return <\n T,\n>(a)
+        // => a` at `return`, or part `async` from its parameters, so the `(` moves to the `<`.
+        if let Some(parameters) = &it.type_parameters {
+            let open = it.params.span.start;
+            if self.text[open as usize] == b'(' && self.has_line_break(parameters.span.start, open) {
+                self.blank(open, open + 1);
+                self.put.push((parameters.span.start, b'('));
+            }
+        }
         // JavaScript allows no line break between an arrow's parameters and `=>`, which a
         // multi-line return type leaves once blanked, so the `)` moves to the type's last byte.
         if let Some(annotation) = &it.return_type {
             let close = it.params.span.end - 1;
-            let between = &self.text[close as usize..annotation.span.end as usize];
-            if self.text[close as usize] == b')' && between.iter().any(|&byte| byte == b'\n' || byte == b'\r')
-            {
+            if self.text[close as usize] == b')' && self.has_line_break(close, annotation.span.end) {
                 self.blank(close, close + 1);
                 self.put.push((annotation.span.end - 1, b')'));
             }
@@ -560,8 +673,7 @@ impl<'a> Visit<'a> for Eraser<'_> {
     }
 
     fn visit_ts_type_assertion(&mut self, it: &TSTypeAssertion<'a>) {
-        self.blank(it.span.start, it.expression.span().start);
-        self.visit_expression(&it.expression);
+        self.reject(it.span, Construct::TypeAssertion);
     }
 
     fn visit_decorator(&mut self, it: &Decorator<'a>) {
@@ -574,6 +686,16 @@ impl<'a> Visit<'a> for Eraser<'_> {
 
     fn visit_jsx_fragment(&mut self, it: &JSXFragment<'a>) {
         self.reject(it.span, Construct::Jsx);
+    }
+}
+
+struct ConstEnum(Option<Span>);
+
+impl<'a> Visit<'a> for ConstEnum {
+    fn visit_ts_enum_declaration(&mut self, it: &TSEnumDeclaration<'a>) {
+        if it.r#const {
+            self.0.get_or_insert(it.span);
+        }
     }
 }
 
@@ -641,7 +763,28 @@ mod tests {
         ),
         ("const y = z satisfies Z;", "const y = z            ;"),
         ("const y = z!.a!;", "const y = z .a ;"),
-        ("const y = <string>z;", "const y =         z;"),
+        // Each `(` moves to its `<`: a line break after `return`, `yield` or `async` would
+        // end the statement there or make `async(a)` a call.
+        (
+            "function f() {\n  return <\n    T,\n  >(a: T) => a;\n}",
+            "function f() {\n  return (\n      \n    a   ) => a;\n}",
+        ),
+        (
+            "function* g() {\n  yield <\n    T,\n  >(a: T) => a;\n}",
+            "function* g() {\n  yield (\n      \n    a   ) => a;\n}",
+        ),
+        (
+            "const f = async <\n  T,\n>(a: T) => a;",
+            "const f = async (\n    \n  a   ) => a;",
+        ),
+        (
+            "interface I {}\nclass A implements /* implements */ I {}\nclass B /* implements */ implements I, J {}",
+            ";             \nclass A                               {}\nclass B /* implements */                 {}",
+        ),
+        (
+            "abstract /* class */ class C {}",
+            "         /* class */ class C {}",
+        ),
         // TypeScript ends the statement after the type, as the `;` does once it is gone.
         ("const y = z as T\n(a);", "const y = z    ;\n(a);"),
         (
@@ -715,6 +858,20 @@ mod tests {
             ("import fs = require('fs');", 1, 1, "`import … =`"),
             ("import A = B.C;", 1, 1, "`import … =`"),
             ("export = 1;", 1, 1, "`export =`"),
+            (
+                "declare const enum E { A = 1 }\nconsole.log(E.A);",
+                1,
+                1,
+                "`enum`",
+            ),
+            ("declare namespace N { const enum E { A } }", 1, 23, "`enum`"),
+            ("const y = <string>z;", 1, 11, "`<T>value`"),
+            (
+                "function f(o: unknown) {\n  return <{\n    a: number\n  }>o;\n}",
+                2,
+                10,
+                "`<T>value`",
+            ),
         ];
         for (source, line, column, construct) in cases {
             let diagnostic = erase("lib/util.ts", source).expect_err(source);
@@ -778,6 +935,45 @@ mod tests {
             "a.ts.js",
         ] {
             assert!(!is_typescript(name), "{name}");
+        }
+    }
+
+    fn nested(construct: &str, depth: usize) -> String {
+        match construct {
+            "[" => format!("const a = {}1{};", "[".repeat(depth), "]".repeat(depth)),
+            "(" => format!("const a = {}1{};", "(".repeat(depth), ")".repeat(depth)),
+            "{" => format!("{}{}", "{".repeat(depth), "}".repeat(depth)),
+            "!" => format!("const a = {}1;", "!".repeat(depth)),
+            "=" => format!("let a; {}1;", "a=".repeat(depth)),
+            "=>" => format!("const f = {}1;", "a=>".repeat(depth)),
+            "?" => format!("const a = {}1;", "a?1:".repeat(depth)),
+            "if" => format!("{};", "if(a)".repeat(depth)),
+            "${" => format!("const a = {}1{};", "`${".repeat(depth), "}`".repeat(depth)),
+            "new" => format!("const a = {}A;", "new ".repeat(depth)),
+            "A<" => format!("let a: {}B{};", "A<".repeat(depth), ">".repeat(depth)),
+            "[]" => format!("let a: {}B{};", "[".repeat(depth), "]".repeat(depth)),
+            "()" => format!("let a: {}B{};", "(".repeat(depth), ")".repeat(depth)),
+            "extends" => format!("let a: {}B;", "A extends B ? C : ".repeat(depth)),
+            _ => unreachable!("{construct}"),
+        }
+    }
+
+    #[test]
+    fn nesting_deeper_than_a_thread_stack_holds_is_refused_or_erased() {
+        for construct in ["[", "(", "{", "${", "A<", "[]", "()"] {
+            let source = nested(construct, 100_000);
+            let diagnostic = erase("main.ts", &source).expect_err(construct);
+            assert_eq!(diagnostic.code, "stack-limit", "{construct}");
+            assert_eq!(diagnostic.line, Some(1), "{construct}");
+            assert!(
+                diagnostic.column.is_some_and(|column| column > 1_000),
+                "{construct}"
+            );
+        }
+        for construct in ["!", "=", "=>", "?", "if", "new", "extends"] {
+            let source = nested(construct, 100_000);
+            let erased = erase("main.ts", &source).unwrap_or_else(|error| panic!("{construct}: {error}"));
+            assert_eq!(erased.len(), source.len(), "{construct}");
         }
     }
 
