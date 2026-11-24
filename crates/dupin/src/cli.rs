@@ -433,7 +433,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 dupin_js_runtime::MAX_ROWS,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
-                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
+                &dupin_extension_bridge::Call::none(),
             )?;
             if json {
                 return Ok(answer_json(&batches));

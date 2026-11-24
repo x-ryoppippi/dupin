@@ -17,7 +17,7 @@ def main []: nothing -> nothing {
 # `--warmup` times unmeasured, then enough times for `--samples` measured keypresses, each
 # `--gap` after the last. The reported percentiles are the median of the runs' own.
 def "main run" [
-    --bin: path = "target/latency/dupin" # `cargo build --profile latency -p dupin --features tooling`, or a debug build
+    --bin: path = "target/latency/dupin" # `cargo build --profile latency -p dupin`, or a debug build
     --out: path = "target/latency/results.json"
     --samples: int = 210 # Measured keypresses per scenario and run
     --warmup: int = 10 # Unmeasured repetitions of each scenario before the measured ones

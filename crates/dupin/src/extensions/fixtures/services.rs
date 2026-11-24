@@ -4,17 +4,21 @@
 //! none of them reaches the network, a program, the clipboard, calendars or Dupin's storage.
 //! A `files` scope is bound to a scratch folder holding the fixture's files, and `storage` to
 //! a scratch store sealed with a throwaway key, seeded with the fixture's records.
+//!
+//! The headless launcher `dupin ext snap` starts answers from the same services, so the panel
+//! it renders is the one `dupin ext test` replays.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
-use dupin_ext_sdk::fixture::{Consent, FilesReply, Replies};
+use dupin_ext_sdk::fixture::{self, Consent, FilesReply, Replies};
 use dupin_extension_bridge::services::{self, Services, Subscription};
 use dupin_extension_bridge::storage::Namespace;
 use dupin_extension_bridge::{
-    Base, Bridge, Broker, Failure, FilesKind, Local, OsAccess, OsPermission, PackageStorage, Scope,
+    Base, Bridge, Broker, Failure, FilesKind, Local, OsAccess, OsPermission, PackageId, PackageStorage,
+    Revision, Scope,
 };
 use dupin_extension_http as http;
 use dupin_host_services::exec;
@@ -40,9 +44,15 @@ pub(super) struct Effects {
 
 pub(super) struct Fixture {
     pub bridge: Bridge,
+    replier: Replier,
+}
+
+/// The services a fixture's replies answer, and the scratch folder its `files` scopes and
+/// storage live in.
+struct Replier {
     state: Arc<State>,
     /// The `files` scopes' contents, removed when the fixture ends.
-    _scratch: tempfile::TempDir,
+    scratch: tempfile::TempDir,
 }
 
 struct State {
@@ -59,11 +69,29 @@ struct State {
 impl Fixture {
     /// `name` is the fixture's path in the package, for diagnostics.
     pub fn open(extension: &Extension, name: &str, replies: &Replies, now: i64) -> Result<Self, Diagnostic> {
-        let invalid = |message: String, field: &str| {
-            Diagnostic::new("invalid-fixture", message)
-                .file(name)
-                .field(field.to_owned())
-        };
+        let replier = Replier::new(replies, now)?;
+        let bridge = Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            replier.services(),
+        );
+        bridge.install(
+            &extension.package,
+            extension.revision.clone(),
+            extension.capabilities.clone(),
+        );
+        replier.grant(&bridge, &extension.package, &extension.revision, name)?;
+        Ok(Self { bridge, replier })
+    }
+
+    /// What the package did since the last call.
+    pub fn take_effects(&self) -> Effects {
+        self.replier.take_effects()
+    }
+}
+
+impl Replier {
+    fn new(replies: &Replies, now: i64) -> Result<Self, Diagnostic> {
         let scratch = tempfile::Builder::new()
             .prefix("dupin-fixture-")
             .tempdir()
@@ -82,17 +110,37 @@ impl Fixture {
             stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
         });
-        let services = Services {
-            http: Box::new(Shared(state.clone())),
-            exec: Box::new(Shared(state.clone())),
-            storage: Box::new(Shared(state.clone())),
-            clipboard: Box::new(Shared(state.clone())),
-            dictionary: Box::new(Shared(state.clone())),
-            calendar: Box::new(Shared(state.clone())),
+        Ok(Self { state, scratch })
+    }
+
+    fn services(&self) -> Services {
+        let shared = || Box::new(Shared(self.state.clone()));
+        Services {
+            http: shared(),
+            exec: shared(),
+            storage: shared(),
+            clipboard: shared(),
+            dictionary: shared(),
+            calendar: shared(),
+        }
+    }
+
+    /// Turns on package `id`, which `bridge` holds at `revision`, as macOS and the fixture's
+    /// consent allow it. `name` is the fixture's path in the package, for diagnostics.
+    fn grant(
+        &self,
+        bridge: &Bridge,
+        id: &PackageId,
+        revision: &Revision,
+        name: &str,
+    ) -> Result<(), Diagnostic> {
+        let replies = &self.state.replies;
+        let scratch = &self.scratch;
+        let invalid = |message: String, field: &str| {
+            Diagnostic::new("invalid-fixture", message)
+                .file(name)
+                .field(field.to_owned())
         };
-        let bridge = Bridge::new(Broker::new(Base::default(), Local::default()), None, services);
-        let id = &extension.package;
-        bridge.install(id, extension.revision.clone(), extension.capabilities.clone());
         for permission in OsPermission::ALL {
             bridge.set_os_access(permission, OsAccess::Allowed);
         }
@@ -126,7 +174,6 @@ impl Fixture {
                 &format!("replies.files.{scope}"),
             ));
         }
-        let revision = extension.revision.clone();
         for entry in scopes {
             let key = entry.scope.key();
             let consent = replies
@@ -157,21 +204,16 @@ impl Fixture {
                 _ => None,
             };
             bridge
-                .allow(id, &revision, &entry.scope, binding)
+                .allow(id, revision, &entry.scope, binding)
                 .map_err(refused)?;
             if consent == Consent::Deny {
                 bridge.revoke(id, &key).map_err(refused)?;
             }
         }
-        Ok(Self {
-            bridge,
-            state,
-            _scratch: scratch,
-        })
+        Ok(())
     }
 
-    /// What the package did since the last call.
-    pub fn take_effects(&self) -> Effects {
+    fn take_effects(&self) -> Effects {
         let mut effects = std::mem::take(&mut *lock(&self.state.effects));
         let Some(namespace) = lock(&self.state.opened).clone() else {
             return effects;
@@ -186,6 +228,82 @@ impl Fixture {
             *stored = now;
         }
         effects
+    }
+}
+
+/// Hands the headless launcher `dupin ext snap` starts the fixture it renders, as JSON:
+/// `{ "fixture": <path>, "package": <package ID> }`.
+pub(in crate::extensions) const HEADLESS_FIXTURE: &str = "DUPIN_HEADLESS_EXTENSION_FIXTURE";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(in crate::extensions) struct HeadlessFixture {
+    pub fixture: PathBuf,
+    pub package: String,
+}
+
+/// The fixture a headless launcher renders: its replies answer every host request, and its
+/// consent is the replayed package's once the launcher installs it.
+pub(in crate::extensions) struct Headless {
+    package: PackageId,
+    replier: Replier,
+    /// The revision consent was last given for.
+    granted: Mutex<Option<Revision>>,
+}
+
+/// The fixture `dupin ext snap` handed this headless launcher, if it handed one. A launcher
+/// with a window never reads it.
+pub(in crate::extensions) fn headless() -> Option<&'static Headless> {
+    static HEADLESS: OnceLock<Option<Headless>> = OnceLock::new();
+    if !rune::tooling::is_headless() {
+        return None;
+    }
+    HEADLESS
+        .get_or_init(|| {
+            let handed: HeadlessFixture =
+                serde_json::from_str(&std::env::var(HEADLESS_FIXTURE).ok()?).ok()?;
+            Headless::open(handed)
+                .inspect_err(|diagnostic| crate::log::warn(&format!("snap fixture: {diagnostic}")))
+                .ok()
+        })
+        .as_ref()
+}
+
+impl Headless {
+    pub fn open(handed: HeadlessFixture) -> Result<Self, Diagnostic> {
+        let name = handed.fixture.display().to_string();
+        let parsed = fixture::read(&name, &handed.fixture)?;
+        let now = fixture::parse_time(&parsed.environment.now).expect("validated by `fixture::parse`");
+        let package = PackageId::new(handed.package)
+            .map_err(|error| Diagnostic::new("invalid-package", error.to_string()))?;
+        Ok(Self {
+            package,
+            replier: Replier::new(&parsed.replies, now)?,
+            granted: Mutex::default(),
+        })
+    }
+
+    pub fn services(&self) -> Services {
+        self.replier.services()
+    }
+
+    /// Gives `extension` the fixture's consent the first time `bridge` holds the replayed
+    /// package at its revision.
+    pub fn grant(&self, bridge: &Bridge, extension: &Extension) {
+        if extension.package != self.package {
+            return;
+        }
+        let mut granted = lock(&self.granted);
+        if granted.as_ref() == Some(&extension.revision) {
+            return;
+        }
+        let name = self.package.to_string();
+        match self
+            .replier
+            .grant(bridge, &extension.package, &extension.revision, &name)
+        {
+            Ok(()) => *granted = Some(extension.revision.clone()),
+            Err(diagnostic) => crate::log::warn(&format!("fixture for {name}: {diagnostic}")),
+        }
     }
 }
 

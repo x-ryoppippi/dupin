@@ -611,14 +611,24 @@ impl Storage {
     }
 }
 
-fn lock_namespace(dir: &Path) -> Result<File, Error> {
+struct NamespaceLock(File);
+
+impl Drop for NamespaceLock {
+    fn drop(&mut self) {
+        // A child spawned on any thread while the namespace was open shares this descriptor
+        // until it execs, so closing ours alone could leave the namespace locked a while longer.
+        let _ = self.0.unlock();
+    }
+}
+
+fn lock_namespace(dir: &Path) -> Result<NamespaceLock, Error> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let file = options.open(dir.join(LOCK))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(NamespaceLock(file)),
         Err(fs::TryLockError::WouldBlock) => Err(Error::Busy),
         Err(fs::TryLockError::Error(error)) => Err(error.into()),
     }
@@ -944,7 +954,7 @@ pub struct Store {
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
     report: Mutex<OpenReport>,
-    _lock: File,
+    _lock: NamespaceLock,
     #[cfg(test)]
     crash_before_rename: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -1552,5 +1562,22 @@ mod tests {
         assert_eq!(store.device_id(), first.device());
         assert!(dir.path().join("storage.state").exists());
         assert!(!dir.path().join("storage").join("storage.state").exists());
+    }
+
+    /// A process spawned on another thread while a namespace is open holds a duplicate of its
+    /// lock descriptor until the child execs; a duplicate here stands in for that child.
+    #[test]
+    fn a_closed_namespace_reopens_while_a_spawned_child_still_holds_its_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().join("storage"), MemoryKey::random());
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        let child = store._lock.0.try_clone().unwrap();
+        drop(store);
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        let other_child = store._lock.0.try_clone().unwrap();
+        drop(store);
+        storage.discard("clipboard").unwrap();
+        assert!(!dir.path().join("storage/clipboard").exists());
+        drop((child, other_child));
     }
 }

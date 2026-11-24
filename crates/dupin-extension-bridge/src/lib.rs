@@ -120,6 +120,16 @@ pub struct Call {
     pub generation: Option<Generation>,
 }
 
+impl Call {
+    /// A call that reaches no host service, as `dupin ext run` and tests make.
+    pub fn none() -> Self {
+        Self {
+            services: Arc::new(dupin_extension_host::NoServices),
+            generation: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Bridge {
     inner: Arc<Inner>,
@@ -340,10 +350,7 @@ impl Bridge {
                 generation: Some(session.generation),
                 services: Arc::new(session),
             },
-            None => Call {
-                services: Arc::new(dupin_extension_host::NoServices),
-                generation: None,
-            },
+            None => Call::none(),
         }
     }
 

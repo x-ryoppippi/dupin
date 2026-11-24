@@ -21,7 +21,7 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 9] = [
+const EXPECTATIONS: [&str; 10] = [
     "rows",
     "selected",
     "effect",
@@ -31,6 +31,7 @@ const EXPECTATIONS: [&str; 9] = [
     "sections",
     "detail",
     "storage",
+    "invalidated",
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
