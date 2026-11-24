@@ -203,7 +203,7 @@ requested = ["http:https://api.example.com"]
 granted = []
 ```
 
-`requested` flattens `dupin.capabilities`: `"http": ["https://api.example.com"]` requests `http:https://api.example.com`, and `"clipboard": true` requests `clipboard`. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't in Dupin yet.
+`requested` lists the scopes `dupin.capabilities` declares (see [Asking for more](#asking-for-more)), named as the [capability broker](../capability-broker.md) names grants: an `http` entry for `https://api.example.com` requests `http:https://api.example.com`, a `files` entry named `notes` requests `files:notes`, and `"clipboard": ["write"]` requests `clipboard:write`. A declaration the broker rejects stops the install. An update keeps the grants of scopes the package still requests and drops the rest. Scopes it adds go to `pending_consent` and stay ungranted until you agree; asking is the capability broker's job, which isn't connected yet.
 
 When Dupin loads the extensions folder, it checks each locked package against its content hash, rehashing only after the package's files change. A package whose files differ, or that gained a symbolic link, is skipped and Settings → Search shows it as **disabled**; an unreadable lock keeps every extension off. `dupin ext sync` puts the installed copy back. Folders the lock doesn't list, such as ones you made yourself, aren't checked.
 

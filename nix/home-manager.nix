@@ -43,11 +43,12 @@
               default = [ ];
               example = [
                 "http:https://api.example.com"
-                "clipboard"
+                "clipboard:write"
               ];
               description = ''
-                Capability scopes granted ahead of time, as `capability` or `capability:scope`
-                from the package's `dupin.capabilities`. They are the read-only base; grants
+                Capability scopes granted ahead of time, named as the capability broker names
+                the scopes the package's `dupin.capabilities` declares, such as
+                `http:https://api.example.com`, `files:notes` or `clipboard:write`. They are the read-only base; grants
                 chosen in Dupin overlay them. macOS still asks for its own permissions on first use.
               '';
             };

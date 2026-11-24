@@ -1,6 +1,6 @@
-//! A minimal reader for the `dupin` key of package.json, as docs/design/extension-platform.md
-//! and the in-progress package.json loader describe it. It stays behind `read` so the launcher's
-//! own loader can replace it once that lands.
+//! A minimal reader for the `dupin` key of package.json: what an installer needs before the
+//! launcher's own loader sees the package. `capabilities` is checked by the capability broker,
+//! so the scopes recorded in extensions.lock are the ones it grants.
 
 use std::io::Read;
 use std::path::Path;
@@ -24,7 +24,7 @@ pub(crate) struct Package {
     pub(crate) keyword: String,
     /// Relative to the package folder.
     pub(crate) main: String,
-    /// Each requested scope as `capability` or `capability:scope`, sorted.
+    /// Each declared scope as the capability broker names it, such as `files:notes`, sorted.
     pub(crate) capabilities: Vec<String>,
 }
 
@@ -105,8 +105,7 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
     let main = main.strip_prefix("./").unwrap_or(&main).to_owned();
     let capabilities = match dupin.get("capabilities") {
         None => Vec::new(),
-        Some(Value::Object(capabilities)) => scopes(capabilities)?,
-        Some(_) => return Err(invalid("dupin.capabilities", "must be an object")),
+        Some(capabilities) => scopes(capabilities)?,
     };
     Ok(Package {
         name,
@@ -118,47 +117,24 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
     })
 }
 
-/// Flattens `capabilities` into scope strings: `"http": ["https://api.example.com"]` requests
-/// `http:https://api.example.com`, and `"clipboard": true` requests `clipboard`.
-fn scopes(capabilities: &Map<String, Value>) -> Result<Vec<String>, Error> {
-    let mut scopes = Vec::new();
-    for (kind, value) in capabilities {
-        let field = format!("dupin.capabilities.{kind}");
-        let invalid = |message: &str| {
-            Error::new("invalid-manifest", message.to_owned())
-                .file(PACKAGE_JSON)
-                .field(field.clone())
-        };
-        if kind.is_empty() || !kind.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-') {
-            return Err(invalid("must be a capability name such as `http`"));
+/// The scopes `capabilities` declares, named as the capability broker keys its grants, such as
+/// `http:https://api.example.com`, `files:notes` or `clipboard:write`.
+fn scopes(capabilities: &Value) -> Result<Vec<String>, Error> {
+    let capabilities = dupin_broker::Capabilities::parse(capabilities).map_err(|diagnostics| {
+        let diagnostic = &diagnostics[0];
+        let error = Error::new("invalid-manifest", diagnostic.message.clone())
+            .file(PACKAGE_JSON)
+            .field(format!("dupin.{}", diagnostic.field));
+        match diagnostic.hint {
+            Some(hint) => error.hint(hint),
+            None => error,
         }
-        match value {
-            Value::Bool(true) => scopes.push(kind.clone()),
-            Value::String(scope) => scopes.push(format!("{kind}:{scope}")),
-            Value::Array(items) => {
-                for item in items {
-                    let Value::String(scope) = item else {
-                        return Err(invalid("must list strings"));
-                    };
-                    scopes.push(format!("{kind}:{scope}"));
-                }
-            }
-            _ => return Err(invalid("must be `true`, a string or a list of strings")),
-        }
-    }
-    if let Some(scope) = scopes
-        .iter()
-        .find(|scope| scope.chars().any(char::is_control) || scope.len() > 512)
-    {
-        return Err(Error::new(
-            "invalid-manifest",
-            format!("`{}` is not a scope Dupin can show", scope.escape_debug()),
-        )
-        .file(PACKAGE_JSON)
-        .field("dupin.capabilities"));
-    }
+    })?;
+    let mut scopes: Vec<_> = capabilities
+        .scopes()
+        .map(|scope| scope.key().to_string())
+        .collect();
     scopes.sort();
-    scopes.dedup();
     Ok(scopes)
 }
 
@@ -209,14 +185,24 @@ mod tests {
                 "title": "Word Count",
                 "keyword": "wc",
                 "main": "./dist/main.js",
-                "capabilities": {"http": ["https://b.example", "https://a.example"], "clipboard": true}
+                "capabilities": {
+                    "http": [
+                        {"origin": "https://b.example", "methods": ["GET"]},
+                        {"origin": "https://a.example", "methods": ["GET"]}
+                    ],
+                    "clipboard": ["write"]
+                }
             }
         }))
         .unwrap();
         assert_eq!(package.main, "dist/main.js");
         assert_eq!(
             package.capabilities,
-            ["clipboard", "http:https://a.example", "http:https://b.example"]
+            [
+                "clipboard:write",
+                "http:https://a.example",
+                "http:https://b.example"
+            ]
         );
     }
 
@@ -243,6 +229,12 @@ mod tests {
         assert_eq!(
             parsed(bad_scope).unwrap_err().field.as_deref(),
             Some("dupin.capabilities.http")
+        );
+        let mut unknown = base();
+        unknown["dupin"]["capabilities"] = json!({"camera": true});
+        assert_eq!(
+            parsed(unknown).unwrap_err().field.as_deref(),
+            Some("dupin.capabilities.camera")
         );
     }
 }
