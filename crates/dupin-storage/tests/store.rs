@@ -73,6 +73,10 @@ impl Fixture {
     fn namespace(&self) -> PathBuf {
         self.root().join("clipboard")
     }
+
+    fn state_path(&self) -> PathBuf {
+        self.dir.path().join("storage.state")
+    }
 }
 
 fn text(value: &str) -> NewRecord {
@@ -99,6 +103,24 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Gives a sealed file a vault key tag (kind 1, a vault ID and epoch 1); returns its bytes.
+fn retag_as_vault(path: &Path) -> Vec<u8> {
+    let mut bytes = fs::read(path).unwrap();
+    bytes[KEY_TAG] = 1;
+    bytes[KEY_TAG + 1..KEY_TAG + 17].fill(0x42);
+    bytes[KEY_TAG + 17..KEY_TAG + 21].copy_from_slice(&1u32.to_le_bytes());
+    fs::write(path, &bytes).unwrap();
+    bytes
+}
+
+/// Marks a sealed file as written in the next format; returns its bytes.
+fn bump_format(path: &Path) -> Vec<u8> {
+    let mut bytes = fs::read(path).unwrap();
+    bytes[4] += 1;
+    fs::write(path, &bytes).unwrap();
+    bytes
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {
@@ -1003,12 +1025,7 @@ fn files_under_a_key_this_device_lacks_are_skipped_not_deleted() {
         .namespace()
         .join("records")
         .join(format!("{}.rec", foreign.id));
-    let mut bytes = fs::read(&record).unwrap();
-    // A vault key tag: kind 1, a vault ID and epoch 1.
-    bytes[KEY_TAG] = 1;
-    bytes[KEY_TAG + 1..KEY_TAG + 17].fill(0x42);
-    bytes[KEY_TAG + 17..KEY_TAG + 21].copy_from_slice(&1u32.to_le_bytes());
-    fs::write(&record, &bytes).unwrap();
+    let bytes = retag_as_vault(&record);
     let blobs = files_in(&fixture.namespace().join("blobs"));
 
     let store = fixture.open(Limits::default());
@@ -1026,6 +1043,72 @@ fn files_under_a_key_this_device_lacks_are_skipped_not_deleted() {
 }
 
 #[test]
+fn blobs_a_skipped_record_may_use_outlive_this_keys_records_and_count_against_quota() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let shared = b"shared blob".to_vec();
+    let only = b"only the skipped record's".to_vec();
+    let foreign = store
+        .put(NewRecord {
+            data: json!({ "text": "foreign" }),
+            blobs: vec![shared.clone(), only.clone()],
+        })
+        .unwrap();
+    let mine = store
+        .put(NewRecord {
+            data: json!({ "text": "mine" }),
+            blobs: vec![shared.clone()],
+        })
+        .unwrap();
+    drop(store);
+    retag_as_vault(
+        &fixture
+            .namespace()
+            .join("records")
+            .join(format!("{}.rec", foreign.id)),
+    );
+    let blob_dir = fixture.namespace().join("blobs");
+    let blobs = files_in(&blob_dir);
+    assert_eq!(blobs.len(), 2);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    let kept = (shared.len() + only.len()) as u64;
+    assert_eq!(store.usage().entries, 1);
+    assert!(store.usage().bytes > kept);
+    assert!(matches!(
+        store.read_blob(&foreign.blobs[1].handle),
+        Err(Error::NotFound)
+    ));
+
+    store.delete(&mine.id).unwrap();
+    let again = store
+        .put(NewRecord {
+            data: json!({ "text": "again" }),
+            blobs: vec![only.clone(), b"written this run".to_vec()],
+        })
+        .unwrap();
+    assert_eq!(again.blobs[0].handle, foreign.blobs[1].handle);
+    assert_eq!(&**store.read_blob(&again.blobs[0].handle).unwrap(), &only[..]);
+    store.delete(&again.id).unwrap();
+    assert_eq!(files_in(&blob_dir), blobs, "only the blob written this run goes");
+    assert_eq!(store.usage().bytes, kept);
+
+    let tight = Limits {
+        max_total_bytes: kept + 8,
+        max_item_bytes: kept + 8,
+        ..Limits::default()
+    };
+    store.set_limits(tight).unwrap();
+    store.put(text("x")).unwrap();
+    assert!(
+        texts(&store).is_empty(),
+        "kept blobs take their share of the quota"
+    );
+    assert_eq!(files_in(&blob_dir), blobs);
+}
+
+#[test]
 fn files_in_a_newer_format_are_skipped_not_deleted() {
     let fixture = Fixture::new();
     let store = fixture.open(Limits::default());
@@ -1035,14 +1118,128 @@ fn files_in_a_newer_format_are_skipped_not_deleted() {
         .namespace()
         .join("records")
         .join(format!("{}.rec", newer.id));
-    let mut bytes = fs::read(&record).unwrap();
-    bytes[4] += 1;
-    fs::write(&record, &bytes).unwrap();
+    let bytes = bump_format(&record);
 
     let store = fixture.open(Limits::default());
     assert_eq!(store.open_report().skipped_records, 1);
     assert!(texts(&store).is_empty());
     assert_eq!(fs::read(&record).unwrap(), bytes);
+}
+
+#[test]
+fn a_key_check_in_a_newer_format_is_kept_and_the_records_judge_the_key() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let older = store.put(text("older")).unwrap();
+    let newer = store.put(text("newer")).unwrap();
+    drop(store);
+    let records = fixture.namespace().join("records");
+    let check = fixture.namespace().join("key.check");
+    let check_bytes = bump_format(&check);
+    bump_format(&records.join(format!("{}.rec", newer.id)));
+    let record_files = files_in(&records);
+
+    assert!(matches!(
+        fixture.other_key().open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(files_in(&records), record_files);
+
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    assert_eq!(store.open_report().corrupt_records, 0);
+    assert_eq!(texts(&store), ["older"]);
+    store.delete(&older.id).unwrap();
+    drop(store);
+    assert_eq!(fs::read(&check).unwrap(), check_bytes);
+
+    // Only files this build can't judge are left: the namespace opens, and nothing changes.
+    let store = fixture.open(Limits::default());
+    assert_eq!(store.open_report().skipped_records, 1);
+    assert!(texts(&store).is_empty());
+    drop(store);
+    assert_eq!(fs::read(&check).unwrap(), check_bytes);
+    assert_eq!(files_in(&records).len(), 1);
+}
+
+#[test]
+fn a_state_in_a_newer_format_refuses_every_open_and_is_kept() {
+    let fixture = Fixture::new();
+    let device = fixture.open(Limits::default()).device_id();
+    let state = fixture.state_path();
+    let bytes = bump_format(&state);
+
+    let storage = fixture.storage();
+    assert!(matches!(
+        storage.open("clipboard", Limits::default()),
+        Err(Error::NewerFormat)
+    ));
+    assert!(matches!(
+        storage.open("fresh", Limits::default()),
+        Err(Error::NewerFormat)
+    ));
+    assert_eq!(fs::read(&state).unwrap(), bytes);
+    assert!(!fixture.root().join("fresh/key.check").exists());
+
+    fs::write(&state, {
+        let mut restored = bytes;
+        restored[4] -= 1;
+        restored
+    })
+    .unwrap();
+    assert_eq!(fixture.open(Limits::default()).device_id(), device);
+}
+
+#[test]
+fn a_new_namespace_under_another_key_leaves_the_device_state_alone() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let device = store.device_id();
+    let before = store.put(text("before")).unwrap();
+    drop(store);
+    let state = fixture.state_path();
+    let bytes = fs::read(&state).unwrap();
+
+    let other = fixture.other_key();
+    assert!(matches!(
+        other.open("clipboard", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert!(matches!(
+        other.open("ext.new", Limits::default()),
+        Err(Error::WrongKey)
+    ));
+    assert_eq!(fs::read(&state).unwrap(), bytes);
+    assert!(!fixture.root().join("ext.new/key.check").exists());
+
+    let storage = fixture.storage();
+    let fresh = storage.open("ext.new", Limits::default()).unwrap();
+    assert_eq!(fresh.device_id(), device);
+    let after = fresh.put(text("after")).unwrap();
+    assert_eq!(after.device(), device);
+    drop(fresh);
+    let store = storage.open("clipboard", Limits::default()).unwrap();
+    assert_eq!(store.get(&before.id).unwrap(), Some(before));
+}
+
+#[test]
+fn a_damaged_state_is_replaced_when_a_namespace_proves_the_key() {
+    let fixture = Fixture::new();
+    let store = fixture.open(Limits::default());
+    let device = store.device_id();
+    store.put(text("kept")).unwrap();
+    drop(store);
+    let state = fixture.state_path();
+    let mut bytes = fs::read(&state).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 1;
+    fs::write(&state, &bytes).unwrap();
+
+    let store = fixture.storage().open("ext.new", Limits::default()).unwrap();
+    assert_ne!(store.device_id(), device);
+    assert_ne!(fs::read(&state).unwrap(), bytes);
+    drop(store);
+    assert_eq!(texts(&fixture.open(Limits::default())), ["kept"]);
 }
 
 #[test]

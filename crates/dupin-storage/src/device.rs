@@ -125,14 +125,21 @@ pub(crate) struct Device {
 }
 
 impl Device {
-    /// Loads `storage.state`, or creates it. Call only once a namespace's key check has
-    /// proved the data key, so a wrong key never replaces the state.
-    pub fn load(path: PathBuf, keys: StateKeys, hardware: Option<String>) -> Result<Self, Error> {
+    /// Loads `storage.state`, or creates it. A state that is well formed but fails to open
+    /// may be sealed under another data key, so it is replaced only when `replaceable` says
+    /// nothing sealed under another key is left to come back to; otherwise the key is wrong.
+    /// A state in a newer format is never this build's to replace.
+    pub fn load(
+        path: PathBuf,
+        keys: StateKeys,
+        hardware: Option<String>,
+        replaceable: impl FnOnce() -> Result<bool, Error>,
+    ) -> Result<Self, Error> {
         if let Some(parent) = path.parent() {
             create_private_dir(parent)?;
         }
         let state = match read(&path, &keys)? {
-            Some(Ok(mut state)) => {
+            Read::Opened(mut state) => {
                 let moved =
                     matches!((&state.hardware, &hardware), (Some(stored), Some(now)) if stored != now);
                 if moved {
@@ -144,17 +151,20 @@ impl Device {
                 }
                 state
             }
-            Some(Err(Damaged)) => {
+            Read::Newer => return Err(Error::NewerFormat),
+            Read::Unopened if !replaceable()? => return Err(Error::WrongKey),
+            Read::Damaged | Read::Unopened => {
                 let state = StateFile::fresh(hardware, None, 0)?;
                 write(&path, &keys, &state)?;
                 state
             }
-            None => {
+            Read::Missing => {
                 let state = StateFile::fresh(hardware, None, 0)?;
                 match create_new_private(&path, &encode(&keys, &state)?) {
                     Ok(()) => state,
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => match read(&path, &keys)? {
-                        Some(Ok(theirs)) => theirs,
+                        Read::Opened(theirs) => theirs,
+                        Read::Newer => return Err(Error::NewerFormat),
                         _ => return Err(Error::Corrupt("storage.state".into())),
                     },
                     Err(error) => return Err(error.into()),
@@ -211,27 +221,50 @@ impl Device {
     }
 }
 
-struct Damaged;
+enum Read {
+    Missing,
+    Opened(StateFile),
+    /// Written by a newer Dupin, in a format this build can't read.
+    Newer,
+    /// Well formed, but it fails to authenticate: damage, or another data key.
+    Unopened,
+    /// Not a state file of this format, or one that opened but couldn't be parsed.
+    Damaged,
+}
 
-fn read(path: &Path, keys: &StateKeys) -> Result<Option<Result<StateFile, Damaged>>, Error> {
+fn read(path: &Path, keys: &StateKeys) -> Result<Read, Error> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Read::Missing),
         Err(error) => return Err(error.into()),
     };
-    let opened = (|| {
-        let rest = bytes
-            .strip_prefix(STATE_MAGIC.as_slice())?
-            .strip_prefix(&[VERSION])?;
+    let Some((&version, rest)) = bytes
+        .strip_prefix(STATE_MAGIC.as_slice())
+        .and_then(<[u8]>::split_first)
+    else {
+        return Ok(Read::Damaged);
+    };
+    if version > VERSION {
+        return Ok(Read::Newer);
+    }
+    let sealed = (|| {
+        if version != VERSION {
+            return None;
+        }
         let (tag, rest) = rest.split_at_checked(KEY_TAG_LEN)?;
         if KeySource::from_tag(tag.try_into().ok()?)? != KeySource::Device {
             return None;
         }
         let (nonce, ciphertext) = rest.split_at_checked(NONCE_LEN)?;
-        let plain = keys.open(nonce.try_into().ok()?, &keys.aad(), ciphertext.to_vec())?;
-        serde_json::from_slice::<StateFile>(&plain).ok()
+        Some((<[u8; NONCE_LEN]>::try_from(nonce).ok()?, ciphertext))
     })();
-    Ok(Some(opened.ok_or(Damaged)))
+    let Some((nonce, ciphertext)) = sealed else {
+        return Ok(Read::Damaged);
+    };
+    let Some(plain) = keys.open(&nonce, &keys.aad(), ciphertext.to_vec()) else {
+        return Ok(Read::Unopened);
+    };
+    Ok(serde_json::from_slice::<StateFile>(&plain).map_or(Read::Damaged, Read::Opened))
 }
 
 fn encode(keys: &StateKeys, state: &StateFile) -> Result<Vec<u8>, Error> {
@@ -261,10 +294,14 @@ mod tests {
         StateKeys::derive(&DataKey::from_slice(&[9; 32]).unwrap())
     }
 
+    fn refuse() -> Result<bool, Error> {
+        Ok(false)
+    }
+
     #[test]
     fn hlc_carries_the_counter_into_milliseconds_and_never_goes_back() {
         let dir = tempfile::tempdir().unwrap();
-        let device = Device::load(dir.path().join("storage.state"), keys(), None).unwrap();
+        let device = Device::load(dir.path().join("storage.state"), keys(), None, refuse).unwrap();
         let first = device.stamp(1_000).unwrap();
         assert_eq!(first.hlc, 1_000 << COUNTER_BITS);
         let second = device.stamp(1_000).unwrap();
@@ -280,10 +317,10 @@ mod tests {
     fn the_clock_and_id_survive_a_restart() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("storage.state");
-        let device = Device::load(path.clone(), keys(), None).unwrap();
+        let device = Device::load(path.clone(), keys(), None, refuse).unwrap();
         let stamp = device.stamp(1_000_000).unwrap();
         drop(device);
-        let device = Device::load(path, keys(), None).unwrap();
+        let device = Device::load(path, keys(), None, refuse).unwrap();
         assert_eq!(device.id(), stamp.device);
         assert!(device.stamp(1).unwrap() > stamp);
     }
@@ -292,9 +329,9 @@ mod tests {
     fn other_hardware_mints_a_new_id_and_remembers_the_old_one() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("storage.state");
-        let unrecorded = Device::load(path.clone(), keys(), None).unwrap().id();
+        let unrecorded = Device::load(path.clone(), keys(), None, refuse).unwrap().id();
         let here = Some(hardware_hash(b"machine-a"));
-        let first = Device::load(path.clone(), keys(), here.clone()).unwrap();
+        let first = Device::load(path.clone(), keys(), here.clone(), refuse).unwrap();
         assert_eq!(
             first.id(),
             unrecorded,
@@ -302,13 +339,16 @@ mod tests {
         );
         let stamp = first.stamp(500).unwrap();
         drop(first);
-        assert_eq!(Device::load(path.clone(), keys(), here).unwrap().id(), unrecorded);
+        assert_eq!(
+            Device::load(path.clone(), keys(), here, refuse).unwrap().id(),
+            unrecorded
+        );
 
-        let moved = Device::load(path.clone(), keys(), Some(hardware_hash(b"machine-b"))).unwrap();
+        let moved = Device::load(path.clone(), keys(), Some(hardware_hash(b"machine-b")), refuse).unwrap();
         assert_ne!(moved.id(), unrecorded);
         assert_eq!(moved.previous_id(), Some(unrecorded));
         assert!(moved.stamp(1).unwrap().hlc > stamp.hlc);
-        assert_eq!(Device::load(path, keys(), None).unwrap().id(), moved.id());
+        assert_eq!(Device::load(path, keys(), None, refuse).unwrap().id(), moved.id());
     }
 
     #[test]
@@ -316,26 +356,61 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("storage.state");
         std::fs::write(&path, b"garbage").unwrap();
-        let device = Device::load(path.clone(), keys(), None).unwrap();
+        let device = Device::load(path.clone(), keys(), None, refuse).unwrap();
         let id = device.id();
         drop(device);
 
-        let mut state = match read(&path, &keys()).unwrap() {
-            Some(Ok(state)) => state,
-            _ => panic!("the state was rewritten"),
+        let Read::Opened(mut state) = read(&path, &keys()).unwrap() else {
+            panic!("the state was rewritten");
         };
         state
             .newer
             .insert("from_the_future".into(), serde_json::json!(42));
         write(&path, &keys(), &state).unwrap();
-        Device::load(path.clone(), keys(), None)
+        Device::load(path.clone(), keys(), None, refuse)
             .unwrap()
             .stamp(1)
             .unwrap();
-        let Some(Ok(state)) = read(&path, &keys()).unwrap() else {
+        let Read::Opened(state) = read(&path, &keys()).unwrap() else {
             panic!("the state opens");
         };
         assert_eq!(state.device_id, id);
         assert_eq!(state.newer["from_the_future"], 42);
+    }
+
+    #[test]
+    fn a_state_that_fails_to_open_is_replaced_only_when_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("storage.state");
+        let id = Device::load(path.clone(), keys(), None, refuse).unwrap().id();
+        let bytes = std::fs::read(&path).unwrap();
+        let other = || StateKeys::derive(&DataKey::from_slice(&[8; 32]).unwrap());
+
+        assert!(matches!(
+            Device::load(path.clone(), other(), None, refuse),
+            Err(Error::WrongKey)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(Device::load(path.clone(), keys(), None, refuse).unwrap().id(), id);
+
+        let replaced = Device::load(path.clone(), other(), None, || Ok(true)).unwrap();
+        assert_ne!(replaced.id(), id);
+    }
+
+    #[test]
+    fn a_state_in_a_newer_format_is_refused_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("storage.state");
+        Device::load(path.clone(), keys(), None, refuse).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        bytes[STATE_MAGIC.len()] = VERSION + 1;
+        std::fs::write(&path, &bytes).unwrap();
+
+        let replace = || -> Result<bool, Error> { panic!("a newer state is never judged") };
+        assert!(matches!(
+            Device::load(path.clone(), keys(), None, replace),
+            Err(Error::NewerFormat)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
@@ -399,9 +399,35 @@ impl Storage {
             self.state_path(),
             StateKeys::derive(data_key),
             self.hardware.clone(),
+            || self.state_replaceable(data_key),
         )?);
         *device = Some(loaded.clone());
         Ok(loaded)
+    }
+
+    /// A namespace's key check also passes when the namespace is new, so it can't prove the
+    /// key that `storage.state` failed to open under. The state is replaced only when no
+    /// namespace holds data that key can't open, and some namespace proves the key or none
+    /// holds anything this build can't judge.
+    fn state_replaceable(&self, data_key: &DataKey) -> Result<bool, Error> {
+        let (mut proved, mut unjudged) = (false, false);
+        for entry in fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            let Some(namespace) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if validate_namespace(&namespace).is_err() || !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let keys = NamespaceKeys::derive(data_key, KeySource::Device, &namespace);
+            match key_evidence(&keys, &entry.path())? {
+                KeyEvidence::Contradicts => return Ok(false),
+                KeyEvidence::Proves => proved = true,
+                KeyEvidence::Unjudged => unjudged = true,
+                KeyEvidence::Empty => {}
+            }
+        }
+        Ok(proved || !unjudged)
     }
 
     /// Opens a namespace, repairs what an interrupted write left behind and applies `limits`.
@@ -444,8 +470,12 @@ impl Storage {
             }
         }
 
-        verify_key(&keys, &dir.join(CHECK), !found.is_empty(), !unreadable.is_empty())?;
+        let check = dir.join(CHECK);
+        let write_check = verify_key(&keys, &check, !found.is_empty(), !unreadable.is_empty())?;
         let device = self.device(&data_key)?;
+        if write_check {
+            write_key_check(&keys, &check)?;
+        }
         if let Some(newest) = found.iter().map(|(_, meta)| meta.stamp.hlc).max() {
             device.observe(newest)?;
         }
@@ -467,6 +497,7 @@ impl Storage {
         }
 
         let mut blobs = HashMap::new();
+        let mut skipped_blobs = HashSet::new();
         let mut stray_blobs = Vec::new();
         for entry in fs::read_dir(&paths.blobs)? {
             let entry = entry?;
@@ -487,16 +518,25 @@ impl Storage {
                     }
                     None => stray_blobs.push(path),
                 },
-                Prefix::Skip => {}
+                Prefix::Skip => {
+                    skipped_blobs.insert(handle);
+                }
                 Prefix::Damaged => stray_blobs.push(path),
             }
         }
 
+        // A skipped record's blobs can't be told apart from this key's, so while any record is
+        // skipped no blob found now is ever removed, even once no record here uses it.
+        let kept = match report.skipped_records {
+            0 => HashSet::new(),
+            _ => blobs.keys().copied().chain(skipped_blobs).collect(),
+        };
         let mut state = State {
             limits,
             records: HashMap::new(),
             order: BTreeSet::new(),
             blobs,
+            kept,
             total: 0,
         };
         for (id, meta) in live {
@@ -517,13 +557,13 @@ impl Storage {
             state.insert(id, meta);
         }
 
-        // A skipped record's blobs can't be told apart from orphans, so none is removed.
-        let keep_unreferenced = report.skipped_records > 0;
-        state.blobs.retain(|handle, entry| {
-            if entry.refs == 0 && !keep_unreferenced {
+        let State { blobs, kept, .. } = &mut state;
+        blobs.retain(|handle, entry| {
+            let unused = entry.refs == 0 && !kept.contains(handle);
+            if unused {
                 stray_blobs.push(paths.blobs.join(handle.file_name()));
             }
-            entry.refs > 0
+            !unused
         });
         report.orphan_blobs = stray_blobs.len();
         for path in stray_blobs {
@@ -592,42 +632,61 @@ fn clear_dir(dir: &Path) -> io::Result<usize> {
     Ok(removed)
 }
 
-/// Confirms the namespace was sealed with this key before anything is deleted as corrupt.
-/// A damaged check file is rewritten only when a record proves the key; a missing one is also
-/// written for a fresh namespace, where no record exists to contradict the key. A check
-/// tagged with another key is never this key's to judge or replace.
+enum KeyCheck {
+    Missing,
+    Opens,
+    /// Damaged, or sealed under another key: neither can be told from the other.
+    Fails,
+    /// In a newer format, or tagged with another key source: not this build's to judge.
+    Foreign,
+}
+
+fn read_key_check(keys: &NamespaceKeys, path: &Path) -> Result<KeyCheck, Error> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(KeyCheck::Missing),
+        Err(error) => return Err(error.into()),
+    };
+    match bytes
+        .get(..PREFIX_LEN)
+        .map(|prefix| classify(CHECK_MAGIC, prefix, keys.source()))
+    {
+        Some(Prefix::Ours) => {}
+        Some(Prefix::Skip) => return Ok(KeyCheck::Foreign),
+        Some(Prefix::Damaged) | None => return Ok(KeyCheck::Fails),
+    }
+    let opened = parse_sealed(CHECK_MAGIC, &bytes)
+        .and_then(|(_, nonce, ciphertext)| keys.open(&nonce, &keys.aad("check", &[]), ciphertext.to_vec()));
+    Ok(match opened {
+        Some(plaintext) if plaintext.as_slice() == CHECK_PLAINTEXT => KeyCheck::Opens,
+        _ => KeyCheck::Fails,
+    })
+}
+
+/// Confirms the namespace was sealed with this key before anything is deleted as corrupt;
+/// returns whether a check should be written once the open goes ahead. A check that fails is
+/// rewritten only when a record proves the key; a missing one is also written for a fresh
+/// namespace, where no record exists to contradict the key. A foreign check is never
+/// replaced, so the key is judged by the records alone.
 fn verify_key(
     keys: &NamespaceKeys,
     path: &Path,
     any_opened: bool,
     any_unreadable: bool,
-) -> Result<(), Error> {
-    let aad = keys.aad("check", &[]);
-    match fs::read(path) {
-        Ok(bytes) => {
-            let parsed = parse_sealed(CHECK_MAGIC, &bytes);
-            if let Some((Some(source), _, _)) = parsed
-                && source != keys.source()
-            {
-                return Err(Error::WrongKey);
-            }
-            let opened =
-                parsed.and_then(|(_, nonce, ciphertext)| keys.open(&nonce, &aad, ciphertext.to_vec()));
-            if opened.is_some_and(|plaintext| plaintext.as_slice() == CHECK_PLAINTEXT) {
-                return Ok(());
-            }
-            if !any_opened {
-                return Err(Error::WrongKey);
-            }
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            if !any_opened && any_unreadable {
-                return Err(Error::WrongKey);
-            }
-        }
-        Err(error) => return Err(error.into()),
+) -> Result<bool, Error> {
+    let unproved = !any_opened && any_unreadable;
+    match read_key_check(keys, path)? {
+        KeyCheck::Opens => Ok(false),
+        KeyCheck::Fails if any_opened => Ok(true),
+        KeyCheck::Fails => Err(Error::WrongKey),
+        KeyCheck::Missing | KeyCheck::Foreign if unproved => Err(Error::WrongKey),
+        KeyCheck::Missing => Ok(true),
+        KeyCheck::Foreign => Ok(false),
     }
-    let (nonce, ciphertext) = keys.seal(&aad, CHECK_PLAINTEXT)?;
+}
+
+fn write_key_check(keys: &NamespaceKeys, path: &Path) -> Result<(), Error> {
+    let (nonce, ciphertext) = keys.seal(&keys.aad("check", &[]), CHECK_PLAINTEXT)?;
     let file = framed(CHECK_MAGIC, keys.source(), &[&nonce, &ciphertext]);
     let tmp = path
         .parent()
@@ -635,6 +694,54 @@ fn verify_key(
         .join(TMP);
     Staged::write(&tmp, &file)?.commit(path)?;
     Ok(())
+}
+
+/// What a namespace's files say about whether `keys` sealed them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyEvidence {
+    /// Its check or a record opens.
+    Proves,
+    /// Its check or its records of this format fail, and nothing opens.
+    Contradicts,
+    /// Only files this build can't judge.
+    Unjudged,
+    Empty,
+}
+
+fn key_evidence(keys: &NamespaceKeys, dir: &Path) -> Result<KeyEvidence, Error> {
+    let check = read_key_check(keys, &dir.join(CHECK))?;
+    if matches!(check, KeyCheck::Opens) {
+        return Ok(KeyEvidence::Proves);
+    }
+    let mut evidence = match check {
+        KeyCheck::Fails => KeyEvidence::Contradicts,
+        KeyCheck::Foreign => KeyEvidence::Unjudged,
+        KeyCheck::Opens | KeyCheck::Missing => KeyEvidence::Empty,
+    };
+    let entries = match fs::read_dir(dir.join(RECORDS)) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(evidence),
+        Err(error) => return Err(error.into()),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        let Some(id) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".rec"))
+            .and_then(|stem| stem.parse::<RecordId>().ok())
+        else {
+            continue;
+        };
+        match read_header(keys, &path, &id) {
+            Ok(Some(_)) => return Ok(KeyEvidence::Proves),
+            Ok(None) if evidence == KeyEvidence::Empty => evidence = KeyEvidence::Unjudged,
+            Ok(None) => {}
+            Err(Error::Corrupt(_)) => evidence = KeyEvidence::Contradicts,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(evidence)
 }
 
 fn framed(magic: &[u8; 4], source: KeySource, parts: &[&[u8]]) -> Vec<u8> {
@@ -803,6 +910,8 @@ struct State {
     /// Every record by `(stamp, id)`: the order `list` pages in and limits evict from.
     order: BTreeSet<(Stamp, RecordId)>,
     blobs: HashMap<BlobHandle, BlobEntry>,
+    /// Blob files a skipped record may use, never removed by this store.
+    kept: HashSet<BlobHandle>,
     total: u64,
 }
 
@@ -1041,9 +1150,15 @@ impl Store {
     /// it again.
     pub fn read_blob(&self, handle: &BlobHandle) -> Result<Zeroizing<Vec<u8>>, Error> {
         let mut state = self.state();
-        let len = state.blobs.get(handle).ok_or(Error::NotFound)?.len;
+        let len = state
+            .blobs
+            .get(handle)
+            .filter(|entry| entry.refs > 0)
+            .ok_or(Error::NotFound)?
+            .len;
         match self.decode_blob(handle, len) {
             Err(Error::Corrupt(what)) => {
+                state.kept.remove(handle);
                 let dependents: Vec<RecordId> = state
                     .records
                     .iter()
@@ -1250,7 +1365,7 @@ impl Store {
                 continue;
             };
             entry.refs -= 1;
-            if entry.refs == 0 {
+            if entry.refs == 0 && !state.kept.contains(&blob.handle) {
                 state.total -= entry.len;
                 state.blobs.remove(&blob.handle);
                 remove_if_exists(&self.paths.blobs.join(blob.handle.file_name()))?;
