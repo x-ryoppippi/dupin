@@ -1,5 +1,5 @@
 use std/assert
-use ../update-rune.nu [pinned-rev locked-revs hashed-rev with-hash]
+use ../update-rune.nu [pinned-rev patched-crates locked-revs in-step unapplied-patches unlock-specs hashed-rev with-hash]
 
 const OLD = "86b903de7fef9c6b683e05dc23440de4ebbc4347"
 const NEW = "fcef33a2f60db30a7a872844464f84ff26f3fc75"
@@ -21,6 +21,8 @@ def manifest [dependency: string, patch: string]: nothing -> record {
         patch: {
             crates-io: {
                 winit: {git: $RUNE, rev: $patch}
+                naga: {git: $RUNE, rev: $patch}
+                objc2: {path: "vendor/objc2"}
             }
         }
     }
@@ -57,6 +59,31 @@ def main [] {
         ]
     }
     assert equal ($lock | locked-revs) [$OLD]
+    assert equal (manifest $NEW $NEW | patched-crates) [winit naga]
+
+    let rune = $"git+($RUNE)?rev=($NEW)#($NEW)"
+    let crates_io = "registry+https://github.com/rust-lang/crates.io-index"
+    let relocked = {
+        package: [
+            {name: rune, version: "0.0.1", source: $rune}
+            {name: winit, version: "0.30.13", source: $rune}
+            {name: naga, version: "30.0.2", source: $crates_io}
+        ]
+        patch: {unused: [{name: naga, version: "30.0.1", source: $rune}]}
+    }
+    # Moving Rune's own packages leaves a newly patched crate locked from crates.io.
+    assert equal ($relocked | locked-revs) [$NEW]
+    assert not ($relocked | in-step $NEW [winit naga])
+    assert equal ($relocked | unapplied-patches [winit naga]) [naga]
+    assert equal ($relocked | unlock-specs [winit naga]) ["naga@30.0.2"]
+
+    let naga = {name: naga, version: "30.0.1", source: $rune}
+    let patched = $relocked
+    | update package { each {|package| if $package.name == naga { $naga } else { $package } } }
+    | reject patch
+    assert ($patched | in-step $NEW [winit naga])
+    assert equal ($patched | unlock-specs [winit naga]) []
+    assert not ($patched | in-step $OLD [winit naga])
 
     assert equal (vendor $OLD "sha256-old=" | hashed-rev) $OLD
     # An empty hash is one still to compute, so it counts as none.

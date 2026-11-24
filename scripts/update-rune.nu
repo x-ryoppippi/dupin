@@ -5,19 +5,36 @@
 # Cargo.toml pins every Rune crate at one rev, but Cargo.lock and Rune's source hash in
 # nix/cargo-vendor.nix only follow when someone refreshes them. autofix.ci runs this on every
 # pull request that touches either file, so a Renovate PR that only rewrites the revs comes
-# back buildable. When the lock and the hash already match the pinned rev, it changes nothing
-# and reaches no network.
+# back buildable, and so does one where someone adds a patch for a crate Rune newly patches.
+# When the lock and the hash already match the pinned rev, it changes nothing and reaches no
+# network.
 
 const RUNE = "https://github.com/anomalyco/rune"
 const VENDOR = "nix/cargo-vendor.nix"
 
 def main []: nothing -> nothing {
     cd ($env.FILE_PWD | path dirname)
-    let rev = open Cargo.toml | pinned-rev
+    let manifest = open Cargo.toml
+    let rev = $manifest | pinned-rev
+    let patched = $manifest | patched-crates
 
-    if (open --raw Cargo.lock | from toml | locked-revs) != [$rev] {
+    let lock = open --raw Cargo.lock | from toml
+    if not ($lock | in-step $rev $patched) {
         print $"Refreshing Cargo.lock's Rune packages to ($rev)"
-        ^cargo update --package rune
+        let specs = ["rune" ...($lock | unlock-specs $patched)]
+        ^cargo update ...($specs | each {|spec| [--package $spec] } | flatten)
+
+        let lock = open --raw Cargo.lock | from toml
+        let unapplied = $lock | unapplied-patches $patched
+        if ($unapplied | is-not-empty) {
+            let crates = $unapplied | str join ", "
+            error make {
+                msg: $"Cargo.toml patches ($crates) from Rune, but Cargo.lock takes it from elsewhere. A patch applies only to a version every requirement accepts, so match Dupin's own requirement to Rune's version, or drop a patch Rune no longer has."
+            }
+        }
+        if ($lock | locked-revs) != [$rev] {
+            error make {msg: $"Cargo.lock still has Rune packages away from ($rev)"}
+        }
     }
 
     let vendor = open --raw $VENDOR
@@ -49,6 +66,43 @@ export def pinned-rev []: record -> string {
             }
         }
     }
+}
+
+# The crates Cargo.toml patches from Rune.
+export def patched-crates []: record -> list<string> {
+    $in.patch?.crates-io?
+    | default {}
+    | transpose name dep
+    | where {|row| ($row.dep | describe) =~ '^record' and $row.dep.git? == $RUNE }
+    | get name
+}
+
+# Whether Cargo.lock takes every Rune package at `rev`, every crate in `patched` among them.
+export def in-step [rev: string, patched: list<string>]: record -> bool {
+    let lock = $in
+    ($lock | locked-revs) == [$rev] and ($lock | unapplied-patches $patched | is-empty)
+}
+
+# The crates in `patched` Cargo.lock takes no package of from Rune. Cargo files such a patch
+# under `[[patch.unused]]` and keeps the crate locked where it was.
+export def unapplied-patches [patched: list<string>]: record -> list<string> {
+    let from_rune = $in.package | where {|package| $package | from-rune } | get name
+    $patched | where {|name| $name not-in $from_rune }
+}
+
+# Package specs for `cargo update` that unlock every crate in `patched` Cargo.lock takes from
+# elsewhere. `cargo update --package rune` leaves those locked, so a newly patched crate never
+# moves.
+export def unlock-specs [patched: list<string>]: record -> list<string> {
+    let lock = $in
+    let unapplied = $lock | unapplied-patches $patched
+    $lock.package
+    | where {|package| $package.name in $unapplied }
+    | each {|package| $"($package.name)@($package.version)" }
+}
+
+def from-rune []: record -> bool {
+    $in.source? | default "" | str starts-with $"git+($RUNE)?"
 }
 
 # The revs Cargo.lock has Rune's packages at.
