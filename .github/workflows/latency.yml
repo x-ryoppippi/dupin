@@ -95,7 +95,9 @@ jobs:
             "$RUNNER_TEMP/main/results.json" "$RUNNER_TEMP/latency/results.json" \
             --report --summary "$GITHUB_STEP_SUMMARY"
 
+      # A baseline run measures only native implementations, so it has no port to hold.
       - name: Hold extensions to native parity
+        if: ${{ !inputs.ref }}
         run: >-
           nix shell --inputs-from . nixpkgs#nushell --command
           nu scripts/latency.nu parity "$RUNNER_TEMP/latency/results.json" --summary "$GITHUB_STEP_SUMMARY"
