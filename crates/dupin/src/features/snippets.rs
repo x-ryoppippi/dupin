@@ -133,7 +133,7 @@ fn unavailable() -> Item {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use dupin_core::config::Snippet;
     use dupin_core::{Action, Delivery, Effect, History, Session};
@@ -271,14 +271,8 @@ mod tests {
         assert_eq!(session.items()[0].primary.as_deref(), Some("copy"));
 
         // What config.toml may hand over always fits the catalogue: as many snippets as it
-        // holds, or their whole text budget spent on the longest keywords and names. Loading
-        // all of it is held to the search's deadline in a release build, as the app ships;
-        // a debug build does the same work several times slower, so it only checks the fit.
-        let deadline = if cfg!(debug_assertions) {
-            Duration::from_secs(60)
-        } else {
-            QUERY_DEADLINE
-        };
+        // holds, or their whole text budget spent on the longest keywords and names, loaded
+        // within the search's deadline.
         let many = (0..=dupin_core::snippets::MAX_SNIPPETS).map(|i| (format!("s{i:05}"), snippet(None, "x")));
         let long = (0..4000).map(|i| (format!("{i:032}"), snippet(Some(&"😀".repeat(80)), "😀")));
         for snippets in [many.collect(), long.collect::<BTreeMap<_, _>>()] {
@@ -294,7 +288,7 @@ mod tests {
                 .catalogue(
                     &last,
                     10,
-                    Instant::now() + deadline,
+                    Instant::now() + QUERY_DEADLINE,
                     &dupin_extension_bridge::Call::none(),
                     Role::Keyword,
                 )
