@@ -41,6 +41,8 @@ Choose contrasting text and selection colors when overriding the palette.
 installed on the Mac by the name Font Book shows — `"Menlo"`, `"JetBrains Mono"`,
 `"Hiragino Sans"`. A comma-separated list tries each in order, CSS-style:
 `"Iosevka, JetBrains Mono"`. A name nothing provides falls back to the system font.
+Settings → Appearance lists the installed families in the Font menu; a name only
+TOML can express stays there, checked.
 
 Geometry uses integer points: width 400–1200, row height 52–100, radius 0–32 and
 font size 12–20. Rows must be at least `3 * font_size + 7` points tall. Invalid
