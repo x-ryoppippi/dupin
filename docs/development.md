@@ -129,8 +129,14 @@ a warm cache built a fresh target at a new path, as a new worktree has, in 46.5
 seconds against 48.8–49.5 without it, and a cold cache cost 1.2 seconds more.
 It only pays when a removed target is rebuilt at the same path: 18.1 seconds
 against 47.5. CI compiles through Nix, which caches whole dependency outputs
-instead. A developer who often deletes and rebuilds the same target directory
-can set `RUSTC_WRAPPER` to sccache themselves.
+instead. The development shell does not include sccache. A developer who often
+deletes and rebuilds the same target directory can run it from nixpkgs without
+installing it:
+
+```sh
+nix build --inputs-from . nixpkgs#sccache --out-link target/sccache
+RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
+```
 
 ## Formatting
 
