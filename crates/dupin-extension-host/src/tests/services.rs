@@ -328,3 +328,25 @@ fn a_row_opens_only_the_calendar_links_its_own_call_was_given() {
         assert_eq!(diagnostic.code, "invalid-url");
     }
 }
+
+#[test]
+fn a_row_opens_a_dictionary_word_no_reply_gave() {
+    skip_inside_a_sandbox!();
+    let package = package(
+        r#"export function search(query) {
+             return [{ title: query, actions: [{ title: 'Open in Dictionary', open: `dict://${query}` }] }];
+           }"#,
+    );
+    let services: Arc<dyn Services> = Arc::new(NoServices);
+    let rows = host()
+        .search(
+            &package,
+            "serendipity",
+            10,
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+            &services,
+        )
+        .unwrap();
+    assert_eq!(titles(&rows), ["serendipity"]);
+}

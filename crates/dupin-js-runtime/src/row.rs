@@ -204,11 +204,21 @@ impl Reason {
     }
 }
 
-/// Which rows a check applies to: `aliases` and `keywords` only mean something to a catalogue.
+/// Which export answered, which decides the fields and limits that apply: `aliases` and
+/// `keywords` only mean something to a catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Search,
     Items,
+}
+
+impl Source {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Source::Search => "search",
+            Source::Items => "items",
+        }
+    }
 }
 
 impl Row {
@@ -298,13 +308,14 @@ impl Row {
                 RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
                     return Err("a paste action's text must be 1 byte to 64 KiB".into());
                 }
-                RowEffect::OpenUrl { url } if source == Source::Items && !is_web_url(url) => {
-                    return Err("a catalogue's open action needs an http or https URL".into());
-                }
-                RowEffect::OpenUrl { url } if !is_openable(url) => {
-                    return Err(
-                        "an open action needs an http or https URL, or a calendar event's link".into(),
-                    );
+                RowEffect::OpenUrl { url } if !is_openable(url, source) => {
+                    return Err(match source {
+                        Source::Items => "a catalogue's open action needs an http, https or dict URL",
+                        Source::Search => {
+                            "an open action needs an http, https or dict URL, or a calendar event's link"
+                        }
+                    }
+                    .into());
                 }
                 RowEffect::Run { handler, data } => {
                     check_handler(handler)?;
@@ -439,22 +450,33 @@ pub(crate) fn check_file(file: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// What an open action may open: a web URL, or the `link` the calendar service gives an event,
-/// which only shows that event in Calendar.
-pub(crate) fn is_openable(url: &str) -> bool {
+/// What a row may open: a web URL; a `dict://` URL, which only shows a word in Dictionary; or,
+/// outside a catalogue, which reaches no host service, the `link` the calendar service gave an
+/// event, which only shows that event in Calendar.
+pub(crate) fn is_openable(url: &str, source: Source) -> bool {
     if url.len() > MAX_URL_BYTES {
         return false;
     }
-    is_web_url(url)
-        || url
-            .strip_prefix(CALENDAR_LINK)
-            .and_then(|rest| rest.strip_suffix(CALENDAR_LINK_QUERY))
-            .is_some_and(|event| {
-                !event.is_empty()
-                    && event
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"%-._~/".contains(&byte))
-            })
+    is_web_url(url) || is_dictionary_url(url) || (source == Source::Search && is_calendar_link(url))
+}
+
+/// Whether `url` only shows a word in Dictionary, which any row may open without a host
+/// service having given it.
+pub fn is_dictionary_url(url: &str) -> bool {
+    url.len() <= MAX_URL_BYTES
+        && url.strip_prefix("dict://").is_some_and(|word| !word.is_empty())
+        && !url.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+fn is_calendar_link(url: &str) -> bool {
+    url.strip_prefix(CALENDAR_LINK)
+        .and_then(|rest| rest.strip_suffix(CALENDAR_LINK_QUERY))
+        .is_some_and(|event| {
+            !event.is_empty()
+                && event
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"%-._~/".contains(&byte))
+        })
 }
 
 const CALENDAR_LINK: &str = "ical://ekevent/";

@@ -1,0 +1,138 @@
+{
+	"fixture": 1,
+	"description": "An Oxford-style entry, as the dictionary service lays it out: the pronunciation as metadata, each part of speech with its inflections and numbered senses, sub-senses and examples, and Phrases and Origin under their own headings. Its actions open the word in Dictionary and copy the definition as the dictionary wrote it.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"dictionary": {
+			"run": [
+				{
+					"dictionary": null,
+					"groups": [
+						{
+							"note": "(runs, running; past ran; past participle run)",
+							"partOfSpeech": "Verb",
+							"senses": [
+								{
+									"definition": "[no object] move on foot faster than walking",
+									"examples": ["she ran to the station", "he ran the last few yards."],
+									"senses": [
+										{
+											"definition": "(of a machine) operate",
+											"examples": ["the engine runs on diesel."],
+											"senses": []
+										},
+										{
+											"definition": "[with object] cause to operate",
+											"examples": ["run the dishwasher twice a week."],
+											"senses": []
+										}
+									]
+								},
+								{
+									"definition": "[with object] be in charge of",
+									"examples": ["he runs a small bakery."],
+									"senses": []
+								},
+								{
+									"definition": "extend in a direction",
+									"examples": ["the path runs along the river."],
+									"senses": []
+								}
+							]
+						},
+						{
+							"note": null,
+							"partOfSpeech": "Noun",
+							"senses": [
+								{
+									"definition": "an act of running",
+									"examples": ["a morning run."],
+									"senses": []
+								},
+								{
+									"definition": "a journey on a regular route",
+									"examples": ["the school run."],
+									"senses": []
+								}
+							]
+						}
+					],
+					"headword": "run",
+					"markdown": "### Verb\n\n\\(runs\\, running\\; past ran\\; past participle run\\)\n\n\n1. \\[no object\\] move on foot faster than walking: *she ran to the station* | *he ran the last few yards\\.*\n   - \\(of a machine\\) operate: *the engine runs on diesel\\.*\n   - \\[with object\\] cause to operate: *run the dishwasher twice a week\\.*\n2. \\[with object\\] be in charge of: *he runs a small bakery\\.*\n3. extend in a direction: *the path runs along the river\\.*\n\n### Noun\n\n1. an act of running: *a morning run\\.*\n2. a journey on a regular route: *the school run\\.*\n\n## Phrases\n\non the run trying to avoid being caught\\.\n\n\n## Origin\n\nOld English\\.",
+					"pronunciation": "rʌn",
+					"sections": [
+						{
+							"text": "on the run trying to avoid being caught.",
+							"title": "Phrases"
+						},
+						{
+							"text": "Old English.",
+							"title": "Origin"
+						}
+					],
+					"text": "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on foot faster than walking: she ran to the station | he ran the last few yards. • (of a machine) operate: the engine runs on diesel. • [with object] cause to operate: run the dishwasher twice a week. 2 [with object] be in charge of: he runs a small bakery. 3 extend in a direction: the path runs along the river. noun 1 an act of running: a morning run. 2 a journey on a regular route: the school run. PHRASES on the run trying to avoid being caught. ORIGIN Old English.",
+					"truncated": false
+				}
+			]
+		}
+	},
+	"steps": [
+		{
+			"query": "run",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open in Dictionary",
+								"url": "dict://run"
+							},
+							{
+								"copy": "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on foot faster than walking: she ran to the station | he ran the last few yards. • (of a machine) operate: the engine runs on diesel. • [with object] cause to operate: run the dishwasher twice a week. 2 [with object] be in charge of: he runs a small bakery. 3 extend in a direction: the path runs along the river. noun 1 an act of running: a morning run. 2 a journey on a regular route: the school run. PHRASES on the run trying to avoid being caught. ORIGIN Old English.",
+								"title": "Copy Definition"
+							}
+						],
+						"detail": {
+							"markdown": "### Verb\n\n\\(runs\\, running\\; past ran\\; past participle run\\)\n\n\n1. \\[no object\\] move on foot faster than walking: *she ran to the station* | *he ran the last few yards\\.*\n   - \\(of a machine\\) operate: *the engine runs on diesel\\.*\n   - \\[with object\\] cause to operate: *run the dishwasher twice a week\\.*\n2. \\[with object\\] be in charge of: *he runs a small bakery\\.*\n3. extend in a direction: *the path runs along the river\\.*\n\n### Noun\n\n1. an act of running: *a morning run\\.*\n2. a journey on a regular route: *the school run\\.*\n\n## Phrases\n\non the run trying to avoid being caught\\.\n\n\n## Origin\n\nOld English\\.",
+							"metadata": [
+								{
+									"label": "Pronunciation",
+									"text": "rʌn"
+								}
+							]
+						},
+						"id": "dictionary:run",
+						"title": "run"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Open in Dictionary",
+			"expect": {
+				"effect": {
+					"url": "dict://run"
+				}
+			}
+		},
+		{
+			"activate": "Copy Definition",
+			"expect": {
+				"effect": {
+					"copy": "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on foot faster than walking: she ran to the station | he ran the last few yards. • (of a machine) operate: the engine runs on diesel. • [with object] cause to operate: run the dishwasher twice a week. 2 [with object] be in charge of: he runs a small bakery. 3 extend in a direction: the path runs along the river. noun 1 an act of running: a morning run. 2 a journey on a regular route: the school run. PHRASES on the run trying to avoid being caught. ORIGIN Old English."
+				}
+			}
+		}
+	]
+}

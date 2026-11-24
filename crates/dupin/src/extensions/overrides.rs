@@ -1,7 +1,8 @@
 //! Every bundled extension, built-in commands' included, follows one override rule: a copy in
 //! the extensions folder with its `name` answers in its place, is the bundled package while it
 //! is unchanged, loses the bundled grants once edited, and deleting it, or turning the
-//! extensions folder off, brings the bundled one back. The test takes each package in
+//! extensions folder off, brings the bundled one back. One that ships off answers only once it
+//! is turned on, and then follows the same rule. The test takes each package in
 //! `extensions/` through `dupin ext eject`, the folder scans, the launcher's registry install
 //! with its ports and searchers, Settings' listing, the broker and the extension host.
 
@@ -14,7 +15,7 @@ use dupin_core::{CommandId, Config, Provider};
 use dupin_extension_bridge::services::{self, Services};
 use dupin_extension_bridge::{
     Bridge, ClipboardAccess, ConsentState, Failure, OsAccess, OsPermission, PackageId, Request, Scope,
-    Trigger,
+    Trigger, WindowsAccess,
 };
 use dupin_host_services::calendar;
 use serde_json::Value;
@@ -46,6 +47,7 @@ fn case(name: &str) -> Option<Override> {
             Some(Config::default()),
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        "dictionary" => Override::built_in("dictionary", Config::default(), None, Some(Use::Search)),
         "dupin" => Override::extension("dupin", None),
         "emoji" => Override::extension(
             "emoji",
@@ -57,6 +59,11 @@ fn case(name: &str) -> Option<Override> {
             None,
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        "window-management" => Override::extension(
+            "window-management",
+            Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
+        )
+        .ships_off(),
         _ => return None,
     })
 }
@@ -96,6 +103,8 @@ struct Override {
     /// One that turns the built-in command off, if a setting can.
     off: Option<Config>,
     uses: Option<Use>,
+    /// It waits for the user to turn it on in Settings → Extensions.
+    ships_off: bool,
 }
 
 impl Override {
@@ -107,6 +116,14 @@ impl Override {
             on: Config::default(),
             off: None,
             uses,
+            ships_off: false,
+        }
+    }
+
+    fn ships_off(self) -> Self {
+        Self {
+            ships_off: true,
+            ..self
         }
     }
 
@@ -120,6 +137,7 @@ impl Override {
             on,
             off,
             uses,
+            ships_off: false,
         }
     }
 
@@ -175,6 +193,22 @@ impl Override {
         };
 
         launcher.install(&self.on);
+        if self.ships_off {
+            let off = self.listed(&launcher);
+            assert!(!off.registered, "it doesn't answer until turned on");
+            assert!(launcher.answering(&self.command).is_none());
+            assert!(!bridge.is_enabled(&off.package));
+            if let Some(Use::Effect(request)) = &self.uses {
+                assert!(
+                    bridge
+                        .authorize(&off.package, request, Trigger::Activation)
+                        .is_err(),
+                    "it can use nothing while off"
+                );
+            }
+            bridge.set_enabled(&off.package, true).unwrap();
+            launcher.install(&self.on);
+        }
         let original = self.listed(&launcher);
         assert_eq!(original.kind, Kind::Bundled);
         assert_eq!(original.package.as_str(), format!("bundled:{}", self.name));

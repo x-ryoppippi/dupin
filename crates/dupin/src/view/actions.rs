@@ -13,7 +13,7 @@ pub(super) fn action_header(s: &Ui, t: &ResolvedTheme) -> El {
     let icon = item_icon(s, screen.item.icon.as_ref(), false);
     let subtitle = match (&screen.stage, &screen.item.view) {
         (ActionStage::Receivers { .. }, _) => SEND_TO,
-        (_, View::Text { subtitle, .. }) => subtitle.as_str(),
+        (_, View::Text { subtitle, .. }) if !subtitle.is_empty() => subtitle.as_str(),
         _ => "Actions",
     };
     row()

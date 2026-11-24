@@ -1,0 +1,34 @@
+{
+	"fixture": 1,
+	"description": "A word no dictionary defines has no rows, so Dupin says No definition found. A term longer than a lookup takes is the same.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"dictionary": {
+			"xyzzy": []
+		}
+	},
+	"steps": [
+		{
+			"query": "xyzzy",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}

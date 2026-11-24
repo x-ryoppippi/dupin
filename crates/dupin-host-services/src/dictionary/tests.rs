@@ -5,6 +5,8 @@ fn entry(headword: &str, dictionary: &str) -> Entry {
         headword: headword.into(),
         dictionary: Some(dictionary.into()),
         pronunciation: Some("rʌn".into()),
+        text: "run | rʌn | verb move on foot".into(),
+        markdown: "### Verb\n\nmove on foot".into(),
         groups: vec![Group {
             part_of_speech: Some("verb".into()),
             note: Some("(runs, running; past ran)".into()),
@@ -64,6 +66,8 @@ fn entries_serialize_for_javascript() {
             "headword": "run",
             "dictionary": "Oxford",
             "pronunciation": "rʌn",
+            "text": "run | rʌn | verb move on foot",
+            "markdown": "### Verb\n\nmove on foot",
             "groups": [{
                 "partOfSpeech": "verb",
                 "note": "(runs, running; past ran)",
@@ -149,6 +153,18 @@ fn results_are_cut_to_their_bounds_and_marked() {
 
     let small = service_with(entry_with_text("short"));
     assert!(!small[0].truncated);
+
+    let [long] = service_with(Entry {
+        headword: "run".into(),
+        text: "é".repeat(MAX_DEFINITION_BYTES),
+        markdown: "m".repeat(MAX_MARKDOWN_BYTES + 1),
+        ..Entry::default()
+    })
+    .try_into()
+    .unwrap();
+    assert!(long.truncated);
+    assert_eq!(long.text.len(), MAX_DEFINITION_BYTES);
+    assert_eq!(long.markdown.len(), MAX_MARKDOWN_BYTES);
 }
 
 fn entry_with_text(text: &str) -> Entry {

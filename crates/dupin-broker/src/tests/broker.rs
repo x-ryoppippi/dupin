@@ -566,7 +566,7 @@ fn a_bundled_package_that_drops_and_redeclares_a_scope_stays_revoked() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("calendar-tools");
     let clipboard = || caps(json!({ "clipboard": ["write"] }));
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     let _ = broker.install(package.clone(), rev(R1), clipboard());
     broker.revoke(&package, &key("clipboard:write")).unwrap();
 
@@ -671,7 +671,7 @@ fn uninstalling_forgets_every_decision() {
 fn bundled_packages_start_on_with_extension_scopes_granted_but_os_access_still_asked() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("calendar-tools");
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     let _ = broker.install(package.clone(), rev(R1), everything());
     assert!(broker.is_enabled(&package));
     let states: Vec<_> = broker
@@ -727,7 +727,7 @@ fn bundled_packages_start_on_with_extension_scopes_granted_but_os_access_still_a
 fn a_modified_copy_of_a_bundled_package_is_third_party() {
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("calendar-tools");
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     let _ = broker.install(package.clone(), rev(R2), everything());
     assert!(!broker.is_enabled(&package));
     assert!(
@@ -850,7 +850,7 @@ fn a_base_that_disables_a_package_locks_it_off() {
         Local::default(),
     );
     let package = id("bookmarks");
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     let _ = broker.install(package.clone(), rev(R1), github());
     assert!(!broker.is_enabled(&package));
     assert_eq!(
@@ -867,7 +867,7 @@ fn a_base_disable_pinned_to_one_revision_still_holds_for_the_next() {
         Local::default(),
     );
     let package = id("bookmarks");
-    broker.set_bundled(package.clone(), rev(R2));
+    broker.set_bundled(package.clone(), rev(R2), true);
     let _ = broker.install(package.clone(), rev(R2), github());
     assert!(!broker.is_enabled(&package));
     assert_eq!(
@@ -1003,7 +1003,7 @@ fn local_decisions_read_again_replace_those_in_memory() {
 fn unreadable_local_grants_fail_closed() {
     let mut broker = Broker::new(base(DECLARED), Local::unreadable());
     let package = id("bookmarks");
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     let _ = broker.install(package.clone(), rev(R1), everything());
     assert!(!broker.is_enabled(&package));
     assert_eq!(
@@ -1188,7 +1188,7 @@ fn only_the_pristine_bundled_revision_is_pre_granted_pasting() {
     let declares = || caps(json!({ "clipboard": ["paste"] }));
     let mut broker = Broker::new(Base::default(), Local::default());
     let package = id("emoji");
-    broker.set_bundled(package.clone(), rev(R1));
+    broker.set_bundled(package.clone(), rev(R1), true);
     broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
     let _ = broker.install(package.clone(), rev(R1), declares());
     assert!(matches!(
@@ -1201,5 +1201,96 @@ fn only_the_pristine_bundled_revision_is_pre_granted_pasting() {
     assert_eq!(
         consent_needed(broker.check(&package, &rev(R2), &paste, Trigger::Activation)).reason,
         ConsentReason::NotGranted
+    );
+}
+
+#[test]
+fn a_bundled_package_that_ships_off_waits_to_be_turned_on_with_its_grants() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("window-management");
+    let windows = || caps(json!({ "windows": ["read", "arrange"] }));
+    broker.set_bundled(package.clone(), rev(R1), false);
+    let _ = broker.install(package.clone(), rev(R1), windows());
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let arrange = Request::Windows(WindowsAccess::Arrange);
+
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        broker.is_turned_off(&package),
+        "it doesn't answer until turned on"
+    );
+    assert!(broker.ships_off(&package));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Activation)),
+        Denial::Disabled
+    );
+
+    broker.set_enabled(&package, true).unwrap();
+    assert!(!broker.is_turned_off(&package));
+    assert!(
+        broker
+            .consents(&package)
+            .iter()
+            .all(|(_, state)| *state == ConsentState::Granted(GrantSource::Bundled))
+    );
+    permit(check(&broker, &package, &arrange, Trigger::Activation));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Query)),
+        Denial::NeedsActivation,
+        "moving a window needs an action the user chose"
+    );
+
+    broker.set_enabled(&package, false).unwrap();
+    assert!(broker.is_turned_off(&package));
+
+    let _ = broker.install(package.clone(), rev(R2), windows());
+    assert!(
+        !broker.ships_off(&package),
+        "a changed copy is an extension like any other"
+    );
+    broker.set_enabled(&package, true).unwrap();
+    assert_eq!(
+        consent_needed(broker.check(&package, &rev(R2), &arrange, Trigger::Activation)).reason,
+        ConsentReason::NotGranted,
+        "a changed copy gets none of the bundled grants"
+    );
+}
+
+#[test]
+fn a_changed_copy_of_a_package_that_ships_off_waits_like_any_new_extension() {
+    let mut broker = Broker::new(Base::default(), Local::default());
+    let package = id("window-management");
+    broker.set_bundled(package.clone(), rev(R1), false);
+    let _ = broker.install(package.clone(), rev(R2), caps(json!({ "windows": ["arrange"] })));
+    assert!(!broker.is_enabled(&package));
+    assert!(
+        !broker.is_turned_off(&package),
+        "a copy that isn't the shipped one is undecided, as a new extension is"
+    );
+}
+
+#[test]
+fn moving_a_window_needs_accessibility_and_an_activation() {
+    let (mut broker, package) = enabled(caps(json!({ "windows": ["read", "arrange"] })));
+    for scope in broker.consents(&package).into_iter().map(|(scope, _)| scope) {
+        broker.consent(&package, &rev(R1), &scope, None).unwrap();
+    }
+    let read = Request::Windows(WindowsAccess::Read);
+    let arrange = Request::Windows(WindowsAccess::Arrange);
+    assert_eq!(
+        consent_needed(check(&broker, &package, &read, Trigger::Query)).reason,
+        ConsentReason::OsAccess(OsPermission::Accessibility)
+    );
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    permit(check(&broker, &package, &read, Trigger::Query));
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Background)),
+        Denial::NeedsActivation
+    );
+    permit(check(&broker, &package, &arrange, Trigger::Activation));
+    broker.set_os_access(OsPermission::Accessibility, OsAccess::Denied);
+    assert_eq!(
+        denial(check(&broker, &package, &arrange, Trigger::Activation)),
+        Denial::OsDenied(OsPermission::Accessibility)
     );
 }

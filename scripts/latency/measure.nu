@@ -145,10 +145,12 @@ def measure [
         }
     }
     let provider = $job.setup.provider
-    let missed = unanswered $matched $provider $per_pass
+    let package = $job.setup.package?
+    let missed = unanswered $matched $provider $per_pass --package $package
     if $missed > 0 {
+        let answerer = if $package == null { "Dupin itself" } else { $"package ($package)" }
         error make {
-            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without its rows; the scenario does not reach its feature"
+            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider) as answered by ($answerer), or ended a pass without its rows; the scenario does not reach its feature"
         }
     }
     let samples = $matched | where superseded? != true
@@ -165,15 +167,25 @@ def measure [
     }
 }
 
-# How many drawn keypresses, `per_pass` to a pass, did not search `provider`, or ended a pass
-# without a row from it. Only the whole of `typed` must show the feature's rows: a shorter
-# query may rightly have none.
-export def unanswered [samples: list<record>, provider: string, per_pass: int]: nothing -> int {
+# How many drawn keypresses, `per_pass` to a pass, did not search `provider` answered by
+# `package` (Dupin itself without one), or ended a pass without a row from it. Only the whole
+# of `typed` must show the feature's rows: a shorter query may rightly have none.
+export def unanswered [
+    samples: list<record>
+    provider: string
+    per_pass: int
+    --package: string
+]: nothing -> int {
     $samples
     | enumerate
     | where {|it| $it.item.superseded? != true }
     | where {|it|
-        let searched = $provider in ($it.item.searched? | default [])
+        let answerer = $it.item.packages?
+        | default {}
+        | transpose name package
+        | where name == $provider
+        | get 0?.package?
+        let searched = $provider in ($it.item.searched? | default []) and $answerer == $package
         let shown = $it.item.shown?
         | default {}
         | transpose name rows
@@ -249,6 +261,7 @@ def summarize [job: record, runs: list<record>]: nothing -> record {
         prefix: $job.prefix
         typed: $job.typed
         provider: $job.setup.provider
+        package: $job.setup.package?
         budget_ms: $job.setup.budget_ms?
         commands: (
             $runs

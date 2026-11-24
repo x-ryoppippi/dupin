@@ -176,7 +176,6 @@ mod tests {
         snippets::SNIPPETS,
         system::SYSTEM,
         web::WEB_KEYWORDS,
-        windows::WINDOWS,
     };
 
     #[test]
@@ -186,7 +185,6 @@ mod tests {
         let mut config = Config {
             calculator: true,
             show_recent: true,
-            window_management: true,
             dictionary_keywords: ["in", "clip", "cal", "define", "shared"]
                 .map(str::to_owned)
                 .into(),
@@ -230,7 +228,6 @@ mod tests {
                 "system.commands",
                 "web.fallbacks",
                 "web.keywords",
-                "windows.arrange",
             ]
         );
         for (keyword, expected) in [
@@ -274,7 +271,6 @@ mod tests {
                 "settings.search",
                 "web.keywords",
                 "web.fallbacks",
-                "windows.arrange",
             ]
         );
     }
@@ -418,50 +414,6 @@ mod tests {
             |effect| !matches!(effect, Effect::Search { command, .. } if command.as_str() == CALCULATOR)
         ));
         assert!(!session.deliver_from(id(CALCULATOR), Delivery::Done { generation }));
-    }
-
-    #[test]
-    fn window_commands_follow_the_live_opt_in_and_run_through_the_session() {
-        use dupin_core::window_management::Layout;
-        use dupin_core::{Action, Delivery, Effect, History, Intent, Request, Session};
-
-        let mut config = Config::parse("").unwrap();
-        assert!(!config.window_management);
-        let mut session = Session::new(History::default(), configured(&config).unwrap().registry).unwrap();
-        let windows = id(WINDOWS);
-        let searches_windows =
-            |effect: &Effect| matches!(effect, Effect::Search { command, .. } if command == &windows);
-        assert!(!session.set_query("left half").iter().any(searches_windows));
-
-        config = Config::parse("window_management = true").unwrap();
-        session
-            .set_commands(configured(&config).unwrap().registry)
-            .unwrap();
-        let generation = session
-            .refresh()
-            .into_iter()
-            .find_map(|effect| match effect {
-                Effect::Search {
-                    command, generation, ..
-                } if command == windows => Some(generation),
-                _ => None,
-            })
-            .unwrap();
-        let mut items = Vec::new();
-        crate::window_management::WindowProvider
-            .search(&Request::detached("left half", 10), &mut |batch| {
-                items.extend(batch)
-            })
-            .unwrap();
-        session.deliver_from(windows.clone(), Delivery::Batch { generation, items });
-        let effects = session.intent(Intent::Open).unwrap();
-        assert!(effects.contains(&Effect::Run(Action::ArrangeWindow(Layout::LeftHalf))));
-        assert!(effects.contains(&Effect::Hide));
-
-        session
-            .set_commands(configured(&Config::default()).unwrap().registry)
-            .unwrap();
-        assert!(!session.set_query("left half").iter().any(searches_windows));
     }
 
     #[test]
@@ -666,6 +618,37 @@ mod tests {
         session.set_query("wc two words");
         assert_eq!(session.command_id(), &words);
         assert_eq!(session.query(), "two words");
+    }
+
+    #[test]
+    fn the_dictionary_package_answers_the_dictionary_aliases_instead_of_its_own_keyword() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let config = Config {
+            dictionary_keywords: vec!["word".into(), "lookup".into()],
+            ..Config::default()
+        };
+        let mut configured = configured(&config).unwrap();
+        let dictionary = Arc::new(extension("Dictionary", "define"));
+        assert_eq!(dictionary.id, "dictionary");
+        let added = add_extensions(&mut configured, std::slice::from_ref(&dictionary));
+
+        assert!(added.problems.is_empty(), "{:?}", added.problems);
+        let [(command, extension, role)] = added.registered.as_slice() else {
+            panic!("{:?}", added.registered.len())
+        };
+        assert_eq!((command, *role), (&id(DICTIONARY), Role::Keyword));
+        assert!(Arc::ptr_eq(extension, &dictionary));
+        assert_eq!(configured.registry.keyword("word"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("lookup"), Some(&id(DICTIONARY)));
+        assert_eq!(configured.registry.keyword("define"), None);
+        assert!(
+            !configured
+                .registry
+                .ids()
+                .contains(&"extension.dictionary".to_owned())
+        );
     }
 
     #[test]

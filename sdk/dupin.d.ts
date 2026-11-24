@@ -30,7 +30,7 @@ declare module 'dupin' {
 		subtitle?: string;
 		/** Unique among the items, up to 128 bytes. Dupin numbers `search` items without one. */
 		id?: string;
-		/** An `http` or `https` URL with a host, up to 2,048 bytes. */
+		/** An `http` or `https` URL with a host, a `dict://` URL or, from `search`, a calendar event's `link`; up to 2,048 bytes. */
 		url?: string;
 		/** Non-empty, up to 16 KiB. */
 		text?: string;
@@ -331,6 +331,8 @@ declare module 'dupin' {
 		dictionary?: ['lookup'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
+		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
+		windows?: ('read' | 'arrange')[];
 	}
 
 	export interface PackageJson {
@@ -501,9 +503,45 @@ declare module 'dupin' {
 		): Promise<void>;
 	};
 
+	/** One sense: its text, its examples and, one level deep, its sub-senses. */
+	export interface DictionarySense {
+		definition: string;
+		examples: string[];
+		senses: DictionarySense[];
+	}
+
+	/** The senses under one part of speech, or under none before the first. */
+	export interface DictionaryGroup {
+		partOfSpeech: string | null;
+		/** What comes before the numbered senses, such as inflections. */
+		note: string | null;
+		senses: DictionarySense[];
+	}
+
+	/** A labeled part such as Phrases or Origin, as plain text, one paragraph or item a line. */
+	export interface DictionarySection {
+		title: string;
+		text: string;
+	}
+
+	/** Each structured text is at most 4 KiB; `truncated` says whether anything was cut. */
 	export interface DictionaryEntry {
 		headword: string;
-		[key: string]: unknown;
+		/** The dictionary the entry came from; `null` on macOS, which doesn't say. */
+		dictionary: string | null;
+		pronunciation: string | null;
+		/** The definition as the dictionary wrote it, up to 16 KiB. */
+		text: string;
+		/**
+		 * The entry as Dupin lays it out, up to 32 KiB of Markdown for an item's `detail`: each
+		 * part of speech under a `###` heading with its numbered senses and examples in italics,
+		 * and each labeled part under a `##` heading. The headword and pronunciation are left
+		 * to the item's title and metadata.
+		 */
+		markdown: string;
+		groups: DictionaryGroup[];
+		sections: DictionarySection[];
+		truncated: boolean;
 	}
 
 	/** `dictionary` capability. */
@@ -554,6 +592,45 @@ declare module 'dupin' {
 			limit?: number;
 			order?: 'earliest' | 'latest';
 		}): Promise<CalendarEvent[]>;
+	};
+
+	/**
+	 * A rectangle in points. Every display shares one space: the origin is the primary display's
+	 * top-left corner and `y` grows downwards.
+	 */
+	export interface WindowFrame {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
+	}
+
+	export interface WindowDisplay {
+		readonly frame: Readonly<WindowFrame>;
+		/** The part windows may use, outside the menu bar and the Dock. */
+		readonly visibleFrame: Readonly<WindowFrame>;
+		/** Pixels per point. */
+		readonly scale: number;
+	}
+
+	export interface FocusedWindow {
+		readonly frame: Readonly<WindowFrame>;
+		/** The app that was in front when the panel opened. */
+		readonly app: { readonly name: string; readonly bundleId: string | null };
+	}
+
+	/** `windows` capability: the focused window of the app that was in front when the panel opened. */
+	export const windows: {
+		/** Every display, the primary one first. Needs `read`. */
+		displays(): Promise<WindowDisplay[]>;
+		/** That window, or `null` when the app has none. Needs `read`. */
+		focused(): Promise<FocusedWindow | null>;
+		/**
+		 * Moves and resizes that window and resolves to the frame it took, which the app may
+		 * constrain. The frame must lie at least partly on a display. Needs `arrange` and an action
+		 * the user chose.
+		 */
+		setFrame(frame: WindowFrame): Promise<WindowFrame>;
 	};
 
 	/**

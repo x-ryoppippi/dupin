@@ -9,15 +9,18 @@
 #
 # Each implementation names the config Dupin starts with, the provider that answers it (every
 # measured keypress must search it and the whole of `typed` must show its rows, so a scenario
-# that never reaches its feature fails rather than timing another one) and, optionally, an
-# `extensions` directory copied beside the config and `settings` merged over the config. An
-# implementation that `extends` another of its feature starts from that one, so the port of a
-# built-in declares only its extensions and the settings that hand the feature to them:
+# that never reaches its feature fails rather than timing another one), the extension
+# `package` behind that provider when an extension answers it (`bundled:<name>` for one that
+# ships with Dupin; without it, Dupin itself must answer) and, optionally, an `extensions`
+# directory copied beside the config and `settings` merged over the config. An implementation
+# that `extends` another of its feature starts from that one, so the port of a built-in
+# declares only its extensions and the settings that hand the feature to them:
 #
 #   [features.notes.extension]
 #   extends = "native"
 #   settings = { extensions = true, notes = { enabled = false } }
 #   provider = "extension.notes"
+#   package = "notes"
 #   extensions = "scripts/latency/notes.extensions"
 #
 # A feature that only an extension has ever answered has nothing native to keep parity with, so
@@ -37,16 +40,21 @@ provider = "apps.search"
 [features.calendar.extension]
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
+package = "bundled:calendar"
 
-[features.dictionary.native]
+# The bundled Dictionary extension answers Dictionary's own command, held to the native feature
+# it replaced as scripts/latency/native-baseline.json recorded it.
+[features.dictionary.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
+package = "bundled:dictionary"
 
 # Clipboard history is the bundled extension `clipboard-history`, held to the native history it
 # replaced (scripts/latency/native-baseline.json).
 [features.clipboard.extension]
 config = "scripts/headless/clipboard.toml"
 provider = "clipboard.history"
+package = "bundled:clipboard-history"
 
 [features.web.native]
 config = "scripts/headless/config/dupin/config.toml"
@@ -57,6 +65,7 @@ provider = "web.keywords"
 [features.snippets.extension]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"
+package = "bundled:snippets"
 
 # A 5,000-row items() catalogue under its keyword. Loading it is the warm-up's work; a measured
 # keypress only matches the rows Dupin holds and calls into no extension.
@@ -64,6 +73,7 @@ provider = "snippets.search"
 config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension.catalogue"
+package = "catalogue"
 extensions = "scripts/latency/catalogue.extensions"
 budget_ms = 5.0
 
@@ -74,18 +84,16 @@ budget_ms = 5.0
 config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension-search.catalogue"
+package = "catalogue"
 extensions = "scripts/latency/catalogue.extensions"
 budget_ms = 5.0
 
 # The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
-# nothing native ever answered it. The latency binary is built outside the source tree, so it
-# finds no bundled extensions there: the repository's `extensions/` is its extensions folder
-# instead, where a copy of a bundled package runs as the package does.
+# nothing native ever answered it.
 [features.emoji.extension]
 config = "scripts/headless/config/dupin/config.toml"
-settings = { extensions = true }
 provider = "extension.emoji"
-extensions = "extensions"
+package = "bundled:emoji"
 budget_ms = 5.0
 
 [[scenarios]]

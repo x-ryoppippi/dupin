@@ -6,7 +6,7 @@ When `config.toml` is read-only, Dupin saves edits to `~/Library/Application Sup
 
 Saves merge the edited keys into the latest valid configuration, preserving unrelated external edits. If the same key changed differently on disk, or an active file is invalid, Dupin reports the problem and leaves both files untouched. An editor that writes between the final source check and the atomic replacement can still have its edit overwritten. Dupin reloads changes while it runs, including atomic replacements and symlink retargets.
 
-Enabling Calendar search, Window Management or Paste snippets, or setting a Selection hotkey for the first time in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
+Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Window Management in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"

@@ -20,7 +20,6 @@ mod search;
 mod selection;
 mod snapshots;
 mod snippets;
-mod window_management;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -28,7 +27,6 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::window_management::Layout as WindowLayout;
 use dupin_core::{
     Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Searcher, Session,
 };
@@ -143,11 +141,8 @@ pub struct Ui {
     settings_after_close: bool,
     snapshots_after_close: bool,
     accessibility_after_close: bool,
-    pub(crate) window_management_enabled: bool,
-    frontmost_pid: Option<i32>,
-    window_action_after_close: Option<(WindowLayout, Option<i32>, Busy)>,
-    window_action_running: bool,
-    pub window_permission_required: bool,
+    /// The app the panel opened over, whose focused window extensions may read and move.
+    front: Arc<dupin_mac::window_management::Front>,
     system_runner: dupin_mac::system_commands::Runner,
     /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
@@ -208,11 +203,13 @@ impl Ui {
             }),
         );
         let scripts_watcher = crate::scripts::watch(me.clone());
+        let front = Arc::new(dupin_mac::window_management::Front::default());
         let bridge = crate::extensions::access::open(crate::extensions::access::Platform {
             scripts: registration.scripts.clone(),
             runner: runner.clone(),
             calendar_access: calendar_access.clone(),
             clipboard: clipboard.settings(),
+            front: front.clone(),
         });
         clipboard.start(&bridge);
         bridge.set_listener({
@@ -304,11 +301,7 @@ impl Ui {
             settings_after_close: false,
             snapshots_after_close: false,
             accessibility_after_close: false,
-            window_management_enabled: config.window_management,
-            frontmost_pid: None,
-            window_action_after_close: None,
-            window_action_running: false,
-            window_permission_required: false,
+            front,
             system_runner: if cfg!(test) || rune::tooling::is_headless() {
                 |_| Err("System commands are unavailable in headless runs.".into())
             } else {

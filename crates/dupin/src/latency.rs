@@ -30,6 +30,10 @@ struct Sample {
     edited: Instant,
     dispatched: Option<Instant>,
     pending: BTreeMap<CommandId, u64>,
+    /// The extension package behind each searched provider an extension answers, since a
+    /// built-in's command ID stays the same whether its port answers it or the feature says
+    /// the port hasn't loaded.
+    packages: BTreeMap<String, String>,
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,
     done: Option<Instant>,
@@ -81,6 +85,7 @@ pub fn edit_started(t: f64, query: &str) {
             edited: Instant::now(),
             dispatched: None,
             pending: BTreeMap::new(),
+            packages: BTreeMap::new(),
             providers: BTreeMap::new(),
             last_provider: None,
             done: None,
@@ -103,12 +108,18 @@ pub fn edit_applied(session: &Session) {
     });
 }
 
-pub fn search_started(provider: &CommandId, generation: u64) {
+/// `package` is the extension package that answers `provider`, if one does.
+pub fn search_started(provider: &CommandId, generation: u64, package: Option<&str>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_none()
         {
             sample.pending.insert(provider.clone(), generation);
+            if let Some(package) = package {
+                sample
+                    .packages
+                    .insert(provider.as_str().to_owned(), package.to_owned());
+            }
         }
     });
 }
@@ -192,6 +203,7 @@ impl Probe {
                     "layout_ms": ms(done, drawn),
                     "providers": sample.providers,
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
+                    "packages": sample.packages,
                     "shown": sample.shown,
                 })
             }
@@ -215,7 +227,7 @@ mod tests {
 
     #[test]
     fn a_ported_command_answers_only_with_its_package_rows() {
-        for command in ["clipboard.history", "calendar.events"] {
+        for command in ["clipboard.history", "calendar.events", "dictionary.lookup"] {
             assert!(answers(command, "extension:clipboard-history/0123abcd"));
             assert!(answers(command, "2026-11-24T09:00:00Z/standup"));
             assert!(!answers(command, "unavailable"), "the package is off or missing");

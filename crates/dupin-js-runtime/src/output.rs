@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, MAX_URL_BYTES, is_web_url};
+use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, MAX_URL_BYTES};
 use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ use crate::row::{
     MAX_FILE_BYTES, MAX_ID_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES,
     MAX_MATCH_TEXT_BYTES, MAX_METADATA, MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES, MAX_PAGE_ROWS,
     MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES, MAX_TTL_SECONDS,
-    Metadata, PageChange, Row, RowAction, RowDetail, RowEffect,
+    Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, Source,
 };
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
@@ -90,22 +90,6 @@ const ITEM_FIELDS_HINT: &str =
 const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `aliases`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
 /// Fields only an `items()` catalogue's items take.
 const CATALOGUE_ONLY_FIELDS: [&str; 5] = ["aliases", "keywords", "matchText", "time", "file"];
-
-/// Which export answered, which decides the fields and limits that apply.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Source {
-    Search,
-    Items,
-}
-
-impl Source {
-    fn name(self) -> &'static str {
-        match self {
-            Source::Search => "search",
-            Source::Items => "items",
-        }
-    }
-}
 
 pub(crate) struct Reader<'a> {
     pub entry: &'a str,
@@ -638,7 +622,7 @@ impl<'a> Reader<'a> {
         let detail = self.detail(&item, &field("detail"))?;
         let mut actions = Vec::new();
         if let Some(url) = self.string(&item, &field("url"), "url", MAX_URL_BYTES)? {
-            self.web_url(&field("url"), &url)?;
+            self.openable_url(&field("url"), &url)?;
             actions.push(RowAction::new("Open URL", RowEffect::OpenUrl { url }));
         }
         if let Some(text) = self.string(&item, &field("text"), "text", MAX_TEXT_BYTES)? {
@@ -683,12 +667,19 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn web_url(&self, field: &str, url: &str) -> Result<(), Failure> {
-        if is_web_url(url) {
+    fn openable_url(&self, field: &str, url: &str) -> Result<(), Failure> {
+        if row::is_openable(url, self.source) {
             return Ok(());
         }
+        let allowed = match self.source {
+            // A catalogue reaches no host service, so no calendar link reached it.
+            Source::Items => "must be an http or https URL with a host, or a dict:// URL",
+            Source::Search => {
+                "must be an http or https URL with a host, a dict:// URL, or a calendar event's `link`"
+            }
+        };
         Err(self
-            .invalid("invalid-url", field, "must be an http or https URL with a host")
+            .invalid("invalid-url", field, allowed)
             .hint("Use a full URL such as `https://example.com/`; other schemes can't be opened.")
             .into())
     }
@@ -933,19 +924,7 @@ impl<'a> Reader<'a> {
                     let url = self
                         .string(&action, &field, "open", MAX_URL_BYTES)?
                         .expect("present");
-                    // A catalogue reaches no host service, so no calendar link reached it.
-                    if self.source == Source::Items {
-                        self.web_url(&field, &url)?;
-                    } else if !row::is_openable(&url) {
-                        return Err(self
-                            .invalid(
-                                "invalid-url",
-                                &field,
-                                "must be an http or https URL with a host, or a calendar event's `link`",
-                            )
-                            .hint("Use a full URL such as `https://example.com/`; other schemes can't be opened.")
-                            .into());
-                    }
+                    self.openable_url(&field, &url)?;
                     RowEffect::OpenUrl { url }
                 }
                 "reveal" => {

@@ -6,7 +6,6 @@
 	"file_limit": 200,
 	"file_demotions": ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"],
 	"dictionary_keywords": ["define", "d"],
-	"window_management": false,
 	"calculator": true,
 	"calculator_currency": false,
 	"web_searches": {
