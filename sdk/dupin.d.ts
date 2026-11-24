@@ -383,9 +383,45 @@ declare module 'dupin' {
 		writeText(text: string): Promise<void>;
 	};
 
+	/** One sense: its text, its examples and, one level deep, its sub-senses. */
+	export interface DictionarySense {
+		definition: string;
+		examples: string[];
+		senses: DictionarySense[];
+	}
+
+	/** The senses under one part of speech, or under none before the first. */
+	export interface DictionaryGroup {
+		partOfSpeech: string | null;
+		/** What comes before the numbered senses, such as inflections. */
+		note: string | null;
+		senses: DictionarySense[];
+	}
+
+	/** A labeled part such as Phrases or Origin, as plain text, one paragraph or item a line. */
+	export interface DictionarySection {
+		title: string;
+		text: string;
+	}
+
+	/** Each structured text is at most 4 KiB; `truncated` says whether anything was cut. */
 	export interface DictionaryEntry {
 		headword: string;
-		[key: string]: unknown;
+		/** The dictionary the entry came from; `null` on macOS, which doesn't say. */
+		dictionary: string | null;
+		pronunciation: string | null;
+		/** The definition as the dictionary wrote it, up to 16 KiB. */
+		text: string;
+		/**
+		 * The entry as Dupin lays it out, up to 32 KiB of Markdown for an item's `detail`: each
+		 * part of speech under a `###` heading with its numbered senses and examples in italics,
+		 * and each labeled part under a `##` heading. The headword and pronunciation are left
+		 * to the item's title and metadata.
+		 */
+		markdown: string;
+		groups: DictionaryGroup[];
+		sections: DictionarySection[];
+		truncated: boolean;
 	}
 
 	/** `dictionary` capability. */

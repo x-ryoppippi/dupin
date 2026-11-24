@@ -392,13 +392,15 @@ Record IDs and blob handles are opaque strings; IDs sort by when the record was 
 
 ### Dictionary
 
-`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. `dictionary.lookup(term)` takes a term of at most 200 characters and returns up to 8 entries, each with the structure Dupin's own `define` view lays out:
+`"dictionary": ["lookup"]` lets an extension look a term up, while you type, in the dictionaries turned on in Dictionary's settings. It needs no macOS permission. `dictionary.lookup(term)` takes a term of at most 200 characters and returns up to 8 entries, each as the dictionary wrote it (`text`), laid out as the bundled [Dictionary](./dictionary.md) shows it (`markdown`, ready for an item's `detail`), and as structure:
 
 ```json
 {
 	"headword": "run",
 	"dictionary": null,
 	"pronunciation": "rʌn",
+	"text": "run | rʌn | verb (runs, running; past ran; past participle run) 1 [no object] move on foot faster than walking: she ran to the station. • (of a machine) operate: the engine runs on diesel. ORIGIN Old English rinnan.",
+	"markdown": "### Verb\n\n\\(runs\\, running\\; past ran\\; past participle run\\)\n\n1. \\[no object\\] move on foot faster than walking: *she ran to the station\\.*\n   - \\(of a machine\\) operate: *the engine runs on diesel\\.*\n\n## Origin\n\nOld English rinnan\\.",
 	"groups": [
 		{
 			"partOfSpeech": "Verb",
@@ -423,7 +425,7 @@ Record IDs and blob handles are opaque strings; IDs sort by when the record was 
 }
 ```
 
-Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, so nothing is lost. An entry keeps at most 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`.
+Text the layout doesn't recognize stays in a sense's `definition` or a group's `note`, and the Markdown as paragraphs, so nothing is lost. An entry keeps up to 16 KiB of `text`, 32 KiB of `markdown`, 32 groups, 64 senses each with 16 examples and one level of sub-senses, and 16 sections, each structured text cut to 4 KiB; `truncated` says whether anything was cut. macOS doesn't say which dictionary an entry came from, so `dictionary` is `null`.
 
 ### Calendar
 
