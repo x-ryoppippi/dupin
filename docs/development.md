@@ -82,11 +82,12 @@ The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` 
 Flake builds keep compiled dependencies in four outputs, one each for the
 release binary, Clippy and the tests, Hawk, whose toolchain differs, and the
 latency binary. A source edit reuses all four; only a manifest or `Cargo.lock`
-change rebuilds them. Every dependency-only output is named with version 0.0.0
-rather than `VERSION`, so a release bump reuses them as well;
-`checks.<system>.dependency-cache-keys` fails if one would not. The two check
-builds leave out debug info, which a failing test does not need to report where
-it panicked.
+change rebuilds them. Hawk's dependency build runs with a fixed configuration,
+so editing `hawk.toml` or `scripts/hawk.nu` reuses it too. Every
+dependency-only output is named with version 0.0.0 rather than `VERSION`, so a
+release bump reuses them as well; `checks.<system>.dependency-cache-keys` fails
+if one would not. The two check builds leave out debug info, which a failing
+test does not need to report where it panicked.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
 builder and its vendor-hash definition; the hash update script evaluates it so

@@ -105,20 +105,31 @@ let
   hawkArgs = baseArgs // {
     pname = "dupin-hawk";
     env = checkEnv;
-    nativeBuildInputs = [
-      pkgs.nushell
-      cargo-hawk
-    ];
-    postPatch = ''
-      cp ${../hawk.toml} hawk.toml
-    '';
-    buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
+    nativeBuildInputs = [ cargo-hawk ];
     doCheck = false;
   };
-  hawkArtifacts = craneLib.buildDepsOnly hawkArgs;
+  # Exclusions and entry points change what Hawk reports, not what it compiles, so the
+  # dependency run leaves out hawk.toml and scripts/hawk.nu, which change with every new crate.
+  hawkDepsConfig = pkgs.writeText "hawk.toml" ''
+    [[production]]
+    package = "dupin"
+    bin = "dupin"
+    reason = "the dependency build"
+  '';
+  hawkArtifacts = craneLib.buildDepsOnly (
+    hawkArgs
+    // {
+      buildPhaseCargoCommand = "cargo-hawk check --manifest-path Cargo.toml --config ${hawkDepsConfig}";
+    }
+  );
   hawk = craneLib.mkCargoDerivation (
     hawkArgs
     // {
+      nativeBuildInputs = hawkArgs.nativeBuildInputs ++ [ pkgs.nushell ];
+      postPatch = ''
+        cp ${../hawk.toml} hawk.toml
+      '';
+      buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
       cargoArtifacts = hawkArtifacts;
       doInstallCargoArtifacts = false;
       installPhaseCommand = "touch $out";
