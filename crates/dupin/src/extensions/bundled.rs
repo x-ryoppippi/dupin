@@ -236,10 +236,13 @@ mod tests {
     #[test]
     fn every_bundled_extension_passes_its_fixtures() {
         dupin_extension_host::skip_inside_a_sandbox!();
-        for (folder, name, _) in packages(&directory().unwrap()) {
-            if !folder.join("fixtures").is_dir() {
-                continue;
-            }
+        let packages = packages(&directory().unwrap());
+        assert!(!packages.is_empty(), "the bundled extensions are found");
+        for (folder, name, _) in packages {
+            assert!(
+                folder.join("fixtures").is_dir(),
+                "{name} has no fixtures for `dupin ext test`"
+            );
             let report = crate::extensions::fixtures::test(&folder, false, &|| false)
                 .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
             assert!(report.passed, "{name}:\n{}", report.text);

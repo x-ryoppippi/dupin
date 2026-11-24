@@ -1,0 +1,77 @@
+{
+	"fixture": 1,
+	"description": "Nothing is listed until a word is typed, and Enter opens the chosen row's page.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "using",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/usage.md"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Search, keywords, actions and the panel",
+						"title": "Using Dupin"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Open URL",
+			"expect": {
+				"effect": {
+					"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/usage.md"
+				}
+			}
+		},
+		{
+			"query": "extensions",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Write, install and eject extensions",
+						"title": "Extensions"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Open URL",
+			"expect": {
+				"effect": {
+					"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/features/extensions.md"
+				}
+			}
+		}
+	]
+}

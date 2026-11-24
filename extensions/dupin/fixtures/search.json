@@ -1,0 +1,110 @@
+{
+	"fixture": 1,
+	"description": "Every word must appear in a row's title or subtitle, in any case and order; a query no row holds lists nothing.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "REPORT",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin/issues/new"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Open an issue on GitHub",
+						"title": "Report a problem"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "default settings",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Every setting and its default",
+						"title": "Settings and config.toml"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "github",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin/issues/new"
+							}
+						],
+						"id": "#0",
+						"subtitle": "Open an issue on GitHub",
+						"title": "Report a problem"
+					},
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://github.com/x-ryoppippi/dupin"
+							}
+						],
+						"id": "#1",
+						"subtitle": "https://github.com/x-ryoppippi/dupin",
+						"title": "Source code"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "dupin.app",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"title": "Open URL",
+								"url": "https://dupin.app"
+							}
+						],
+						"id": "#0",
+						"subtitle": "dupin.app",
+						"title": "Website"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "no such page",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}
