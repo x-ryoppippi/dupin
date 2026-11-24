@@ -31,14 +31,6 @@ const INTERVAL: Duration = Duration::from_millis(500);
 const FILE_URL_TYPE: &str = "public.file-url";
 const URL_TYPE: &str = "public.url";
 const STRING_TYPE: &str = "public.utf8-plain-text";
-/// Image types in the order they are preferred when a copy offers several.
-const IMAGE_TYPES: [&str; 5] = [
-    "public.png",
-    "public.tiff",
-    "public.heic",
-    "public.heif",
-    "public.jpeg",
-];
 /// The largest image read off the pasteboard to convert; an uncompressed 5K TIFF fits.
 const MAX_SOURCE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SOURCE_ID_BYTES: usize = 1024;
@@ -346,7 +338,7 @@ fn read_content(board: &impl Board, limits: &Limits) -> Option<service::Content>
             .string(STRING_TYPE, limits.text_bytes)
             .map(|text| service::Content::Text { text });
     }
-    let kind = IMAGE_TYPES.into_iter().find(|kind| offers(kind))?;
+    let kind = image::TYPES.into_iter().find(|kind| offers(kind))?;
     let data = board.data(kind, MAX_SOURCE_IMAGE_BYTES)?;
     let image = image::to_png(&data, image::MAX_PIXELS, limits.image_bytes)?;
     Some(service::Content::Image {

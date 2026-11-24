@@ -1,17 +1,17 @@
-//! Thumbnails of the images extensions keep, decoded and scaled down with ImageIO, which reads
-//! PNG, TIFF, HEIC, HEIF and JPEG as clipboard history does. Call it off the panel's thread.
+//! Thumbnails of the images extensions keep, decoded and scaled down with ImageIO, which is let
+//! read only the types clipboard history reads. Call it off the panel's thread.
 
 use std::io::Read;
 use std::path::Path;
 
-use objc2_core_foundation::{CFBoolean, CFData, CFDictionary, CFNumber, CFString, CFType};
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFString, CFType};
 use objc2_image_io::{
-    CGImageSource, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
-    kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
-    kCGImageSourceShouldCache, kCGImageSourceThumbnailMaxPixelSize,
+    kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth, kCGImageSourceCreateThumbnailFromImageAlways,
+    kCGImageSourceCreateThumbnailWithTransform, kCGImageSourceShouldCache,
+    kCGImageSourceThumbnailMaxPixelSize,
 };
 
-use crate::clipboard::image::{dimension, encode};
+use crate::clipboard::image::{dimension, encode, source};
 
 /// The largest encoded image read, as large as a copied image clipboard history reads.
 const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
@@ -20,23 +20,16 @@ const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_SOURCE_PIXELS: u64 = 64 * 1024 * 1024;
 
 /// The image in `data` as PNG, scaled down to fit `fit` pixels (width, height), keeping its aspect
-/// ratio and its orientation, never scaled up. `None` when it isn't an image ImageIO decodes, or
-/// is larger than [`MAX_SOURCE_BYTES`] or [`MAX_SOURCE_PIXELS`].
+/// ratio and its orientation, never scaled up. `None` when it isn't a PNG, TIFF, HEIC, HEIF or
+/// JPEG image, or is larger than [`MAX_SOURCE_BYTES`] or [`MAX_SOURCE_PIXELS`].
 pub fn from_bytes(data: &[u8], fit: (u32, u32)) -> Option<Vec<u8>> {
     if data.is_empty() || data.len() > MAX_SOURCE_BYTES || fit.0 == 0 || fit.1 == 0 {
         return None;
     }
-    let no_cache = CFDictionary::<CFString, CFType>::from_slices(
-        &[unsafe { kCGImageSourceShouldCache }],
-        &[CFBoolean::new(false).as_ref()],
-    );
-    // SAFETY: The options dictionary maps ImageIO's keys to CF values of the documented types.
-    let source = unsafe { CGImageSource::with_data(&CFData::from_bytes(data), Some(no_cache.as_opaque())) }?;
-    // SAFETY: As above; index 0 is checked to exist first.
+    let source = source(data)?;
+    // SAFETY: The options dictionaries map ImageIO's keys to CF values of the documented types;
+    // `source` has an image at index 0.
     unsafe {
-        if source.count() == 0 {
-            return None;
-        }
         let properties = source.properties_at_index(0, None)?;
         let properties: &CFDictionary<CFString, CFType> = properties.cast_unchecked();
         let width = dimension(properties, kCGImagePropertyPixelWidth)?;
@@ -134,6 +127,27 @@ mod tests {
 
         let small = encoded(20, 10, "public.jpeg");
         assert_eq!(size(&from_bytes(&small, (64, 64)).unwrap()), (20, 10));
+    }
+
+    #[test]
+    fn only_the_image_types_clipboard_history_reads_reach_a_decoder() {
+        for kind in ["public.png", "public.tiff", "public.heic", "public.jpeg"] {
+            assert!(from_bytes(&encoded(8, 8, kind), (4, 4)).is_some(), "{kind}");
+        }
+        let others = [
+            "com.compuserve.gif",
+            "com.microsoft.bmp",
+            "com.adobe.photoshop-image",
+            "public.jpeg-2000",
+        ];
+        for kind in others {
+            assert!(from_bytes(&encoded(8, 8, kind), (4, 4)).is_none(), "{kind}");
+        }
+
+        let folder = tempfile::tempdir().unwrap();
+        let mislabelled = folder.path().join("a.png");
+        std::fs::write(&mislabelled, encoded(8, 8, "com.compuserve.gif")).unwrap();
+        assert!(from_file(&mislabelled, (4, 4)).is_none());
     }
 
     #[test]

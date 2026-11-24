@@ -229,7 +229,7 @@ interface View {
 }
 
 /** Files Dupin draws as pictures, by their extension. */
-const PICTURE = /\.(png|jpe?g|heic|heif|tiff?|gif|webp|bmp)$/iu;
+const PICTURE = /\.(png|jpe?g|heic|heif|tiff?)$/iu;
 
 function view(record: StoredRecord, copy: Copy): View {
 	switch (copy.kind) {

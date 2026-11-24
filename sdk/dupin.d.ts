@@ -93,10 +93,11 @@ declare module 'dupin' {
 	/**
 	 * An image Dupin draws from what the package keeps, by a handle and never by its bytes: a
 	 * stored blob's `handle`, or a file its clipboard watch delivered, as `{ path, handle }` with
-	 * the handle it came with. Dupin reads it from the package's own storage alone, decodes PNG,
-	 * TIFF, HEIC, HEIF, JPEG and the other formats macOS reads, up to 64 MiB and 64 megapixels,
-	 * and scales it down off the panel's thread, only for the rows in view. While the package
-	 * may not read its storage, or the handle names nothing of its own, the image is left out.
+	 * the handle it came with. Dupin reads it from the package's own storage alone, decodes it
+	 * only when it is PNG, TIFF, HEIC, HEIF or JPEG, up to 64 MiB and 64 megapixels, and scales
+	 * it down off the panel's thread, only for the rows in view. While the package may not read
+	 * its storage, the handle names nothing of its own, or the image is of another format or
+	 * doesn't decode, the image is left out, and a detail keeps no space for it.
 	 */
 	export type HostImage = string | { path: string; handle: string };
 
