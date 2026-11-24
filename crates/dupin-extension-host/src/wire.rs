@@ -108,7 +108,7 @@ impl Preferences {
         Self(Form::Encoded(encoded.into()))
     }
 
-    pub fn into_value(self) -> serde_json::Value {
+    pub(crate) fn into_value(self) -> serde_json::Value {
         match self.0 {
             Form::Decoded(value) => value,
             Form::Encoded(json) => serde_json::from_str(json.get()).expect("encoded from a JSON value"),
