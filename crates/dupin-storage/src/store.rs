@@ -611,7 +611,6 @@ impl Storage {
     }
 }
 
-/// The advisory lock on an open namespace, released when dropped.
 struct NamespaceLock(File);
 
 impl Drop for NamespaceLock {
