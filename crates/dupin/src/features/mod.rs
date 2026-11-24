@@ -26,7 +26,9 @@ pub(super) struct Feature {
     pub start: fn(&mut Providers),
     pub reload: fn(&mut Ui, &Config, &mut ConfiguredCommands) -> bool,
     permissions: &'static [PermissionUse],
-    port: Option<Port>,
+    /// The bundled extension that answers the feature's command, which then never answers a
+    /// keyword of its own.
+    bundled: Option<Bundled>,
 }
 
 impl Feature {
@@ -36,23 +38,25 @@ impl Feature {
         start: |_| {},
         reload: |_, _, _| false,
         permissions: &[],
-        port: None,
+        bundled: None,
     };
 }
 
-/// A built-in that a bundled extension answers. The package called `package` serves the
-/// feature's `command`, under the keywords the feature registers from config.toml and only
-/// while the feature registers it, so the feature's switches and aliases keep working and the
-/// package's own keyword is never used. `title` names the feature when its package isn't on.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Port {
+#[derive(Clone, Copy)]
+pub(super) struct Bundled {
+    /// The package's `name`.
     pub package: &'static str,
+    /// The command the feature registers while it is on.
     pub command: &'static str,
-    pub title: &'static str,
 }
 
-pub(crate) fn ports() -> impl Iterator<Item = &'static Port> {
-    MANIFEST.iter().filter_map(|feature| feature.port.as_ref())
+/// The built-in command the extension called `package` answers, if a feature ships as it.
+pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.package == package)
+        .map(|bundled| bundled.command)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -42,7 +42,7 @@ fn with_host(source: &str, query: &str, bridge: &mut Fixture) -> Result<Vec<Row>
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
-        .search_with(query, MAX_ROWS, timeout(DEADLINE), bridge)
+        .search_with(&engine(), query, MAX_ROWS, timeout(DEADLINE), bridge)
 }
 
 fn titles(rows: &[Row]) -> Vec<String> {
@@ -200,8 +200,13 @@ fn a_request_nobody_answers_ends_at_the_deadline_and_cancelling_ends_it_quietly(
         silent: true,
         ..Fixture::default()
     };
-    let diagnostic =
-        failure(package.search_with("", MAX_ROWS, timeout(Duration::from_millis(100)), &mut silent));
+    let diagnostic = failure(package.search_with(
+        &engine(),
+        "",
+        MAX_ROWS,
+        timeout(Duration::from_millis(100)),
+        &mut silent,
+    ));
     assert_eq!(diagnostic.code, "deadline");
     assert!(started.elapsed() < Duration::from_secs(1));
 
@@ -216,7 +221,7 @@ fn a_request_nobody_answers_ends_at_the_deadline_and_cancelling_ends_it_quietly(
         is_cancelled: Box::new(move || cancelled.load(Ordering::Relaxed)),
     };
     assert_eq!(
-        package.search_with("", MAX_ROWS, control, &mut silent),
+        package.search_with(&engine(), "", MAX_ROWS, control, &mut silent),
         Err(RunError::Cancelled)
     );
 }
@@ -282,7 +287,7 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded
         .unwrap()
-        .action(name, data, timeout(DEADLINE), bridge)
+        .action(&engine(), name, data, timeout(DEADLINE), bridge)
         .map(|acted| acted.effect)
 }
 
@@ -335,6 +340,57 @@ fn actions_run_by_name_with_their_data_and_return_an_effect() {
 }
 
 #[test]
+fn items_reaches_host_services_like_search() {
+    let mut bridge = Fixture::default();
+    bridge.replies.insert(
+        "storage.list",
+        r#"{"ok":{"records":[{"id":"r1","createdAt":0,"data":"copied","blobs":[]}],"next":null}}"#.into(),
+    );
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        r#"import { storage } from 'dupin';
+           export async function items() {
+             const { records } = await storage.list({ limit: 10 });
+             return records.map((record) => ({ id: record.id, title: record.data }));
+           }"#,
+    )]);
+    let page = loaded
+        .unwrap()
+        .items(&engine(), None, Reason::Load, timeout(DEADLINE), &mut bridge)
+        .unwrap();
+    let crate::row::PageChange::Reset { rows } = page.change else {
+        panic!("expected the whole catalogue, got {:?}", page.change);
+    };
+    assert_eq!(
+        rows.iter().map(|row| row.title.as_str()).collect::<Vec<_>>(),
+        ["copied"]
+    );
+    assert_eq!(
+        bridge.sent,
+        [("storage.list".to_owned(), serde_json::json!({"limit": 10}))]
+    );
+}
+
+#[test]
+fn an_event_handler_may_invalidate_the_catalogue() {
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        r#"import { items as catalogue } from 'dupin';
+           export function items() { return []; }
+           export const events = { clipboard(change) { if (change.text) catalogue.invalidate(); } };"#,
+    )]);
+    let package = loaded.unwrap();
+    let mut bridge = Fixture::default();
+    let mut handle = |event: &str| {
+        package
+            .event(&engine(), "clipboard", event, timeout(DEADLINE), &mut bridge)
+            .unwrap()
+    };
+    assert!(handle(r#"{"type":"text","text":"hi"}"#).invalidated);
+    assert!(!handle(r#"{"type":"text","text":""}"#).invalidated);
+}
+
+#[test]
 fn event_handlers_receive_a_frozen_event() {
     let mut bridge = Fixture::default();
     bridge.replies.insert(
@@ -349,6 +405,7 @@ fn event_handlers_receive_a_frozen_event() {
     let package = loaded.unwrap();
     package
         .event(
+            &engine(),
             "clipboard",
             r#"{"type":"text","text":"hi"}"#,
             timeout(DEADLINE),
@@ -363,7 +420,7 @@ fn event_handlers_receive_a_frozen_event() {
         )]
     );
     assert_eq!(
-        failure_of(package.event("other", "{}", timeout(DEADLINE), &mut bridge)).code,
+        failure_of(package.event(&engine(), "other", "{}", timeout(DEADLINE), &mut bridge)).code,
         "missing-handler"
     );
 }

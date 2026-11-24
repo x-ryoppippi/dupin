@@ -13,6 +13,10 @@ mod items;
 
 const DEADLINE: Duration = Duration::from_secs(2);
 
+fn engine() -> Engine {
+    Engine::new().unwrap()
+}
+
 fn timeout(timeout: Duration) -> Control {
     Control {
         deadline: Instant::now() + timeout,
@@ -67,11 +71,38 @@ fn run(source: &str, query: &str) -> Result<Vec<Row>, RunError> {
 }
 
 #[test]
+fn an_engine_runs_one_call_and_refuses_a_second() {
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        "export function search() { globalThis.left = (globalThis.left ?? 0) + 1; return [{ title: String(globalThis.left) }]; }",
+    )]);
+    let package = loaded.unwrap();
+    let engine = engine();
+    let mut bridge = Unavailable::default();
+    let rows = package
+        .search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge)
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
+    let refused = failure(package.search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge));
+    assert_eq!(refused.code, "engine-error", "{refused:?}");
+    let rows = package
+        .search_with(
+            &Engine::new().unwrap(),
+            "",
+            MAX_ROWS,
+            timeout(DEADLINE),
+            &mut bridge,
+        )
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
+}
+
+#[test]
 fn the_word_count_example_counts_words_and_copies_the_count() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
     let package = load(&root).unwrap();
     assert_eq!(
-        package.check(timeout(DEADLINE)).unwrap(),
+        package.check(&engine(), timeout(DEADLINE)).unwrap(),
         Exports {
             search: true,
             items: false
@@ -219,7 +250,9 @@ fn deep_recursion_hits_the_stack_limit() {
 fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
     let looping = load(&fixture("startup-loop")).unwrap();
     for result in [
-        looping.check(timeout(Duration::from_millis(100))).map(drop),
+        looping
+            .check(&engine(), timeout(Duration::from_millis(100)))
+            .map(drop),
         looping
             .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
             .map(drop),
@@ -228,7 +261,7 @@ fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
         assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
     }
     let allocating = load(&fixture("startup-allocation")).unwrap();
-    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|_| Vec::new()));
+    let diagnostic = failure(allocating.check(&engine(), timeout(DEADLINE)).map(|_| Vec::new()));
     assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
@@ -789,24 +822,40 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
     assert_ne!(title(None).split('|').next(), Some("1767225600000"));
 }
 
-mod host;
-
 #[test]
-fn items_open_web_urls_and_dictionary_words_only() {
+fn rows_open_web_urls_dictionary_words_and_calendar_event_links_only() {
+    use crate::row::{Source, is_openable};
     for url in [
         "https://example.com/",
         "dict://serendipity",
         "dict://a%20b%2F%23%C3%A9",
     ] {
-        assert!(crate::row::is_openable_url(url), "{url}");
+        assert!(is_openable(url, Source::Search), "{url}");
+        assert!(is_openable(url, Source::Items), "{url}");
+    }
+    for url in [
+        "ical://ekevent/20261123T100000Z/7F3C%3A1?method=show&options=more",
+        "ical://ekevent/shared%2Fmeeting%3F?method=show&options=more",
+    ] {
+        assert!(is_openable(url, Source::Search), "{url}");
+        // A catalogue reaches no host service, so no calendar link reached it.
+        assert!(!is_openable(url, Source::Items), "{url}");
     }
     for url in [
         "dict://",
         "dict://a b",
         "DICT://run",
-        "file:///",
-        "x-apple.systempreferences:",
+        "ical://ekevent/?method=show&options=more",
+        "ical://ekevent/a b?method=show&options=more",
+        "ical://ekevent/a?method=edit",
+        "ical://calendar/a?method=show&options=more",
+        "webcal://example.com/feed.ics",
+        "x-apple.systempreferences:com.apple.preference.security",
+        "file:///etc/passwd",
     ] {
-        assert!(!crate::row::is_openable_url(url), "{url}");
+        assert!(!is_openable(url, Source::Search), "{url}");
+        assert!(!is_openable(url, Source::Items), "{url}");
     }
 }
+
+mod host;

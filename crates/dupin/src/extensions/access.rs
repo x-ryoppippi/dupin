@@ -56,20 +56,36 @@ pub struct Platform {
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service of this Mac; a headless render may still declare a base beside its
-/// own config, and looks words up in fixed definitions, as the bundled Dictionary renders them.
+/// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
+/// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
+/// headless render may still declare a base beside its own config, and one `dupin ext snap`
+/// starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
-    if cfg!(test) || rune::tooling::is_headless() {
+    if cfg!(test) {
+        return Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+    }
+    if rune::tooling::is_headless() {
         let base = base_path()
-            .filter(|_| !cfg!(test))
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|source| Base::parse(&source).ok())
             .unwrap_or_default();
-        let mut services = Services::none();
-        if !cfg!(test) {
-            services.dictionary = fixed_dictionary();
+        if let Some(fixture) = super::fixtures::headless() {
+            return Bridge::new(Broker::new(base, Local::default()), None, fixture.services());
         }
-        return Bridge::new(Broker::new(base, Local::default()), None, services);
+        let services = Services {
+            calendar: Box::new(Calendars(calendar::Calendar::new(
+                dupin_mac::EventStore::fixtures(),
+            ))),
+            dictionary: fixed_dictionary(),
+            ..Services::none()
+        };
+        let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
+        bridge.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+        return bridge;
     }
     let services = Services {
         http: Box::new(HttpService::new(HttpConfig {
@@ -99,9 +115,9 @@ pub fn open(platform: Platform) -> Bridge {
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
             dupin_mac::SystemDictionary::default(),
         ))),
-        calendar: Box::new(Calendars(calendar::Calendar::new(
-            dupin_mac::CalendarProvider::new(platform.calendar_access),
-        ))),
+        calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
+            platform.calendar_access,
+        )))),
     };
     let bridge = match (base_path(), local_path()) {
         (Some(base), Some(local)) => Bridge::open(&base, &local, services),
@@ -132,6 +148,17 @@ pub fn os_access(permission: OsPermission, calendar: &CalendarAccess) -> OsAcces
     match Permission::of(permission) {
         Permission::Calendars => calendar.status().os_access(),
         row => row.status().os_access(),
+    }
+}
+
+/// Asks macOS to trust Dupin with Accessibility, which pasting for an extension needs, on a
+/// deliberate press. macOS shows its prompt only while it hasn't been asked.
+pub fn request_accessibility() {
+    if cfg!(test) || rune::tooling::is_headless() {
+        return;
+    }
+    if dupin_mac::privacy::Permission::Accessibility.status() == dupin_mac::privacy::Access::NotDetermined {
+        dupin_mac::accessibility::request_once();
     }
 }
 
@@ -197,7 +224,7 @@ struct Dictionaries(dictionary::Dictionary<dupin_mac::SystemDictionary>);
 
 /// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
 /// depend on the dictionaries this Mac has.
-pub(crate) fn fixed_dictionary() -> Box<dyn services::Dictionary> {
+fn fixed_dictionary() -> Box<dyn services::Dictionary> {
     Box::new(Dictionaries(dictionary::Dictionary::new(
         dupin_mac::SystemDictionary::fixtures(),
     )))
@@ -210,7 +237,7 @@ impl services::Dictionary for Dictionaries {
     }
 }
 
-struct Calendars(calendar::Calendar<dupin_mac::CalendarProvider>);
+struct Calendars(calendar::Calendar<dupin_mac::EventStore>);
 
 impl services::Calendar for Calendars {
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure> {
@@ -219,8 +246,18 @@ impl services::Calendar for Calendars {
         Ok((bounds.past_days, bounds.future_days))
     }
 
-    fn events(&self, from: i64, to: i64, limit: usize, scope: &Scope) -> Result<Value, Failure> {
-        let query = calendar::Query::new(from, to, None, None, Some(limit)).map_err(Failure::from)?;
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        order: calendar::Order,
+        scope: &Scope,
+    ) -> Result<Value, Failure> {
+        let query = calendar::Query::new(from, to, None, query, Some(limit))
+            .map_err(Failure::from)?
+            .ordered(order);
         let bounds = calendar::Bounds::of(scope)
             .ok_or_else(|| Failure::new("failed", "the permit isn't for calendars"))?;
         encoded(self.0.events(&query, bounds).map_err(Failure::from)?)

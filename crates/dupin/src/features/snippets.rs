@@ -20,7 +20,7 @@ pub(super) const FEATURE: Feature = Feature {
         enabled: |config| config.snippet_paste,
         request_on_enable: true,
     }],
-    ..Feature::EMPTY
+    bundled: None,
 };
 
 fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {

@@ -83,6 +83,10 @@ pub enum RowEffect {
     Copy {
         text: String,
     },
+    /// Pastes the text into the app in front of Dupin, which copying alone leaves to the user.
+    Paste {
+        text: String,
+    },
     OpenUrl {
         url: String,
     },
@@ -148,11 +152,21 @@ impl Reason {
     }
 }
 
-/// Which rows a check applies to: `keywords` only mean something to a catalogue.
+/// Which export answered, which decides the fields and limits that apply: `keywords` only mean
+/// something to a catalogue.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Search,
     Items,
+}
+
+impl Source {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Source::Search => "search",
+            Source::Items => "items",
+        }
+    }
 }
 
 impl Row {
@@ -206,8 +220,17 @@ impl Row {
                 RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
                     return Err("a copy action's text must be 1 byte to 16 KiB".into());
                 }
-                RowEffect::OpenUrl { url } if !is_openable_url(url) => {
-                    return Err("an open action needs an http, https or dict URL".into());
+                RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_TEXT_BYTES => {
+                    return Err("a paste action's text must be 1 byte to 16 KiB".into());
+                }
+                RowEffect::OpenUrl { url } if !is_openable(url, source) => {
+                    return Err(match source {
+                        Source::Items => "a catalogue's open action needs an http, https or dict URL",
+                        Source::Search => {
+                            "an open action needs an http, https or dict URL, or a calendar event's link"
+                        }
+                    }
+                    .into());
                 }
                 RowEffect::Run { handler, data } => {
                     check_handler(handler)?;
@@ -215,7 +238,7 @@ impl Row {
                         check_data(data)?;
                     }
                 }
-                RowEffect::Copy { .. } | RowEffect::OpenUrl { .. } => {}
+                RowEffect::Copy { .. } | RowEffect::Paste { .. } | RowEffect::OpenUrl { .. } => {}
             }
         }
         Ok(())
@@ -237,7 +260,7 @@ impl Row {
             .map(|action| {
                 action.title.len()
                     + match &action.effect {
-                        RowEffect::Copy { text } => text.len(),
+                        RowEffect::Copy { text } | RowEffect::Paste { text } => text.len(),
                         RowEffect::OpenUrl { url } => url.len(),
                         RowEffect::Run { handler, data } => {
                             handler.len() + data.as_ref().map_or(0, |data| data.to_string().len())
@@ -297,15 +320,6 @@ impl CataloguePage {
     }
 }
 
-/// Whether an item may open `url`: an `http` or `https` URL with a host, or a `dict://` URL,
-/// which only shows a word in Dictionary.
-pub(crate) fn is_openable_url(url: &str) -> bool {
-    is_web_url(url)
-        || (url.len() <= MAX_URL_BYTES
-            && url.strip_prefix("dict://").is_some_and(|word| !word.is_empty())
-            && !url.chars().any(|c| c.is_control() || c.is_whitespace()))
-}
-
 /// A path inside the package, to an image format the launcher draws.
 pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
     let invalid = || {
@@ -333,6 +347,38 @@ pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// What a row may open: a web URL; a `dict://` URL, which only shows a word in Dictionary; or,
+/// outside a catalogue, which reaches no host service, the `link` the calendar service gave an
+/// event, which only shows that event in Calendar.
+pub(crate) fn is_openable(url: &str, source: Source) -> bool {
+    if url.len() > MAX_URL_BYTES {
+        return false;
+    }
+    is_web_url(url) || is_dictionary_url(url) || (source == Source::Search && is_calendar_link(url))
+}
+
+/// Whether `url` only shows a word in Dictionary, which any row may open without a host
+/// service having given it.
+pub fn is_dictionary_url(url: &str) -> bool {
+    url.len() <= MAX_URL_BYTES
+        && url.strip_prefix("dict://").is_some_and(|word| !word.is_empty())
+        && !url.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+fn is_calendar_link(url: &str) -> bool {
+    url.strip_prefix(CALENDAR_LINK)
+        .and_then(|rest| rest.strip_suffix(CALENDAR_LINK_QUERY))
+        .is_some_and(|event| {
+            !event.is_empty()
+                && event
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"%-._~/".contains(&byte))
+        })
+}
+
+const CALENDAR_LINK: &str = "ical://ekevent/";
+const CALENDAR_LINK_QUERY: &str = "?method=show&options=more";
 
 /// The name of an export in the package's `actions` object.
 pub(crate) fn check_handler(handler: &str) -> Result<(), String> {

@@ -1,5 +1,14 @@
 use std/assert
-use ../latency.nu [percentiles resolve typing-script unanswered verdicts]
+use ../latency.nu [
+    PARITY_FLOOR
+    parity-pairs
+    percentiles
+    resolve
+    typing-script
+    unanswered
+    unmeasured
+    verdicts
+]
 
 def result [id: string, implementation: string, p95: float]: nothing -> record {
     {id: $id, implementation: $implementation, p95_ms: $p95}
@@ -20,6 +29,59 @@ def main [] {
     assert equal (verdict (result a native 20.0) (result a native 22.1)) regressed
     assert equal (verdict (result a native 20.0) (result a extension 3.0)) ok
     assert equal (verdict null (result a extension 3.0)) new
+
+    # Parity allows 10% or half a millisecond, which catches Dictionary's port before its call
+    # overhead was cut: its p95 was 2.33 ms at best, against native's recorded 1.38 ms.
+    let parity = {|baseline: record, candidate: record|
+        verdicts [
+            {baseline: $baseline, candidate: $candidate}
+        ] 10.0 $PARITY_FLOOR | get 0.verdict
+    }
+    assert equal (do $parity (result a native 1.38) (result a extension 1.85)) ok
+    assert equal (do $parity (result a native 1.38) (result a extension 2.33)) regressed
+    assert equal (do $parity (result a native 20.0) (result a extension 21.9)) ok
+
+    # A feature with no native implementation is held to its own budget instead.
+    let budgeted = {|p95|
+        result a extension $p95 | insert budget_ms 5.0
+    }
+    assert equal (verdict null (do $budgeted 4.9)) ok
+    assert equal (verdict null (do $budgeted 5.1)) regressed
+
+    # A port is held to its run's native implementation or, once that is deleted, to the one
+    # recorded from the last commit that had it; a recorded scenario must still be measured.
+    let recorded = [
+        (
+            {
+                id: b
+                feature: b
+                commit: "b11a968d0"
+                p95_ms: 1.5
+            }
+            | insert implementation native
+        )
+    ]
+    let run = [
+        (result a native 2.0)
+        (result a extension 2.5)
+        (result b extension 2.4)
+        (result c extension 1.0)
+    ]
+    let pairs = parity-pairs $run $recorded
+    assert equal ($pairs | each { $in.baseline?.implementation? | default none }) [native "native at b11a968" none]
+    assert equal ($pairs | get candidate.id) [a b c]
+    assert equal (verdicts $pairs 10.0 1ms | get verdict) [ok ok new]
+    assert equal (
+        parity-pairs [
+            (result b native 1.0)
+            (result b extension 2.4)
+        ] $recorded
+        | get 0.baseline.p95_ms
+    ) 1.0
+    assert equal (unmeasured $run $recorded) []
+    assert equal (unmeasured [
+        (result a extension 2.5)
+    ] $recorded) [b]
 
     # Every keypress must search the feature's provider; only a pass's last must show its rows.
     let pass = [
@@ -49,7 +111,7 @@ def main [] {
     assert equal (unanswered $typed_over web.keywords 2) 0
 
     # A port answers its built-in's own command, so only the package behind it tells the port
-    # from the stand-in that answers while the package isn't on.
+    # from the row the feature answers with while the package hasn't loaded.
     let ported = [
         {
             searched: [dictionary.lookup]

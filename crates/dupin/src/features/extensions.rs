@@ -1,6 +1,7 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use dupin_core::{CommandId, CommandSpec, Config, QueryEligibility};
+use dupin_core::{CommandId, CommandSpec, Config, Provider, QueryEligibility};
+use dupin_extension_bridge::OsPermission;
 use dupin_host_services::{calendar, clipboard};
 use dupin_mac::privacy::Permission;
 
@@ -27,9 +28,33 @@ pub(super) const FEATURE: Feature = Feature {
             enabled: |config| config.extensions,
             request_on_enable: false,
         },
+        PermissionUse {
+            capability: Capability::Permission(Permission::of(OsPermission::Accessibility)),
+            label: "extensions that paste",
+            enabled: |config| config.extensions,
+            request_on_enable: false,
+        },
     ],
     ..Feature::EMPTY
 };
+
+/// Which provider answers a built-in command that a bundled extension ports: the extension
+/// that runs now, handed in whenever the extensions are registered again.
+#[derive(Default)]
+pub(crate) struct Port(RwLock<Option<Arc<dyn Provider>>>);
+
+impl Port {
+    pub(crate) fn set(&self, provider: Option<Arc<dyn Provider>>) {
+        *self.0.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = provider;
+    }
+
+    pub(crate) fn provider(&self) -> Option<Arc<dyn Provider>> {
+        self.0
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
 
 /// Rows one extension's catalogue adds to the main search.
 const DEFAULT_SEARCH_ROWS: usize = 8;
@@ -61,13 +86,14 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
     };
     // Extensions join the main search after apps, in the order of their folders.
     let mut after = id(APPS);
-    let commands = configured.registry.ids();
     for extension in extensions {
-        if let Some(port) = super::ports().find(|port| port.package == extension.id) {
-            if commands.iter().any(|command| command == port.command) {
+        // A feature that ships as this extension owns its command and keyword, and the
+        // extension answers that command only while the feature is on.
+        if let Some(command) = super::ported_command(&extension.id) {
+            if configured.registry.ids().iter().any(|id| id == command) {
                 added
                     .registered
-                    .push((id(port.command), extension.clone(), Role::Keyword));
+                    .push((id(command), extension.clone(), Role::Keyword));
             }
             continue;
         }

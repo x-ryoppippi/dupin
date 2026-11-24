@@ -23,6 +23,9 @@
 #   package = "snippets"
 #   extensions = "scripts/latency/snippets.extensions"
 #
+# A feature that only an extension has ever answered has nothing native to keep parity with, so
+# its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it.
+#
 # `prefix` is typed in one go and not measured; each character of `typed` is one measured
 # keypress.
 
@@ -30,12 +33,15 @@
 config = "scripts/headless/config/dupin/config.toml"
 provider = "apps.search"
 
-[features.calendar.native]
+# Calendar search is the bundled extension `calendar`, held to the native search it replaced
+# until the native one was removed.
+[features.calendar.extension]
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
+package = "bundled:calendar"
 
-# The bundled Dictionary extension answers Dictionary's own command. The native feature it
-# replaced is gone, so there is nothing left to hold it to parity with.
+# The bundled Dictionary extension answers Dictionary's own command, held to the native feature
+# it replaced as scripts/latency/native-baseline.json recorded it.
 [features.dictionary.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "dictionary.lookup"
@@ -70,6 +76,14 @@ settings = { extensions = true }
 provider = "extension-search.catalogue"
 package = "catalogue"
 extensions = "scripts/latency/catalogue.extensions"
+
+# The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it.
+[features.emoji.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.emoji"
+package = "bundled:emoji"
+budget_ms = 5.0
 
 [[scenarios]]
 id = "search.saf"
@@ -130,3 +144,16 @@ id = "search-catalogue.term"
 feature = "search-catalogue"
 prefix = ""
 typed = "term"
+
+[[scenarios]]
+id = "emoji.thumb"
+feature = "emoji"
+prefix = "emoji "
+typed = "thumb"
+
+# A Japanese keyword, as an input method commits it.
+[[scenarios]]
+id = "emoji.ja"
+feature = "emoji"
+prefix = "emoji "
+typed = "にっこり"

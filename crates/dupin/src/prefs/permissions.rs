@@ -301,6 +301,7 @@ mod tests {
                 (
                     Permission::Accessibility,
                     vec![
+                        "extensions that paste",
                         "focused window display",
                         "selected-text search",
                         "snippet pasting",

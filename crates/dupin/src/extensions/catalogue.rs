@@ -3,6 +3,10 @@
 //! typing matches the rows held here natively. A package revision Dupin reloads starts a new,
 //! empty catalogue with the new [`super::Extension`].
 //!
+//! A catalogue may read the package's storage, files or the network, as a search may, so it
+//! belongs to the broker generation it was asked under: once the package's authority changes,
+//! such as a revoked scope, the rows it held are dropped and asked for again from the start.
+//!
 //! Catalogues live in memory only. Rebuilding one costs a call to the package, and one written
 //! to disk would keep what a package lists, such as clipboard history, past the package's own
 //! say; a package that wants its list to outlast a restart keeps it in its own storage.
@@ -13,8 +17,11 @@ use std::time::{Duration, Instant};
 
 use dupin_core::Batch;
 use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits};
+use dupin_extension_bridge::Generation;
 use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::{CataloguePage, Diagnostic, Reason, Row, RunError};
+
+use super::Role;
 
 /// What one package's catalogue may hold.
 pub const LIMITS: Limits = Limits {
@@ -47,6 +54,9 @@ struct Shared {
     /// Kept outside the lock, so the budget can weigh a catalogue another thread is filling.
     bytes: AtomicUsize,
     used: AtomicU64,
+    /// Counts [`Cached::forget`] calls outside the lock, which a catalogue being filled holds
+    /// for as long as the package takes, so forgetting never waits for it.
+    forgotten: AtomicU64,
 }
 
 struct State {
@@ -55,6 +65,12 @@ struct State {
     expires: Option<Instant>,
     /// Why the package must be asked before the catalogue is used again, if it must.
     due: Option<Reason>,
+    /// The broker generation the rows were asked under.
+    generation: Option<Generation>,
+    /// The [`Shared::forgotten`] count the rows were asked after.
+    forgotten: u64,
+    /// The last ask failed, and nothing has changed since that could make the next one succeed.
+    failed: bool,
 }
 
 impl Default for Cached {
@@ -65,9 +81,13 @@ impl Default for Cached {
                 cursor: None,
                 expires: None,
                 due: Some(Reason::Load),
+                generation: None,
+                forgotten: 0,
+                failed: false,
             }),
             bytes: AtomicUsize::new(0),
             used: AtomicU64::new(0),
+            forgotten: AtomicU64::new(0),
         });
         held()
             .lock()
@@ -78,26 +98,49 @@ impl Default for Cached {
 }
 
 impl Cached {
+    /// Drops what the catalogue holds when it is next used, which then asks for it from the
+    /// start. Rows being asked for right now are dropped at that use too.
+    pub fn forget(&self) {
+        self.shared.forgotten.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// Asks the package again before the next use, with the cursor it last gave.
     pub fn invalidate(&self) {
         let mut state = self.shared.lock();
+        state.failed = false;
         if state.due.is_none() {
             state.due = Some(Reason::Invalidated);
         }
     }
 
     /// The rows for `query`, after asking the package through `fetch` if the catalogue is
-    /// missing, invalidated or expired.
+    /// missing, invalidated, expired, forgotten or held from another `generation` than the one
+    /// `fetch` asks under. The main search doesn't ask again after a failure until one of those
+    /// changes or the keyword's search succeeds, so a package that can't answer it, such as for
+    /// want of consent, costs no call per keystroke.
     pub fn search(
         &self,
         query: &str,
         limit: usize,
         fetch: &mut Fetch<'_>,
         convert: &dyn Convert,
+        generation: Option<Generation>,
+        role: Role,
     ) -> Result<Vec<Batch>, RunError> {
         let mut state = self.shared.lock();
         self.shared.used.store(now_ms(), Ordering::Relaxed);
+        let forgotten = self.shared.forgotten.load(Ordering::Acquire);
+        if state.generation != generation || state.forgotten != forgotten {
+            state.forget();
+            state.generation = generation;
+            state.forgotten = forgotten;
+        }
+        if state.failed && role == Role::DefaultSearch {
+            self.shared.bytes.store(0, Ordering::Relaxed);
+            return Ok(Vec::new());
+        }
         let refreshed = state.refresh(Instant::now(), fetch, convert);
+        state.failed = refreshed.is_err();
         self.shared
             .bytes
             .store(state.catalogue.bytes(), Ordering::Relaxed);
@@ -155,6 +198,7 @@ impl State {
         self.cursor = None;
         self.expires = None;
         self.due = Some(Reason::Load);
+        self.failed = false;
     }
 
     fn refresh(
@@ -329,10 +373,16 @@ mod tests {
             ))
         };
         for query in ["", "s", "sa", "saf"] {
-            cached.search(query, 10, &mut fetch, ENTRY).unwrap();
+            cached
+                .search(query, 10, &mut fetch, ENTRY, None, Role::Keyword)
+                .unwrap();
         }
         assert_eq!(
-            titles(&cached.search("no", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("no", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["Notes"]
         );
         assert_eq!(calls, [(None, Reason::Load)]);
@@ -374,12 +424,20 @@ mod tests {
             })
         };
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["Alpha", "Beta"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["Bravo"]
         );
         assert_eq!(calls.len(), 3);
@@ -407,17 +465,29 @@ mod tests {
         let mut fetch =
             |_: Option<&str>, _| Ok(page(answers.next().expect("asked once per change"), "1", false));
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["First", "Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["Second"]
         );
         cached.invalidate();
         assert_eq!(
-            titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()),
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
             ["Second", "Again"]
         );
     }
@@ -449,12 +519,189 @@ mod tests {
                 )),
             }
         };
-        cached.search("", 10, &mut fetch, ENTRY).unwrap();
+        cached
+            .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .unwrap();
         cached.shared.lock().expires = Some(Instant::now());
-        assert!(cached.search("", 10, &mut fetch, ENTRY).is_err());
+        assert!(
+            cached
+                .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                .is_err()
+        );
         assert_eq!(cached.len(), 0);
-        assert_eq!(titles(&cached.search("", 10, &mut fetch, ENTRY).unwrap()), ["B"]);
+        assert_eq!(
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
+            ["B"]
+        );
         assert_eq!(reasons, [Reason::Load, Reason::Expired, Reason::Load]);
+    }
+
+    #[test]
+    fn the_main_search_asks_a_failed_catalogue_again_only_once_something_changed() {
+        use std::cell::{Cell, RefCell};
+
+        let cached = Cached::default();
+        let calls = RefCell::new(Vec::new());
+        let failing = Cell::new(true);
+        let ask = |role| {
+            let mut fetch = |_: Option<&str>, reason| {
+                calls.borrow_mut().push(reason);
+                if failing.get() {
+                    Err(RunError::Failed(Diagnostic::new("items-threw", "needs-consent")))
+                } else {
+                    Ok(page(
+                        PageChange::Reset {
+                            rows: vec![row("a", "Allowed")],
+                        },
+                        "1",
+                        false,
+                    ))
+                }
+            };
+            cached.search("a", 10, &mut fetch, ENTRY, None, role)
+        };
+        assert!(ask(Role::DefaultSearch).is_err());
+        for _ in 0..3 {
+            assert!(
+                ask(Role::DefaultSearch).unwrap().is_empty(),
+                "held off, not failing again"
+            );
+        }
+        assert_eq!(calls.borrow().len(), 1, "one call, not one per keystroke");
+
+        assert!(
+            ask(Role::Keyword).is_err(),
+            "the keyword still asks, so it can show the failure and any question"
+        );
+        assert_eq!(calls.borrow().len(), 2);
+
+        cached.forget();
+        assert!(
+            ask(Role::DefaultSearch).is_err(),
+            "forgetting, as an access change does, asks again"
+        );
+        assert_eq!(calls.borrow().len(), 3);
+        cached.invalidate();
+        failing.set(false);
+        assert_eq!(titles(&ask(Role::DefaultSearch).unwrap()), ["Allowed"]);
+        assert_eq!(
+            *calls.borrow(),
+            [Reason::Load, Reason::Load, Reason::Load, Reason::Load]
+        );
+    }
+
+    #[test]
+    fn forgetting_never_waits_for_a_catalogue_being_asked_for() {
+        use std::sync::mpsc;
+
+        let cached = Arc::new(Cached::default());
+        let (asked, was_asked) = mpsc::channel();
+        let (answer, answered) = mpsc::channel::<()>();
+        let filling = std::thread::spawn({
+            let cached = cached.clone();
+            move || {
+                let mut fetch = |_: Option<&str>, _| {
+                    asked.send(()).unwrap();
+                    answered.recv().unwrap();
+                    Ok(page(
+                        PageChange::Reset {
+                            rows: vec![row("a", "Before")],
+                        },
+                        "1",
+                        false,
+                    ))
+                };
+                titles(
+                    &cached
+                        .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                        .unwrap(),
+                )
+            }
+        });
+        was_asked.recv().unwrap();
+        cached.forget();
+        answer.send(()).unwrap();
+        assert_eq!(filling.join().unwrap(), ["Before"]);
+
+        let mut reasons = Vec::new();
+        let mut fetch = |_: Option<&str>, reason| {
+            reasons.push(reason);
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("b", "After")],
+                },
+                "2",
+                false,
+            ))
+        };
+        assert_eq!(
+            titles(
+                &cached
+                    .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+                    .unwrap()
+            ),
+            ["After"],
+            "rows asked for before the forget are dropped at the next use"
+        );
+        assert_eq!(reasons, [Reason::Load]);
+    }
+
+    #[test]
+    fn a_catalogue_from_another_generation_is_asked_for_again_from_the_start() {
+        use dupin_extension_bridge::{
+            Base, Bridge, Broker, Capabilities, Local, PackageId, Revision, Services,
+        };
+
+        let bridge = Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+        let id = PackageId::new("clips").unwrap();
+        let capabilities =
+            Capabilities::parse(&serde_json::json!({ "storage": { "quotaBytes": 1024 } })).unwrap();
+        bridge.install(&id, Revision::new("blake3:1").unwrap(), capabilities);
+        bridge.set_enabled(&id, true).unwrap();
+        let before = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        bridge.set_enabled(&id, false).unwrap();
+        let after = bridge
+            .call(&id, dupin_extension_bridge::Trigger::Query)
+            .generation;
+        assert_ne!(before, after);
+
+        let cached = Cached::default();
+        let mut calls = Vec::new();
+        let mut fetch = |cursor: Option<&str>, reason| {
+            calls.push((cursor.map(str::to_owned), reason));
+            Ok(page(
+                PageChange::Reset {
+                    rows: vec![row("a", "Copied")],
+                },
+                "1",
+                false,
+            ))
+        };
+        cached
+            .search("", 10, &mut fetch, ENTRY, before, Role::Keyword)
+            .unwrap();
+        cached
+            .search("c", 10, &mut fetch, ENTRY, before, Role::Keyword)
+            .unwrap();
+        cached.invalidate();
+        cached
+            .search("", 10, &mut fetch, ENTRY, after, Role::Keyword)
+            .unwrap();
+        assert_eq!(
+            calls,
+            [(None, Reason::Load), (None, Reason::Load)],
+            "a new generation starts over instead of updating rows asked for under the old one"
+        );
     }
 
     #[test]
@@ -471,13 +718,17 @@ mod tests {
                 false,
             ))
         };
-        let error = cached.search("", 10, &mut fetch, ENTRY).unwrap_err();
+        let error = cached
+            .search("", 10, &mut fetch, ENTRY, None, Role::Keyword)
+            .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "unknown-id"),
             "{error:?}"
         );
         let mut endless = |_: Option<&str>, _| Ok(page(PageChange::Reset { rows: Vec::new() }, "1", true));
-        let error = cached.search("", 10, &mut endless, ENTRY).unwrap_err();
+        let error = cached
+            .search("", 10, &mut endless, ENTRY, None, Role::Keyword)
+            .unwrap_err();
         assert!(
             matches!(&error, RunError::Failed(diagnostic) if diagnostic.code == "too-many-parts"),
             "{error:?}"

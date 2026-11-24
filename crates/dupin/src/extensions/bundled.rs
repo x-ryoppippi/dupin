@@ -249,16 +249,14 @@ mod tests {
     #[test]
     fn every_bundled_extension_passes_its_fixtures() {
         dupin_extension_host::skip_inside_a_sandbox!();
-        let source = directory().unwrap();
-        let mut tested = Vec::new();
-        for (folder, name, _) in packages(&source) {
-            if folder.join("fixtures").is_dir() {
-                let report = crate::extensions::test(&folder, false, &|| false).unwrap();
-                assert!(report.passed, "{}:\n{}", folder.display(), report.text);
-                tested.push(name);
+        for (folder, name, _) in packages(&directory().unwrap()) {
+            if !folder.join("fixtures").is_dir() {
+                continue;
             }
+            let report = crate::extensions::fixtures::test(&folder, false, &|| false)
+                .unwrap_or_else(|diagnostic| panic!("{name}: {diagnostic}"));
+            assert!(report.passed, "{name}:\n{}", report.text);
         }
-        assert!(tested.iter().any(|name| name == "dictionary"), "{tested:?}");
     }
 
     #[test]

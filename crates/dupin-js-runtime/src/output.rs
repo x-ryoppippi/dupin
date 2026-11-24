@@ -12,7 +12,7 @@ use crate::row::{
     MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_METADATA,
     MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES, MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES,
     MAX_TEXT_BYTES, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail,
-    RowEffect,
+    RowEffect, Source,
 };
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
@@ -80,22 +80,6 @@ const ITEM_FIELDS: [&str; 9] = [
 const ITEM_FIELDS_HINT: &str =
     "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
 const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
-
-/// Which export answered, which decides the fields and limits that apply.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Source {
-    Search,
-    Items,
-}
-
-impl Source {
-    fn name(self) -> &'static str {
-        match self {
-            Source::Search => "search",
-            Source::Items => "items",
-        }
-    }
-}
 
 pub(crate) struct Reader<'a> {
     pub entry: &'a str,
@@ -630,15 +614,18 @@ impl<'a> Reader<'a> {
     }
 
     fn openable_url(&self, field: &str, url: &str) -> Result<(), Failure> {
-        if row::is_openable_url(url) {
+        if row::is_openable(url, self.source) {
             return Ok(());
         }
+        let allowed = match self.source {
+            // A catalogue reaches no host service, so no calendar link reached it.
+            Source::Items => "must be an http or https URL with a host, or a dict:// URL",
+            Source::Search => {
+                "must be an http or https URL with a host, a dict:// URL, or a calendar event's `link`"
+            }
+        };
         Err(self
-            .invalid(
-                "invalid-url",
-                field,
-                "must be an http or https URL with a host, or a dict:// URL",
-            )
+            .invalid("invalid-url", field, allowed)
             .hint("Use a full URL such as `https://example.com/`; other schemes can't be opened.")
             .into())
     }
@@ -810,11 +797,11 @@ impl<'a> Reader<'a> {
                 let key = key?;
                 match key.as_str() {
                     "title" | "data" => {}
-                    "copy" | "open" | "run" => kinds.push(key),
+                    "copy" | "paste" | "open" | "run" => kinds.push(key),
                     _ => {
                         return Err(self
                             .invalid("unknown-field", format!("{at}.{key}"), "is not an action field")
-                            .hint("An action takes `title` and one of `copy`, `open` or `run`, with `data` for `run`.")
+                            .hint("An action takes `title` and one of `copy`, `paste`, `open` or `run`, with `data` for `run`.")
                             .into());
                     }
                 }
@@ -827,7 +814,7 @@ impl<'a> Reader<'a> {
                 })?;
             let [kind] = kinds.as_slice() else {
                 return Err(self
-                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `open` or `run`")
+                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open` or `run`")
                     .hint("Give `{ title: \"Open\", open: \"https://…\" }` or `{ title: \"Delete\", run: \"remove\" }`.")
                     .into());
             };
@@ -842,6 +829,11 @@ impl<'a> Reader<'a> {
                 "copy" => RowEffect::Copy {
                     text: self
                         .string(&action, &format!("{at}.copy"), "copy", MAX_TEXT_BYTES)?
+                        .expect("present"),
+                },
+                "paste" => RowEffect::Paste {
+                    text: self
+                        .string(&action, &format!("{at}.paste"), "paste", MAX_TEXT_BYTES)?
                         .expect("present"),
                 },
                 "open" => {

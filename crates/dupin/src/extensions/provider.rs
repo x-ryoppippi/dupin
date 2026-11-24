@@ -6,8 +6,7 @@ use dupin_core::{
     Action, Batch, Detail, ExtensionRequest, Icon, Item, ItemAction, Page, Payload, Provider, ProviderError,
     Request, View,
 };
-use dupin_extension_bridge::{Bridge, ConsentReason, ConsentRequest, PackageId, Trigger};
-use dupin_extension_host::{NoServices, Services};
+use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_js_runtime::RunError;
 use dupin_js_runtime::row::{Row, RowEffect};
 
@@ -86,8 +85,8 @@ impl ExtensionProvider {
 }
 
 /// The rows `extension` answers `query` with under its keyword: what `search` computes for it,
-/// answering its host requests with `services`, then the catalogue's matches, in batches by
-/// section.
+/// then the catalogue's matches, in batches by section. Both answer their host requests through
+/// `call`.
 pub fn answer(
     extension: &Extension,
     query: &str,
@@ -95,17 +94,18 @@ pub fn answer(
     limit: usize,
     deadline: Instant,
     is_cancelled: impl Fn() -> bool + 'static,
-    services: &Arc<dyn Services>,
+    call: &Call,
 ) -> Result<Vec<Batch>, RunError> {
     if page.is_some() {
         return Err(super::views_unsupported());
     }
     let exports = extension.check(deadline)?;
     let mut batches = Vec::new();
-    // Like any keyword command, `search` runs once there is something to search for.
-    if exports.search && !query.trim().is_empty() {
+    // Like any keyword command, `search` runs once there is something to search for, unless
+    // the package has something to show before that.
+    if exports.search && (extension.empty_query || !query.trim().is_empty()) {
         let scored = exports.items;
-        let rows = extension.query(query, None, limit, deadline, is_cancelled, services)?;
+        let rows = extension.query(query, None, limit, deadline, is_cancelled, &call.services)?;
         let rows = rows.into_iter().enumerate().map(|(index, row)| {
             let (mut item, detail, section) = row_item(extension, row, false);
             if scored {
@@ -117,22 +117,24 @@ pub fn answer(
     }
     if exports.items {
         let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
-        batches.extend(extension.catalogue(query, left, deadline)?);
+        batches.extend(extension.catalogue(query, left, deadline, call, Role::Keyword)?);
     }
     Ok(batches)
 }
 
-/// The catalogue's matches for the main search. The package never sees the query.
+/// The catalogue's matches for the main search. The package never sees the query, but loading
+/// its catalogue reaches host services through `call` as it does under the keyword.
 pub fn default_answer(
     extension: &Extension,
     query: &str,
     limit: usize,
     deadline: Instant,
+    call: &Call,
 ) -> Result<Vec<Batch>, RunError> {
     if query.trim().is_empty() || !extension.check(deadline)?.items {
         return Ok(Vec::new());
     }
-    extension.catalogue(query, limit, deadline)
+    extension.catalogue(query, limit, deadline, call, Role::DefaultSearch)
 }
 
 /// Consecutive rows of one section in one batch, each with its detail shown while selected.
@@ -206,7 +208,7 @@ pub(super) fn row_item(
             _ => None,
         })
         .unwrap_or_default();
-    let (mut copy, mut open) = (false, false);
+    let (mut copy, mut paste, mut open) = (false, false, false);
     let actions: Vec<ItemAction> = offered
         .into_iter()
         .enumerate()
@@ -222,6 +224,14 @@ pub(super) fn row_item(
                 RowEffect::Copy { text } => {
                     ItemAction::new(&name(&mut copy, "copy"), &action.title, Action::Copy(text))
                 }
+                RowEffect::Paste { text } => ItemAction::new(
+                    &name(&mut paste, "paste"),
+                    &action.title,
+                    Action::Extension {
+                        extension: extension.id.clone(),
+                        request: ExtensionRequest::Paste { text },
+                    },
+                ),
                 RowEffect::OpenUrl { url } => {
                     ItemAction::new(&name(&mut open, "open"), &action.title, Action::OpenUrl(url))
                 }
@@ -266,49 +276,50 @@ impl Provider for ExtensionProvider {
             return Ok(());
         }
         let deadline = Instant::now() + QUERY_DEADLINE;
-        // Only the keyword runs the guest; the main search matches what the catalogue holds.
-        let access = match self.role {
-            Role::Keyword => self
-                .bridge
-                .as_ref()
-                .map(|bridge| (bridge, &self.extension.package)),
-            Role::DefaultSearch => None,
+        let id = &self.extension.package;
+        // Loading a catalogue is a query too, from either search, with no activation.
+        let call = match &self.bridge {
+            Some(bridge) => bridge.call(id, Trigger::Query),
+            None => Call::none(),
         };
         let answer = match self.role {
             Role::Keyword => {
                 let cancellation = request.cancellation();
-                let (services, generation): (Arc<dyn Services>, _) = match access {
-                    Some((bridge, id)) => {
-                        let call = bridge.call(id, Trigger::Query);
-                        (call.services, call.generation)
-                    }
-                    None => (Arc::new(NoServices), None),
-                };
-                let answer = answer(
+                answer(
                     &self.extension,
                     &request.query,
                     request.page.as_ref(),
                     request.limit,
                     deadline,
                     move || cancellation.is_cancelled(),
-                    &services,
-                );
-                if let Some((bridge, id)) = access
-                    && !bridge.is_current(id, generation)
-                {
-                    emit(Batch::from(vec![self.problem(
-                        "Its access changed while it ran, so its answer was dropped. Type again to retry."
-                            .into(),
-                    )]));
-                    return Ok(());
-                }
-                answer
+                    &call,
+                )
             }
-            Role::DefaultSearch => default_answer(&self.extension, &request.query, request.limit, deadline),
+            Role::DefaultSearch => {
+                default_answer(&self.extension, &request.query, request.limit, deadline, &call)
+            }
         };
+        if let Some(bridge) = &self.bridge
+            && !bridge.is_current(id, call.generation)
+        {
+            // The main search shows everyone's results; a package whose access changed only
+            // drops its own.
+            if self.role == Role::Keyword {
+                emit(Batch::from(vec![self.problem(
+                    "Its access changed while it ran, so its answer was dropped. Type again to retry.".into(),
+                )]));
+            }
+            return Ok(());
+        }
         if request.is_cancelled() || matches!(answer, Err(RunError::Cancelled)) {
             return Ok(());
         }
+        // Only the keyword asks for consent; the main search never shows another package's
+        // questions among its results.
+        let access = match self.role {
+            Role::Keyword => self.bridge.as_ref().map(|bridge| (bridge, id)),
+            Role::DefaultSearch => None,
+        };
         if let Some((bridge, id)) = access {
             let mut asking: Vec<_> = bridge
                 .pending(Some(id))
@@ -370,32 +381,6 @@ fn notice_row(id: String, title: String, subtitle: String, actions: Vec<ItemActi
         primary: None,
         alternate: None,
         actions,
-    }
-}
-
-/// Answers a built-in's command while the bundled package that serves it is off or didn't
-/// load, so the keyword says why instead of searching for ever.
-pub struct PortOff {
-    title: &'static str,
-}
-
-impl PortOff {
-    pub fn new(title: &'static str) -> Self {
-        Self { title }
-    }
-}
-
-impl Provider for PortOff {
-    fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        if request.limit > 0 {
-            emit(vec![notice_row(
-                "port-off".into(),
-                format!("{} isn't on", self.title),
-                "Turn it on, or see why it didn't load, in Settings → Extensions.".into(),
-                Vec::new(),
-            )]);
-        }
-        Ok(())
     }
 }
 
@@ -593,6 +578,24 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_action_asks_for_its_extension_and_a_copy_is_its_payload() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(
+            "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: '🍵' }, { title: 'Copy', copy: '🍵' }] }]; }",
+        );
+        let rows = search(&provider, "tea");
+        assert_eq!(rows[0].primary.as_deref(), Some("paste"));
+        assert_eq!(
+            rows[0].action("paste"),
+            Some(&Action::Extension {
+                extension: provider.extension.id.clone(),
+                request: ExtensionRequest::Paste { text: "🍵".into() },
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::text("🍵"));
+    }
+
+    #[test]
     fn javascript_failures_become_a_visible_error_row_with_the_location() {
         dupin_extension_host::skip_inside_a_sandbox!();
         for (source, subtitle) in [
@@ -602,7 +605,7 @@ mod tests {
             ),
             (
                 "export function search() { return [{ title: 'x', url: 'file:///' }]; }",
-                "main.js: `items[0].url` must be an http or https URL with a host, or a dict:// URL",
+                "main.js: `items[0].url` must be an http or https URL with a host, a dict:// URL, or a calendar event's `link`",
             ),
         ] {
             let (_folder, provider) = javascript(source);
@@ -728,20 +731,5 @@ mod tests {
                 }
             })
         );
-    }
-
-    #[test]
-    fn a_built_in_whose_package_is_off_says_so() {
-        let mut rows = Vec::new();
-        PortOff::new("Dictionary")
-            .search(&Request::detached("serendipity", 1), &mut |items| {
-                rows.extend(items)
-            })
-            .unwrap();
-        let [row] = rows.as_slice() else {
-            panic!("{rows:?}")
-        };
-        assert_eq!(row.display_title(), "Dictionary isn't on");
-        assert_eq!(row.primary, None);
     }
 }

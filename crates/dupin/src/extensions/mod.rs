@@ -23,13 +23,13 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
 use dupin_core::{Batch, Page};
-use dupin_extension_bridge::{Capabilities, PackageId, Revision};
+use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
 use dupin_extension_host::{Compiled, Host, Services};
-use dupin_js_runtime::{Acted, Diagnostic, Exports, Row, RunError, Sources};
+use dupin_js_runtime::{Acted, Diagnostic, Exports, Handled, Row, RunError, Sources};
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
-pub use provider::{ACTION_DEADLINE, ExtensionProvider, PortOff, QUERY_DEADLINE, Role, answer};
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -45,6 +45,8 @@ pub struct Extension {
     pub root: PathBuf,
     /// The package asked for its catalogue to answer the default search too.
     pub default_search: bool,
+    /// The package's `search` answers its keyword before anything is typed.
+    pub empty_query: bool,
     /// What the package exports, once a call has linked it.
     exports: OnceLock<Exports>,
     catalogue: catalogue::Cached,
@@ -120,32 +122,64 @@ impl Extension {
         Ok(acted)
     }
 
-    /// Runs `events[name](event)` for something Dupin watched on the package's behalf.
+    /// Runs `events[name](event)` for something Dupin watched on the package's behalf, and
+    /// asks for the catalogue again if the handler invalidated it.
     pub fn event(
         &self,
         name: &str,
         event: &serde_json::Value,
         deadline: Instant,
         services: &Arc<dyn Services>,
-    ) -> Result<(), RunError> {
-        host().event(&self.compiled, name, event, deadline, &|| false, services)
+    ) -> Result<Handled, RunError> {
+        let handled = host().event(&self.compiled, name, event, deadline, &|| false, services)?;
+        if handled.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(handled)
     }
 
     /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
-    /// holds none or it went stale. Typing never cancels that, since the next keystroke needs
-    /// the same catalogue. Every part of it must arrive before `deadline`, the search's own, so
-    /// a slow catalogue fails with its own diagnostic before the search expires.
-    pub fn catalogue(&self, query: &str, limit: usize, deadline: Instant) -> Result<Vec<Batch>, RunError> {
-        let mut fetch =
-            |cursor: Option<&str>, reason| host().items(&self.compiled, cursor, reason, deadline, &|| false);
+    /// holds none, it went stale or it was made under another generation than `call`'s. Its
+    /// host requests go through `call`, as a search's do. Typing never cancels that, since the
+    /// next keystroke needs the same catalogue. Every part of it must arrive before `deadline`,
+    /// the search's own, so a slow catalogue fails with its own diagnostic before the search
+    /// expires. For the main search, `role` holds off asking again after a failure.
+    pub fn catalogue(
+        &self,
+        query: &str,
+        limit: usize,
+        deadline: Instant,
+        call: &Call,
+        role: Role,
+    ) -> Result<Vec<Batch>, RunError> {
+        let mut fetch = |cursor: Option<&str>, reason| {
+            host().items(
+                &self.compiled,
+                cursor,
+                reason,
+                deadline,
+                &|| false,
+                &call.services,
+            )
+        };
         self.catalogue
-            .search(query, limit, &mut fetch, self)
-            .map_err(|error| match error {
-                RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
-                    RunError::Failed(diagnostic.file(self.compiled.entry()))
-                }
-                error => error,
-            })
+            .search(query, limit, &mut fetch, self, call.generation, role)
+            .map_err(|error| self.located(error))
+    }
+
+    /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
+    pub fn forget_catalogue(&self) {
+        self.catalogue.forget();
+    }
+
+    /// A catalogue's failure, named after the package's entry when nothing else locates it.
+    fn located(&self, error: RunError) -> RunError {
+        match error {
+            RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
+                RunError::Failed(diagnostic.file(self.compiled.entry()))
+            }
+            error => error,
+        }
     }
 }
 
@@ -163,23 +197,36 @@ fn host() -> &'static Host {
 }
 
 /// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
-/// launcher it starts. A launcher with a window never reads it.
+/// launcher it starts, or else the clock of the headless calendar fixtures, so guests see the
+/// same day the fixture events are laid out around. A launcher with a window never reads it.
 fn headless_environment() -> Option<dupin_js_runtime::Environment> {
     if !rune::tooling::is_headless() {
         return None;
     }
-    let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+    let Ok(value) = std::env::var(fixtures::HEADLESS_ENVIRONMENT) else {
+        return Some(dupin_js_runtime::Environment {
+            now: dupin_mac::FIXTURE_CLOCK,
+            seed: 1,
+        });
+    };
     serde_json::from_str::<dupin_js_runtime::Environment>(&value)
         .ok()
         .filter(dupin_js_runtime::Environment::is_valid)
 }
 
-/// Dupin's own executable as the extension host, with nothing inherited it doesn't need.
+/// Dupin's own executable as the extension host, with nothing inherited it doesn't need. A
+/// headless run's guests keep to the calendar fixtures' UTC unless it names a zone.
 fn helper_command() -> std::io::Result<std::process::Command> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.env_clear().current_dir("/");
-    if let Some(zone) = std::env::var_os("TZ") {
-        command.env("TZ", zone);
+    match std::env::var_os("TZ") {
+        Some(zone) => {
+            command.env("TZ", zone);
+        }
+        None if rune::tooling::is_headless() => {
+            command.env("TZ", "UTC");
+        }
+        None => {}
     }
     #[cfg(not(test))]
     command.arg(dupin_extension_host::FLAG);
@@ -390,6 +437,7 @@ fn load_with(
             keyword: manifest.keyword,
             root: folder.to_path_buf(),
             default_search: manifest.default_search,
+            empty_query: manifest.empty_query,
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             package,
@@ -573,6 +621,7 @@ pub(crate) mod tests {
             keyword: keyword.into(),
             root: PathBuf::from("/fixture"),
             default_search: false,
+            empty_query: false,
             exports: OnceLock::new(),
             catalogue: catalogue::Cached::default(),
             revision: Revision::new("blake3:fixture").unwrap(),

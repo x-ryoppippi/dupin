@@ -13,9 +13,12 @@ pub const PACKAGE_JSON: &str = "package.json";
 pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
-const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch` and `capabilities`";
+const DUPIN_KEYS: &str =
+    "`title`, `keyword`, and optionally `main`, `defaultSearch`, `emptyQuery` and `capabilities`";
 const DEFAULT_SEARCH_HINT: &str =
     "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
+const EMPTY_QUERY_HINT: &str =
+    "Set `\"emptyQuery\": true` to have `search` answer before anything is typed, or leave it out.";
 
 pub(super) struct Manifest {
     pub id: String,
@@ -26,6 +29,8 @@ pub(super) struct Manifest {
     pub entry: String,
     /// The package's `items()` catalogue also answers the default search.
     pub default_search: bool,
+    /// `search` answers the keyword before anything is typed.
+    pub empty_query: bool,
     /// The most the package may do; the user grants each scope.
     pub capabilities: dupin_broker::Capabilities,
 }
@@ -135,6 +140,11 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     let required = |object: &Map<String, Value>, key: &str, field_name: &str, hint: &str| {
         string(object, key, field_name, hint)?.ok_or_else(|| field(field_name, "is missing", hint))
     };
+    let flag = |object: &Map<String, Value>, key: &str, hint: &str| match object.get(key) {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(field(&format!("dupin.{key}"), "must be true or false", hint)),
+    };
 
     let Value::Object(dupin) = dupin else {
         return Err(field(
@@ -146,7 +156,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     if let Some(key) = dupin.keys().find(|key| {
         !matches!(
             key.as_str(),
-            "title" | "keyword" | "main" | "defaultSearch" | "capabilities"
+            "title" | "keyword" | "main" | "defaultSearch" | "emptyQuery" | "capabilities"
         )
     }) {
         return Err(field(
@@ -161,17 +171,8 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         version: required(package, "version", "version", VERSION_HINT)?,
         keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
-        default_search: match dupin.get("defaultSearch") {
-            None => false,
-            Some(Value::Bool(value)) => *value,
-            Some(_) => {
-                return Err(field(
-                    "dupin.defaultSearch",
-                    "must be true or false",
-                    DEFAULT_SEARCH_HINT,
-                ));
-            }
-        },
+        default_search: flag(dupin, "defaultSearch", DEFAULT_SEARCH_HINT)?,
+        empty_query: flag(dupin, "emptyQuery", EMPTY_QUERY_HINT)?,
         capabilities: dupin_broker::Capabilities::default(),
     };
     validate(&manifest)?;

@@ -6,15 +6,13 @@ Enter opens the word in Dictionary.app. Right Arrow, Cmd+K or the Actions link o
 
 ## The bundled extension
 
-Dictionary is the [bundled extension](./extensions.md#bundled-extensions) `dictionary`, in TypeScript in the repository's [`extensions/dictionary`](../../extensions/dictionary). It looks each word up with the extension [`dictionary` capability](./extensions.md#dictionary), which reads Dictionary Services and lays the entry out in Dupin, and shows the entry's Markdown as the row's detail. It answers Dictionary's own command, so `dictionary_keywords` choose its keywords and the `keyword` in its `package.json` is never used.
-
-Settings → Extensions lists it with a switch. Turned off, or when it can't load, Dictionary's keywords still reach it and say so instead of searching. To change it, copy it into the extensions folder and edit the copy:
+Dictionary is the [bundled extension](./extensions.md#bundled-extensions) `dictionary`, in TypeScript in the repository's [`extensions/dictionary`](../../extensions/dictionary). It looks each word up with the extension [`dictionary` capability](./extensions.md#dictionary), which reads Dictionary Services and lays the entry out in Dupin, and shows the entry's Markdown as the row's detail. It answers Dictionary's own command, so `dictionary_keywords` choose its keywords, the `keyword` in its `package.json` is never used, and Settings → Extensions doesn't list it separately. If it can't load, Dictionary's keywords say so instead of searching. To change it, copy it into the extensions folder and edit the copy:
 
 ```sh
 dupin ext eject dictionary
 ```
 
-The copy answers Dictionary's keywords while the extensions folder is on. Once it differs from the bundled one, it is a third-party package: it asks you before it looks words up, as any extension that declares `dictionary` does. Its fixtures run with `dupin ext test ~/.config/dupin/extensions/dictionary`.
+While the extensions folder is on, your copy answers Dictionary's keywords in place of the bundled one. Once it differs from the bundled package, it is a third-party extension: the panel asks you to turn it on and to allow it to look words up before it shows any definition. Its fixtures run with `dupin ext test ~/.config/dupin/extensions/dictionary`.
 
 ## Configuration
 

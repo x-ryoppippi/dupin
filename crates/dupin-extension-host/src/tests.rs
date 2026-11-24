@@ -507,7 +507,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         }
     );
     let page = host
-        .items(&package, None, Reason::Load, deadline(), &|| false)
+        .items(&package, None, Reason::Load, deadline(), &|| false, &none())
         .unwrap();
     assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
     let PageChange::Reset { rows } = page.change else {
@@ -515,7 +515,14 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     };
     assert_eq!(rows[0].id, "load");
     let next = host
-        .items(&package, Some("next"), Reason::More, deadline(), &|| false)
+        .items(
+            &package,
+            Some("next"),
+            Reason::More,
+            deadline(),
+            &|| false,
+            &none(),
+        )
         .unwrap();
     assert!(!next.more);
     assert!(
@@ -871,6 +878,131 @@ fn a_helper_inside_another_sandbox_refuses_and_says_why() {
             && stdout.contains("already runs inside another sandbox"),
         "{stdout}"
     );
+}
+
+#[test]
+fn no_guest_state_outlives_its_call_in_the_resident_helper() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let leaky = package(
+        r#"import * as dupin from 'dupin';
+           export function search() {
+             const seen = [
+               typeof globalThis.left,
+               typeof Array.prototype.left,
+               typeof Object.getPrototypeOf(dupin.storage).left,
+               String(Math.random === globalThis.realRandom),
+             ];
+             globalThis.left = 1;
+             Array.prototype.left = 1;
+             Object.getPrototypeOf(dupin.storage).left = 1;
+             globalThis.realRandom = Math.random;
+             return [{ title: seen.join(' ') }];
+           }"#,
+    );
+    let mut pids = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            titles(&search(&host, &leaky, "", Duration::from_secs(5)).unwrap()),
+            ["undefined undefined undefined false"]
+        );
+        pids.push(host.helper_pid().unwrap());
+    }
+    assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
+}
+
+const FORGETFUL_ENV: &str = "DUPIN_EXTENSION_HOST_FORGETFUL";
+
+/// Not a test: a helper that holds no package, so it answers `missing` to every run that names
+/// one without carrying its bytecode. Its rows count those runs.
+#[test]
+fn forgetful_helper_entry() {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::net::UnixStream;
+
+    use wire::{Answer, FromHelper, ToHelper};
+
+    if std::env::var_os(FORGETFUL_ENV).is_none() {
+        return;
+    }
+    // SAFETY: the host starts this process with the socket as standard input.
+    let mut socket = unsafe { UnixStream::from_raw_fd(0) };
+    let hello = FromHelper::Hello {
+        version: wire::VERSION,
+        engine: dupin_js_runtime::engine_version().into(),
+    };
+    wire::write(&mut socket, &hello, &[]).unwrap();
+    let mut named_alone = 0;
+    while let Ok(Some((message, _))) = wire::read::<ToHelper>(&mut socket) {
+        let ToHelper::Run { id, modules, .. } = message else {
+            continue;
+        };
+        let answer = match modules {
+            None => {
+                named_alone += 1;
+                Answer::Missing
+            }
+            Some(_) => Answer::Rows {
+                items: vec![Row {
+                    id: "1".into(),
+                    title: format!("carried after {named_alone} named alone"),
+                    subtitle: String::new(),
+                    keywords: Vec::new(),
+                    icon: None,
+                    section: None,
+                    detail: None,
+                    actions: Vec::new(),
+                }],
+            },
+        };
+        wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).unwrap();
+    }
+    std::process::exit(0);
+}
+
+fn forgetful_host() -> Host {
+    Host::new(Box::new(|| {
+        let mut command = helper_command("tests::forgetful_helper_entry")?;
+        command.env(FORGETFUL_ENV, "1");
+        Ok(command)
+    }))
+}
+
+#[test]
+fn a_package_the_helper_no_longer_holds_is_sent_again() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    let host = forgetful_host();
+    let mut pids = Vec::new();
+    for named_alone in 0..3 {
+        assert_eq!(
+            titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
+            [format!("carried after {named_alone} named alone")]
+        );
+        pids.push(host.helper_pid().unwrap());
+    }
+    assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
+}
+
+#[test]
+fn packages_run_in_turn_past_what_the_helper_holds_are_never_named_alone() {
+    skip_inside_a_sandbox!();
+    // Three packages of 3 MiB of bytecode each, more than the helper holds together.
+    let packages: Vec<_> = (0..3)
+        .map(|n| {
+            package(&format!(
+                "const filler = '{n}{}'; export function search() {{ return [{{ title: filler }}]; }}",
+                "x".repeat(3 * 1024 * 1024)
+            ))
+        })
+        .collect();
+    let host = forgetful_host();
+    for package in packages.iter().cycle().take(9) {
+        assert_eq!(
+            titles(&search(&host, package, "", Duration::from_secs(5)).unwrap()),
+            ["carried after 0 named alone"]
+        );
+    }
 }
 
 mod services;

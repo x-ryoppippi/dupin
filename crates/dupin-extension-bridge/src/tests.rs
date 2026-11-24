@@ -772,6 +772,73 @@ fn calendar_reads_stay_inside_the_declared_window() {
 }
 
 #[test]
+fn a_call_opens_only_the_calendar_links_its_own_reads_returned() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 2 } }),
+        &guest("export const search = () => [];"),
+    );
+    world.enable();
+    world
+        .bridge
+        .set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let link = "ical://ekevent/standup-43200000?method=show&options=more";
+    let read = |call: &Call| -> serde_json::Value {
+        serde_json::from_slice(&call.services.call(
+            "calendar.events",
+            br#"{"from":0,"to":86400000}"#,
+            Instant::now() + Duration::from_secs(1),
+            &Default::default(),
+        ))
+        .unwrap()
+    };
+
+    let refused = world.bridge.call(&world.id, Trigger::Query);
+    assert_eq!(read(&refused)["error"]["code"], "needs-consent");
+    assert!(!refused.services.opens(link));
+
+    world.grant("calendar");
+    let granted = world.bridge.call(&world.id, Trigger::Query);
+    assert_eq!(read(&granted)["ok"]["events"][0]["link"], link);
+    assert!(granted.services.opens(link));
+    assert!(
+        !granted
+            .services
+            .opens("ical://ekevent/other?method=show&options=more")
+    );
+    assert!(!world.bridge.call(&world.id, Trigger::Query).services.opens(link));
+}
+
+#[test]
+fn a_latest_first_calendar_read_reaches_the_service() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 0, "futureDays": 2 } }),
+        &guest("export const search = () => [];"),
+    );
+    world.enable();
+    world.grant("calendar");
+    world
+        .bridge
+        .set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+    let call = world.bridge.call(&world.id, Trigger::Query);
+    let ask = |args: &[u8]| -> serde_json::Value {
+        serde_json::from_slice(&call.services.call(
+            "calendar.events",
+            args,
+            Instant::now() + Duration::from_secs(1),
+            &Default::default(),
+        ))
+        .unwrap()
+    };
+    assert!(ask(br#"{"from":0,"to":86400000,"order":"latest"}"#)["ok"].is_object());
+    assert_eq!(
+        ask(br#"{"from":0,"to":86400000,"order":"newest"}"#)["error"]["code"],
+        "invalid"
+    );
+}
+
+#[test]
 fn dictionary_lookups_return_entries() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let world = world(
@@ -980,5 +1047,61 @@ fn a_declared_base_changed_while_running_applies_its_denials_at_once() {
     assert!(
         notices.lock().unwrap().is_empty(),
         "an unchanged file is not read again"
+    );
+}
+
+#[test]
+fn an_effect_dupin_performs_for_a_package_is_decided_like_its_own_requests() {
+    let bridge = Bridge::new(
+        Broker::new(Base::default(), Local::default()),
+        None,
+        Services::none(),
+    );
+    let id = PackageId::new("emoji").unwrap();
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let declares = |value| Capabilities::parse(&value).unwrap();
+    let _ = bridge.install(&id, revision(), declares(serde_json::json!({})));
+    bridge.set_enabled(&id, true).unwrap();
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "undeclared");
+
+    let _ = bridge.install(
+        &id,
+        revision(),
+        declares(serde_json::json!({ "clipboard": ["paste"] })),
+    );
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "needs-consent");
+    let pending = bridge.pending(Some(&id));
+    assert_eq!(pending[0].key().to_string(), "clipboard:paste");
+    bridge.allow(&id, &revision(), &pending[0].scope, None).unwrap();
+    assert_eq!(
+        bridge.authorize(&id, &paste, Trigger::Query).unwrap_err().code(),
+        "needs-activation"
+    );
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "needs-consent");
+    assert_eq!(
+        bridge.pending(Some(&id))[0].permission,
+        Some(OsPermission::Accessibility)
+    );
+
+    bridge.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let permit = bridge.authorize(&id, &paste, Trigger::Activation).unwrap();
+    assert!(bridge.validate(&permit));
+    bridge
+        .revoke(&id, &ScopeKey::Clipboard(ClipboardAccess::Paste))
+        .unwrap();
+    assert!(
+        !bridge.validate(&permit),
+        "a revocation reaches a paste not yet made"
+    );
+    let missing = PackageId::new("missing").unwrap();
+    assert_eq!(
+        bridge
+            .authorize(&missing, &paste, Trigger::Activation)
+            .unwrap_err()
+            .code(),
+        "not-installed"
     );
 }

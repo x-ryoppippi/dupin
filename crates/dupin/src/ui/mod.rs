@@ -55,6 +55,11 @@ use snippets::SnippetRun;
 enum PendingPaste {
     Snippet(SnippetRun),
     ClipboardEntry(u64),
+    /// An extension row's text, pasted only while the permit to paste for it still holds.
+    Extension {
+        text: String,
+        permit: dupin_extension_bridge::Permit,
+    },
 }
 
 pub struct Windows {
@@ -182,16 +187,11 @@ impl Ui {
         });
         currency.set_enabled(config.calculator && config.calculator_currency);
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
-        let calendar = if rune::tooling::is_headless() {
-            dupin_mac::CalendarProvider::fixtures()
-        } else {
-            dupin_mac::CalendarProvider::new(calendar_access.clone())
-        };
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
             history,
-            calendar,
+            (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
             clipboard.history(),
             currency.calculator(),
         )
@@ -288,7 +288,7 @@ impl Ui {
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
-            extensions: Extensions::new(bridge),
+            extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
             clipboard,

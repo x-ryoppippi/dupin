@@ -62,6 +62,7 @@ pub fn permission_id(permission: OsPermission) -> &'static str {
     match permission {
         OsPermission::Calendars => "calendars",
         OsPermission::Pasteboard => "pasteboard",
+        OsPermission::Accessibility => "accessibility",
     }
 }
 

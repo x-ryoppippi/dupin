@@ -1,15 +1,16 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use dupin_core::{CommandId, ExtensionRequest};
-use dupin_extension_bridge::{Bridge, Notice, ScopeKey, Trigger};
+use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
 use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
-use crate::extensions::packages::Packages;
-use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, PortOff, Role, Watch};
+use crate::extensions::packages::{Kind, Packages};
+use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
+use crate::features::extensions::Port;
 
 /// The bundled extensions, always, and the extensions folder while `extensions = true`; which
 /// of them run; and which own a command and searcher now.
@@ -21,8 +22,9 @@ pub(super) struct Extensions {
     /// change of the user's choices needs another.
     active: Vec<Arc<Extension>>,
     registered: HashMap<CommandId, (Arc<Extension>, Role)>,
-    /// Built-in commands whose bundled package isn't on, answered by a [`PortOff`].
-    off: HashSet<CommandId>,
+    /// The built-in commands bundled extensions answer, which keep their searcher and take
+    /// the extension that runs now.
+    ports: HashMap<CommandId, Arc<Port>>,
     /// Every guest call's host requests go through it.
     pub(super) bridge: Bridge,
 }
@@ -36,14 +38,14 @@ struct Folder {
 }
 
 impl Extensions {
-    pub(super) fn new(bridge: Bridge) -> Self {
+    pub(super) fn new(bridge: Bridge, ports: HashMap<CommandId, Arc<Port>>) -> Self {
         Self {
             bundled: Folder::default(),
             user: Folder::default(),
             packages: Packages::new(bridge.clone()),
             active: Vec::new(),
             registered: HashMap::new(),
-            off: HashSet::new(),
+            ports,
             bridge,
         }
     }
@@ -53,6 +55,18 @@ impl Extensions {
         self.registered
             .get(command)
             .map(|(extension, _)| extension.package.as_str())
+    }
+
+    /// Whether `current` lists `package`'s catalogue: its keyword, or the main search it
+    /// answers too.
+    fn lists_catalogue_of(&self, current: &CommandId, package: &PackageId) -> bool {
+        lists_catalogue_of(
+            self.registered
+                .iter()
+                .map(|(command, (extension, role))| (command, &extension.package, *role)),
+            current,
+            package,
+        )
     }
 
     fn folder(&mut self, origin: Origin) -> &mut Folder {
@@ -147,22 +161,28 @@ impl Ui {
             .into_iter()
             .map(|(id, extension, role)| (id, (extension, role)))
             .collect();
-        let current = self.session.command_id().clone();
-        // A ported built-in's command is registered before its package loads, so a query typed
-        // meanwhile is searched again once a provider answers it.
-        let mut active_changed = registered.get(&current).is_some_and(|(next, _)| {
-            self.extensions
-                .registered
-                .get(&current)
-                .is_none_or(|(current, _)| !Arc::ptr_eq(next, current))
-        });
+        let current = self.session.command_id();
+        let answers = |registered: &HashMap<CommandId, (Arc<Extension>, Role)>| {
+            registered
+                .get(current)
+                .map(|(extension, _)| Arc::as_ptr(extension))
+        };
+        let active_changed = answers(&registered) != answers(&self.extensions.registered)
+            && (self.extensions.registered.contains_key(current)
+                || self.extensions.ports.contains_key(current));
+        let ports = &self.extensions.ports;
         self.extensions.registered.retain(|id, (extension, _)| {
             let keep = registered
                 .get(id)
                 .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
             if !keep {
-                self.searchers.remove(id);
-                self.deadlines.remove(id);
+                match ports.get(id) {
+                    Some(port) => port.set(None),
+                    None => {
+                        self.searchers.remove(id);
+                        self.deadlines.remove(id);
+                    }
+                }
             }
             keep
         });
@@ -175,38 +195,37 @@ impl Ui {
                 role,
                 self.extensions.bridge.clone(),
             );
-            let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
-            self.searchers.insert(id.clone(), searcher);
-            self.extensions.off.remove(&id);
+            match self.extensions.ports.get(&id) {
+                Some(port) => port.set(Some(provider)),
+                None => {
+                    let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
+                    self.searchers.insert(id.clone(), searcher);
+                }
+            }
             self.extensions.registered.insert(id, (extension, role));
         }
-        let commands = registration.registry.ids();
-        for port in crate::features::ports() {
-            let command = CommandId::new(port.command).expect("built-in command IDs are valid");
-            if !commands.iter().any(|id| id == port.command) {
-                if self.extensions.off.remove(&command) {
-                    self.searchers.remove(&command);
-                }
-                continue;
-            }
-            if self.extensions.registered.contains_key(&command) || self.extensions.off.contains(&command) {
-                continue;
-            }
-            let searcher = spawn_searcher(
-                self.me.clone(),
-                command.clone(),
-                Arc::new(PortOff::new(port.title)),
-            );
-            self.searchers.insert(command.clone(), searcher);
-            active_changed |= command == current;
-            self.extensions.off.insert(command);
-        }
         let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
-        let listing = self.extensions.packages.listing(|extension| {
-            routed
-                .iter()
-                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
-        });
+        // A feature's own switch turns its bundled extension on and off, so Settings lists only
+        // a changed copy of one, which runs as third-party code.
+        let listing = self
+            .extensions
+            .packages
+            .listing(|extension| {
+                routed
+                    .iter()
+                    .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+            })
+            .into_iter()
+            .filter(|listed| {
+                !(matches!(listed.kind, Kind::Bundled | Kind::Copy)
+                    && listed
+                        .package
+                        .as_str()
+                        .strip_prefix("bundled:")
+                        .and_then(crate::features::ported_command)
+                        .is_some())
+            })
+            .collect();
         let problems: Vec<_> = self
             .extensions
             .bundled
@@ -242,16 +261,30 @@ impl Ui {
             }
             let (watcher, bridge_for_watch) = (Arc::downgrade(&extension), bridge.clone());
             let id_for_watch = id.clone();
+            let me = self.me.clone();
             bridge.watch_clipboard(id, move |event| {
                 let Some(extension) = watcher.upgrade() else {
                     return;
                 };
                 let call = bridge_for_watch.call(&id_for_watch, Trigger::Background);
                 let deadline = Instant::now() + crate::extensions::QUERY_DEADLINE;
-                if let Err(RunError::Failed(diagnostic)) =
-                    extension.event("clipboard", &event, deadline, &call.services)
-                {
-                    crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                match extension.event("clipboard", &event, deadline, &call.services) {
+                    // Only a search that lists this catalogue runs again: any other would run
+                    // its package's `search` on this package's events.
+                    Ok(handled) if handled.invalidated => {
+                        let id = id_for_watch.clone();
+                        me.update(move |ui, tx| {
+                            let current = ui.session.command_id().clone();
+                            if ui.shown && ui.extensions.lists_catalogue_of(&current, &id) {
+                                let effects = ui.session.refresh();
+                                ui.apply(effects, tx);
+                            }
+                        });
+                    }
+                    Ok(_) | Err(RunError::Cancelled) => {}
+                    Err(RunError::Failed(diagnostic)) => {
+                        crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                    }
                 }
             });
         }
@@ -263,6 +296,13 @@ impl Ui {
     /// extension asked for before.
     pub(crate) fn extension_access_changed(&mut self, notice: Notice, tx: &mut Tx) {
         if let Notice::Changed(id) = &notice {
+            // A grant changes what the catalogue may read even when no authority was lost, so
+            // it is asked for again from the start on its next use.
+            for (extension, _) in self.extensions.registered.values() {
+                if extension.package == *id {
+                    extension.forget_catalogue();
+                }
+            }
             let bridge = &self.extensions.bridge;
             let commands: Vec<_> = self
                 .extensions
@@ -309,9 +349,10 @@ impl Ui {
         let Some(extension) = self.registered_extension(&extension) else {
             return;
         };
-        let ExtensionRequest::Run { action, data } = request else {
-            self.answer_extension_row(None, extension, request, tx);
-            return;
+        let (action, data) = match request {
+            ExtensionRequest::Run { action, data } => (action, data),
+            ExtensionRequest::Paste { text } => return self.run_paste(&extension, text, tx),
+            request => return self.answer_extension_row(None, extension, request, tx),
         };
         let bridge = self.extensions.bridge.clone();
         let me = self.me.clone();
@@ -369,7 +410,7 @@ impl Ui {
                 .find(|request| request.key().to_string() == key)
         };
         let outcome = match request {
-            ExtensionRequest::Run { .. } => return,
+            ExtensionRequest::Run { .. } | ExtensionRequest::Paste { .. } => return,
             ExtensionRequest::Allow { scope, revision } => match pending(&scope) {
                 Some(request) if request.revision.as_str() == revision => bridge
                     .allow(&id, &request.revision, &request.scope, None)
@@ -392,6 +433,10 @@ impl Ui {
                     }
                     Some(dupin_extension_bridge::OsPermission::Pasteboard) => {
                         self.request_clipboard_access();
+                        Ok(String::new())
+                    }
+                    Some(dupin_extension_bridge::OsPermission::Accessibility) => {
+                        crate::extensions::access::request_accessibility();
                         Ok(String::new())
                     }
                     None => Ok(String::new()),
@@ -430,4 +475,51 @@ impl Ui {
             self.answer_extension_row(Some(row), extension, request, tx);
         }
     }
+}
+
+/// Whether `current` lists `package`'s catalogue, given which extension and role each command
+/// routes to: its keyword does, and so does the main search while it answers there.
+fn lists_catalogue_of<'a>(
+    registered: impl IntoIterator<Item = (&'a CommandId, &'a PackageId, Role)>,
+    current: &CommandId,
+    package: &PackageId,
+) -> bool {
+    let main = current.as_str() == crate::features::apps::APPS;
+    registered.into_iter().any(|(command, routed, role)| {
+        routed == package
+            && match role {
+                Role::Keyword => command == current,
+                Role::DefaultSearch => main,
+            }
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn only_a_search_that_lists_the_catalogue_runs_again_for_it() {
+    let command = |id: &str| CommandId::new(id).unwrap();
+    let (clips, web) = (PackageId::new("clips").unwrap(), PackageId::new("web").unwrap());
+    let (clips_keyword, web_keyword, apps) = (
+        command("extension.clips"),
+        command("extension.web"),
+        command(crate::features::apps::APPS),
+    );
+    let clips_search = command("extension-search.clips");
+    let keywords_only = [
+        (&clips_keyword, &clips, Role::Keyword),
+        (&web_keyword, &web, Role::Keyword),
+    ];
+    assert!(lists_catalogue_of(keywords_only, &clips_keyword, &clips));
+    assert!(
+        !lists_catalogue_of(keywords_only, &web_keyword, &clips),
+        "another extension's keyword search never runs on this one's events"
+    );
+    assert!(!lists_catalogue_of(keywords_only, &apps, &clips));
+    let in_main_search = [
+        (&clips_keyword, &clips, Role::Keyword),
+        (&clips_search, &clips, Role::DefaultSearch),
+        (&web_keyword, &web, Role::Keyword),
+    ];
+    assert!(lists_catalogue_of(in_main_search, &apps, &clips));
+    assert!(!lists_catalogue_of(in_main_search, &apps, &web));
 }

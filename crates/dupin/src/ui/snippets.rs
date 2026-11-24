@@ -53,10 +53,15 @@ impl Ui {
     }
 
     fn finish_snippet(&self, text: String, paste: bool, tx: &mut Tx) {
-        if !paste {
+        if paste {
+            self.paste_text(text);
+        } else {
             tx.copy(text);
-            return;
         }
+    }
+
+    /// Pastes `text` into the frontmost app, which must already be in front.
+    pub(super) fn paste_text(&self, text: String) {
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
         let key = dupin_mac::paste::key_code();

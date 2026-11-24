@@ -21,7 +21,7 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 9] = [
+const EXPECTATIONS: [&str; 10] = [
     "rows",
     "selected",
     "effect",
@@ -31,6 +31,7 @@ const EXPECTATIONS: [&str; 9] = [
     "sections",
     "detail",
     "storage",
+    "invalidated",
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -620,10 +621,12 @@ pub fn rows(rows: &[Row]) -> Value {
         .collect()
 }
 
-/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }` or `{ "run": … }`.
+/// What choosing an action does, as `{ "copy": … }`, `{ "paste": … }`, `{ "url": … }` or
+/// `{ "run": … }`.
 pub fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
         RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
+        RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
     };

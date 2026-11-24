@@ -230,6 +230,8 @@ pub enum ClipboardAccess {
     Read,
     Write,
     Watch,
+    /// Pasting a row's text into the app in front of Dupin, which Dupin does by posting ⌘V.
+    Paste,
 }
 
 impl ClipboardAccess {
@@ -238,6 +240,7 @@ impl ClipboardAccess {
             Self::Read => "read",
             Self::Write => "write",
             Self::Watch => "watch",
+            Self::Paste => "paste",
         }
     }
 }
@@ -258,16 +261,19 @@ pub enum OsPermission {
     Calendars,
     /// Reading the general pasteboard without the system's paste prompt.
     Pasteboard,
+    /// Posting key events, such as ⌘V into the front app.
+    Accessibility,
 }
 
 impl OsPermission {
-    pub const ALL: [Self; 2] = [Self::Calendars, Self::Pasteboard];
+    pub const ALL: [Self; 3] = [Self::Calendars, Self::Pasteboard, Self::Accessibility];
 
     /// The name System Settings lists it under.
     pub fn name(self) -> &'static str {
         match self {
             Self::Calendars => "Calendars",
             Self::Pasteboard => "Paste from Other Apps",
+            Self::Accessibility => "Accessibility",
         }
     }
 }
@@ -391,6 +397,9 @@ impl Scope {
             Self::Clipboard {
                 access: ClipboardAccess::Read | ClipboardAccess::Watch,
             } => Some(OsPermission::Pasteboard),
+            Self::Clipboard {
+                access: ClipboardAccess::Paste,
+            } => Some(OsPermission::Accessibility),
             _ => None,
         }
     }
@@ -463,6 +472,7 @@ impl fmt::Display for Scope {
                 ClipboardAccess::Read => f.write_str("read the clipboard"),
                 ClipboardAccess::Write => f.write_str("write to the clipboard"),
                 ClipboardAccess::Watch => f.write_str("see each new clipboard entry"),
+                ClipboardAccess::Paste => f.write_str("paste into the app you were using"),
             },
             Self::Dictionary => f.write_str("look words up in the system dictionaries"),
             Self::Calendar {
@@ -529,6 +539,7 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "read")) => Self::Clipboard(ClipboardAccess::Read),
             Some(("clipboard", "write")) => Self::Clipboard(ClipboardAccess::Write),
             Some(("clipboard", "watch")) => Self::Clipboard(ClipboardAccess::Watch),
+            Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
             Some(_) => return Err(unknown()),
         })
     }

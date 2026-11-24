@@ -78,7 +78,7 @@ let
   latencyArgs = baseArgs // {
     pname = "dupin-latency";
     CARGO_PROFILE = "latency";
-    cargoExtraArgs = "--offline --locked --package dupin --features tooling";
+    cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
   releaseArtifacts = craneLib.buildDepsOnly releaseArgs;

@@ -20,14 +20,7 @@ Dupin then reads `$XDG_CONFIG_HOME/dupin/extensions/` (or `~/.config/dupin/exten
 
 ## Bundled extensions
 
-Some extensions ship inside Dupin and run whether or not the extensions folder is on:
-
-| Extension                                        | Answers                                                                                                   |
-| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| **Dupin** (`dupin`)                              | `help` and Space, then a word: Dupin's documentation, issue tracker, source and website.                  |
-| [**Dictionary**](./dictionary.md) (`dictionary`) | `define` or `d` and Space, then a word: its definition from the dictionaries turned on in Dictionary.app. |
-
-Some built-in features are bundled extensions. Such a package answers the feature's own command, under the keywords its setting gives, such as `dictionary_keywords`, and only while the feature is on; the `keyword` in its `package.json` isn't used. Turned off in Settings → Extensions, or when it can't load, its keywords say so instead of searching.
+Some extensions ship inside Dupin and run whether or not the extensions folder is on. **Dupin** (`help`): type `help` and Space, then a word, for Dupin's documentation, issue tracker, source and website. **Emoji & Symbols** (`emoji`): pick an emoji or symbol by its English or Japanese name ([Emoji & Symbols](./emoji.md)). Some built-in features are bundled extensions too, such as [Calendar search](./calendar.md) and [Dictionary](./dictionary.md): each keeps its own settings as its switch and its keywords, the `keyword` in its `package.json` isn't used, and Settings → Extensions doesn't list it.
 
 | Where                        | What                                                                                                                                                                                                                                  |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -85,35 +78,36 @@ Type `wc two words` to see **2 words**. Enter copies `2`. [`examples/extensions/
 
 The manifest is the `dupin` key of `package.json`, so a package keeps one file for Dupin and its own JavaScript tooling. Dupin reads it as plain JSON before running any code:
 
-| Key                   | Value                                                                                                                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                                                                         |
-| `version`             | Required. 1–32 characters without spaces.                                                                                                                                                |
-| `dupin.title`         | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                                                                                |
-| `dupin.keyword`       | Required. Up to 32 bytes, no spaces.                                                                                                                                                     |
-| `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`. |
-| `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                      |
-| `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                    |
+| Key                   | Value                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                | Required. The extension's id: 1–64 lowercase letters, digits or hyphens, unique among extensions. No npm scopes.                                                                                                     |
+| `version`             | Required. 1–32 characters without spaces.                                                                                                                                                                            |
+| `dupin.title`         | Required. Shown on the keyword chip and in Settings, up to 80 characters.                                                                                                                                            |
+| `dupin.keyword`       | Required. Up to 32 bytes, no spaces.                                                                                                                                                                                 |
+| `dupin.main`          | Optional. The module that exports `search` or `items`: a `.js`, `.mjs`, `.ts`, `.mts` or `.tsx` file inside the folder, such as `dist/index.js` or `src/main.ts`. Defaults to `main.js`.                             |
+| `dupin.defaultSearch` | Optional, `false` unless set. `true` lists the package's [`items()`](#itemsctx) catalogue in the main search too, ranked with apps.                                                                                  |
+| `dupin.emptyQuery`    | Optional, `false` unless set. `true` calls [`search`](#searchquery-ctx) with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed, such as upcoming events. |
+| `dupin.capabilities`  | Optional. What the extension may ask to use; see [Asking for more](#asking-for-more).                                                                                                                                |
 
 Any other key inside `dupin` is an error. Every other key of `package.json`, such as `scripts`, `dependencies` or `devDependencies`, is ignored. A folder whose `package.json` has no `dupin` key is not an extension, and Settings says so. A keyword that another command already uses (`in`, a Dictionary alias, a web search keyword or another extension) is reported in Settings and the extension is skipped; extensions never take a keyword from anything else.
 
 The module exports `search`, `items` or both. Each may be a function or an `async` function:
 
 - **`search(query, ctx)`** answers each query itself, for what has to be computed from the query, such as a calculation or a lookup. It runs on every keystroke.
-- **`items(ctx)`** hands Dupin a catalogue, such as bookmarks or clipboard history. Dupin keeps it and matches it as you type with the same matcher and usage ranking as apps, without running the package. It runs on first use, and again only after its `ttl` or when one of its actions invalidates it.
+- **`items(ctx)`** hands Dupin a catalogue, such as bookmarks or clipboard history. Dupin keeps it and matches it as you type with the same matcher and usage ranking as apps, without running the package. It runs on first use, and again only after its `ttl` or when one of its actions or event handlers invalidates it.
 
 A package with both lists what `search` computes for the query first, then the catalogue's matches.
 
 ### `search(query, ctx)`
 
-`search` receives the text typed after the keyword and a frozen `ctx` whose `limit` is the number of rows Dupin will show. It returns an array of items, or a list: `{ type: "list", items: [...] }`, or `{ sections: [{ title, items }, ...] }` for items under headings (`type` may be left out). Return `[]` for no results. It isn't called before anything is typed.
+`search` receives the text typed after the keyword and a frozen `ctx` whose `limit` is the number of rows Dupin will show. It returns an array of items, or a list: `{ type: "list", items: [...] }`, or `{ sections: [{ title, items }, ...] }` for items under headings (`type` may be left out). Return `[]` for no results. It isn't called before anything is typed, unless the manifest sets `emptyQuery`.
 
 | Item field | Value                                                                                                                                                |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `title`    | Required. One line, up to 512 bytes.                                                                                                                 |
 | `subtitle` | Optional, up to 2,048 bytes.                                                                                                                         |
 | `id`       | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                         |
-| `url`      | Optional. An `http` or `https` URL with a host, or a `dict://` URL that shows a word in Dictionary, up to 2,048 bytes: **Open URL** opens it.        |
+| `url`      | Optional. An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](#calendar), up to 2,048 bytes: **Open URL** opens it.            |
 | `text`     | Optional, up to 16 KiB: **Copy** copies it.                                                                                                          |
 | `icon`     | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file. |
 | `section`  | Optional. The heading the item is listed under, one line up to 128 bytes. Items of a list's `sections` get their section's title.                    |
@@ -151,11 +145,11 @@ Typing `bm` and Space lists the catalogue in its own order, under its sections. 
 
 | List field | Value                                                                                                                                      |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ttl`      | Seconds, 1 to 86,400. Dupin asks again on the first use after they pass. Without it, the catalogue stays until an action invalidates it.   |
+| `ttl`      | Seconds, 1 to 86,400. Dupin asks again on the first use after they pass. Without it, the catalogue stays until it is invalidated.          |
 | `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
 | `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
 
-`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
+`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action or event handler called `items.invalidate()`. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
 
 Instead of the whole catalogue, an answer can change the one Dupin holds, by `id`, so a long and busy list such as clipboard history never sends everything again:
 
@@ -173,11 +167,13 @@ export function items(ctx) {
 
 `append` adds items Dupin doesn't hold after the others, `replace` swaps the items with those IDs in place, and `remove` lists IDs to drop; an ID Dupin doesn't hold is ignored. An update that appends an ID Dupin already holds, or replaces one it doesn't, is refused whole: Dupin shows the failure, drops the catalogue and asks again from the start, with `reason` `"load"` and no cursor. So does any failure of `items`.
 
-Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say. `items` reaches no host service, so it can't read the package's `storage`: a request from it fails with `unavailable`.
+Dupin holds each catalogue in memory, at most 10,000 items and 8 MiB of text, and 24 MiB across all extensions; past that, the least recently used catalogue is dropped and asked for again when next used. Reloading the package, including any edit to its files, starts an empty catalogue. Nothing is written to disk: a catalogue costs one call to rebuild after Dupin starts, and keeping it would leave what a package lists, such as clipboard history, on disk beyond the package's say; a list that must outlast a restart lives in the package's `storage`, which `items` reads.
+
+`items` reaches host services as `search` does. It runs while you type, never because you chose an action, so it may use what you allowed that needs no action of yours (files, GET and HEAD, the dictionary, calendars and `storage`, whose writes and deletes need none either), and anything that needs an action you chose, such as reading the clipboard, fails with `needs-activation`. A request that needs consent shows its question under the keyword. A catalogue belongs to the access it was read under: revoking a scope or turning the extension off drops it, allowing a scope drops it too, and either way the next use asks for it from the start with `reason` `"load"`.
 
 #### The main search
 
-With `"defaultSearch": true` in its manifest, a package's catalogue also answers the main search, after apps and in the order of the extension folders, with up to eight rows ranked by the same matcher. Dupin matches the catalogue it holds, so the package never sees what you type there and `search` is never called for it. A catalogue that fails to load stays out of the main search and shows its failure under its own keyword.
+With `"defaultSearch": true` in its manifest, a package's catalogue also answers the main search, after apps and in the order of the extension folders, with up to eight rows ranked by the same matcher. Dupin matches the catalogue it holds, so the package never sees what you type there and `search` is never called for it. Loading the catalogue from the main search reaches host services as it does under the keyword, but the main search never asks for consent: a catalogue that fails to load, for want of consent or otherwise, stays out of it and shows its failure, and any question, under its own keyword. The main search doesn't ask a failed catalogue again until its access changes, something invalidates it or its keyword loads it, so it costs no call per keystroke.
 
 ### Details
 
@@ -194,11 +190,12 @@ The detail's title is the item's.
 
 An item's `actions` adds up to eight actions, counting the ones `url` and `text` make. Each has a one-line `title` of up to 512 bytes and exactly one of:
 
-| Action | What it does                                                                                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `copy` | Copies the text, 1 byte to 16 KiB.                                                                                                                                                |
-| `open` | Opens the `http`, `https` or `dict://` URL.                                                                                                                                       |
-| `run`  | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. |
+| Action  | What it does                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `copy`  | Copies the text, 1 byte to 16 KiB.                                                                                                                                                                                                            |
+| `paste` | Pastes the text, 1 byte to 16 KiB, into the app in front of Dupin once the panel closes. Only a package that [declares](#clipboard) `"clipboard": ["paste"]`, and that you allow to, may paste; otherwise Dupin copies the text and says why. |
+| `open`  | Opens the `http`, `https` or `dict://` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                        |
+| `run`   | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep.                                                             |
 
 ```js
 import { items as catalogue, storage } from 'dupin';
@@ -223,13 +220,13 @@ export const actions = {
 };
 ```
 
-A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen, empty `ctx`, and may return nothing or `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there asks `items` again, with its cursor and `reason` `"invalidated"`; called anywhere else, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
+A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen, empty `ctx`, and may return nothing or `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
 
 ### What the module can reach
 
 The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`2`), `DupinError`, `items`, whose `invalidate()` an action calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, and only from `search`, actions and events: a request from `items` fails with `unavailable`. Each query, `items` call, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
+There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`2`), `DupinError`, `items`, whose `invalidate()` an action or event handler calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
 ### Events
 
@@ -248,6 +245,32 @@ export const events = {
 
 `change` is frozen and shaped as `clipboard.read()` returns a copy, with text cut to 64 KiB and `truncated: true` when it was. One delivery runs at a time for each package; copies that land meanwhile are coalesced to the newest, so a slow handler never builds a queue. A handler runs in the background: it may read and use `storage`, but anything that needs an action you chose fails with `needs-activation`. Revoking the scope, turning the extension off or macOS withdrawing access stops the deliveries at once.
 
+A handler that calls `items.invalidate()` has Dupin ask `items` again, with its cursor and `reason` `"invalidated"`, and, while the panel lists that catalogue under the keyword or in the main search, search the current query again so the change shows at once. Clipboard history is one catalogue kept this way: each copy is stored, the cursor is the newest record's ID, and `items` sends only the records listed before it, or everything again when it is gone or the catalogue expired, which also drops records storage has since deleted:
+
+```js
+import { items as catalogue, storage } from 'dupin';
+
+const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });
+
+export async function items(ctx) {
+	const { records } = await storage.list({ limit: 200 });
+	const seen = records.findIndex((record) => record.id === ctx.cursor);
+	const cursor = records[0]?.id;
+	if (ctx.reason !== 'invalidated' || seen < 0) {
+		return { items: [...records].reverse().map(row), cursor, ttl: 3600 };
+	}
+	return { type: 'update', append: records.slice(0, seen).reverse().map(row), cursor, ttl: 3600 };
+}
+
+export const events = {
+	async clipboard(change) {
+		if (change.type !== 'text') return;
+		await storage.put({ text: change.text });
+		catalogue.invalidate();
+	},
+};
+```
+
 ### Asking for more
 
 An extension asks for host services by declaring `capabilities` in the `dupin` key of its `package.json`. Dupin checks every request against that declaration, the version you allowed and your choices:
@@ -258,7 +281,7 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 	"files": { "notes": { "kind": "directory", "access": ["read", "list"] } },
 	"exec": { "git-status": { "args": ["status", "--short", "{path}"], "output": true }, "@script:open-in-zed": {} },
 	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
-	"clipboard": ["read", "write", "watch"],
+	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 }
 }
@@ -269,9 +292,9 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 - An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer. Settings → Extensions lists the same requests, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
 - Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
-- While you type, an extension may use what you allowed to read: GET and HEAD, files, storage, the dictionary and calendars. Any other HTTP method, a program or script and reading or writing the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+- While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary and calendars, and its own `storage`, writes included. Any other HTTP method, a program or script and reading, writing or pasting from the clipboard need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 - Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
-- Calendars, and reading or watching the clipboard, also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
+- Calendars, reading or watching the clipboard, and pasting also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
 [Permissions](./permissions.md#extensions) and [Capability broker](../capability-broker.md) have the full rules.
 
@@ -392,7 +415,7 @@ const bytes = await storage.readBlob(record.blobs[0].handle);
 | `delete(id)`, `clear()`   | Delete one record, or all of them. A blob goes with the last record that carries it.                                                                                                                 |
 | `usage()`                 | `{ entries, bytes, quotaBytes, retentionDays }`.                                                                                                                                                     |
 
-Record IDs and blob handles are opaque strings; IDs sort by when the record was stored. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
+Record IDs and blob handles are opaque strings. IDs are random, so they don't sort by when the record was stored; `list` gives that order. The same blob stored twice is kept once and counts once. Writes, reads and deletes all need the grant; none needs an action you chose.
 
 - **Limits.** A record's JSON and its blobs are at most 1 MiB together, with at most 16 blobs; a larger one fails with `too-large`. The package keeps up to 10,000 records and `quotaBytes` (at most 64 MiB) in all. A `put` that doesn't fit fails with `quota-exceeded` and deletes nothing; Dupin checks the room and writes in one step, so writes made at the same time can't pass the quota together. Records older than `retentionDays` (1–3,650) are deleted; without it they stay until the package deletes them. An update that lowers the quota or the retention deletes the oldest records that no longer fit.
 - **Where it lives.** Each package has a [`dupin-storage`](./storage.md) namespace of its own, named by a hash of its package ID and where it was installed from, so no package reads another's data, a native feature's, or that of a bundled package it copies. Everything is sealed with the data key in your Keychain.
@@ -437,7 +460,7 @@ Text the layout doesn't recognize stays in a sense's `definition` or a group's `
 
 ### Calendar
 
-`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, limit })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed:
+`"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }` lets an extension read events that fall within the declared number of whole days before and after today. `calendar.events({ from, to, query, limit, order })` takes a `Date`, an ISO 8601 string or JavaScript milliseconds for each end, with `to` exclusive, and up to 500 events, 100 by default; a range wider than the declared days is `out-of-scope`, not quietly narrowed. With `query`, up to 200 characters, only events whose title or location holds every word of it, in any order and case, come back, so a search sends the extension only what matches:
 
 ```js
 import { calendar } from 'dupin';
@@ -453,7 +476,7 @@ export async function search() {
 }
 ```
 
-Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
+Events come earliest start first, and the limit keeps the earliest. With `order: 'latest'` they come latest start first and the limit keeps the latest, which is what a read of past events wants. `start` and `end` are ISO 8601 in UTC:
 
 ```json
 {
@@ -464,18 +487,25 @@ Events come earliest first, with `start` and `end` as ISO 8601 in UTC:
 	"allDay": false,
 	"calendar": { "name": "Work", "color": "#1badf8" },
 	"location": "Meeting room",
-	"url": null
+	"url": null,
+	"link": "ical://ekevent/20261124T100000Z/7F3C…?method=show&options=more",
+	"labels": {
+		"day": "Tuesday 24 November",
+		"time": "10:00 – 11:00",
+		"dates": "24 Nov, 10:00 – 11:00"
+	}
 }
 ```
 
-`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading also needs macOS Calendars access, which only **Request Access** asks for.
+`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, a title comes as one line of up to 512 bytes, so it fits a row's `title` as it is, and locations and names are cut to 1 KiB. `url` is the event's own link, if its calendar holds one. `link` shows the occurrence in Calendar: give it as an [`open` action](#actions) of the `search` that read it, the only scheme besides `http` and `https` one opens. A link no read in that search returned, or one in an `items()` catalogue, fails the answer with `invalid-url`. The guest has no `Intl`, so `labels` has the event's dates as this Mac's locale and time zone write them: `day` the weekday and date it starts, `time` only its time, or `All day`, when it falls within one day and `null` otherwise, and `dates` its dates and times, each with the year when it isn't this year. Reading also needs macOS Calendars access, which only **Request Access** asks for. The bundled [Calendar search](./calendar.md) is written this way.
 
 ### Clipboard
 
-`"clipboard": ["read", "write", "watch"]` declares each kind of access separately.
+`"clipboard": ["read", "write", "watch", "paste"]` declares each kind of access separately.
 
 - **Read**: `clipboard.read()` returns the current copy when you choose an action, or `null` when the clipboard is empty or the copy is one Dupin never reads; `clipboard.readText()` returns its text, if it is text.
 - **Write**: `clipboard.writeText(text)` puts up to 1 MiB of text on the clipboard when you choose an action.
+- **Paste**: a row's [`paste` action](#actions) puts its text in the app in front of Dupin when you choose it. Dupin presses ⌘V for it, which needs macOS Accessibility access; until both are allowed, choosing it copies the text, shows why, and leaves the request in the panel and Settings. The extension's code never pastes: the action is data, and `clipboard:paste` only lets Dupin carry it out.
 - **Watch**: [`events.clipboard`](#events) receives each new copy, without your choosing anything. Dupin's own clipboard monitor delivers the changes, so the extension never polls, and reads each copy once however many watches there are; at most 16 run at once. Keeping a history is up to the extension, in its own `storage`.
 
 A copy is the most specific form it offers: `{ "type": "files", "files": [{ "path", "name" }] }`, then `{ "type": "url", "url" }`, then an image (`{ "type": "image", "mediaType": "image/png", "data": "<base64>" }`, up to 2 MiB), then `{ "type": "text", "text" }`. Like clipboard history, reads and watches skip copies that password managers mark concealed, transient or auto-generated, copies from the apps clipboard history ignores (`[clipboard] ignored_apps`, followed from the next copy when it changes), and text longer than its `max_entry_bytes`; Dupin checks those markers and apps before it reads the contents. Which app made a copy is only known if Dupin's clipboard monitor saw it land, by the app frontmost then, so while `ignored_apps` lists any app, a read returns `null` for a copy made before the clipboard service started or within the half second before the read. Reading and watching need macOS to let Dupin paste from other apps without asking (**Always Allow**); writing needs no macOS permission.
@@ -612,7 +642,7 @@ FAIL fixtures/search.json
 
 Each difference names the path in the outcome and both values; something the outcome has that the expectation doesn't name is `unexpected`, and something it lacks is `got nothing`. A step that can't run, such as selecting a row the answer doesn't have, stops its fixture. `test` exits non-zero when any fixture fails or can't be read. `--json` prints `{ "package", "passed", "fixtures": [{ "file", "passed", "updated", "steps": [{ "step", "action", "passed", "outcome", "differences", "problem" }] }] }`, and a fixture that can't be read has a `diagnostic` instead of `steps`. `--update` rewrites each fixture whose steps all ran so every step expects what it produced, and passes it; a fixture is rewritten only when that changes it.
 
-`dupin ext snap <dir> <fixture> <output.png> [--step N] [--json]` renders the panel after step `N`, counting from 1, or after the last step. It starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. Activations and events aren't replayed, so the panel is the one the action was chosen from. The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, so two renders of one fixture on one Mac are the same bytes. In the render, host services are unavailable, as in any headless Dupin, except the dictionary, which defines only `run` and `serendipity`, from fixed text. Rendering needs Dupin's headless renderer, which debug builds have and release builds have only with Rune's `tooling` feature; without it, `snap` fails with `render-failed`.
+`dupin ext snap <dir> <fixture> <output.png> [--step N] [--json]` renders the panel after step `N`, counting from 1, or after the last step. It starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. Activations and events aren't replayed, so the panel is the one the action was chosen from; to show what they would have stored, seed `replies.storage` with it. The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, so two renders of one fixture on one Mac are the same bytes. The render answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`.
 
 ### Fixtures
 
@@ -658,14 +688,14 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `theme`           | `"dark"`                       | `snap`'s appearance, `dark` or `light`.                                                                    |
 | `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).            |
 
-| Step                                  | Does                                                                                                                                                                            | Its outcome                                                                 |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `{ "query": "…" }`                    | Types the query after the keyword, replacing the last, and waits for the answer. The first row is selected.                                                                     | `rows`, `selected` when there are rows, and `error` when the search failed. |
-| `{ "select": 2 }`                     | Selects a row, counting from 0.                                                                                                                                                 | `selected`                                                                  |
-| `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`.                               |
-| `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                      | `error` when the handler failed.                                            |
+| Step                                  | Does                                                                                                                                                                            | Its outcome                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `{ "query": "…" }`                    | Types the query after the keyword, replacing the last, and waits for the answer. The first row is selected.                                                                     | `rows`, `selected` when there are rows, and `error` when the search failed.       |
+| `{ "select": 2 }`                     | Selects a row, counting from 0.                                                                                                                                                 | `selected`                                                                        |
+| `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`.                                     |
+| `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                      | `invalidated` when the handler invalidated the catalogue, `error` when it failed. |
 
-Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy` and `open` for a row's first Copy and Open URL, and `action-<index>` for the others. A query step calls `search`; an `items()` catalogue isn't replayed yet. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
+Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `clipboard`, `storage`, `invalidated`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "keywords", "icon", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "markdown", "metadata" }` and each action is `{ "title", "copy" | "paste" | "url" | "run" }`; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy`, `paste` and `open` for a row's first Copy, Paste and Open URL, and `action-<index>` for the others. A query step answers as the keyword does: `search`'s rows for a query that isn't blank, then the `items()` catalogue's matches, ranked by Dupin's own matcher (without usage history, which a fixture doesn't have) and losing their `section` once the query ranks them. The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
 
 `replies` answers host requests in place of this Mac. Every request still goes through the broker, against the scopes `package.json` declares, so an undeclared origin, a method or path out of scope, or a clipboard read while typing fails exactly as in the launcher, before any reply is looked up. A request the fixture has no reply for fails rather than reaching the network, a program or a file of yours.
 
@@ -677,7 +707,7 @@ Any step's outcome also has `clipboard`, the texts the package wrote to the clip
 | `storage`     | The `data` of each record the package's storage holds when the fixture starts, oldest first, stored within its declared quota in a scratch store that ends with the fixture.                                                                                               |
 | `clipboard`   | What a clipboard read returns, such as `{ "type": "text", "text": "…" }`, or `null` for an empty clipboard. Watched copies come as `event` steps.                                                                                                                          |
 | `dictionary`  | Each term's entries, in the [dictionary](#dictionary)'s shape. Any other term fails with `unavailable`.                                                                                                                                                                    |
-| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range. Whole days are counted from `now` in UTC.                                                                                                                     |
+| `calendar`    | The events a read can see, in the [calendar](#calendar)'s shape; a read returns those overlapping its range that match its `query`, in its `order`. Whole days are counted from `now` in UTC.                                                                              |
 | `consent`     | Your decision on each declared scope, named as grant files name it: `"allow"`, `"deny"` (granted, then revoked) or `"pending"` (`needs-consent`). A scope left out is allowed, and macOS access counts as allowed. Naming a scope the package doesn't declare is an error. |
 
 ### Through MCP

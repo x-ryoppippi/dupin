@@ -1,0 +1,122 @@
+{
+	"fixture": 1,
+	"description": "Typing an English name finds the emoji; Copy, Paste and a skin tone each hand over its character.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "thumbs up",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "👍",
+								"title": "Copy"
+							},
+							{
+								"paste": "👍",
+								"title": "Paste"
+							},
+							{
+								"copy": "👍🏻",
+								"title": "Copy 👍🏻 light skin tone"
+							},
+							{
+								"copy": "👍🏼",
+								"title": "Copy 👍🏼 medium-light skin tone"
+							},
+							{
+								"copy": "👍🏽",
+								"title": "Copy 👍🏽 medium skin tone"
+							},
+							{
+								"copy": "👍🏾",
+								"title": "Copy 👍🏾 medium-dark skin tone"
+							},
+							{
+								"copy": "👍🏿",
+								"title": "Copy 👍🏿 dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "👍"
+								},
+								{
+									"label": "Name",
+									"text": "thumbs up"
+								},
+								{
+									"label": "日本語",
+									"text": "サムズアップ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F44D"
+								},
+								{
+									"label": "Keywords",
+									"text": "+1, hand, thumb, up, OK, オーケー, オッケー, グッド, サムズアップ, 上, 手, 親指"
+								}
+							]
+						},
+						"id": "1f44d",
+						"keywords": [
+							"thumbs up",
+							"+1",
+							"hand",
+							"thumb",
+							"up",
+							"OK",
+							"オーケー",
+							"オッケー",
+							"グッド",
+							"サムズアップ",
+							"上",
+							"手",
+							"親指"
+						],
+						"title": "👍 Thumbs up"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy",
+			"expect": {
+				"effect": {
+					"copy": "👍"
+				}
+			}
+		},
+		{
+			"activate": "Paste",
+			"expect": {
+				"effect": {
+					"paste": "👍"
+				}
+			}
+		},
+		{
+			"activate": "Copy 👍🏽 medium skin tone",
+			"expect": {
+				"effect": {
+					"copy": "👍🏽"
+				}
+			}
+		}
+	]
+}

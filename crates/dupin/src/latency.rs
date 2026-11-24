@@ -30,8 +30,8 @@ struct Sample {
     dispatched: Option<Instant>,
     pending: BTreeMap<CommandId, u64>,
     /// The extension package behind each searched provider an extension answers, since a
-    /// built-in's command ID stays the same whether its port or the stand-in for an absent
-    /// port answers it.
+    /// built-in's command ID stays the same whether its port answers it or the feature says
+    /// the port hasn't loaded.
     packages: BTreeMap<String, String>,
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,

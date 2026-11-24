@@ -17,7 +17,7 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 		"@script:open-in-zed": {}
 	},
 	"storage": { "quotaBytes": 1048576, "retentionDays": 30 },
-	"clipboard": ["read", "write", "watch"],
+	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calendar": { "access": ["read"], "pastDays": 1, "futureDays": 30 }
 }
@@ -29,7 +29,7 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 | `files`      | Up to 16 named scopes, each a `file` or `directory` with `read` and, for a directory, `list` access. Writes are rejected until they are designed.                                                                | name              |
 | `exec`       | Up to 16 named profiles, each an argument template whose `{input}` placeholders the exec service fills, or `@script:<name>` targets for the user's script commands. `output` asks to return output to the guest. | profile or script |
 | `storage`    | A quota of 1 byte to 64 MiB and an optional retention of 1–3,650 days.                                                                                                                                           | the capability    |
-| `clipboard`  | `read`, `write` and `watch`.                                                                                                                                                                                     | access            |
+| `clipboard`  | `read`, `write`, `watch` and `paste`, which lets Dupin carry out the package's `paste` row actions.                                                                                                              | access            |
 | `dictionary` | `lookup`.                                                                                                                                                                                                        | the capability    |
 | `calendar`   | `read` within `pastDays` and `futureDays` of today, each 0–366.                                                                                                                                                  | the capability    |
 
@@ -45,7 +45,9 @@ A host service describes the operation as a `Request` and calls `Broker::check(p
 
 When the user grants it, the host passes that revision and scope back to `Broker::consent`. The broker refuses the approval if the package has since moved to another revision or declares the scope differently, so a consent never approves more than the user saw. Settings takes both from `Broker::revision` and `Broker::consents` when it renders the list.
 
-HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads and clipboard writes need an activation. Reads, storage of the package's own data and clipboard watching don't.
+HTTP methods other than GET and HEAD, exec profiles, script targets, clipboard reads, clipboard writes and pastes need an activation. Reads, storage of the package's own data and clipboard watching don't.
+
+An effect the host performs itself on a package's behalf goes through the same check: a row's `paste` action is decided as `Request::Clipboard(Paste)` with the activation that chose it, through `Bridge::authorize`, and the host validates the permit again just before posting ⌘V. Pasting needs macOS Accessibility, so Settings → Permissions lists packages that declare it on that row.
 
 A service acts only within its permit: the HTTP service connects to the permit's origin, and the files service opens paths beneath the permit's binding, so its parsing can't disagree with the broker's. Redirects, resolved addresses and symlinks are still the service's to check.
 
@@ -108,7 +110,7 @@ Calendar reads need macOS Calendars access, and clipboard reads and watching nee
 
 ## OS-backed services
 
-`dupin-host-services` has a service for each OS-backed capability: `dictionary`, `calendar` and `clipboard`. Each defines a narrow backend trait that `dupin-mac` implements (`SystemDictionary`, `CalendarProvider`, which also backs the `cal` search, and `GeneralPasteboard`) and a `Fixture` for tests, validates and bounds its inputs and results, and returns serialisable data or a `ServiceError` whose `code` a guest can branch on. The services read OS access themselves and never prompt: a call while macOS hasn't been asked returns `needs-permission`, which the host can turn into a Request Access row. The calendar service also checks the range against the permit's `Bounds`, and the clipboard service refuses reads and writes without an activation trigger, beside the broker's own checks. Clipboard watches share one subscription to the monitor thread clipboard history uses, read each copy once and deliver on threads of their own, so a guest slow to take a copy never holds up the monitor; reads and watches skip concealed, transient and auto-generated copies, and copies from ignored apps or, while any app is ignored, copies the monitor didn't see land, before reading anything. A clipboard write names files by the handles the `files` service issued, so it can only put entries inside a granted scope on the pasteboard.
+`dupin-host-services` has a service for each OS-backed capability: `dictionary`, `calendar` and `clipboard`. Each defines a narrow backend trait that `dupin-mac` implements (`SystemDictionary`, which backs the bundled Dictionary extension, `EventStore`, which backs the bundled Calendar search extension, and `GeneralPasteboard`) and a `Fixture` for tests, validates and bounds its inputs and results, and returns serialisable data or a `ServiceError` whose `code` a guest can branch on. The services read OS access themselves and never prompt: a call while macOS hasn't been asked returns `needs-permission`, which the host can turn into a Request Access row. The calendar service also checks the range against the permit's `Bounds`, and the clipboard service refuses reads and writes without an activation trigger, beside the broker's own checks. Clipboard watches share one subscription to the monitor thread clipboard history uses, read each copy once and deliver on threads of their own, so a guest slow to take a copy never holds up the monitor; reads and watches skip concealed, transient and auto-generated copies, and copies from ignored apps or, while any app is ignored, copies the monitor didn't see land, before reading anything. A clipboard write names files by the handles the `files` service issued, so it can only put entries inside a granted scope on the pasteboard.
 
 ## The broker bridge
 
