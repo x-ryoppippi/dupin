@@ -112,6 +112,11 @@ declare module 'dupin' {
 		 * `items.invalidate()`.
 		 */
 		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
+		/**
+		 * What the user set for the package. A bundled package that replaces a built-in gets that
+		 * built-in's config.toml settings here; a change asks `items` again with reason `load`.
+		 */
+		readonly preferences: Readonly<Record<string, Json>>;
 	}
 
 	interface CatalogueAnswer {
@@ -146,10 +151,11 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
-	 * user types, asking again only on first use, after `ttl` or when an action or event handler
-	 * invalidates it. At most 10,000 items and 8 MiB of text. It may use host services as
-	 * `search` does: what reads, and `storage` writes too, but nothing that needs an action
-	 * the user chose. With `defaultSearch`, it may run as the user types in the main search.
+	 * user types, asking again only on first use, after `ttl`, when an action or event handler
+	 * invalidates it or when its preferences change. At most 10,000 items and 8 MiB of text. It
+	 * may use host services as `search` does: what reads, and `storage` writes too, but nothing
+	 * that needs an action the user chose. With `defaultSearch`, it may run as the user types in
+	 * the main search.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
 

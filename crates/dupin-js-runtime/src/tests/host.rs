@@ -351,7 +351,13 @@ fn items_reaches_host_services_like_search() {
     )]);
     let page = loaded
         .unwrap()
-        .items(None, Reason::Load, timeout(DEADLINE), &mut bridge)
+        .items(
+            None,
+            Reason::Load,
+            &Preferences::new(),
+            timeout(DEADLINE),
+            &mut bridge,
+        )
         .unwrap();
     let crate::row::PageChange::Reset { rows } = page.change else {
         panic!("expected the whole catalogue, got {:?}", page.change);

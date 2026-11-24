@@ -507,7 +507,17 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
         }
     );
     let page = host
-        .items(&package, None, Reason::Load, deadline(), &|| false, &none())
+        .items(
+            &package,
+            ItemsContext {
+                cursor: None,
+                reason: Reason::Load,
+                preferences: &Default::default(),
+            },
+            deadline(),
+            &|| false,
+            &none(),
+        )
         .unwrap();
     assert_eq!((page.cursor.as_deref(), page.more), (Some("next"), true));
     let PageChange::Reset { rows } = page.change else {
@@ -517,8 +527,11 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     let next = host
         .items(
             &package,
-            Some("next"),
-            Reason::More,
+            ItemsContext {
+                cursor: Some("next"),
+                reason: Reason::More,
+                preferences: &Default::default(),
+            },
             deadline(),
             &|| false,
             &none(),

@@ -14,6 +14,7 @@ mod manifest;
 pub mod packages;
 #[cfg(test)]
 pub(crate) mod parity;
+pub mod preferences;
 mod provider;
 
 use std::collections::HashMap;
@@ -24,8 +25,12 @@ use std::time::{Instant, SystemTime};
 
 use dupin_core::{Batch, Page};
 use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
-use dupin_extension_host::{Compiled, Host, Services};
-use dupin_js_runtime::{Acted, Diagnostic, Exports, Handled, Row, RunError, Sources};
+use dupin_extension_host::{Compiled, Host, ItemsContext, Services};
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
+};
+
+use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
 pub(crate) use provider::is_answered_consent_row;
@@ -139,11 +144,12 @@ impl Extension {
     }
 
     /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
-    /// holds none, it went stale or it was made under another generation than `call`'s. Its
-    /// host requests go through `call`, as a search's do. Typing never cancels that, since the
-    /// next keystroke needs the same catalogue. Every part of it must arrive before `deadline`,
-    /// the search's own, so a slow catalogue fails with its own diagnostic before the search
-    /// expires. For the main search, `role` holds off asking again after a failure.
+    /// holds none, it went stale, its preferences changed or it was made under another
+    /// generation than `call`'s. Its host requests go through `call`, as a search's do. Typing
+    /// never cancels that, since the next keystroke needs the same catalogue. Every part of it
+    /// must arrive before `deadline`, the search's own, so a slow catalogue fails with its own
+    /// diagnostic before the search expires. For the main search, `role` holds off asking again
+    /// after a failure.
     pub fn catalogue(
         &self,
         query: &str,
@@ -152,19 +158,30 @@ impl Extension {
         call: &Call,
         role: Role,
     ) -> Result<Vec<Batch>, RunError> {
-        let mut fetch = |cursor: Option<&str>, reason| {
-            host().items(
-                &self.compiled,
-                cursor,
-                reason,
-                deadline,
-                &|| false,
-                &call.services,
-            )
+        let preferences = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &preferences,
+            generation: call.generation,
+            role,
         };
         self.catalogue
-            .search(query, limit, &mut fetch, self, call.generation, role)
+            .search(query, limit, asking, &mut self.fetch(deadline, call), self)
             .map_err(|error| self.located(error))
+    }
+
+    fn fetch(
+        &self,
+        deadline: Instant,
+        call: &Call,
+    ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
+        move |cursor, reason, preferences| {
+            let asked = ItemsContext {
+                cursor,
+                reason,
+                preferences,
+            };
+            host().items(&self.compiled, asked, deadline, &|| false, &call.services)
+        }
     }
 
     /// Drops the catalogue Dupin holds, so its next use asks for it from the start.

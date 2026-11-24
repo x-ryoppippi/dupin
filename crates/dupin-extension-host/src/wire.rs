@@ -8,12 +8,14 @@
 use std::io::{self, Read, Write};
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Preferences, Reason, Row,
+};
 use serde::{Deserialize, Serialize};
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -62,6 +64,8 @@ pub enum Call {
     Items {
         cursor: Option<String>,
         reason: Reason,
+        #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+        preferences: Preferences,
     },
     /// `actions[name](data)`, which the user chose.
     Action {
@@ -348,6 +352,7 @@ mod tests {
             Call::Items {
                 cursor: Some("c".into()),
                 reason: Reason::Invalidated,
+                preferences: serde_json::json!({ "p": 1 }).as_object().unwrap().clone(),
             },
             Call::Action {
                 name: "run".into(),
@@ -433,7 +438,7 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (6, SHAPES.map(str::to_owned).to_vec()),
+            (7, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
@@ -442,7 +447,7 @@ mod tests {
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated"},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"p":1}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"cancel","id":1}"#,

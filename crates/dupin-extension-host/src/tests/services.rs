@@ -85,8 +85,11 @@ fn a_catalogue_reaches_host_services_as_a_search_does() {
     let page = host
         .items(
             &package,
-            None,
-            Reason::Load,
+            ItemsContext {
+                cursor: None,
+                reason: Reason::Load,
+                preferences: &Default::default(),
+            },
             Instant::now() + Duration::from_secs(5),
             &|| false,
             &services(&fixture),

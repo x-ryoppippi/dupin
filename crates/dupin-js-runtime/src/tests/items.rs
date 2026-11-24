@@ -4,10 +4,23 @@ use super::*;
 use crate::row::{self, PageChange, RowAction, RowEffect};
 
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
+    items_with(source, cursor, reason, &Preferences::new())
+}
+
+fn items_with(
+    source: &str,
+    cursor: Option<&str>,
+    reason: Reason,
+    preferences: &Preferences,
+) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
-    loaded
-        .unwrap()
-        .items(cursor, reason, timeout(DEADLINE), &mut Unavailable::default())
+    loaded.unwrap().items(
+        cursor,
+        reason,
+        preferences,
+        timeout(DEADLINE),
+        &mut Unavailable::default(),
+    )
 }
 
 fn failure_of<T: std::fmt::Debug>(result: Result<T, RunError>) -> Diagnostic {
@@ -32,11 +45,13 @@ fn a_package_may_export_items_search_or_both() {
     }
     let (_folder, loaded) = package(&[("main.js", "export function search() { return []; }")]);
     assert_eq!(
-        failure_of(
-            loaded
-                .unwrap()
-                .items(None, Reason::Load, timeout(DEADLINE), &mut Unavailable::default())
-        )
+        failure_of(loaded.unwrap().items(
+            None,
+            Reason::Load,
+            &Preferences::new(),
+            timeout(DEADLINE),
+            &mut Unavailable::default(),
+        ))
         .code,
         "missing-items"
     );
@@ -341,4 +356,27 @@ fn rows_from_another_process_are_checked_again() {
             .validate(row::Source::Items)
             .is_ok()
     );
+}
+
+#[test]
+fn items_sees_the_preferences_frozen_through_and_through() {
+    let preferences: Preferences =
+        serde_json::from_str(r#"{ "snippets": [{ "keyword": "sig", "text": "Best" }], "paste": true }"#)
+            .unwrap();
+    let source = r#"export function items(ctx) {
+         const [first] = ctx.preferences.snippets;
+         const frozen = Object.isFrozen(ctx.preferences) && Object.isFrozen(ctx.preferences.snippets)
+           && Object.isFrozen(first);
+         return [{ id: first.keyword, title: `${first.text} ${ctx.preferences.paste} ${frozen}` }];
+       }"#;
+    let page = items_with(source, None, Reason::Load, &preferences).unwrap();
+    let PageChange::Reset { rows } = page.change else {
+        panic!("expected the whole catalogue, got {:?}", page.change);
+    };
+    assert_eq!(rows[0].title, "Best true true");
+    let none = "export function items(ctx) { return [{ id: 'a', title: String(Object.keys(ctx.preferences).length) }]; }";
+    let PageChange::Reset { rows } = items(none, None, Reason::Load).unwrap().change else {
+        panic!("expected the whole catalogue");
+    };
+    assert_eq!(rows[0].title, "0");
 }
