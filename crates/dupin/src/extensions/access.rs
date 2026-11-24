@@ -56,8 +56,9 @@ pub struct Platform {
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service but a headless run's fixture calendar, as the built-in Calendar
-/// search reads it; a headless render may still declare a base beside its own config.
+/// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
+/// Calendar search reads it; a headless render may still declare a base beside its own config,
+/// and one `dupin ext snap` starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
     if cfg!(test) {
         return Bridge::new(
@@ -71,6 +72,9 @@ pub fn open(platform: Platform) -> Bridge {
             .and_then(|path| std::fs::read_to_string(path).ok())
             .and_then(|source| Base::parse(&source).ok())
             .unwrap_or_default();
+        if let Some(fixture) = super::fixtures::headless() {
+            return Bridge::new(Broker::new(base, Local::default()), None, fixture.services());
+        }
         let services = Services {
             calendar: Box::new(Calendars(calendar::Calendar::new(
                 dupin_mac::EventStore::fixtures(),

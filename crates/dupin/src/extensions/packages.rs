@@ -74,12 +74,16 @@ impl Packages {
             self.bridge
                 .set_bundled(&extension.package, extension.revision.clone());
         }
+        let fixture = super::fixtures::headless();
         for (_, extension) in self.present() {
             self.bridge.install(
                 &extension.package,
                 extension.revision.clone(),
                 extension.capabilities.clone(),
             );
+            if let Some(fixture) = fixture {
+                fixture.grant(&self.bridge, &extension);
+            }
         }
     }
 

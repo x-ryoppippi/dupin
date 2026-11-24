@@ -335,6 +335,57 @@ fn actions_run_by_name_with_their_data_and_return_an_effect() {
 }
 
 #[test]
+fn items_reaches_host_services_like_search() {
+    let mut bridge = Fixture::default();
+    bridge.replies.insert(
+        "storage.list",
+        r#"{"ok":{"records":[{"id":"r1","createdAt":0,"data":"copied","blobs":[]}],"next":null}}"#.into(),
+    );
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        r#"import { storage } from 'dupin';
+           export async function items() {
+             const { records } = await storage.list({ limit: 10 });
+             return records.map((record) => ({ id: record.id, title: record.data }));
+           }"#,
+    )]);
+    let page = loaded
+        .unwrap()
+        .items(None, Reason::Load, timeout(DEADLINE), &mut bridge)
+        .unwrap();
+    let crate::row::PageChange::Reset { rows } = page.change else {
+        panic!("expected the whole catalogue, got {:?}", page.change);
+    };
+    assert_eq!(
+        rows.iter().map(|row| row.title.as_str()).collect::<Vec<_>>(),
+        ["copied"]
+    );
+    assert_eq!(
+        bridge.sent,
+        [("storage.list".to_owned(), serde_json::json!({"limit": 10}))]
+    );
+}
+
+#[test]
+fn an_event_handler_may_invalidate_the_catalogue() {
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        r#"import { items as catalogue } from 'dupin';
+           export function items() { return []; }
+           export const events = { clipboard(change) { if (change.text) catalogue.invalidate(); } };"#,
+    )]);
+    let package = loaded.unwrap();
+    let mut bridge = Fixture::default();
+    let mut handle = |event: &str| {
+        package
+            .event("clipboard", event, timeout(DEADLINE), &mut bridge)
+            .unwrap()
+    };
+    assert!(handle(r#"{"type":"text","text":"hi"}"#).invalidated);
+    assert!(!handle(r#"{"type":"text","text":""}"#).invalidated);
+}
+
+#[test]
 fn event_handlers_receive_a_frozen_event() {
     let mut bridge = Fixture::default();
     bridge.replies.insert(

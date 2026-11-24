@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
-    Acted, Bridge, CataloguePage, Control, Diagnostic, Environment, Exports, Package, Reply, Row, RunError,
-    Sources,
+    Acted, Bridge, CataloguePage, Control, Diagnostic, Environment, Exports, Handled, Package, Reply, Row,
+    RunError, Sources,
 };
 
 use crate::sandbox;
@@ -107,7 +107,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Ok(Outcome::Rows(items)) => Answer::Rows { items },
             Ok(Outcome::Catalogue(page)) => Answer::Catalogue { page },
             Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
-            Ok(Outcome::Handled) => Answer::Handled,
+            Ok(Outcome::Handled(handled)) => Answer::Handled { handled },
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
@@ -190,7 +190,7 @@ enum Outcome {
     Rows(Vec<Row>),
     Catalogue(CataloguePage),
     Acted(Acted),
-    Handled,
+    Handled(Handled),
 }
 
 fn execute(
@@ -227,13 +227,13 @@ fn execute(
             .search_with(&query, limit as usize, control, bridge)
             .map(Outcome::Rows),
         Call::Items { cursor, reason } => package
-            .items(cursor.as_deref(), reason, control)
+            .items(cursor.as_deref(), reason, control, bridge)
             .map(Outcome::Catalogue),
         Call::Action { name, data } => package
             .action(&name, &data.to_string(), control, bridge)
             .map(Outcome::Acted),
         Call::Event { name, event } => package
             .event(&name, &event.to_string(), control, bridge)
-            .map(|()| Outcome::Handled),
+            .map(Outcome::Handled),
     }
 }

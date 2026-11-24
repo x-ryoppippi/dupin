@@ -96,8 +96,8 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `search` export: answers computed for each query. It runs as the user
-	 * types, so it may only read, and only once something is typed unless the manifest sets
-	 * `emptyQuery`.
+	 * types, so it may only read, and write its own `storage`, and only once something is typed
+	 * unless the manifest sets `emptyQuery`.
 	 */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
 
@@ -107,7 +107,8 @@ declare module 'dupin' {
 		readonly cursor: string | null;
 		/**
 		 * `load` when Dupin holds nothing, `more` after an answer with `more: true`, `expired`
-		 * after its `ttl` and `invalidated` after an action called `items.invalidate()`.
+		 * after its `ttl` and `invalidated` after an action or event handler called
+		 * `items.invalidate()`.
 		 */
 		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
 	}
@@ -144,15 +145,16 @@ declare module 'dupin' {
 
 	/**
 	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
-	 * user types, asking again only on first use, after `ttl` or when an action invalidates it.
-	 * At most 10,000 items and 8 MiB of text. It reaches no host service: a request fails with
-	 * `unavailable`.
+	 * user types, asking again only on first use, after `ttl` or when an action or event handler
+	 * invalidates it. At most 10,000 items and 8 MiB of text. It may use host services as
+	 * `search` does: what reads, and `storage` writes too, but nothing that needs an action
+	 * the user chose. With `defaultSearch`, it may run as the user types in the main search.
 	 */
 	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
 
 	/** The host's catalogue controls. */
 	export const items: {
-		/** From an action handler: ask `items` again, with its cursor, before the next use. */
+		/** From an action or event handler: ask `items` again, with its cursor, before the next use. */
 		invalidate(): void;
 	};
 
@@ -331,7 +333,7 @@ declare module 'dupin' {
 
 	/** A record as `storage` returns it. Dupin freezes it, but not `data`. */
 	export interface StoredRecord {
-		/** Opaque. IDs sort by when the record was stored. */
+		/** Opaque and random; `storage.list` gives the order records were stored in. */
 		readonly id: string;
 		/** ISO 8601, UTC. */
 		readonly createdAt: string;

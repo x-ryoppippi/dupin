@@ -34,7 +34,7 @@ export const apiVersion = 2;
 export const items = Object.freeze({
 	invalidate() {
 		if (typeof invalidate !== 'function' || !invalidate()) {
-			throw new Error('items.invalidate() works only in an action handler');
+			throw new Error('items.invalidate() works only in an action or event handler');
 		}
 	},
 });
@@ -280,7 +280,8 @@ pub(crate) struct Calls {
 pub(crate) type Shared = Rc<RefCell<Calls>>;
 
 /// Installs the native functions the `dupin` module captures. `invalidated` is set when an
-/// action calls `items.invalidate()`; any other call gets `None`, and the guest an error.
+/// action or event handler calls `items.invalidate()`; any other call gets `None`, and the guest
+/// an error.
 pub(crate) fn install<'js>(
     ctx: &Ctx<'js>,
     calls: &Shared,
