@@ -389,8 +389,7 @@ fn action_bytes(action: &Action) -> usize {
         | Action::DeleteClipboardEntry(_)
         | Action::ClearClipboardHistory
         | Action::RequestClipboardAccess
-        | Action::OpenPreferences
-        | Action::ArrangeWindow(_) => 0,
+        | Action::OpenPreferences => 0,
     }
 }
 

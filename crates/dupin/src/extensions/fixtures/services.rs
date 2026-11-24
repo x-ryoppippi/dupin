@@ -1,7 +1,8 @@
 //! A broker bridge for one fixture: the package installed at its revision with the fixture's
 //! consent, behind host services that answer from the fixture's `replies` alone. Requests go
 //! through the same decoding and broker checks as the launcher's; only the services differ, and
-//! none of them reaches the network, a program, the clipboard, calendars or Dupin's storage.
+//! none of them reaches the network, a program, the clipboard, calendars, windows or Dupin's
+//! storage.
 //! A `files` scope is bound to a scratch folder holding the fixture's files, and `storage` to
 //! a scratch store sealed with a throwaway key, seeded with the fixture's records.
 //!
@@ -21,7 +22,7 @@ use dupin_extension_bridge::{
     Revision, Scope,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec};
+use dupin_host_services::{calendar, exec, windows};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::{Limits, MemoryKey, NewRecord, Store};
 use serde_json::Value;
@@ -38,6 +39,8 @@ const UNRUN_PROGRAM: &str = "/usr/bin/false";
 #[derive(Default)]
 pub(super) struct Effects {
     pub clipboard: Vec<String>,
+    /// Each frame the focused window was moved to.
+    pub windows: Vec<windows::Frame>,
     /// The whole store, when the step changed it.
     pub storage: Option<Value>,
 }
@@ -64,6 +67,7 @@ struct State {
     /// The store as the last step left it.
     stored: Mutex<Vec<Value>>,
     effects: Mutex<Effects>,
+    windows: Option<windows::Service<windows::Fixture>>,
 }
 
 impl Fixture {
@@ -102,6 +106,7 @@ impl Replier {
                 )
             })?;
         let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::random());
+        let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),
             now,
@@ -109,6 +114,7 @@ impl Replier {
             opened: Mutex::default(),
             stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
+            windows,
         });
         Ok(Self { state, scratch })
     }
@@ -122,6 +128,7 @@ impl Replier {
             clipboard: shared(),
             dictionary: shared(),
             calendar: shared(),
+            windows: shared(),
         }
     }
 
@@ -215,6 +222,9 @@ impl Replier {
 
     fn take_effects(&self) -> Effects {
         let mut effects = std::mem::take(&mut *lock(&self.state.effects));
+        if let Some(windows) = &self.state.windows {
+            effects.windows = std::mem::take(&mut *lock(&windows.backend().moves));
+        }
         let Some(namespace) = lock(&self.state.opened).clone() else {
             return effects;
         };
@@ -305,6 +315,25 @@ impl Headless {
             Err(diagnostic) => crate::log::warn(&format!("fixture for {name}: {diagnostic}")),
         }
     }
+}
+
+/// The windows service a fixture's `replies.windows` describes, read as the service's own shapes.
+fn window_fixture(reply: &fixture::WindowsReply) -> Result<windows::Service<windows::Fixture>, Diagnostic> {
+    let invalid = |field: String, error: serde_json::Error| {
+        Diagnostic::new("invalid-fixture", error.to_string()).field(field)
+    };
+    let displays = reply
+        .displays
+        .iter()
+        .enumerate()
+        .map(|(index, display)| {
+            serde_json::from_value(display.clone())
+                .map_err(|error| invalid(format!("replies.windows.displays[{index}]"), error))
+        })
+        .collect::<Result<_, _>>()?;
+    let focused = serde_json::from_value(reply.focused.clone())
+        .map_err(|error| invalid("replies.windows.focused".into(), error))?;
+    Ok(windows::Service::new(windows::Fixture::new(displays, focused)))
 }
 
 /// Each record's data, oldest first; blobs are left out.
@@ -495,6 +524,33 @@ impl services::Dictionary for Shared {
             .get(word)
             .map(|entries| Value::from(entries.clone()))
             .ok_or_else(|| missing(format!("looking up {}", Value::from(word))))
+    }
+}
+
+impl Shared {
+    fn windows(&self) -> Result<&windows::Service<windows::Fixture>, Failure> {
+        self.0
+            .windows
+            .as_ref()
+            .ok_or_else(|| missing("reading or moving windows".into()))
+    }
+}
+
+fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
+    serde_json::to_value(value).map_err(|error| Failure::new("failed", error.to_string()))
+}
+
+impl services::Windows for Shared {
+    fn displays(&self) -> Result<Value, Failure> {
+        encoded(self.windows()?.displays()?)
+    }
+
+    fn focused(&self) -> Result<Value, Failure> {
+        encoded(self.windows()?.focused()?)
+    }
+
+    fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
+        encoded(self.windows()?.set_frame(frame)?)
     }
 }
 

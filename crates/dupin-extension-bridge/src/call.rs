@@ -10,9 +10,10 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use dupin_broker::{
     ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
+    WindowsAccess,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{calendar, exec, files};
+use dupin_host_services::{calendar, exec, files, windows};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -143,6 +144,16 @@ struct Range {
     query: Option<String>,
     limit: Option<u64>,
     order: Option<calendar::Order>,
+}
+
+/// A frame as the guest sends it; the windows service checks its bounds.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameArgs {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
 }
 
 impl Session {
@@ -293,6 +304,32 @@ impl Session {
                 self.release(&permit, cancelled)?;
                 self.issue_links(&events);
                 Ok(json!({ "events": events }))
+            }
+            "windows.displays" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Windows(WindowsAccess::Read))?;
+                let displays = self.bridge.services.windows.displays()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "displays": displays }))
+            }
+            "windows.focused" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Windows(WindowsAccess::Read))?;
+                let window = self.bridge.services.windows.focused()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "window": window }))
+            }
+            "windows.setFrame" => {
+                let FrameArgs { x, y, width, height } = decode(args)?;
+                let permit = self.permit(&Request::Windows(WindowsAccess::Arrange))?;
+                // Moving the window is the effect, so the permit is checked again just before it.
+                self.release(&permit, cancelled)?;
+                let frame = self
+                    .bridge
+                    .services
+                    .windows
+                    .set_frame(windows::Frame::new(x, y, width, height))?;
+                Ok(json!({ "frame": frame }))
             }
             _ => Err(Failure::new(
                 "unknown-operation",

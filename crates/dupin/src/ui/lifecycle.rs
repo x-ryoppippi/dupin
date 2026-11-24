@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dupin_core::{DisplaySelection, InputSource, Position};
-use dupin_mac::{accessibility, quick_look::Previewer, window::DisplayNotice, window_management};
+use dupin_mac::{accessibility, quick_look::Previewer, window::DisplayNotice};
 use objc2_foundation::NSRect;
 use rune::raw_window_handle::RawWindowHandle;
 use rune::{Align, DisplayTarget, OverlayPlacement, ScreenEdge, Tx};
@@ -71,11 +71,8 @@ impl Ui {
             self.selection_request = SelectionRequest::Superseded;
         }
         crate::trace::summoned();
-        if self.window_permission_required && accessibility::is_trusted() {
-            self.window_permission_required = false;
-        }
         if !self.shown && !rune::tooling::is_headless() {
-            self.frontmost_pid = window_management::frontmost_pid();
+            self.front.capture();
             crate::extensions::access::refresh_os_access(&self.extensions.bridge, &self.calendar_access);
         }
         if let Some(problem) = self.backdrop.refresh() {
@@ -133,7 +130,6 @@ impl Ui {
     pub fn open_accessibility_settings(&mut self, tx: &mut Tx) {
         if rune::tooling::is_headless()
             || (!self.selection_permission_required
-                && !self.window_permission_required
                 && self.display_notice != Some(DisplayNotice::AccessibilityRequired))
         {
             return;
@@ -176,7 +172,6 @@ impl Ui {
 
     pub fn closed(&mut self, tx: &mut Tx) {
         crate::trace::panel("closed", self.me.is_visible(), self.shown);
-        self.arrange_window_after_close();
         let show_snapshots = std::mem::take(&mut self.snapshots_after_close);
         let show_settings = std::mem::take(&mut self.settings_after_close);
         if std::mem::take(&mut self.accessibility_after_close) {

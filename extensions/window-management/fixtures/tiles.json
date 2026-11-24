@@ -1,0 +1,485 @@
+{
+	"fixture": 1,
+	"description": "On one display, each command uses its usable area: halves and thirds share boundaries on whole points, Centre keeps the size, and Next Display leaves the window where it is.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"windows": {
+			"displays": [
+				{
+					"frame": {
+						"height": 900,
+						"width": 1024,
+						"x": 0,
+						"y": 0
+					},
+					"scale": 2,
+					"visibleFrame": {
+						"height": 799,
+						"width": 1001,
+						"x": 10,
+						"y": 25
+					}
+				}
+			],
+			"focused": {
+				"app": {
+					"bundleId": "com.apple.Notes",
+					"name": "Notes"
+				},
+				"frame": {
+					"height": 180,
+					"width": 220,
+					"x": 50,
+					"y": 60
+				}
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "Centre",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "centre"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "centre",
+						"keywords": ["Center", "window centre", "window center"],
+						"subtitle": "Window Management",
+						"title": "Centre"
+					},
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "centre-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "centre-third",
+						"keywords": ["Center Third", "window centre third", "window center third"],
+						"subtitle": "Window Management",
+						"title": "Centre Third"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "centre"
+					}
+				},
+				"windows": [
+					{
+						"height": 180.0,
+						"width": 220.0,
+						"x": 400.5,
+						"y": 334.5
+					}
+				]
+			}
+		},
+		{
+			"query": "Next Display",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "next-display"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "next-display",
+						"keywords": ["window next display"],
+						"subtitle": "Window Management",
+						"title": "Next Display"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "next-display"
+					}
+				},
+				"windows": [
+					{
+						"height": 180.0,
+						"width": 220.0,
+						"x": 400.5,
+						"y": 334.5
+					}
+				]
+			}
+		},
+		{
+			"query": "Left Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "left-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "left-half",
+						"keywords": ["window left half"],
+						"subtitle": "Window Management",
+						"title": "Left Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "left-half"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 501.0,
+						"x": 10.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Right Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "right-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "right-half",
+						"keywords": ["window right half"],
+						"subtitle": "Window Management",
+						"title": "Right Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "right-half"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 500.0,
+						"x": 511.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Top Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "top-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "top-half",
+						"keywords": ["window top half"],
+						"subtitle": "Window Management",
+						"title": "Top Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "top-half"
+					}
+				},
+				"windows": [
+					{
+						"height": 400.0,
+						"width": 1001.0,
+						"x": 10.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Bottom Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "bottom-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "bottom-half",
+						"keywords": ["window bottom half"],
+						"subtitle": "Window Management",
+						"title": "Bottom Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "bottom-half"
+					}
+				},
+				"windows": [
+					{
+						"height": 399.0,
+						"width": 1001.0,
+						"x": 10.0,
+						"y": 425.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Left Third",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "left-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "left-third",
+						"keywords": ["window left third"],
+						"subtitle": "Window Management",
+						"title": "Left Third"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "left-third"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 334.0,
+						"x": 10.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Centre Third",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "centre-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "centre-third",
+						"keywords": ["Center Third", "window centre third", "window center third"],
+						"subtitle": "Window Management",
+						"title": "Centre Third"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "centre-third"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 333.0,
+						"x": 344.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Right Third",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "right-third"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "right-third",
+						"keywords": ["window right third"],
+						"subtitle": "Window Management",
+						"title": "Right Third"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "right-third"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 334.0,
+						"x": 677.0,
+						"y": 25.0
+					}
+				]
+			}
+		},
+		{
+			"query": "Maximise",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "maximise"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "maximise",
+						"keywords": ["Maximize", "window maximise", "window maximize"],
+						"subtitle": "Window Management",
+						"title": "Maximise"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "maximise"
+					}
+				},
+				"windows": [
+					{
+						"height": 799.0,
+						"width": 1001.0,
+						"x": 10.0,
+						"y": 25.0
+					}
+				]
+			}
+		}
+	]
+}

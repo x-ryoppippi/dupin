@@ -57,7 +57,6 @@ impl Ui {
                         }
                     }
                     Action::OpenPreferences => self.prepare_settings(),
-                    Action::ArrangeWindow(layout) => self.schedule_window_action(layout),
                     Action::System(command) => {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;

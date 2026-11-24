@@ -73,7 +73,6 @@ pub enum Action {
     Push(Page),
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
-    ArrangeWindow(crate::window_management::Layout),
     /// Something only the extension `extension` (its package ID) offered on its own row.
     Extension {
         extension: String,

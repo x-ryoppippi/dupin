@@ -24,7 +24,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         clipboard_images_setting(s, k),
         clipboard_files_setting(s, k),
         snippet_paste_setting(s, k),
-        window_management_setting(s, k),
+        window_management_setting(k),
     ];
     rows.extend(snippet_accessibility(s, k));
     let mut body = vec![card(k, hair, rows)];
@@ -257,22 +257,20 @@ fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
     )
 }
 
-fn window_management_setting(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("window_management");
-    let enabled = s.config.window_management;
-    let window_management = Switch::new(enabled)
-        .label("Window Management")
-        .hide_label()
-        .disabled(locked)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
-        .build(k);
-    setting_with_lock(
+fn window_management_setting(k: &Kit) -> El {
+    let open = value_button(
+        k,
+        "open-window-management",
+        "Extensions",
+        &rune_theme_opencode::icons::CHEVRON_RIGHT,
+    )
+    .on_press(|s: &mut Prefs| s.show_extensions());
+    setting(
         k,
         &icons::PANEL,
         "Window Management",
-        Some("Show commands to move and resize windows. Requires Accessibility access."),
-        window_management,
-        s.lock_note(locked),
+        Some("Now an extension: turn on Window Management in Settings → Extensions"),
+        open,
     )
 }
 

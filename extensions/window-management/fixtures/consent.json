@@ -1,0 +1,87 @@
+{
+	"fixture": 1,
+	"description": "Until moving the focused window is allowed, choosing a command moves nothing and leaves the request to allow it to Dupin.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"windows": {
+			"displays": [
+				{
+					"frame": {
+						"height": 900,
+						"width": 1440,
+						"x": 0,
+						"y": 0
+					},
+					"scale": 2,
+					"visibleFrame": {
+						"height": 844,
+						"width": 1440,
+						"x": 0,
+						"y": 24
+					}
+				}
+			],
+			"focused": {
+				"app": {
+					"bundleId": "com.apple.Notes",
+					"name": "Notes"
+				},
+				"frame": {
+					"height": 600,
+					"width": 800,
+					"x": 100,
+					"y": 100
+				}
+			}
+		},
+		"consent": {
+			"windows:arrange": "pending"
+		}
+	},
+	"steps": [
+		{
+			"query": "Left Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "left-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "left-half",
+						"keywords": ["window left half"],
+						"subtitle": "Window Management",
+						"title": "Left Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "left-half"
+					}
+				}
+			}
+		}
+	]
+}

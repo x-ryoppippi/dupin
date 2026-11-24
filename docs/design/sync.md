@@ -183,7 +183,7 @@ Each configuration key is classified in the feature manifest as **shared** or **
 
 - hotkeys: `hotkey`, `selection_hotkey`, `[bindings]`;
 - display choices: `display`, `position`, `input_source`, `backdrop` (it can name a local WGSL file);
-- every key whose enabling requests macOS access or authority on that Mac: `calendar`, `window_management`, `system_automation`, `snippet_paste`, `extensions`, `[clipboard]`; Settings → Permissions already treats these as per-Mac decisions;
+- every key whose enabling requests macOS access or authority on that Mac: `calendar`, `system_automation`, `snippet_paste`, `extensions`, `[clipboard]`; Settings → Permissions already treats these as per-Mac decisions;
 - `auto_update` (Nix-installed Macs must not inherit it), `[sync]`, and paths such as script folders.
 
 Everything else, including `[theme]`, `[web_searches]`, `web_fallbacks`, keyword lists, `calculator`, `calculator_currency`, `show_recent`, `file_limit` and `file_demotions`, is shared.

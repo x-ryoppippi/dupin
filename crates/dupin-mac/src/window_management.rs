@@ -1,13 +1,19 @@
+//! The Accessibility side of the extensions' `windows` capability: the displays, and the
+//! focused window of the app that was in front of Dupin when the panel opened.
+
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
+use std::sync::Mutex;
 
-use dupin_core::window_management::{Display, Frame, Layout, target_frame};
+use dupin_host_services::ServiceError;
+use dupin_host_services::windows::{self, App, Display, Frame, Window};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSScreen, NSWorkspace};
 use objc2_core_foundation::{CFRetained, CFString, CFType};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use crate::accessibility::{self, AX_NO_VALUE, AX_POINT, AX_SIZE, attribute};
+use crate::privacy::Permission;
 
 const MESSAGING_TIMEOUT_SECONDS: f32 = 0.25;
 const AX_ATTRIBUTE_UNSUPPORTED: i32 = -25205;
@@ -19,104 +25,151 @@ unsafe extern "C" {
     fn AXValueCreate(kind: u32, value: *const c_void) -> *mut CFType;
 }
 
-#[derive(Clone, Copy)]
-pub enum Error {
-    PermissionRequested,
-    PermissionRequired,
-    NoWindow,
-    NoDisplay,
-    WindowUnavailable,
-    FrameRejected,
+#[derive(Clone)]
+struct Target {
+    pid: i32,
+    app: App,
+    displays: Vec<Display>,
 }
 
-impl Error {
-    pub fn message(self) -> &'static str {
-        match self {
-            Self::PermissionRequested | Self::PermissionRequired => {
-                "Dupin needs Accessibility access to move and resize windows."
-            }
-            Self::NoWindow => "There is no focused window to arrange.",
-            Self::NoDisplay => "No display is available to arrange this window.",
-            Self::WindowUnavailable => "Dupin couldn’t read the focused window.",
-            Self::FrameRejected => "The window couldn’t be moved or resized as requested.",
-        }
+/// What was in front of Dupin when the panel last opened: the app whose focused window the
+/// `windows` capability reads and moves, and the displays then, which AppKit reads only on the
+/// main thread.
+#[derive(Default)]
+pub struct Front(Mutex<Option<Target>>);
+
+impl Front {
+    /// Notes the frontmost app and the displays. Call it on the main thread as the panel opens,
+    /// while the app the user was in is still in front.
+    pub fn capture(&self) {
+        let target = MainThreadMarker::new().and_then(|main| {
+            let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+            let pid = app.processIdentifier();
+            (pid > 0 && pid as u32 != std::process::id()).then(|| Target {
+                pid,
+                app: App {
+                    name: app
+                        .localizedName()
+                        .map(|name| name.to_string())
+                        .unwrap_or_default(),
+                    bundle_id: app.bundleIdentifier().map(|id| id.to_string()),
+                },
+                displays: displays(main),
+            })
+        });
+        *self.lock() = target;
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Target>> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn target(&self) -> Option<Target> {
+        self.lock().clone()
     }
 }
 
-pub fn frontmost_pid() -> Option<i32> {
-    let pid = NSWorkspace::sharedWorkspace()
-        .frontmostApplication()?
-        .processIdentifier();
-    (pid > 0 && pid as u32 != std::process::id()).then_some(pid)
-}
-
-pub fn displays() -> Vec<Display> {
-    let Some(main) = MainThreadMarker::new() else {
-        return Vec::new();
-    };
+/// Display bounds in top-left coordinates, with the primary display first.
+fn displays(main: MainThreadMarker) -> Vec<Display> {
     let screens = NSScreen::screens(main);
     let Some(primary) = screens.firstObject() else {
         return Vec::new();
     };
     let primary_top = primary.frame().max().y;
     let convert = |rect: NSRect| {
-        Frame::new(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height).flip_y(primary_top)
+        Frame::new(
+            rect.origin.x,
+            primary_top - rect.origin.y - rect.size.height,
+            rect.size.width,
+            rect.size.height,
+        )
     };
     screens
         .iter()
         .map(|screen| Display {
             frame: convert(screen.frame()),
-            visible: convert(screen.visibleFrame()),
+            visible_frame: convert(screen.visibleFrame()),
+            scale: screen.backingScaleFactor(),
         })
         .collect()
 }
 
-/// Run on a worker so an unresponsive application cannot delay the panel.
-pub fn arrange(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Error> {
-    if displays.is_empty() {
-        return Err(Error::NoDisplay);
-    }
-    if !accessibility::is_trusted() {
-        return Err(if accessibility::request_once() {
-            Error::PermissionRequested
-        } else {
-            Error::PermissionRequired
-        });
+/// Reads and moves windows through the Accessibility API. Each call may wait on the app in
+/// front, so it runs on a worker, never on the main thread.
+pub struct Windows(pub std::sync::Arc<Front>);
+
+impl windows::Windows for Windows {
+    fn access(&self) -> dupin_host_services::OsAccess {
+        Permission::Accessibility.status().os_access()
     }
 
-    arrange_trusted(pid, layout, displays).map_err(|error| {
-        if accessibility::is_trusted() {
-            error
-        } else {
-            Error::PermissionRequired
-        }
+    fn displays(&self) -> Result<Vec<Display>, ServiceError> {
+        Ok(self.0.target().map(|target| target.displays).unwrap_or_default())
+    }
+
+    fn focused(&self) -> Result<Option<Window>, ServiceError> {
+        let Some(target) = self.0.target() else {
+            return Ok(None);
+        };
+        let Some(window) = trusted(focused_window(target.pid))? else {
+            return Ok(None);
+        };
+        let frame = read_frame(&window).ok_or_else(unreadable)?;
+        Ok(Some(Window {
+            frame,
+            app: target.app,
+        }))
+    }
+
+    fn set_frame(&self, frame: Frame) -> Result<Frame, ServiceError> {
+        let target = self.0.target().ok_or_else(no_window)?;
+        let window = trusted(focused_window(target.pid))?.ok_or_else(no_window)?;
+        let initial = read_frame(&window).ok_or_else(unreadable)?;
+        trusted(update_frame(&window, initial, frame).ok_or_else(|| {
+            ServiceError::Failed("The window couldn't be moved or resized as requested.".into())
+        }))?;
+        Ok(read_frame(&window).unwrap_or(frame))
+    }
+}
+
+fn no_window() -> ServiceError {
+    ServiceError::Failed("There is no focused window to arrange.".into())
+}
+
+fn unreadable() -> ServiceError {
+    ServiceError::Failed("Dupin couldn’t read the focused window.".into())
+}
+
+/// A failure while macOS no longer trusts Dupin is that, not whatever the call reported.
+fn trusted<T>(result: Result<T, ServiceError>) -> Result<T, ServiceError> {
+    result.map_err(|error| {
+        ServiceError::from_access(
+            windows::PERMISSION,
+            Permission::Accessibility.status().os_access(),
+        )
+        .unwrap_or(error)
     })
 }
 
-fn arrange_trusted(pid: i32, layout: Layout, displays: &[Display]) -> Result<(), Error> {
-    let app = accessibility::application(pid).ok_or(Error::WindowUnavailable)?;
+/// The app's focused window, or its main window when it reports no focused one.
+fn focused_window(pid: i32) -> Result<Option<CFRetained<CFType>>, ServiceError> {
+    let app = accessibility::application(pid).ok_or_else(unreadable)?;
     let app = timed(app)?;
-    let window = timed(focused_window(&app)?)?;
-    let initial = read_frame(&window).ok_or(Error::WindowUnavailable)?;
-    let target = target_frame(layout, initial, displays).ok_or(Error::NoDisplay)?;
-    update_frame(&window, initial, target).ok_or(Error::FrameRejected)
+    let window = match attribute(&app, "AXFocusedWindow") {
+        Err(AX_NO_VALUE | AX_ATTRIBUTE_UNSUPPORTED) => match attribute(&app, "AXMainWindow") {
+            Err(AX_NO_VALUE | AX_ATTRIBUTE_UNSUPPORTED) => return Ok(None),
+            result => result.map_err(|_| unreadable())?,
+        },
+        result => result.map_err(|_| unreadable())?,
+    };
+    timed(window).map(Some)
 }
 
-fn timed(element: CFRetained<CFType>) -> Result<CFRetained<CFType>, Error> {
+fn timed(element: CFRetained<CFType>) -> Result<CFRetained<CFType>, ServiceError> {
     // A timeout on the system-wide element would affect other Accessibility features.
     accessibility::set_timeout(&element, MESSAGING_TIMEOUT_SECONDS)
         .then_some(element)
-        .ok_or(Error::WindowUnavailable)
-}
-
-fn focused_window(app: &CFType) -> Result<CFRetained<CFType>, Error> {
-    match attribute(app, "AXFocusedWindow") {
-        Err(AX_NO_VALUE | AX_ATTRIBUTE_UNSUPPORTED) => match attribute(app, "AXMainWindow") {
-            Err(AX_NO_VALUE | AX_ATTRIBUTE_UNSUPPORTED) => Err(Error::NoWindow),
-            result => result.map_err(|_| Error::WindowUnavailable),
-        },
-        result => result.map_err(|_| Error::WindowUnavailable),
-    }
+        .ok_or_else(unreadable)
 }
 
 fn read_frame(window: &CFType) -> Option<Frame> {
@@ -167,4 +220,22 @@ fn update_frame(window: &CFType, initial: Frame, target: Frame) -> Option<()> {
 fn is_settable(window: &CFType, attribute: &CFString) -> bool {
     let mut settable = 0;
     (unsafe { AXUIElementIsAttributeSettable(window, attribute, &mut settable) } == 0) && settable != 0
+}
+
+#[cfg(test)]
+mod tests {
+    use dupin_host_services::windows::Windows as _;
+
+    use super::*;
+
+    #[test]
+    fn nothing_captured_reads_as_no_window_and_no_displays() {
+        let windows = Windows(Default::default());
+        assert_eq!(windows.displays(), Ok(Vec::new()));
+        assert_eq!(windows.focused(), Ok(None));
+        assert!(matches!(
+            windows.set_frame(Frame::new(0.0, 0.0, 100.0, 100.0)),
+            Err(ServiceError::Failed(_))
+        ));
+    }
 }

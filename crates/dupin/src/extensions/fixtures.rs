@@ -378,6 +378,12 @@ fn replay(
         if !effects.clipboard.is_empty() {
             outcome.insert("clipboard".into(), effects.clipboard.into());
         }
+        if !effects.windows.is_empty() {
+            outcome.insert(
+                "windows".into(),
+                serde_json::to_value(effects.windows).unwrap_or_default(),
+            );
+        }
         if let Some(storage) = effects.storage {
             outcome.insert("storage".into(), storage);
         }
