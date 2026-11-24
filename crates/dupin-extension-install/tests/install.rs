@@ -344,6 +344,35 @@ fn a_package_cannot_take_a_bundled_name() {
 }
 
 #[test]
+fn a_package_installed_before_its_name_was_bundled_stays_off_after_the_upgrade() {
+    let mut fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.install(&fixture.url()).unwrap();
+    let folder = fixture.installed("word-count");
+    assert_eq!(
+        Integrity::new(fixture.installer.lock.clone(), Default::default()).check(&folder),
+        None
+    );
+
+    fixture.installer.bundled.insert("word-count".into());
+    let mut integrity = Integrity::new(fixture.installer.lock.clone(), fixture.installer.bundled.clone());
+    let problem = integrity
+        .check(&folder)
+        .expect("an installed package never replaces a bundled one");
+    assert!(
+        problem.contains("bundles an extension called `word-count`")
+            && problem.contains("dupin ext remove word-count"),
+        "{problem}"
+    );
+    assert_eq!(
+        integrity.check(&fixture.installer.extensions.join("hand-made")),
+        None,
+        "a folder extensions.lock doesn't list, such as an ejected copy, still may"
+    );
+}
+
+#[test]
 fn keywords_and_folders_belong_to_one_package() {
     let fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");
@@ -429,7 +458,7 @@ fn tampering_disables_the_package_until_sync_restores_it() {
     fixture.tag("v1.0.0");
     let change = fixture.install(&fixture.url()).unwrap();
     let folder = fixture.installed("word-count");
-    let mut integrity = Integrity::new(fixture.installer.lock.clone());
+    let mut integrity = Integrity::new(fixture.installer.lock.clone(), Default::default());
     assert_eq!(integrity.check(&folder), None);
     assert_eq!(
         integrity.check(&fixture.installer.extensions.join("hand-made")),

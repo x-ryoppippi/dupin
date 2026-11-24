@@ -593,7 +593,11 @@ pub fn watch(
 ) -> std::io::Result<Watch> {
     let integrity: Option<Integrity> = match origin {
         Origin::User => crate::extension_install::lock_path().map(|lock| {
-            let mut integrity = dupin_extension_install::Integrity::new(lock);
+            let bundled = bundled::directory()
+                .map(|directory| bundled::packages(&directory))
+                .unwrap_or_default();
+            let names = bundled.into_iter().map(|(_, name, _)| name).collect();
+            let mut integrity = dupin_extension_install::Integrity::new(lock, names);
             Box::new(move |folder: &Path| integrity.check(folder)) as _
         }),
         Origin::Bundled => {
@@ -1009,7 +1013,7 @@ pub(crate) mod tests {
             },
         );
         lock.write(&lock_path).unwrap();
-        let mut integrity = dupin_extension_install::Integrity::new(lock_path);
+        let mut integrity = dupin_extension_install::Integrity::new(lock_path, Default::default());
         let mut scanner = Scanner {
             integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
