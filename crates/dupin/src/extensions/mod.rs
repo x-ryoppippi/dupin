@@ -195,12 +195,16 @@ impl Extension {
         deadline: Instant,
         call: &Call,
     ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
+        // Every part of one catalogue is asked for with the same settings.
+        let mut encoded = None;
         move |cursor, reason, settings| {
             host().items(
                 &self.compiled,
                 cursor,
                 reason,
-                self.preferences_with(settings),
+                encoded.get_or_insert_with(|| {
+                    dupin_extension_host::Preferences::encode(&self.preferences_with(settings))
+                }),
                 deadline,
                 &|| false,
                 &call.services,

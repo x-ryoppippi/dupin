@@ -20,7 +20,7 @@ use dupin_js_runtime::{
 };
 use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 
-use crate::wire::{self, Answer, Call, FromHelper, ToHelper};
+use crate::wire::{self, Answer, Call, FromHelper, Preferences, ToHelper};
 
 /// How long a call may run past its deadline, or past a cancellation, before the helper is
 /// stopped. The helper's own interrupt normally ends it well inside this.
@@ -306,7 +306,7 @@ impl Host {
         package: &Compiled,
         cursor: Option<&str>,
         reason: Reason,
-        preferences: serde_json::Value,
+        preferences: &Preferences,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
@@ -314,7 +314,7 @@ impl Host {
         let call = Call::Items {
             cursor: cursor.map(str::to_owned),
             reason,
-            preferences,
+            preferences: preferences.clone(),
         };
         let request = Request::run(package, call, Work::Items);
         match self.call(package.domain, request, deadline, is_cancelled, services)? {
@@ -376,7 +376,7 @@ impl Host {
         let call = Call::Action {
             name: name.into(),
             data: data.clone(),
-            preferences: preferences.clone(),
+            preferences: Preferences::encode(preferences),
         };
         match self.alone(
             Request::run(package, call, Work::Action),
@@ -406,7 +406,7 @@ impl Host {
         let call = Call::Event {
             name: name.into(),
             event: event.clone(),
-            preferences: preferences.clone(),
+            preferences: Preferences::encode(preferences),
         };
         match self.alone(
             Request::run(package, call, Work::Event),

@@ -172,7 +172,7 @@ impl<'a> Held<'a> {
                 &self.extension.compiled,
                 cursor,
                 reason,
-                self.extension.preferences_with(settings),
+                &dupin_extension_host::Preferences::encode(&self.extension.preferences_with(settings)),
                 deadline,
                 cancelled,
                 &call.services,
