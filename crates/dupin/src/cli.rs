@@ -2,9 +2,17 @@ use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
 const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+/// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
+fn ext_help() -> String {
+    HELP.lines()
+        .filter(|line| line.starts_with("dupin ext "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
+    ExtHelp,
     Version,
     Open(Option<String>),
     Pick(bool),
@@ -130,6 +138,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["mcp"] if !json && !build_flags && !update && step.is_none() => Ok(Action::Mcp(workspace)),
         _ if build_flags || other_flags => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
+        ["ext", "--help" | "-h" | "help"] => Ok(Action::ExtHelp),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
@@ -323,6 +332,14 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 return Ok(serde_json::json!({"help": HELP}));
             }
             println!("{HELP}");
+            Ok(Value::Null)
+        }
+        Action::ExtHelp => {
+            let help = ext_help();
+            if json {
+                return Ok(serde_json::json!({"help": help}));
+            }
+            println!("{help}");
             Ok(Value::Null)
         }
         Action::Version => {
@@ -1046,6 +1063,27 @@ mod tests {
         assert_eq!(crate::ui::pick_indices(&values, "OTHER"), vec![1]);
         assert!(crate::ui::pick_indices(&values, "missing").is_empty());
         assert_eq!(values[0]["action"], "execute");
+    }
+    #[test]
+    fn ext_help_prints_the_ext_usage() {
+        for help in ["--help", "-h", "help"] {
+            assert_eq!(
+                parse(&["ext".into(), help.into()]).unwrap(),
+                Action::ExtHelp,
+                "dupin ext {help}"
+            );
+        }
+        let usage = ext_help();
+        assert!(usage.starts_with("dupin ext check DIR"), "{usage}");
+        assert!(usage.ends_with("dupin ext eject NAME [--json]"), "{usage}");
+        assert!(
+            usage.lines().all(|line| line.starts_with("dupin ext ")),
+            "{usage}"
+        );
+        assert_eq!(
+            execute(Action::ExtHelp, true).unwrap(),
+            serde_json::json!({ "help": usage })
+        );
     }
     #[test]
     fn arguments_and_selection() {
