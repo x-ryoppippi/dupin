@@ -150,6 +150,12 @@ let
     latencyArgs
     // {
       cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
+      # Where `bin/dupin` finds the bundled extensions it sealed, as Dupin.app has them in
+      # Contents/Resources, so the scenarios measure the bundled features.
+      postInstall = ''
+        mkdir -p "$out/share/dupin"
+        cp -R extensions "$out/share/dupin/extensions"
+      '';
     }
   );
 in
