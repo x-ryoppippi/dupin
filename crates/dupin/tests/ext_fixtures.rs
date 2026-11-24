@@ -70,15 +70,19 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
     assert!(shots[0] == shots[1], "two renders of one fixture differ");
 
     let first_step = root.path().join("query.png");
-    let output = dupin(&[
-        "ext".as_ref(),
-        "snap".as_ref(),
-        package.as_os_str(),
-        fixture.as_os_str(),
-        first_step.as_os_str(),
-        "--step".as_ref(),
-        "1".as_ref(),
-    ]);
+    let output = Command::new(env!("CARGO_BIN_EXE_dupin"))
+        .current_dir(root.path())
+        .args([
+            "ext",
+            "snap",
+            "greeter",
+            "greeter/fixtures/search.json",
+            "query.png",
+            "--step",
+            "1",
+        ])
+        .output()
+        .unwrap();
     assert!(output.status.success(), "{output:?}");
     assert!(
         std::fs::read(&first_step).unwrap() == shots[0],

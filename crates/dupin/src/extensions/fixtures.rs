@@ -389,6 +389,13 @@ pub fn snap(
         .file(name)
         .field("environment.timeZone"));
     }
+    // The headless launcher runs in the scratch home, so a relative path would land there.
+    let output = &std::path::absolute(output).map_err(|error| {
+        Diagnostic::new(
+            "render-failed",
+            format!("couldn't resolve the output path: {error}"),
+        )
+    })?;
     let render_failed = |message: String| {
         Diagnostic::new("render-failed", message).hint(
             "`snap` runs Dupin headless, which a debug build or one with Rune's `tooling` feature can do.",
