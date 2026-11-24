@@ -38,6 +38,17 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
             let change = installer.install(&spec, &cwd, &taken).map_err(diagnostic)?;
             if change.previous.is_none() {
                 forget_grants(&change.name)?;
+                if let Err(failure) = delete_data(&change.name) {
+                    installer.remove(&change.name).map_err(diagnostic)?;
+                    return Err(Diagnostic::new(
+                        "data-undeleted",
+                        format!(
+                            "Didn't install {}, because what an earlier package of that name \
+                             stored must be deleted first. {}",
+                            change.name, failure.message
+                        ),
+                    ));
+                }
             }
             (describe(&change, "Installed"), change_json(&change))
         }
@@ -142,8 +153,9 @@ fn forget_grants(name: &str) -> Result<(), Diagnostic> {
     })
 }
 
-/// Uninstalling deletes what the package stored; revoking its `storage` in Settings keeps it.
-/// A running Dupin that has the package's data open deletes it itself.
+/// Uninstalling deletes what the package stored, and so does installing a name afresh, since a
+/// package's namespace is named after its package name; revoking its `storage` in Settings
+/// keeps it. A running Dupin that has the package's data open deletes it itself.
 fn delete_data(name: &str) -> Result<(), Diagnostic> {
     let Ok(id) = PackageId::new(name) else {
         return Ok(());
