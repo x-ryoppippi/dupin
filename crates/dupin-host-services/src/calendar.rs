@@ -15,8 +15,10 @@ pub const MAX_EVENTS: usize = 500;
 pub const MAX_QUERY_CHARS: usize = 200;
 pub const MAX_CALENDARS: usize = 32;
 pub const MAX_CALENDAR_NAME_BYTES: usize = 256;
-/// Each title, location and calendar name.
+/// Each location and calendar name.
 pub const MAX_TEXT_BYTES: usize = 1024;
+/// What an extension's row title holds, so an event's title fits its row as it comes.
+pub const MAX_TITLE_BYTES: usize = 512;
 pub const MAX_URL_BYTES: usize = 2048;
 
 pub const PERMISSION: OsPermission = OsPermission::Calendars;
@@ -29,6 +31,7 @@ pub type Millis = i64;
 pub struct Event {
     /// Stable for one occurrence of a recurring event.
     pub id: String,
+    /// One line, up to [`MAX_TITLE_BYTES`].
     pub title: String,
     pub start: Millis,
     pub end: Millis,
@@ -227,7 +230,7 @@ impl Event {
     fn bounded(self) -> Self {
         Self {
             id: bounded(self.id, MAX_TEXT_BYTES),
-            title: bounded(self.title, MAX_TEXT_BYTES),
+            title: bounded(one_line(&self.title), MAX_TITLE_BYTES),
             calendar: CalendarInfo {
                 name: bounded(self.calendar.name, MAX_TEXT_BYTES),
                 color: self.calendar.color.filter(|color| is_hex_color(color)),
@@ -241,6 +244,15 @@ impl Event {
             ..self
         }
     }
+}
+
+/// `text` with each run of spaces, line breaks and other control characters as one space,
+/// since a title pasted from an invitation may carry them.
+fn one_line(text: &str) -> String {
+    text.split(|ch: char| ch.is_whitespace() || ch.is_control())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_hex_color(color: &str) -> bool {

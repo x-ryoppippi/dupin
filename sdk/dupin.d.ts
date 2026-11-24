@@ -402,6 +402,7 @@ declare module 'dupin' {
 	export interface CalendarEvent {
 		/** Names one occurrence of a recurring event. */
 		readonly id: string;
+		/** One line, up to 512 bytes, so it fits an item's `title` as it comes. */
 		readonly title: string;
 		/** ISO 8601, UTC. */
 		readonly start: string;

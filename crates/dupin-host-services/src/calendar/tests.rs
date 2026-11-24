@@ -107,6 +107,39 @@ fn calendars_query_and_limit_narrow_the_events() {
 }
 
 #[test]
+fn titles_come_as_one_line_that_fits_a_row() {
+    let calendar = Calendar::new(Fixture {
+        access: OsAccess::Allowed,
+        today: TODAY,
+        events: vec![
+            event(
+                "pasted",
+                " Sync:\r\n\tweekly \u{0007} review ",
+                "Work",
+                TODAY,
+                TODAY + HOUR,
+            ),
+            event(
+                "long",
+                &"会議".repeat(200),
+                "Work",
+                TODAY + HOUR,
+                TODAY + 2 * HOUR,
+            ),
+        ],
+    });
+    let query = Query::new(TODAY, TODAY + DAY, None, Some("weekly"), None).unwrap();
+    assert_eq!(
+        titles(&calendar.events(&query, WEEK).unwrap()),
+        ["Sync: weekly review"]
+    );
+    let query = Query::new(TODAY, TODAY + DAY, None, Some("会議"), None).unwrap();
+    let [event] = calendar.events(&query, WEEK).unwrap().try_into().unwrap();
+    assert!(event.title.len() <= MAX_TITLE_BYTES);
+    assert!(event.title.starts_with("会議"));
+}
+
+#[test]
 fn a_range_beyond_the_declared_window_is_out_of_scope() {
     let calendar = Calendar::new(fixture(OsAccess::Allowed));
     let far = Query::new(TODAY, TODAY + 41 * DAY, None, None, None).unwrap();
@@ -248,7 +281,8 @@ fn events_serialize_for_javascript_within_their_bounds() {
     });
     let query = Query::new(TODAY, TODAY + DAY, None, None, None).unwrap();
     let [event] = calendar.events(&query, WEEK).unwrap().try_into().unwrap();
-    assert!(event.title.len() <= MAX_TEXT_BYTES);
+    assert!(event.title.len() <= MAX_TITLE_BYTES);
+    assert!(event.title.chars().all(|ch| ch == 'é'));
     assert_eq!(event.location, None);
     assert_eq!(event.url, None);
     assert_eq!(event.link, None);
