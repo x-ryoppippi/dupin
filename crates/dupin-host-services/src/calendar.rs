@@ -2,8 +2,8 @@
 //!
 //! Reading needs macOS Calendars access. The service only reads its status, which never
 //! prompts: while macOS hasn't been asked, a read fails with
-//! [`ServiceError::NeedsPermission`], and the app asks only on enable or a deliberate action
-//! routed from it, following the shared Calendar access policy.
+//! [`ServiceError::NeedsPermission`], and only the app asks, from a deliberate action such as
+//! Request Access, following the shared Calendar access policy.
 
 use dupin_broker::{OsAccess, OsPermission, Scope};
 use serde::Serialize;

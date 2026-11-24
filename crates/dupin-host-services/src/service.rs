@@ -11,8 +11,8 @@ use serde::{Serialize, Serializer};
 /// can turn `needs-permission` into a Request Access row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServiceError {
-    /// macOS hasn't been asked yet. Only the app asks, on enable or a deliberate action routed
-    /// from it, never on a guest call.
+    /// macOS hasn't been asked yet. Only the app asks, from a deliberate action such as Request
+    /// Access, never on a guest call.
     NeedsPermission(OsPermission),
     PermissionDenied(OsPermission),
     PermissionRestricted(OsPermission),

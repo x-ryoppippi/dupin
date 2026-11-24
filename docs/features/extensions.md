@@ -181,7 +181,7 @@ Events come earliest first:
 }
 ```
 
-`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading needs macOS Calendars access, which follows the same rules as Calendar search: Dupin only checks it for an extension, and while macOS hasn't been asked a read returns `needs-permission`. Dupin asks when you turn the extension on or choose Request Access, never because the extension called.
+`id` names one occurrence of a recurring event, `color` is the calendar's color in sRGB, and titles, locations and names are cut to 1 KiB. Reading needs macOS Calendars access. The service only checks it, and while macOS hasn't been asked a read returns `needs-permission`; an extension's call never asks. For now only Request Access on the Calendars row of Settings → Permissions asks macOS: turning the Extensions setting on doesn't, and nothing asks when you turn on one extension until the broker bridge connects these services.
 
 ### Clipboard
 
