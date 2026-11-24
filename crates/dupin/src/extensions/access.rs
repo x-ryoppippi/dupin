@@ -119,24 +119,21 @@ struct Pasteboard {
 
 impl Pasteboard {
     fn service(&self) -> &clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard> {
-        let service = self.service.get_or_init(|| {
-            clipboard::Clipboard::new(
-                dupin_mac::clipboard::GeneralPasteboard::default(),
-                clipboard::Policy::default(),
-            )
-        });
-        let ignored_apps = self
-            .history
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .policy()
-            .ignored_apps()
-            .to_vec();
-        service.set_policy(clipboard::Policy {
-            ignored_apps,
-            ..clipboard::Policy::default()
-        });
-        service
+        self.service.get_or_init(|| {
+            let history = self.history.clone();
+            clipboard::Clipboard::new(dupin_mac::clipboard::GeneralPasteboard::default(), move || {
+                let ignored_apps = history
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .policy()
+                    .ignored_apps()
+                    .to_vec();
+                clipboard::Policy {
+                    ignored_apps,
+                    ..clipboard::Policy::default()
+                }
+            })
+        })
     }
 }
 
