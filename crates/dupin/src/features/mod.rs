@@ -53,6 +53,27 @@ pub(super) struct Bundled {
     /// For a feature that pastes, what Dupin says when macOS doesn't let it: the feature asks
     /// macOS for Dupin's own access on first paste, as it did before it shipped as a package.
     pub paste_notice: Option<&'static str>,
+    /// Whether the feature is on, and so may the package watch on its behalf.
+    pub enabled: fn(&Config) -> bool,
+}
+
+/// Whether the feature that ships as the extension called `package` is on, if one does.
+pub(crate) fn ported_enabled(package: &str, config: &Config) -> Option<bool> {
+    bundled(package).map(|bundled| (bundled.enabled)(config))
+}
+
+/// The row a built-in command that a bundled extension answers shows while the package is off
+/// or didn't load.
+pub(crate) const UNAVAILABLE_ROW: &str = "unavailable";
+
+/// Whether the row `id` that `command` shows is its feature's answer, not one Dupin shows in
+/// place of the bundled extension that answers the command.
+pub(crate) fn answered_by_feature(command: &str, id: &str) -> bool {
+    let ported = MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .any(|bundled| bundled.command == command);
+    !ported || (id != UNAVAILABLE_ROW && !crate::extensions::stands_in(id))
 }
 
 fn bundled(package: &str) -> Option<Bundled> {

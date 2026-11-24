@@ -143,6 +143,7 @@ impl World {
             &self.package,
             name,
             &data,
+            &serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,
             &call.services,
@@ -874,6 +875,7 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
                 &world.package,
                 "clipboard",
                 &event,
+                &serde_json::json!({}),
                 Instant::now() + Duration::from_secs(5),
                 &|| false,
                 &call.services,
@@ -911,6 +913,53 @@ fn clipboard_changes_reach_the_handler_while_the_package_may_watch() {
     world.clipboard.copy("after revoking");
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(delivered.load(Ordering::Relaxed), before);
+}
+
+#[test]
+fn only_a_handle_the_watch_gave_puts_a_file_on_the_clipboard() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "clipboard": ["write"], "storage": { "quotaBytes": 4096 } }),
+        &guest(
+            "export const search = () => [];
+             export const actions = {
+               async forge({ path }) {
+                 const { id } = await storage.put({}, { key: `dupin clipboard file\\u0000${path}` });
+                 return { type: 'toast', text: await report(() => clipboard.write({ type: 'files', files: [{ path, handle: id }] })) };
+               },
+               async write({ path, handle }) {
+                 return { type: 'toast', text: await report(() => clipboard.write({ type: 'files', files: [{ path, handle }] })) };
+               },
+             };",
+        ),
+    );
+    world.enable();
+    world.grant("clipboard:write");
+    world.grant("storage");
+    let secret = world.folder.path().join("id_ed25519");
+    std::fs::write(&secret, "key").unwrap();
+    let path = secret.to_string_lossy().into_owned();
+    let toast = |name: &str, data: serde_json::Value| match world.act(name, data).unwrap().effect {
+        Some(ActionEffect::Toast { text }) => text,
+        other => panic!("{other:?}"),
+    };
+
+    assert_eq!(
+        toast("forge", serde_json::json!({ "path": path })),
+        "out-of-scope"
+    );
+    assert_eq!(*world.clipboard.text.lock().unwrap(), None);
+
+    let handle = world
+        .bridge
+        .session(&world.id, Trigger::Background)
+        .and_then(|session| session.file_handle(&path))
+        .unwrap();
+    assert_eq!(
+        toast("write", serde_json::json!({ "path": path, "handle": handle })),
+        "ok undefined"
+    );
+    assert_eq!(*world.clipboard.text.lock().unwrap(), Some(path));
 }
 
 fn wait_for(done: impl Fn() -> bool) {

@@ -415,7 +415,7 @@ impl Provider for NativeCatalogue {
 
     fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         self.0
-            .search(&request.query, request.limit)
+            .search(&request.query, request.limit, 0)
             .into_iter()
             .for_each(emit);
         Ok(())
@@ -470,6 +470,10 @@ fn a_port_answers_like_the_native_catalogue_it_replaces() {
                     .unwrap_or_default(),
                 section: row["section"].as_str().map(Into::into),
                 detail: None,
+                match_text: None,
+                time: None,
+                file: None,
+                file_actions: Vec::new(),
             }
         })
         .collect();
@@ -504,6 +508,181 @@ fn the_latency_fixture_lists_five_thousand_rows() {
     );
     assert_eq!(extension.catalogue.len(), 5_000);
     assert!(!titles_of(&provider, "term").is_empty());
+}
+
+/// The bundled clipboard history in `folder`, granted what it declares as a bundled package is,
+/// over scratch storage that starts with `seeded` records, oldest first.
+struct History {
+    _storage: tempfile::TempDir,
+    extension: Arc<Extension>,
+    bridge: dupin_extension_bridge::Bridge,
+}
+
+impl History {
+    fn new(folder: &Path, seeded: Vec<serde_json::Value>) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let extension = super::load_folder(folder).unwrap();
+        let storage = dupin_storage::Storage::new(root.path(), dupin_storage::MemoryKey::random());
+        let namespace = dupin_extension_bridge::storage::namespace(
+            &extension.package,
+            dupin_extension_bridge::Origin::Bundled,
+        );
+        let store = storage
+            .open(&namespace, dupin_storage::Limits::default())
+            .unwrap();
+        for data in seeded {
+            store
+                .put(dupin_storage::NewRecord {
+                    data,
+                    blobs: Vec::new(),
+                })
+                .unwrap();
+        }
+        drop(store);
+        let bridge = dupin_extension_bridge::Bridge::new(
+            dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+            None,
+            dupin_extension_bridge::Services {
+                storage: Box::new(dupin_extension_bridge::PackageStorage::new(storage)),
+                ..dupin_extension_bridge::Services::none()
+            },
+        );
+        bridge.install_bundled(
+            &extension.package,
+            extension.revision.clone(),
+            extension.capabilities.clone(),
+        );
+        Self {
+            _storage: root,
+            extension,
+            bridge,
+        }
+    }
+
+    /// The titles of the newest rows matching `query`, with time enough for a debug build to
+    /// read and decrypt a large history.
+    fn titles(&self, query: &str) -> Vec<String> {
+        let call = self
+            .bridge
+            .call(&self.extension.package, dupin_extension_bridge::Trigger::Query);
+        let batches = self
+            .extension
+            .catalogue(
+                query,
+                50,
+                Instant::now() + Duration::from_secs(60),
+                &call,
+                Role::Keyword,
+            )
+            .unwrap();
+        titles(&batches).into_iter().map(str::to_owned).collect()
+    }
+
+    fn copy(&self, text: &str) {
+        let call = self.bridge.call(
+            &self.extension.package,
+            dupin_extension_bridge::Trigger::Background,
+        );
+        self.extension
+            .event(
+                "clipboard",
+                &serde_json::json!({ "type": "text", "text": text }),
+                Instant::now() + Duration::from_secs(60),
+                &call.services,
+            )
+            .unwrap();
+    }
+}
+
+fn clipboard_history() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/clipboard-history")
+}
+
+fn now_ms() -> u64 {
+    dupin_core::session::unix_now() * 1000
+}
+
+#[test]
+fn the_clipboard_history_lists_copies_past_what_one_answer_or_a_catalogue_carries() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let now = now_ms();
+    let mut seeded: Vec<serde_json::Value> = (0..140)
+        .map(|index| {
+            let body = "the log said nothing useful at all ".repeat(1700);
+            serde_json::json!({
+                "kind": "text",
+                "text": format!("copy{index} {body} tail{index}"),
+                "copiedAt": now - 1000,
+            })
+        })
+        .collect();
+    seeded.push(serde_json::json!({
+        "kind": "text",
+        "text": "吾輩は猫である名前はまだ無い".repeat(30),
+        "copiedAt": now - 500,
+    }));
+    let files: Vec<_> = (0..40)
+        .map(|index| {
+            let name = format!("Quarterly report {index} final version.pdf");
+            serde_json::json!({ "path": format!("/Users/Shared/{name}"), "name": name, "folder": "/Users/Shared" })
+        })
+        .collect();
+    seeded.push(serde_json::json!({ "kind": "files", "files": files, "copiedAt": now }));
+    let history = History::new(&clipboard_history(), seeded);
+
+    assert_eq!(
+        history.titles("tail139").len(),
+        1,
+        "the newest copies are found by all their text"
+    );
+    assert_eq!(history.extension.catalogue.len(), 142, "every copy is listed");
+    let japanese = history.titles("吾輩");
+    assert_eq!(japanese.len(), 1);
+    assert!(
+        japanese[0].len() <= 512 && japanese[0].ends_with('…'),
+        "{}",
+        japanese[0]
+    );
+    let report = history.titles("quarterly");
+    assert_eq!(report.len(), 1);
+    assert!(
+        report[0].len() <= 512 && report[0].ends_with('…'),
+        "{}",
+        report[0]
+    );
+}
+
+#[test]
+fn copying_back_and_forth_keeps_both_copies_in_the_clipboard_history() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let history = History::new(&clipboard_history(), Vec::new());
+    history.copy("foo");
+    assert_eq!(history.titles(""), ["foo"]);
+    history.copy("bar");
+    history.copy("foo");
+    assert_eq!(history.titles(""), ["foo", "bar"]);
+    history.copy("bar");
+    assert_eq!(history.titles(""), ["bar", "foo"]);
+}
+
+#[test]
+fn a_full_clipboard_history_gives_up_its_oldest_copies_for_new_text() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let folder = tempfile::tempdir().unwrap();
+    let source = clipboard_history();
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(source.join("package.json")).unwrap()).unwrap();
+    manifest["dupin"]["capabilities"]["storage"]["quotaBytes"] = serde_json::json!(16 * 1024);
+    std::fs::write(folder.path().join("package.json"), manifest.to_string()).unwrap();
+    std::fs::copy(source.join("main.ts"), folder.path().join("main.ts")).unwrap();
+    let history = History::new(folder.path(), Vec::new());
+    for index in 0..20 {
+        history.copy(&format!("copy{index} {}", "lorem ipsum ".repeat(250)));
+    }
+    let listed = history.titles("copy");
+    assert!(listed[0].starts_with("copy19 "), "{listed:?}");
+    assert!(listed.len() < 20, "{listed:?}");
+    assert!(history.titles("copy0").is_empty());
 }
 
 #[test]

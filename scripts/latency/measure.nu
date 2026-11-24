@@ -145,12 +145,10 @@ def measure [
         }
     }
     let provider = $job.setup.provider
-    let package = $job.setup.package?
-    let missed = unanswered $matched $provider $per_pass $package
+    let missed = unanswered $matched $provider $per_pass
     if $missed > 0 {
-        let rows = if $package == null { "its rows" } else { $"rows from ($package)" }
         error make {
-            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without ($rows); the scenario does not reach its feature"
+            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without its rows; the scenario does not reach its feature"
         }
     }
     let samples = $matched | where superseded? != true
@@ -168,14 +166,9 @@ def measure [
 }
 
 # How many drawn keypresses, `per_pass` to a pass, did not search `provider`, or ended a pass
-# without a row from it, or, given an extension's `package`, without rows that package answered.
-# Only the whole of `typed` must show the feature's rows: a shorter query may rightly have none.
-export def unanswered [
-    samples: list<record>
-    provider: string
-    per_pass: int
-    package?: string
-]: nothing -> int {
+# without a row from it. Only the whole of `typed` must show the feature's rows: a shorter
+# query may rightly have none.
+export def unanswered [samples: list<record>, provider: string, per_pass: int]: nothing -> int {
     $samples
     | enumerate
     | where {|it| $it.item.superseded? != true }
@@ -186,9 +179,8 @@ export def unanswered [
         | transpose name rows
         | where name == $provider and rows > 0
         | is-not-empty
-        let answered = $package == null or ($it.item.packages? | default {} | get --optional $package | default 0) > 0
         let ends_pass = ($it.index + 1) mod $per_pass == 0
-        not $searched or ($ends_pass and not ($shown and $answered))
+        not $searched or ($ends_pass and not $shown)
     }
     | length
 }

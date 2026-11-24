@@ -43,12 +43,45 @@ fn reading_returns_the_current_copy_after_an_activation() {
         clipboard.read(Trigger::Activation),
         Ok(Some(Clip {
             change: 1,
-            content: text("hello")
+            content: text("hello"),
+            source: Some("com.apple.Safari".into()),
         }))
     );
     for trigger in [Trigger::Query, Trigger::Background] {
         assert_eq!(clipboard.read(trigger), Err(ServiceError::NeedsActivation));
     }
+}
+
+#[test]
+fn a_copy_names_the_app_it_declares_before_the_one_in_front() {
+    let (board, clipboard) = clipboard(OsAccess::Allowed);
+    board.copy(
+        text("hello"),
+        &[],
+        Some("com.apple.Safari"),
+        Some("com.example.notes"),
+    );
+    let clip = clipboard.read(Trigger::Activation).unwrap().unwrap();
+    assert_eq!(clip.source.as_deref(), Some("com.example.notes"));
+}
+
+#[test]
+fn only_a_png_and_files_still_there_are_written_back() {
+    assert!(Write::image(b"GIF89a".to_vec()).is_err());
+    assert_eq!(
+        Write::image(b"\x89PNG\r\n\x1a\nrest".to_vec()),
+        Ok(Write::Image(b"\x89PNG\r\n\x1a\nrest".to_vec()))
+    );
+    let folder = tempfile::tempdir().unwrap();
+    let kept = folder.path().join("kept.txt");
+    std::fs::write(&kept, "x").unwrap();
+    let gone = folder.path().join("gone.txt");
+    assert_eq!(
+        Write::copied_files(vec![gone.clone(), kept.clone()]),
+        Ok(Write::CopiedFiles(vec![kept]))
+    );
+    assert!(Write::copied_files(vec![gone]).is_err());
+    assert!(Write::copied_files(Vec::new()).is_err());
 }
 
 #[test]
@@ -101,6 +134,7 @@ fn copies_beyond_the_policy_limit_are_left_out() {
     *policy.lock().unwrap() = Policy {
         ignored_apps: Vec::new(),
         max_text_bytes: 4,
+        ..Policy::default()
     };
     board.copy(text("12345"), &[], None, None);
     assert_eq!(clipboard.read(Trigger::Activation), Ok(None));
@@ -328,14 +362,18 @@ fn clips_serialize_for_javascript() {
         change: 7,
         content: Content::Image {
             media_type: "image/png".into(),
+            width: 2,
+            height: 1,
             data: b"\x89PNG".to_vec(),
         },
+        source: Some("Preview".into()),
     };
     assert_eq!(
         serde_json::to_value(image).unwrap(),
         serde_json::json!({
             "change": 7,
-            "content": { "type": "image", "mediaType": "image/png", "data": "iVBORw==" },
+            "content": { "type": "image", "mediaType": "image/png", "width": 2, "height": 1, "data": "iVBORw==" },
+            "source": "Preview",
         })
     );
     assert_eq!(

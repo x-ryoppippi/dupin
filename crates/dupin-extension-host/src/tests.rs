@@ -509,11 +509,9 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     let page = host
         .items(
             &package,
-            ItemsContext {
-                cursor: None,
-                reason: Reason::Load,
-                preferences: &Default::default(),
-            },
+            None,
+            Reason::Load,
+            serde_json::json!({}),
             deadline(),
             &|| false,
             &none(),
@@ -527,11 +525,9 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
     let next = host
         .items(
             &package,
-            ItemsContext {
-                cursor: Some("next"),
-                reason: Reason::More,
-                preferences: &Default::default(),
-            },
+            Some("next"),
+            Reason::More,
+            serde_json::json!({}),
             deadline(),
             &|| false,
             &none(),
@@ -543,6 +539,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
             &package,
             "refresh",
             &serde_json::Value::Null,
+            &serde_json::json!({}),
             deadline(),
             &|| false,
             &none()
@@ -575,6 +572,9 @@ fn rogue_helper_entry() {
             subtitle: String::new(),
             aliases: Vec::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -963,6 +963,9 @@ fn forgetful_helper_entry() {
                     subtitle: String::new(),
                     aliases: Vec::new(),
                     keywords: Vec::new(),
+                    match_text: None,
+                    time: None,
+                    file: None,
                     icon: None,
                     section: None,
                     detail: None,

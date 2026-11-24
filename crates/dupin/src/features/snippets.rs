@@ -34,6 +34,7 @@ pub(super) const FEATURE: Feature = Feature {
         package: PACKAGE,
         command: SNIPPETS,
         paste_notice: Some(PASTE_NOTICE),
+        enabled: |_| true,
     }),
 };
 
@@ -113,10 +114,10 @@ impl Provider for SnippetSearch {
 fn unavailable() -> Item {
     Item {
         payload: Payload::default(),
-        id: "unavailable".into(),
+        id: super::UNAVAILABLE_ROW.into(),
         view: View::Text {
             title: "Snippets aren't available".into(),
-            subtitle: "Their bundled extension didn't load; Settings → Extensions says why.".into(),
+            subtitle: "Their extension is off or didn't load; Settings → Extensions says why.".into(),
         },
         record_usage: false,
         icon: None,

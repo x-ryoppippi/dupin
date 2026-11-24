@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use dupin_core::catalogue::Entry;
 use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
 use dupin_extension_bridge::{Call, ClipboardAccess, Request, Trigger};
-use dupin_extension_host::{ActionEffect, Host, ItemsContext};
+use dupin_extension_host::{ActionEffect, Host};
 use dupin_js_runtime::row::{Row, RowEffect};
 use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
@@ -149,7 +149,7 @@ impl<'a> Held<'a> {
     fn new(extension: &'a Extension) -> Self {
         Self {
             extension,
-            cached: Cached::default(),
+            cached: Cached::new(extension.matching),
             rows: RefCell::default(),
         }
     }
@@ -167,15 +167,12 @@ impl<'a> Held<'a> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let mut fetch = |cursor: Option<&str>, reason, preferences: &Preferences| {
-            let asked = ItemsContext {
-                cursor,
-                reason,
-                preferences,
-            };
+        let mut fetch = |cursor: Option<&str>, reason, settings: &Preferences| {
             host.items(
                 &self.extension.compiled,
-                asked,
+                cursor,
+                reason,
+                self.extension.preferences_with(settings),
                 deadline,
                 cancelled,
                 &call.services,
@@ -338,6 +335,7 @@ fn replay(
                                 &extension.compiled,
                                 handler,
                                 data.as_ref().unwrap_or(&Value::Null),
+                                &extension.preferences_with(&preferences),
                                 Instant::now() + ACTION_DEADLINE,
                                 cancelled,
                                 &call(Trigger::Activation).services,
@@ -351,6 +349,12 @@ fn replay(
                             match acted.map(|acted| acted.effect) {
                                 Ok(Some(ActionEffect::Toast { text })) => {
                                     outcome.insert("toasts".into(), json!([text]));
+                                }
+                                Ok(Some(ActionEffect::Hide)) => {
+                                    outcome.insert("panel".into(), "hide".into());
+                                }
+                                Ok(Some(ActionEffect::Paste)) => {
+                                    outcome.insert("panel".into(), "paste".into());
                                 }
                                 Ok(None) => {}
                                 Err(error) => problem = record(error, &mut outcome),
@@ -378,6 +382,7 @@ fn replay(
                     &extension.compiled,
                     event,
                     data,
+                    &extension.preferences_with(&preferences),
                     Instant::now() + ACTION_DEADLINE,
                     cancelled,
                     &call(Trigger::Background).services,

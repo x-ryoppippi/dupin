@@ -52,6 +52,12 @@ declare module 'dupin' {
 		run: string;
 		/** Passed to the handler as JSON, or `null` without it: at most 4 KiB, nested at most 16 deep. */
 		data?: Json;
+		/** ⌘Enter runs it. At most one action of an item. */
+		alternate?: boolean;
+		/** Dupin asks this first, one line, with the action's title as the button and Cancel selected. */
+		confirm?: string;
+		/** It acts on the item's `file`: while the file is gone, Dupin leaves it out. */
+		needsFile?: boolean;
 	}
 
 	/** An item of an `items` catalogue, which may carry words that also find it. */
@@ -65,6 +71,16 @@ declare module 'dupin' {
 		aliases?: string[];
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
+		/** With `"match": "words"`, more text, up to 64 KiB, that finds the item; it never shows. */
+		matchText?: string;
+		/** Milliseconds since the epoch the item is from: its subtitle starts with how long ago that was. */
+		time?: number;
+		/**
+		 * The file the item stands for, by absolute path: it shows the file's Finder icon unless
+		 * it has an `icon`, and while the file is gone it shows as Unavailable, without the
+		 * actions that need it.
+		 */
+		file?: string;
 	}
 
 	export interface Metadata {
@@ -93,6 +109,8 @@ declare module 'dupin' {
 		| { title: string; copy: string; template?: boolean }
 		| { title: string; paste: string; template?: boolean }
 		| { title: string; open: string }
+		/** Shows the file at the absolute path selected in Finder; it opens nothing. */
+		| { title: string; reveal: string }
 		| ItemAction;
 
 	export interface Section<T extends Item = Item> {
@@ -122,12 +140,15 @@ declare module 'dupin' {
 		 * `items.invalidate()`.
 		 */
 		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
-		/**
-		 * What the user set for the package. A bundled package that replaces a built-in gets that
-		 * built-in's config.toml settings here; a change asks `items` again with reason `load`.
-		 */
-		readonly preferences: Readonly<Record<string, Json>>;
+		readonly preferences: Preferences;
 	}
+
+	/**
+	 * What the user chose for each of the manifest's `preferences`, or its default. The package
+	 * Dupin shipped for a built-in that reads config.toml also finds that built-in's settings
+	 * here; a change asks `items` again with reason `load`.
+	 */
+	export type Preferences = Readonly<Record<string, Json>>;
 
 	interface CatalogueAnswer {
 		/** Seconds, from 1 to 86,400, until Dupin asks again. Without it, it asks again only when invalidated. */
@@ -148,6 +169,8 @@ declare module 'dupin' {
 	/** Changes to the catalogue Dupin holds, by item `id`. */
 	export interface CatalogueUpdate extends CatalogueAnswer {
 		type: 'update';
+		/** Items Dupin doesn't hold yet, before the others, in this order. */
+		prepend?: CatalogueItem[];
 		/** Items Dupin doesn't hold yet, after the others. */
 		append?: CatalogueItem[];
 		/** Items that take the place of the ones with their `id`. */
@@ -175,8 +198,12 @@ declare module 'dupin' {
 		invalidate(): void;
 	};
 
-	/** What an action may ask Dupin to do once it has run. */
-	export type ActionEffect = { type: 'toast'; text: string };
+	/**
+	 * What an action may ask Dupin to do once it has run: show one line, hide the panel as
+	 * copying does, or hide it and paste what the action put on the clipboard into the app in
+	 * front (which needs Accessibility; without it, Dupin says how to allow it).
+	 */
+	export type ActionEffect = { type: 'toast'; text: string } | { type: 'hide' } | { type: 'paste' };
 
 	/**
 	 * The entry module's `actions` export. A handler runs only because the user chose its item
@@ -186,12 +213,41 @@ declare module 'dupin' {
 		string,
 		(
 			data: Json,
-			ctx: Readonly<Record<string, never>>,
+			ctx: { readonly preferences: Preferences },
 		) => ActionEffect | void | Promise<ActionEffect | void>
 	>;
 
-	/** What `events.clipboard` receives for each copy, as `clipboard.read()` returns it. */
-	export type ClipboardChange = Clip & { truncated?: true };
+	/**
+	 * What `events.clipboard` receives for each copy: as `clipboard.read()` returns it, except
+	 * that an image's PNG stays with Dupin under `blob`, which `storage.put` stores as one of
+	 * the record's blobs, and each file carries a `handle` that lets the package put it back on
+	 * the clipboard while it may use its storage.
+	 */
+	export type ClipboardChange = (
+		| { type: 'text'; text: string }
+		| { type: 'url'; url: string }
+		| { type: 'files'; files: CopiedFile[] }
+		| {
+				type: 'image';
+				mediaType: 'image/png';
+				width: number;
+				height: number;
+				size: number;
+				blob: string;
+		  }
+	) & { truncated?: true; source?: string };
+
+	export interface CopiedFile {
+		path: string;
+		name: string;
+		/** The folder it is in, with the home folder written `~`. */
+		folder?: string;
+		/** Bytes, when the file could be measured as it was copied. */
+		size?: number;
+		/** Its uniform type identifier, such as `public.mpeg-4`. */
+		kind?: string;
+		handle?: string;
+	}
 
 	/**
 	 * The entry module's `events` export: handlers for what Dupin watches on the package's
@@ -200,7 +256,10 @@ declare module 'dupin' {
 	 * run programs.
 	 */
 	export interface Events {
-		clipboard?(change: ClipboardChange): void | Promise<void>;
+		clipboard?(
+			change: ClipboardChange,
+			ctx: { readonly preferences: Preferences },
+		): void | Promise<void>;
 	}
 
 	/**
@@ -233,9 +292,23 @@ declare module 'dupin' {
 		defaultSearch?: boolean;
 		/** Call `search` with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed. */
 		emptyQuery?: boolean;
+		/**
+		 * How the `items` catalogue is matched: `fuzzy` ranks items as apps are ranked, and
+		 * `words` keeps the items that hold every word typed, ignoring case, in the catalogue's
+		 * order, as a history is searched, and leaves them out of usage ranking.
+		 */
+		match?: 'fuzzy' | 'words';
+		/** Up to 16 choices `ctx.preferences` hands every call, by name. */
+		preferences?: Record<string, PreferenceDeclaration>;
 		/** The most the extension may do. The user allows each scope separately. */
 		capabilities?: Capabilities;
 	}
+
+	export type PreferenceDeclaration = { title: string } & (
+		| { type: 'checkbox'; default: boolean }
+		| { type: 'select'; options: string[]; default: string }
+		| { type: 'number'; min: number; max: number; default: number }
+	);
 
 	export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -383,7 +456,15 @@ declare module 'dupin' {
 	 * nothing; one over 1 MiB fails with `too-large`.
 	 */
 	export const storage: {
-		put(data: Json, options?: { blobs?: (ArrayBufferView | ArrayBuffer)[] }): Promise<StoredRecord>;
+		/**
+		 * A blob may be the `blob` of the latest clipboard change, whose image never crosses to
+		 * the guest and may be up to 32 MiB. With `key`, up to 256 bytes, the record replaces the
+		 * one stored for that key before, keeps its ID and lists as the newest.
+		 */
+		put(
+			data: Json,
+			options?: { blobs?: (ArrayBufferView | ArrayBuffer | string)[]; key?: string },
+		): Promise<StoredRecord>;
 		/** `undefined` when no such record is stored. */
 		get(id: string): Promise<StoredRecord | undefined>;
 		/** Up to `limit` records (50 by default, 200 at most) older than `before`, newest first. */
@@ -399,14 +480,25 @@ declare module 'dupin' {
 	export type Clip =
 		| { type: 'text'; text: string }
 		| { type: 'url'; url: string }
-		| { type: 'files'; files: { path: string; name: string }[] }
-		| { type: 'image'; [key: string]: unknown };
+		| { type: 'files'; files: CopiedFile[] }
+		/** `data` is the PNG in Base64, up to 2 MiB. */
+		| { type: 'image'; mediaType: 'image/png'; width: number; height: number; data: string };
 
 	/** `clipboard` capability. Reading and writing happen only in an action. */
 	export const clipboard: {
 		read(): Promise<Clip | null>;
 		readText(): Promise<string | undefined>;
 		writeText(text: string): Promise<void>;
+		/**
+		 * Text; an image the package stored, by its blob's handle; or files a watch delivered,
+		 * by the handles they came with, which must still be there.
+		 */
+		write(
+			clip:
+				| { type: 'text'; text: string }
+				| { type: 'image'; blob: string }
+				| { type: 'files'; files: { path: string; handle: string }[] },
+		): Promise<void>;
 	};
 
 	export interface DictionaryEntry {

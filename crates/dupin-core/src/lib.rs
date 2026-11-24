@@ -3,7 +3,6 @@
 //! turns keys and query edits into searches and actions.
 
 pub mod catalogue;
-pub mod clipboard;
 pub mod command;
 pub mod config;
 pub mod detail;

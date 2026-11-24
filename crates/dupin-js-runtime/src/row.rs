@@ -12,6 +12,11 @@ pub(crate) const MAX_TEXT_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_ACTION_TEXT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_KEYWORDS: usize = 16;
 pub(crate) const MAX_KEYWORD_BYTES: usize = 64;
+/// As much text as a clipboard change carries, so a history can be found by all of it.
+pub(crate) const MAX_MATCH_TEXT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_FILE_BYTES: usize = 4096;
+/// Milliseconds since the epoch that JavaScript's `Date` can hold.
+pub(crate) const MAX_TIME_MS: u64 = 8_640_000_000_000_000;
 pub(crate) const MAX_SECTION_BYTES: usize = 128;
 pub(crate) const MAX_ICON_BYTES: usize = 256;
 /// Image formats the launcher draws as a row's icon.
@@ -48,6 +53,15 @@ pub struct Row {
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub keywords: Vec<String>,
+    /// More text a catalogue that matches words finds the row by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_text: Option<String>,
+    /// Milliseconds since the epoch the row is from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<u64>,
+    /// An absolute path whose Finder icon the row shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
     /// A package-relative image path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
@@ -84,6 +98,29 @@ pub struct RowAction {
     /// chosen, so the package never sees the clipboard or the time.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub template: bool,
+    /// ⌘Enter runs it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub alternate: bool,
+    /// What Dupin asks before it runs, with the action's title as the button.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm: Option<String>,
+    /// It acts on the row's `file`, so it isn't offered while the file is gone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_file: bool,
+}
+
+impl RowAction {
+    /// An action Enter or the action list runs, without asking first.
+    pub fn new(title: impl Into<String>, effect: RowEffect) -> Self {
+        Self {
+            title: title.into(),
+            effect,
+            template: false,
+            alternate: false,
+            confirm: None,
+            needs_file: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +135,10 @@ pub enum RowEffect {
     },
     OpenUrl {
         url: String,
+    },
+    /// Shows a file selected in Finder; it opens nothing.
+    Reveal {
+        path: String,
     },
     /// Calls `actions[handler](data)` in the package.
     Run {
@@ -129,6 +170,8 @@ pub enum PageChange {
     /// The whole catalogue, or its first part when `more` is set.
     Reset { rows: Vec<Row> },
     Update {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        prepend: Vec<Row>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         append: Vec<Row>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -183,8 +226,27 @@ impl Row {
         if self.subtitle.len() > MAX_SUBTITLE_BYTES {
             return Err("`subtitle` is too long".into());
         }
-        if source == Source::Search && !(self.keywords.is_empty() && self.aliases.is_empty()) {
-            return Err("`aliases` and `keywords` belong to items()".into());
+        if source == Source::Search
+            && (!self.aliases.is_empty()
+                || !self.keywords.is_empty()
+                || self.match_text.is_some()
+                || self.time.is_some()
+                || self.file.is_some())
+        {
+            return Err("`aliases`, `keywords`, `matchText`, `time` and `file` belong to items()".into());
+        }
+        if self
+            .match_text
+            .as_ref()
+            .is_some_and(|text| text.is_empty() || text.len() > MAX_MATCH_TEXT_BYTES)
+        {
+            return Err("`matchText` must be 1 byte to 64 KiB".into());
+        }
+        if self.time.is_some_and(|time| time > MAX_TIME_MS) {
+            return Err("`time` is out of range".into());
+        }
+        if let Some(file) = &self.file {
+            check_file(file)?;
         }
         if self.keywords.len() > MAX_KEYWORDS || self.aliases.len() > MAX_KEYWORDS {
             return Err("too many `aliases` or `keywords`".into());
@@ -213,10 +275,21 @@ impl Row {
         if self.actions.len() > MAX_ACTIONS {
             return Err("too many `actions`".into());
         }
+        if self.actions.iter().filter(|action| action.alternate).count() > 1 {
+            return Err("more than one `alternate` action".into());
+        }
         for action in &self.actions {
             line("actions.title", &action.title, MAX_ACTION_TITLE_BYTES)?;
             if action.template && !matches!(action.effect, RowEffect::Copy { .. } | RowEffect::Paste { .. }) {
                 return Err("only a copy or paste action can be a template".into());
+            }
+            if (action.alternate || action.confirm.is_some() || action.needs_file)
+                && !matches!(action.effect, RowEffect::Run { .. })
+            {
+                return Err("only a `run` action is `alternate`, asks to `confirm` or `needsFile`".into());
+            }
+            if let Some(confirm) = &action.confirm {
+                line("actions.confirm", confirm, MAX_ACTION_TITLE_BYTES)?;
             }
             match &action.effect {
                 RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
@@ -239,6 +312,7 @@ impl Row {
                         check_data(data)?;
                     }
                 }
+                RowEffect::Reveal { path } => check_file(path)?,
                 RowEffect::Copy { .. } | RowEffect::Paste { .. } | RowEffect::OpenUrl { .. } => {}
             }
         }
@@ -260,9 +334,11 @@ impl Row {
             .iter()
             .map(|action| {
                 action.title.len()
+                    + action.confirm.as_ref().map_or(0, String::len)
                     + match &action.effect {
                         RowEffect::Copy { text } | RowEffect::Paste { text } => text.len(),
                         RowEffect::OpenUrl { url } => url.len(),
+                        RowEffect::Reveal { path } => path.len(),
                         RowEffect::Run { handler, data } => {
                             handler.len() + data.as_ref().map_or(0, |data| data.to_string().len())
                         }
@@ -274,6 +350,8 @@ impl Row {
             + self.subtitle.len()
             + self.aliases.iter().map(String::len).sum::<usize>()
             + self.keywords.iter().map(String::len).sum::<usize>()
+            + self.match_text.as_ref().map_or(0, String::len)
+            + self.file.as_ref().map_or(0, String::len)
             + self.icon.as_ref().map_or(0, String::len)
             + self.section.as_ref().map_or(0, String::len)
             + detail
@@ -287,10 +365,11 @@ impl CataloguePage {
         let (rows, removed): (Vec<&Row>, &[String]) = match &self.change {
             PageChange::Reset { rows } => (rows.iter().collect(), &[]),
             PageChange::Update {
+                prepend,
                 append,
                 replace,
                 remove,
-            } => (append.iter().chain(replace).collect(), remove),
+            } => (prepend.iter().chain(append).chain(replace).collect(), remove),
         };
         if rows.len() > MAX_PAGE_ROWS || removed.len() > MAX_PAGE_ROWS {
             return Err(format!("more than {MAX_PAGE_ROWS} items in one answer"));
@@ -346,6 +425,16 @@ pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
         .map(|(_, extension)| extension.to_ascii_lowercase());
     if !extension.is_some_and(|extension| ICON_EXTENSIONS.contains(&extension.as_str())) {
         return invalid();
+    }
+    Ok(())
+}
+
+/// An absolute path to show the Finder icon of. The row only names it; nothing reads it.
+pub(crate) fn check_file(file: &str) -> Result<(), String> {
+    if !file.starts_with('/') || file.len() > MAX_FILE_BYTES || file.chars().any(char::is_control) {
+        return Err(format!(
+            "`file` must be an absolute path of at most {MAX_FILE_BYTES} bytes"
+        ));
     }
     Ok(())
 }

@@ -66,7 +66,7 @@ impl ExtensionProvider {
 
     fn problem(&self, message: String) -> Item {
         Item {
-            id: "extension-error".into(),
+            id: PROBLEM_ROW.into(),
             payload: Payload::default(),
             view: View::Text {
                 title: format!("{} failed", self.extension.name),
@@ -165,6 +165,10 @@ impl Convert for Extension {
     fn entry(&self, mut row: Row) -> Entry {
         let aliases = std::mem::take(&mut row.aliases);
         let keywords = std::mem::take(&mut row.keywords);
+        let match_text = row.match_text.take();
+        let time = row.time.map(|ms| ms / 1000);
+        let file = row.file.clone().map(Into::into);
+        let file_actions = file_actions(&row);
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
@@ -172,6 +176,10 @@ impl Convert for Extension {
             keywords,
             section: section.map(Into::into),
             detail,
+            match_text,
+            time,
+            file,
+            file_actions,
         }
     }
 
@@ -185,6 +193,16 @@ impl Convert for Extension {
     }
 }
 
+/// The IDs [`row_item`] gives the row's actions that act on its file.
+fn file_actions(row: &Row) -> Vec<String> {
+    row.actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| action.needs_file || matches!(action.effect, RowEffect::Reveal { .. }))
+        .map(|(index, _)| format!("action-{index}"))
+        .collect()
+}
+
 pub(super) fn row_item(
     extension: &Extension,
     row: Row,
@@ -196,6 +214,9 @@ pub(super) fn row_item(
         subtitle,
         aliases: _,
         keywords: _,
+        match_text: _,
+        time: _,
+        file,
         icon,
         section,
         detail,
@@ -225,6 +246,7 @@ pub(super) fn row_item(
         })
         .unwrap_or_default();
     let (mut copy, mut paste, mut open) = (false, false, false);
+    let mut alternate = None;
     let actions: Vec<ItemAction> = offered
         .into_iter()
         .enumerate()
@@ -257,18 +279,33 @@ pub(super) fn row_item(
                 RowEffect::OpenUrl { url } => {
                     ItemAction::new(&name(&mut open, "open"), &action.title, Action::OpenUrl(url))
                 }
-                RowEffect::Run { handler, data } => ItemAction::new(
+                RowEffect::Reveal { path } => ItemAction::new(
                     &format!("action-{index}"),
                     &action.title,
-                    Action::Extension {
-                        extension: extension.id.clone(),
-                        request: ExtensionRequest::Run {
-                            action: handler,
-                            data,
+                    Action::Reveal(path.into()),
+                ),
+                RowEffect::Run { handler, data } => {
+                    let id = format!("action-{index}");
+                    if action.alternate {
+                        alternate = Some(id.clone());
+                    }
+                    let run = ItemAction::new(
+                        &id,
+                        &action.title,
+                        Action::Extension {
+                            extension: extension.id.clone(),
+                            request: ExtensionRequest::Run {
+                                action: handler,
+                                data,
+                            },
                         },
-                    },
-                )
-                .keep_open(),
+                    )
+                    .keep_open();
+                    match &action.confirm {
+                        Some(prompt) => run.confirm(prompt, &action.title),
+                        None => run,
+                    }
+                }
             }
         })
         .collect();
@@ -276,17 +313,24 @@ pub(super) fn row_item(
         id: if catalogue { extension.entry_id(&id) } else { id },
         view: View::Text { title, subtitle },
         payload,
-        record_usage: catalogue,
-        icon: icon.map(|icon| Icon::Image(extension.root.join(icon))),
+        // A catalogue matched by words keeps its own order, as a history does, so picks never
+        // rank it.
+        record_usage: catalogue && extension.matching == dupin_core::catalogue::Matching::Fuzzy,
+        icon: icon
+            .map(|icon| Icon::Image(extension.root.join(icon)))
+            .or_else(|| file.map(|file| Icon::File(file.into()))),
         matched: Vec::new(),
         completion: None,
         score: None,
         primary: actions.first().map(|action| action.id.clone()),
-        // ⌘Enter copies what Enter would paste, as it does for clipboard history and snippets.
-        alternate: actions
-            .first()
-            .filter(|action| action.id == "paste")
-            .and(copy.then(|| "copy".to_owned())),
+        // Without an `alternate` of its own, ⌘Enter copies what Enter would paste, as it does
+        // for snippets.
+        alternate: alternate.or_else(|| {
+            actions
+                .first()
+                .filter(|action| action.id == "paste")
+                .and(copy.then(|| "copy".to_owned()))
+        }),
         actions,
     };
     (item, detail, section)
@@ -360,11 +404,7 @@ impl Provider for ExtensionProvider {
             }
         }
         match answer {
-            Ok(batches) => {
-                let rows = batches.iter().map(|batch| batch.items.len()).sum();
-                crate::latency::package_answered(id.as_str(), rows);
-                batches.into_iter().for_each(emit);
-            }
+            Ok(batches) => batches.into_iter().for_each(emit),
             Err(RunError::Cancelled) => {}
             Err(RunError::Failed(diagnostic)) => {
                 crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
@@ -483,6 +523,13 @@ pub(crate) fn consent_row(extension: &Extension, request: &ConsentRequest) -> It
 
 const CONSENT_ROW: &str = "consent:";
 const TURN_ON_ROW: &str = "consent:turn-on";
+const PROBLEM_ROW: &str = "extension-error";
+
+/// Whether the row `id` is one Dupin shows in place of an extension's answer: the extension
+/// failed, or waits to be turned on or for consent.
+pub(crate) fn stands_in(id: &str) -> bool {
+    id == PROBLEM_ROW || id.starts_with(CONSENT_ROW)
+}
 
 /// Whether `row` asks the user something about `id` that the bridge no longer waits on, so the
 /// panel can drop it after an answer without running the guest again.

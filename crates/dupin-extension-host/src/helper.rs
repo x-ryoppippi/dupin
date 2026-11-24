@@ -292,11 +292,19 @@ fn execute(
         } => package
             .items(engine, cursor.as_deref(), reason, &preferences, control, bridge)
             .map(Outcome::Catalogue),
-        Call::Action { name, data } => package
-            .action(engine, &name, &data.to_string(), control, bridge)
+        Call::Action {
+            name,
+            data,
+            preferences,
+        } => package
+            .action(engine, &name, &data.to_string(), &preferences, control, bridge)
             .map(Outcome::Acted),
-        Call::Event { name, event } => package
-            .event(engine, &name, &event.to_string(), control, bridge)
+        Call::Event {
+            name,
+            event,
+            preferences,
+        } => package
+            .event(engine, &name, &event.to_string(), &preferences, control, bridge)
             .map(Outcome::Handled),
     }
 }

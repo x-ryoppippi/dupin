@@ -18,7 +18,7 @@ fn items_with(
         &engine(),
         cursor,
         reason,
-        preferences,
+        &serde_json::Value::Object(preferences.clone()),
         timeout(DEADLINE),
         &mut Unavailable::default(),
     )
@@ -50,7 +50,7 @@ fn a_package_may_export_items_search_or_both() {
             &engine(),
             None,
             Reason::Load,
-            &Preferences::new(),
+            &serde_json::json!({}),
             timeout(DEADLINE),
             &mut Unavailable::default(),
         ))
@@ -129,6 +129,7 @@ fn items_answers_with_changes_by_id_after_its_cursor() {
         append,
         replace,
         remove,
+        ..
     } = page.change
     else {
         panic!("{:?}", page.change);
@@ -288,6 +289,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
             &engine(),
             name,
             data,
+            &serde_json::json!({}),
             timeout(DEADLINE),
             &mut Unavailable::default(),
         )
@@ -355,6 +357,9 @@ fn rows_from_another_process_are_checked_again() {
             subtitle: String::new(),
             aliases: Vec::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -364,11 +369,7 @@ fn rows_from_another_process_are_checked_again() {
         row
     };
     assert!(row(&|_| {}).validate(row::Source::Search).is_ok());
-    let action = |effect: RowEffect| RowAction {
-        title: "Act".into(),
-        effect,
-        template: false,
-    };
+    let action = |effect: RowEffect| RowAction::new("Act", effect);
     for broken in [
         row(&|row| row.title = "a\nb".into()),
         row(&|row| row.keywords = vec!["k".into()]),
@@ -447,17 +448,15 @@ fn copy_and_paste_actions_may_be_templates_of_up_to_64_kib() {
         rows[0].actions,
         [
             RowAction {
-                title: "Paste".into(),
-                effect: RowEffect::Paste {
-                    text: "{date}".into()
-                },
                 template: true,
+                ..RowAction::new(
+                    "Paste",
+                    RowEffect::Paste {
+                        text: "{date}".into(),
+                    },
+                )
             },
-            RowAction {
-                title: "Copy".into(),
-                effect: RowEffect::Copy { text: long },
-                template: false,
-            },
+            RowAction::new("Copy", RowEffect::Copy { text: long }),
         ]
     );
     for (action, code) in [

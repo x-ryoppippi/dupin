@@ -27,6 +27,7 @@ pub(super) const FEATURE: Feature = Feature {
         package: PACKAGE,
         command: CALENDAR,
         paste_notice: None,
+        enabled: |config| config.calendar.enabled,
     }),
     ..Feature::EMPTY
 };
@@ -91,7 +92,7 @@ impl Provider for CalendarSearch {
             None => {
                 emit(
                     vec![row(
-                        "unavailable",
+                        super::UNAVAILABLE_ROW,
                         "Calendar search isn't available",
                         "Its extension is off or didn't load; Settings → Extensions says why.".into(),
                         None,

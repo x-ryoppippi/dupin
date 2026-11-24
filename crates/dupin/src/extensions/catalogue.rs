@@ -16,9 +16,9 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use dupin_core::Batch;
-use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits};
+use dupin_core::catalogue::{Catalogue, Change, ChangeError, Entry, Limits, Matching};
 use dupin_extension_bridge::Generation;
-use dupin_js_runtime::row::{MAX_PAGE_ROWS, PageChange};
+use dupin_js_runtime::row::{MAX_PAGE_BYTES, MAX_PAGE_ROWS, PageChange};
 use dupin_js_runtime::{CataloguePage, Diagnostic, Preferences, Reason, Row, RunError};
 
 use super::Role;
@@ -31,8 +31,9 @@ pub const LIMITS: Limits = Limits {
 /// Text all catalogues together may hold. Past it, the least recently used are dropped and
 /// asked for again on their next use.
 const BUDGET_BYTES: usize = 24 * 1024 * 1024;
-/// Parts one refresh may take: a full catalogue in the largest parts, and one more.
-const MAX_PARTS: usize = LIMITS.rows / MAX_PAGE_ROWS + 1;
+/// Parts one refresh may take: a full catalogue whose parts each end at an answer's rows or at
+/// its text, whichever comes first, and one more.
+const MAX_PARTS: usize = LIMITS.rows / MAX_PAGE_ROWS + LIMITS.bytes / MAX_PAGE_BYTES + 1;
 
 pub(crate) struct Cached {
     shared: Arc<Shared>,
@@ -88,9 +89,15 @@ struct State {
 
 impl Default for Cached {
     fn default() -> Self {
+        Self::new(Matching::default())
+    }
+}
+
+impl Cached {
+    pub fn new(matching: Matching) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
-                catalogue: Catalogue::default(),
+                catalogue: Catalogue::new(matching),
                 cursor: None,
                 expires: None,
                 due: Some(Reason::Load),
@@ -109,9 +116,7 @@ impl Default for Cached {
             .push(Arc::downgrade(&shared));
         Self { shared }
     }
-}
 
-impl Cached {
     /// Drops what the catalogue holds when it is next used, which then asks for it from the
     /// start. Rows being asked for right now are dropped at that use too.
     pub fn forget(&self) {
@@ -162,7 +167,9 @@ impl Cached {
             .bytes
             .store(state.catalogue.bytes(), Ordering::Relaxed);
         refreshed?;
-        let batches = state.catalogue.search(query, limit);
+        let batches = state
+            .catalogue
+            .search(query, limit, dupin_core::session::unix_now());
         drop(state);
         self.keep_within_budget();
         Ok(batches)
@@ -171,7 +178,7 @@ impl Cached {
     /// How many rows the catalogue holds.
     #[cfg(test)]
     pub fn len(&self) -> usize {
-        let listed = self.shared.lock().catalogue.search("", usize::MAX);
+        let listed = self.shared.lock().catalogue.search("", usize::MAX, 0);
         listed.iter().map(|batch| batch.items.len()).sum()
     }
 
@@ -211,7 +218,7 @@ impl Shared {
 
 impl State {
     fn forget(&mut self) {
-        self.catalogue = Catalogue::default();
+        self.catalogue = Catalogue::new(self.catalogue.matching());
         self.cursor = None;
         self.expires = None;
         self.due = Some(Reason::Load);
@@ -253,10 +260,12 @@ impl State {
                     Change::Reset(rows.into_iter().map(|row| convert.entry(row)).collect())
                 }
                 PageChange::Update {
+                    prepend,
                     append,
                     replace,
                     remove,
                 } => Change::Update {
+                    prepend: prepend.into_iter().map(|row| convert.entry(row)).collect(),
                     append: append.into_iter().map(|row| convert.entry(row)).collect(),
                     replace: replace.into_iter().map(|row| convert.entry(row)).collect(),
                     remove: remove.iter().map(|id| convert.entry_id(id)).collect(),
@@ -327,6 +336,9 @@ mod tests {
             subtitle: String::new(),
             aliases: Vec::new(),
             keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
             icon: None,
             section: None,
             detail: None,
@@ -361,6 +373,10 @@ mod tests {
                 keywords: row.keywords,
                 section: None,
                 detail: None,
+                match_text: None,
+                time: None,
+                file: None,
+                file_actions: Vec::new(),
             }
         }
 
@@ -447,6 +463,7 @@ mod tests {
                 ),
                 (Some("1"), Reason::More) => page(
                     PageChange::Update {
+                        prepend: Vec::new(),
                         append: vec![row("b", "Beta")],
                         replace: Vec::new(),
                         remove: Vec::new(),
@@ -456,6 +473,7 @@ mod tests {
                 ),
                 (Some("2"), Reason::Invalidated) => page(
                     PageChange::Update {
+                        prepend: Vec::new(),
                         append: Vec::new(),
                         replace: vec![row("b", "Bravo")],
                         remove: vec!["a".into()],
@@ -494,11 +512,13 @@ mod tests {
                 rows: vec![row("clip-1", "First"), row("clip-2", "Second")],
             },
             PageChange::Update {
+                prepend: Vec::new(),
                 append: Vec::new(),
                 replace: Vec::new(),
                 remove: vec!["clip-1".into()],
             },
             PageChange::Update {
+                prepend: Vec::new(),
                 append: vec![row("clip-1", "Again")],
                 replace: Vec::new(),
                 remove: Vec::new(),
@@ -789,11 +809,48 @@ mod tests {
     }
 
     #[test]
+    fn a_catalogue_near_both_limits_arrives_in_the_parts_its_rows_and_text_need() {
+        let cached = Cached::default();
+        let heavy = 7;
+        let full = 19;
+        let mut sent = 0;
+        let mut fetch = |_: Option<&str>, _, _: &Preferences| {
+            sent += 1;
+            let rows = if sent <= heavy {
+                let mut large = row(&format!("heavy-{sent}"), "Heavy");
+                large.subtitle = "x".repeat(MAX_PAGE_BYTES - 64);
+                vec![large]
+            } else {
+                (0..MAX_PAGE_ROWS)
+                    .map(|index| row(&format!("{sent}-{index}"), "Light"))
+                    .collect()
+            };
+            let change = if sent == 1 {
+                PageChange::Reset { rows }
+            } else {
+                PageChange::Update {
+                    prepend: Vec::new(),
+                    append: rows,
+                    replace: Vec::new(),
+                    remove: Vec::new(),
+                }
+            };
+            Ok(page(change, "1", sent < heavy + full))
+        };
+        assert!(heavy + full > LIMITS.rows / MAX_PAGE_ROWS + 1);
+        let found = cached
+            .search("heavy", 10, keyword(&none()), &mut fetch, ENTRY)
+            .unwrap();
+        assert_eq!(titles(&found).len(), heavy);
+    }
+
+    #[test]
     fn a_rejected_change_or_endless_parts_drop_the_catalogue() {
         let cached = Cached::default();
         let mut fetch = |_: Option<&str>, _, _: &Preferences| {
             Ok(page(
                 PageChange::Update {
+                    prepend: Vec::new(),
                     append: Vec::new(),
                     replace: vec![row("missing", "M")],
                     remove: Vec::new(),
