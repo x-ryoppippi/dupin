@@ -61,6 +61,8 @@ declare module 'dupin' {
 		 * remembers which items are picked by it.
 		 */
 		id: string;
+		/** Up to 16 other names of up to 64 bytes, such as a short code, matched as the title is. */
+		aliases?: string[];
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
 	}
@@ -79,9 +81,15 @@ declare module 'dupin' {
 		metadata?: Metadata[];
 	}
 
+	/**
+	 * `copy` and `paste` take 1 byte to 64 KiB of text. With `template`, Dupin fills `{date}`
+	 * (`2026-01-31`), `{time}` (`09:05`), `{datetime}` and `{clipboard}` (the clipboard's text)
+	 * when the action is chosen, so the package never sees the clipboard; other braces stay as
+	 * written. `paste` needs the `clipboard: ['paste']` scope, and copies without it.
+	 */
 	export type Action =
-		| { title: string; copy: string }
-		| { title: string; paste: string }
+		| { title: string; copy: string; template?: boolean }
+		| { title: string; paste: string; template?: boolean }
 		| { title: string; open: string }
 		| ItemAction;
 

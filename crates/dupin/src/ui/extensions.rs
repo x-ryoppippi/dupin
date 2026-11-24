@@ -344,7 +344,9 @@ impl Ui {
         };
         let (action, data) = match request {
             ExtensionRequest::Run { action, data } => (action, data),
-            ExtensionRequest::Paste { text } => return self.run_paste(&extension, text, tx),
+            ExtensionRequest::Paste { text, template } => {
+                return self.run_paste(&extension, text, template, tx);
+            }
             request => return self.answer_extension_row(None, extension, request, tx),
         };
         let bridge = self.extensions.bridge.clone();

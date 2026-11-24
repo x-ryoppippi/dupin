@@ -48,15 +48,27 @@ pub(super) struct Bundled {
     pub package: &'static str,
     /// The command the feature registers while it is on.
     pub command: &'static str,
+    /// For a feature that pastes, what Dupin says when macOS doesn't let it: the feature asks
+    /// macOS for Dupin's own access on first paste, as it did before it shipped as a package.
+    pub paste_notice: Option<&'static str>,
 }
 
-/// The built-in command the extension called `package` answers, if a feature ships as it.
-pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
+fn bundled(package: &str) -> Option<Bundled> {
     MANIFEST
         .iter()
         .filter_map(|feature| feature.bundled)
         .find(|bundled| bundled.package == package)
-        .map(|bundled| bundled.command)
+}
+
+/// The built-in command the extension called `package` answers, if a feature ships as it.
+pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
+    bundled(package).map(|bundled| bundled.command)
+}
+
+/// What Dupin says when it can't paste for the feature the extension called `package` ships,
+/// if that feature pastes.
+pub(crate) fn paste_notice(package: &str) -> Option<&'static str> {
+    bundled(package).and_then(|bundled| bundled.paste_notice)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

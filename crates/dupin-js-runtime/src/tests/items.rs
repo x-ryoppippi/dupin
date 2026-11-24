@@ -317,6 +317,7 @@ fn rows_from_another_process_are_checked_again() {
             id: "a".into(),
             title: "A".into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             icon: None,
             section: None,
@@ -330,6 +331,7 @@ fn rows_from_another_process_are_checked_again() {
     let action = |effect: RowEffect| RowAction {
         title: "Act".into(),
         effect,
+        template: false,
     };
     for broken in [
         row(&|row| row.title = "a\nb".into()),
@@ -346,6 +348,19 @@ fn rows_from_another_process_are_checked_again() {
             row.actions = vec![action(RowEffect::Run {
                 handler: "a b".into(),
                 data: None,
+            })]
+        }),
+        row(&|row| {
+            row.actions = vec![RowAction {
+                template: true,
+                ..action(RowEffect::OpenUrl {
+                    url: "https://example.com/".into(),
+                })
+            }]
+        }),
+        row(&|row| {
+            row.actions = vec![action(RowEffect::Copy {
+                text: "x".repeat(64 * 1024 + 1),
             })]
         }),
     ] {
@@ -379,4 +394,49 @@ fn items_sees_the_preferences_frozen_through_and_through() {
         panic!("expected the whole catalogue");
     };
     assert_eq!(rows[0].title, "0");
+}
+
+#[test]
+fn copy_and_paste_actions_may_be_templates_of_up_to_64_kib() {
+    let long = "x".repeat(64 * 1024);
+    let source = format!(
+        "export function items() {{ return [{{ id: 'a', title: 'A', actions: [\
+         {{ title: 'Paste', paste: '{{date}}', template: true }},\
+         {{ title: 'Copy', copy: '{long}', template: false }}] }}]; }}"
+    );
+    let PageChange::Reset { rows } = items(&source, None, Reason::Load).unwrap().change else {
+        panic!("expected the whole catalogue");
+    };
+    assert_eq!(
+        rows[0].actions,
+        [
+            RowAction {
+                title: "Paste".into(),
+                effect: RowEffect::Paste {
+                    text: "{date}".into()
+                },
+                template: true,
+            },
+            RowAction {
+                title: "Copy".into(),
+                effect: RowEffect::Copy { text: long },
+                template: false,
+            },
+        ]
+    );
+    for (action, code) in [
+        (
+            "{ title: 'Open', open: 'https://example.com/', template: true }",
+            "unknown-field",
+        ),
+        ("{ title: 'Copy', copy: 'x', template: 'yes' }", "invalid-field"),
+    ] {
+        let source =
+            format!("export function items() {{ return [{{ id: 'a', title: 'A', actions: [{action}] }}]; }}");
+        assert_eq!(
+            failure_of(items(&source, None, Reason::Load)).code,
+            code,
+            "{action}"
+        );
+    }
 }

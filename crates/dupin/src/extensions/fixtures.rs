@@ -310,7 +310,7 @@ fn replay(
                 });
                 match chosen {
                     Some(action) => {
-                        outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
+                        outcome.insert("effect".into(), Value::Object(fixture::chosen(action)));
                         if let RowEffect::Paste { text } = &action.effect {
                             let paste = Request::Clipboard(ClipboardAccess::Paste);
                             // The launcher copies instead, so the fixture sees what the user would.
@@ -319,8 +319,11 @@ fn replay(
                                     .bridge
                                     .authorize(&extension.package, &paste, Trigger::Activation)
                             {
-                                let copied = RowEffect::Copy { text: text.clone() };
-                                outcome.insert("effect".into(), Value::Object(fixture::effect(&copied)));
+                                let copied = dupin_js_runtime::row::RowAction {
+                                    effect: RowEffect::Copy { text: text.clone() },
+                                    ..action.clone()
+                                };
+                                outcome.insert("effect".into(), Value::Object(fixture::chosen(&copied)));
                                 outcome.insert(
                                     "error".into(),
                                     fixture::error(&Diagnostic::new(

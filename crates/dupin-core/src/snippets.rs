@@ -49,6 +49,11 @@ fn next_placeholder(text: &str, from: usize) -> Option<(usize, usize, Placeholde
     })
 }
 
+/// Whether the text holds a placeholder, so what it becomes depends on when it is used.
+pub fn has_placeholders(text: &str) -> bool {
+    next_placeholder(text, 0).is_some()
+}
+
 /// Whether expanding the snippet requires clipboard text.
 pub fn needs_clipboard(text: &str) -> bool {
     text.contains(CLIPBOARD_PLACEHOLDER)

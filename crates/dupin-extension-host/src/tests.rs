@@ -573,6 +573,7 @@ fn rogue_helper_entry() {
             id: "1".into(),
             title: title.into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             icon: None,
             section: None,

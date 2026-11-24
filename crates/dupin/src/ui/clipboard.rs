@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use dupin_core::clipboard::Content;
-use dupin_extension_bridge::{ClipboardAccess, Request, Trigger};
+use dupin_extension_bridge::{ClipboardAccess, OsAccess, OsPermission, Request, Trigger};
 use rune::Tx;
 
+use super::snippets::RowText;
 use super::{Busy, PendingPaste, Ui};
 use crate::extensions::Extension;
 
@@ -27,7 +28,18 @@ impl Ui {
     /// Paste an extension row's text once the panel closes, while the extension holds
     /// `clipboard:paste` and macOS lets Dupin post ⌘V, or copy it now. A refusal for want of
     /// consent waits in the panel and Settings, as a request from the extension's code would.
-    pub(super) fn run_paste(&mut self, extension: &Extension, text: String, tx: &mut Tx) {
+    /// A built-in's port pastes as the built-in did: Dupin asks macOS for its own access on
+    /// first use and explains a refusal with the built-in's notice.
+    pub(super) fn run_paste(&mut self, extension: &Extension, text: String, template: bool, tx: &mut Tx) {
+        let text = RowText::new(text, template);
+        if let Some(notice) = crate::features::paste_notice(&extension.id) {
+            if rune::tooling::is_headless() || !self.may_paste(notice) {
+                return self.hand_over(text, false, tx);
+            }
+            self.extensions
+                .bridge
+                .set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+        }
         let paste = Request::Clipboard(ClipboardAccess::Paste);
         match self
             .extensions
@@ -37,9 +49,9 @@ impl Ui {
             Ok(permit) if !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) => {
                 self.paste_after_close = Some(PendingPaste::Extension { text, permit });
             }
-            Ok(_) => tx.copy(text),
+            Ok(_) => self.hand_over(text, false, tx),
             Err(refused) => {
-                tx.copy(text);
+                self.hand_over(text, false, tx);
                 self.notice_after_close = Some(format!("Copied instead. {refused}"));
             }
         }

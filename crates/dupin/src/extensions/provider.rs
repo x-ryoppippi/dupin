@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use dupin_core::catalogue::Entry;
 use dupin_core::{
     Action, Batch, Detail, ExtensionRequest, Icon, Item, ItemAction, Page, Payload, Provider, ProviderError,
-    Request, View,
+    Request, View, snippets,
 };
 use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_js_runtime::RunError;
@@ -163,18 +163,24 @@ fn sectioned(rows: impl Iterator<Item = (Item, Option<Arc<Detail>>, Option<Strin
 impl Convert for Extension {
     /// A catalogue row as the launcher holds it.
     fn entry(&self, mut row: Row) -> Entry {
+        let aliases = std::mem::take(&mut row.aliases);
         let keywords = std::mem::take(&mut row.keywords);
         let (item, detail, section) = row_item(self, row, true);
         Entry {
             item,
+            aliases,
             keywords,
             section: section.map(Into::into),
             detail,
         }
     }
 
-    /// Carries the extension's ID, since usage history keys rows by ID across every command.
+    /// Carries the extension's ID, since usage history keys rows by ID across every command. A
+    /// built-in's port keeps the IDs the built-in gave its rows, so what was used carries over.
     fn entry_id(&self, id: &str) -> String {
+        if crate::features::ported_command(&self.id).is_some() {
+            return id.to_owned();
+        }
         format!("extension:{}/{id}", self.id)
     }
 }
@@ -188,6 +194,7 @@ pub(super) fn row_item(
         id,
         title,
         subtitle,
+        aliases: _,
         keywords: _,
         icon,
         section,
@@ -201,10 +208,14 @@ pub(super) fn row_item(
         }
         Arc::new(shown)
     });
+    // Text Dupin fills in only when it is chosen isn't the row's text until then.
     let payload = offered
         .iter()
         .find_map(|action| match &action.effect {
-            RowEffect::Copy { text } => Some(Payload::text(text.clone())),
+            RowEffect::Copy { text } if !action.template || !snippets::has_placeholders(text) => {
+                Some(Payload::text(text.clone()))
+            }
+            RowEffect::Copy { .. } => Some(Payload::default()),
             _ => None,
         })
         .unwrap_or_default();
@@ -220,7 +231,13 @@ pub(super) fn row_item(
                     first.to_owned()
                 }
             };
+            let template = action.template;
             match action.effect {
+                RowEffect::Copy { text } if template => ItemAction::new(
+                    &name(&mut copy, "copy"),
+                    &action.title,
+                    Action::Snippet { text, paste: false },
+                ),
                 RowEffect::Copy { text } => {
                     ItemAction::new(&name(&mut copy, "copy"), &action.title, Action::Copy(text))
                 }
@@ -229,7 +246,7 @@ pub(super) fn row_item(
                     &action.title,
                     Action::Extension {
                         extension: extension.id.clone(),
-                        request: ExtensionRequest::Paste { text },
+                        request: ExtensionRequest::Paste { text, template },
                     },
                 ),
                 RowEffect::OpenUrl { url } => {
@@ -260,7 +277,11 @@ pub(super) fn row_item(
         completion: None,
         score: None,
         primary: actions.first().map(|action| action.id.clone()),
-        alternate: None,
+        // ⌘Enter copies what Enter would paste, as it does for clipboard history and snippets.
+        alternate: actions
+            .first()
+            .filter(|action| action.id == "paste")
+            .and(copy.then(|| "copy".to_owned())),
         actions,
     };
     (item, detail, section)
@@ -589,7 +610,10 @@ mod tests {
             rows[0].action("paste"),
             Some(&Action::Extension {
                 extension: provider.extension.id.clone(),
-                request: ExtensionRequest::Paste { text: "🍵".into() },
+                request: ExtensionRequest::Paste {
+                    text: "🍵".into(),
+                    template: false,
+                },
             })
         );
         assert_eq!(rows[0].payload, Payload::text("🍵"));

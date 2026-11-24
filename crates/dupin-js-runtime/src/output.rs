@@ -8,8 +8,8 @@ use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::row::{
-    self, CataloguePage, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_ID_BYTES,
-    MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_METADATA,
+    self, CataloguePage, MAX_ACTION_TEXT_BYTES, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES,
+    MAX_ID_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_METADATA,
     MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES, MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES,
     MAX_TEXT_BYTES, MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail,
     RowEffect,
@@ -79,7 +79,7 @@ const ITEM_FIELDS: [&str; 9] = [
 ];
 const ITEM_FIELDS_HINT: &str =
     "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
-const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `keywords`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
+const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `aliases`, `keywords`, `text`, `url`, `icon`, `section`, `detail` and `actions`.";
 
 /// Which export answered, which decides the fields and limits that apply.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -540,11 +540,11 @@ impl<'a> Reader<'a> {
         };
         for key in item.keys::<String>() {
             let key = key?;
-            let catalogue_only = key == "keywords" && self.source == Source::Items;
+            let catalogue_only = (key == "keywords" || key == "aliases") && self.source == Source::Items;
             if !ITEM_FIELDS.contains(&key.as_str()) && !catalogue_only {
                 let hint = match self.source {
-                    Source::Search if key == "keywords" => {
-                        "`keywords` help Dupin match items it holds; export `items` to use them."
+                    Source::Search if key == "keywords" || key == "aliases" => {
+                        "`aliases` and `keywords` help Dupin match items it holds; export `items` to use them."
                     }
                     Source::Search => ITEM_FIELDS_HINT,
                     Source::Items => CATALOGUE_ITEM_FIELDS_HINT,
@@ -592,7 +592,8 @@ impl<'a> Reader<'a> {
             }
             None => format!("#{index}"),
         };
-        let keywords = self.keywords(&item, &field("keywords"))?;
+        let aliases = self.words(&item, &field("aliases"), "aliases")?;
+        let keywords = self.words(&item, &field("keywords"), "keywords")?;
         let icon = self.string(&item, &field("icon"), "icon", row::MAX_ICON_BYTES)?;
         if let Some(icon) = &icon {
             row::check_icon(icon).map_err(|message| {
@@ -608,12 +609,14 @@ impl<'a> Reader<'a> {
             actions.push(RowAction {
                 title: "Open URL".into(),
                 effect: RowEffect::OpenUrl { url },
+                template: false,
             });
         }
         if let Some(text) = self.string(&item, &field("text"), "text", MAX_TEXT_BYTES)? {
             actions.push(RowAction {
                 title: "Copy".into(),
                 effect: RowEffect::Copy { text },
+                template: false,
             });
         }
         self.actions(&item, &field("actions"), &mut actions)?;
@@ -621,6 +624,7 @@ impl<'a> Reader<'a> {
             id,
             title,
             subtitle,
+            aliases,
             keywords,
             icon,
             section,
@@ -639,8 +643,9 @@ impl<'a> Reader<'a> {
             .into())
     }
 
-    fn keywords(&mut self, item: &Object<'_>, field: &str) -> Result<Vec<String>, Failure> {
-        let value: Value = item.get("keywords")?;
+    /// An item's `aliases` or `keywords`, which `key` names.
+    fn words(&mut self, item: &Object<'_>, field: &str, key: &str) -> Result<Vec<String>, Failure> {
+        let value: Value = item.get(key)?;
         if value.is_undefined() || value.is_null() {
             return Ok(Vec::new());
         }
@@ -655,7 +660,7 @@ impl<'a> Reader<'a> {
                 .invalid(
                     "invalid-field",
                     field,
-                    format!("has more than {MAX_KEYWORDS} keywords"),
+                    format!("has more than {MAX_KEYWORDS} {key}"),
                 )
                 .hint("Keep the few words people would type.")
                 .into());
@@ -678,7 +683,7 @@ impl<'a> Reader<'a> {
             if text.is_empty() || printable(&text).is_err() {
                 return Err(self
                     .invalid("invalid-field", at, "must be one line of text")
-                    .hint("Leave empty keywords out.")
+                    .hint(format!("Leave empty {key} out."))
                     .into());
             }
             self.count(&at, &text, MAX_KEYWORD_BYTES)?;
@@ -805,12 +810,12 @@ impl<'a> Reader<'a> {
             for key in action.keys::<String>() {
                 let key = key?;
                 match key.as_str() {
-                    "title" | "data" => {}
+                    "title" | "data" | "template" => {}
                     "copy" | "paste" | "open" | "run" => kinds.push(key),
                     _ => {
                         return Err(self
                             .invalid("unknown-field", format!("{at}.{key}"), "is not an action field")
-                            .hint("An action takes `title` and one of `copy`, `paste`, `open` or `run`, with `data` for `run`.")
+                            .hint("An action takes `title` and one of `copy`, `paste`, `open` or `run`, with `data` for `run` and `template` for `copy` or `paste`.")
                             .into());
                     }
                 }
@@ -834,15 +839,16 @@ impl<'a> Reader<'a> {
                     .hint("Leave `data` out, or make the action `run` a handler.")
                     .into());
             }
+            let template = self.template(&action, &at, kind)?;
             let effect = match kind.as_str() {
                 "copy" => RowEffect::Copy {
                     text: self
-                        .string(&action, &format!("{at}.copy"), "copy", MAX_TEXT_BYTES)?
+                        .string(&action, &format!("{at}.copy"), "copy", MAX_ACTION_TEXT_BYTES)?
                         .expect("present"),
                 },
                 "paste" => RowEffect::Paste {
                     text: self
-                        .string(&action, &format!("{at}.paste"), "paste", MAX_TEXT_BYTES)?
+                        .string(&action, &format!("{at}.paste"), "paste", MAX_ACTION_TEXT_BYTES)?
                         .expect("present"),
                 },
                 "open" => {
@@ -878,9 +884,35 @@ impl<'a> Reader<'a> {
                     RowEffect::Run { handler, data }
                 }
             };
-            actions.push(RowAction { title, effect });
+            actions.push(RowAction {
+                title,
+                effect,
+                template,
+            });
         }
         Ok(())
+    }
+
+    /// An action's `template`: a boolean, and only on a `copy` or `paste`.
+    fn template(&mut self, action: &Object<'_>, at: &str, kind: &str) -> Result<bool, Failure> {
+        let field = format!("{at}.template");
+        let value: Value = action.get("template")?;
+        if value.is_undefined() {
+            return Ok(false);
+        }
+        let Some(template) = value.as_bool() else {
+            return Err(self
+                .invalid("invalid-field", &field, "must be a boolean")
+                .hint("Give `template: true` to have Dupin fill `{date}`, `{time}`, `{datetime}` and `{clipboard}`.")
+                .into());
+        };
+        if template && kind != "copy" && kind != "paste" {
+            return Err(self
+                .invalid("unknown-field", &field, "only goes with `copy` or `paste`")
+                .hint("Leave `template` out, or make the action `copy` or `paste` its text.")
+                .into());
+        }
+        Ok(template)
     }
 
     fn data(&mut self, value: Value<'_>, field: &str) -> Result<Option<serde_json::Value>, Failure> {

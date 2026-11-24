@@ -264,6 +264,7 @@ mod tests {
                 id: index.to_string(),
                 title: "a".into(),
                 subtitle: control(1),
+                aliases: vec!["a".into(); 16],
                 keywords: vec!["a".into(); 16],
                 icon: Some("a.png".into()),
                 section: Some("a".into()),
@@ -281,6 +282,7 @@ mod tests {
                     RowAction {
                         title: "a".into(),
                         effect: RowEffect::Copy { text: control(1) },
+                        template: true,
                     };
                     8
                 ],
@@ -332,6 +334,7 @@ mod tests {
             id: "a".into(),
             title: "A".into(),
             subtitle: String::new(),
+            aliases: Vec::new(),
             keywords: Vec::new(),
             icon: None,
             section: None,

@@ -195,11 +195,8 @@ impl Ui {
             Some(PendingPaste::Snippet(snippet)) => self.deliver_snippet(snippet, true, tx),
             Some(PendingPaste::ClipboardEntry(entry)) => self.deliver_clipboard_entry(entry, true, tx),
             Some(PendingPaste::Extension { text, permit }) => {
-                if self.extensions.bridge.validate(&permit) {
-                    self.paste_text(text);
-                } else {
-                    tx.copy(text);
-                }
+                let paste = self.extensions.bridge.validate(&permit);
+                self.hand_over(text, paste, tx);
             }
             None => {}
         }

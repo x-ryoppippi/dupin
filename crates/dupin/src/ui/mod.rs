@@ -50,14 +50,14 @@ use notices::Notices;
 use reload::backdrop_source;
 use search::spawn_searcher;
 use selection::SelectionRequest;
-use snippets::SnippetRun;
+use snippets::{RowText, SnippetRun};
 
 enum PendingPaste {
     Snippet(SnippetRun),
     ClipboardEntry(u64),
     /// An extension row's text, pasted only while the permit to paste for it still holds.
     Extension {
-        text: String,
+        text: RowText,
         permit: dupin_extension_bridge::Permit,
     },
 }

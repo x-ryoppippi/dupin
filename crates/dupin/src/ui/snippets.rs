@@ -10,13 +10,35 @@ pub(super) struct SnippetRun {
     now: dupin_core::snippets::LocalTime,
 }
 
+impl SnippetRun {
+    fn now(text: String) -> Self {
+        Self {
+            text,
+            now: dupin_mac::clock::now(),
+        }
+    }
+}
+
+/// Text an extension row copies or pastes: as it is, or a template filled in as a snippet is.
+pub(super) enum RowText {
+    Plain(String),
+    Template(SnippetRun),
+}
+
+impl RowText {
+    pub(super) fn new(text: String, template: bool) -> Self {
+        if template {
+            Self::Template(SnippetRun::now(text))
+        } else {
+            Self::Plain(text)
+        }
+    }
+}
+
 impl Ui {
     /// Copy the snippet now, or paste it once the panel closes if access is granted.
     pub(super) fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
-        let snippet = SnippetRun {
-            text,
-            now: dupin_mac::clock::now(),
-        };
+        let snippet = SnippetRun::now(text);
         if paste && !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) {
             self.paste_after_close = Some(PendingPaste::Snippet(snippet));
         } else {
@@ -34,6 +56,14 @@ impl Ui {
             self.notice_after_close = Some(notice.into());
         }
         false
+    }
+
+    /// Copies the text, or pastes it into the frontmost app, which must already be in front.
+    pub(super) fn hand_over(&self, text: RowText, paste: bool, tx: &mut Tx) {
+        match text {
+            RowText::Template(snippet) => self.deliver_snippet(snippet, paste, tx),
+            RowText::Plain(text) => self.finish_snippet(text, paste, tx),
+        }
     }
 
     pub(super) fn deliver_snippet(&self, snippet: SnippetRun, paste: bool, tx: &mut Tx) {

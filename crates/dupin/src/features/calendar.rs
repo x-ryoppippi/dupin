@@ -26,6 +26,7 @@ pub(super) const FEATURE: Feature = Feature {
     bundled: Some(Bundled {
         package: PACKAGE,
         command: CALENDAR,
+        paste_notice: None,
     }),
     ..Feature::EMPTY
 };
