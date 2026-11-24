@@ -28,10 +28,7 @@ declare module 'dupin' {
 		title: string;
 		/** Up to 2,048 bytes. */
 		subtitle?: string;
-		/**
-		 * Unique among the items, up to 128 bytes. Dupin numbers items without one, except in an
-		 * `items` answer sent in parts or as an update, where each needs its own.
-		 */
+		/** Unique among the items, up to 128 bytes. Dupin numbers `search` items without one. */
 		id?: string;
 		/** An `http` or `https` URL with a host, up to 2,048 bytes. */
 		url?: string;
@@ -49,6 +46,11 @@ declare module 'dupin' {
 
 	/** An item of an `items` catalogue, which may carry words that also find it. */
 	export interface CatalogueItem extends Item {
+		/**
+		 * Required, and kept with the item as the list changes: Dupin applies updates and
+		 * remembers which items are picked by it.
+		 */
+		id: string;
 		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
 		keywords?: string[];
 	}

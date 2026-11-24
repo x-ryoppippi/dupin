@@ -113,13 +113,13 @@ Type `wc two words` to see **2 words**. Enter copies `2`. The two files above ar
 
 ### A list source
 
-Use the same manifest shape with `"name": "bookmarks"`, `"title": "Bookmarks"` and `"keyword": "bm"`. Replace the entry with `items()`. Dupin caches the rows and supplies URL actions and native matching.
+Use the same manifest shape with `"name": "bookmarks"`, `"title": "Bookmarks"` and `"keyword": "bm"`. Replace the entry with `items()`. Dupin caches the rows by their `id` and supplies URL actions and native matching.
 
 ```js
 export function items() {
 	return [
-		{ title: 'Dupin', url: 'https://github.com/x-ryoppippi/dupin' },
-		{ title: 'Rune', url: 'https://github.com/x-ryoppippi/rune' },
+		{ id: 'dupin', title: 'Dupin', url: 'https://github.com/x-ryoppippi/dupin' },
+		{ id: 'rune', title: 'Rune', url: 'https://github.com/x-ryoppippi/rune' },
 	];
 }
 ```

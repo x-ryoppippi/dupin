@@ -80,7 +80,7 @@ A package with both lists what `search` computes for the query first, then the c
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `title`    | Required. One line, up to 512 bytes.                                                                                                                 |
 | `subtitle` | Optional, up to 2,048 bytes.                                                                                                                         |
-| `id`       | Optional and unique among the items, up to 128 bytes. Dupin numbers items without one.                                                               |
+| `id`       | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                         |
 | `url`      | Optional. An `http` or `https` URL with a host, up to 2,048 bytes: **Open URL** opens it.                                                            |
 | `text`     | Optional, up to 16 KiB: **Copy** copies it.                                                                                                          |
 | `icon`     | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file. |
@@ -123,7 +123,7 @@ Typing `bm` and Space lists the catalogue in its own order, under its sections. 
 | `cursor`   | Up to 256 bytes of the package's choosing, handed back as `ctx.cursor` the next time Dupin asks.                                           |
 | `more`     | `true` when this is only the first part: Dupin asks again at once with `ctx.reason` `"more"` and the cursor, and keeps the parts together. |
 
-`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Items sent in parts or as an update need an `id`.
+`ctx` is frozen and holds `cursor`, the last answer's (`null` when Dupin holds nothing), and `reason`: `"load"` when Dupin holds no catalogue, `"more"`, `"expired"` after `ttl`, or `"invalidated"` after an action. One answer carries at most 500 items and 1 MiB of text, so a larger catalogue comes in parts with `more`. Every part, the first included, must arrive within the 2 seconds Dupin gives the search that asked, so parts make room for more items, not more time. Every catalogue item needs an `id` that stays with it as the list changes: Dupin applies updates by it and remembers which items you pick by it, so a position would hand one item's history to whatever takes its place.
 
 Instead of the whole catalogue, an answer can change the one Dupin holds, by `id`, so a long and busy list such as clipboard history never sends everything again:
 

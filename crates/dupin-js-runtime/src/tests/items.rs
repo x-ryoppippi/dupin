@@ -43,7 +43,7 @@ fn items_answers_with_the_whole_catalogue_its_sections_and_details() {
                ttl: 60,
                cursor: `seen ${ctx.reason} ${ctx.cursor}`,
                sections: [
-                 { title: 'Pinned', items: [{ title: 'Dupin', keywords: ['launcher'], url: 'https://github.com/x-ryoppippi/dupin',
+                 { title: 'Pinned', items: [{ id: 'dupin', title: 'Dupin', keywords: ['launcher'], url: 'https://github.com/x-ryoppippi/dupin',
                    detail: { markdown: '# Dupin\n**fast**', metadata: [{ label: 'Stars', text: '9' }] } }] },
                  { title: 'Other', items: [{ id: 'rune', title: 'Rune', icon: 'assets/rune.png', section: 'Mine',
                    actions: [{ title: 'Forget', run: 'forget', data: { id: 'rune', at: [1, 2] } }] }] },
@@ -60,7 +60,7 @@ fn items_answers_with_the_whole_catalogue_its_sections_and_details() {
     let PageChange::Reset { rows } = page.change else {
         panic!("{:?}", page.change);
     };
-    assert_eq!(rows[0].id, "#0");
+    assert_eq!(rows[0].id, "dupin");
     assert_eq!(rows[0].section.as_deref(), Some("Pinned"));
     assert_eq!(rows[0].keywords, ["launcher"]);
     let detail = rows[0].detail.as_ref().unwrap();
@@ -128,6 +128,16 @@ fn items_problems_name_the_field_at_fault() {
             Some("items[0].id"),
         ),
         (
+            "export function items() { return [{ title: 'no id' }]; }",
+            "missing-field",
+            Some("items[0].id"),
+        ),
+        (
+            "export function items() { return { sections: [{ title: 'S', items: [{ title: 'no id' }] }] }; }",
+            "missing-field",
+            Some("sections[0].items[0].id"),
+        ),
+        (
             "export function items() { return { type: 'update', append: [{ id: 'a', title: 'a' }], replace: [{ id: 'a', title: 'b' }] }; }",
             "duplicate-id",
             Some("replace[0].id"),
@@ -168,7 +178,7 @@ fn items_problems_name_the_field_at_fault() {
             Some("cursor"),
         ),
         (
-            "export function items() { return [{ title: 'a', keywords: Array(17).fill('k') }]; }",
+            "export function items() { return [{ id: 'a', title: 'a', keywords: Array(17).fill('k') }]; }",
             "invalid-field",
             Some("items[0].keywords"),
         ),

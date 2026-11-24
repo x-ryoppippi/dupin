@@ -43,8 +43,6 @@ pub(crate) struct Reader<'a> {
     pub limit: usize,
     source: Source,
     bytes: usize,
-    /// Each item must name its ID, since the answer changes a catalogue held by ID.
-    ids_required: bool,
 }
 
 impl<'a> Reader<'a> {
@@ -54,7 +52,6 @@ impl<'a> Reader<'a> {
             limit,
             source: Source::Search,
             bytes: 0,
-            ids_required: false,
         }
     }
 
@@ -64,7 +61,6 @@ impl<'a> Reader<'a> {
             limit: MAX_PAGE_ROWS,
             source: Source::Items,
             bytes: 0,
-            ids_required: false,
         }
     }
 
@@ -126,8 +122,6 @@ impl<'a> Reader<'a> {
         let more = self.boolean(&answer, "more")?.unwrap_or(false);
         let cursor = self.string(&answer, "cursor", "cursor", MAX_CURSOR_BYTES)?;
         let ttl = self.ttl(&answer)?;
-        // Items that arrive in parts or as changes are matched to the catalogue by ID.
-        self.ids_required = update || more;
         let change = if update {
             self.only_keys(
                 &answer,
@@ -465,7 +459,10 @@ impl<'a> Reader<'a> {
             field,
             format!("`{id}` is used by an earlier item"),
         )
-        .hint("Give every item a different `id`, or leave `id` out.")
+        .hint(match self.source {
+            Source::Search => "Give every item a different `id`, or leave `id` out.",
+            Source::Items => "Give every item a different `id`.",
+        })
         .into()
     }
 
@@ -527,10 +524,10 @@ impl<'a> Reader<'a> {
                 })?;
                 id
             }
-            None if self.ids_required => {
+            None if self.source == Source::Items => {
                 return Err(self
-                    .invalid("missing-field", field("id"), "is required here")
-                    .hint("Items sent in parts or as changes are matched by `id`; give each one.")
+                    .invalid("missing-field", field("id"), "is required in a catalogue")
+                    .hint("Dupin updates a catalogue and remembers the items you pick by `id`; give each item one that stays with it, such as its URL or a database key.")
                     .into());
             }
             None => format!("#{index}"),
