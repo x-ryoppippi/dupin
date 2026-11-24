@@ -314,10 +314,67 @@ impl Fixture {
             format!("{base}/git/matching-refs/tags"),
             json_response(&Value::Array(self.tag_refs())),
         );
+        let tagged = git(
+            &self.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname:strip=2) %(*objectname) %(objectname)",
+                "refs/tags",
+            ],
+        );
+        let tags: Vec<Value> = tagged
+            .lines()
+            .map(|line| {
+                let [name, peeled, object] = line.split(' ').collect::<Vec<_>>()[..] else {
+                    panic!("{line}");
+                };
+                let commit = if peeled.is_empty() { object } else { peeled };
+                json!({"name": name, "commit": {"sha": commit}})
+            })
+            .collect();
+        for (page, chunk) in tags.chunks(100).chain([&[][..]]).enumerate() {
+            self.server.set(
+                format!("{base}/tags?per_page=100&page={}", page + 1),
+                json_response(&Value::Array(chunk.to_vec())),
+            );
+        }
+        let names = git(
+            &self.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname:strip=2)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        );
         let commits = git(&self.repo, &["rev-list", "--all"]);
         for commit in commits.lines() {
             self.publish_commit(commit);
+            for name in names.lines() {
+                let tip = git(&self.repo, &["rev-parse", &format!("{name}^{{commit}}")]);
+                let reached = Command::new("git")
+                    .args(["merge-base", "--is-ancestor", commit, &tip])
+                    .current_dir(&self.repo)
+                    .envs(ISOLATION)
+                    .status()
+                    .unwrap()
+                    .success();
+                let status = match (commit == tip, reached) {
+                    (true, _) => "identical",
+                    (false, true) => "behind",
+                    (false, false) => "diverged",
+                };
+                self.compare(name, commit, status);
+            }
         }
+    }
+
+    /// Answers GitHub's comparison of the branch or tag `base` with `commit`.
+    fn compare(&self, base: &str, commit: &str, status: &str) {
+        self.server.set(
+            format!("{}/compare/{base}...{commit}", self.repo_path()),
+            json_response(&json!({ "status": status })),
+        );
     }
 
     fn publish_commit(&self, commit: &str) {
@@ -410,6 +467,82 @@ fn leftovers(installer: &Installer) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[test]
+fn a_pinned_commit_must_be_one_the_repository_publishes() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    let first = fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "released"]);
+    fixture.write("main.js", "export function search() { return []; }\n");
+    let tagged = fixture.commit("tagged off the default branch");
+    fixture.tag("v2.0.0");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "fork", "main"]);
+    fixture.write("main.js", "export function search() { steal(); }\n");
+    let forked = fixture.commit("pushed to a fork");
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    git(&fixture.repo, &["branch", "--quiet", "-D", "fork", "released"]);
+    fixture.publish();
+    // GitHub serves a fork's commits through the repository it was forked from.
+    fixture.publish_commit(&forked);
+    fixture.compare("main", &forked, "ahead");
+
+    let github = fixture.without_git("github");
+    let asked = fixture.server.seen().len();
+    let error = install(&github, &format!("{SPEC}@{forked}")).unwrap_err();
+    assert_eq!(error.code, "unknown-ref", "{error:?}");
+    assert!(error.message.contains("default branch or a tag"), "{error:?}");
+    assert_eq!(fixture.downloads(), 0);
+    let tag_requests: Vec<String> = fixture.server.seen()[asked..]
+        .iter()
+        .map(|seen| seen.path.clone())
+        .filter(|path| path.contains("/tags"))
+        .collect();
+    assert_eq!(
+        tag_requests,
+        [format!("{}/tags?per_page=100&page=1", fixture.repo_path())],
+        "the tag list names each tag's commit, so no annotated tag is peeled one by one"
+    );
+
+    let pinned = install(&github, &format!("{SPEC}@{first}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(first.as_str()));
+    let released = fixture.without_git("released");
+    let pinned = install(&released, &format!("{SPEC}@{tagged}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(tagged.as_str()));
+
+    let pull = install(&fixture.without_git("pull"), &format!("{SPEC}@refs/pull/1/head")).unwrap_err();
+    assert_eq!(pull.code, "invalid-source", "{pull:?}");
+}
+
+#[test]
+fn a_package_installed_from_a_branch_syncs_from_it_after_the_branch_moves_on() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [];\n");
+    let dev = fixture.commit("on dev only");
+
+    let github = fixture.without_git("github");
+    let installed = install(&github, &format!("{SPEC}@dev")).unwrap();
+    assert_eq!(installed.entry.rev.as_deref(), Some("dev"));
+    assert_eq!(installed.entry.commit.as_deref(), Some(dev.as_str()));
+
+    fixture.write("lib/rows.js", "export const rows = [1];\n");
+    fixture.commit("dev moves on");
+    let folder = github.extensions.join("word-count");
+    std::fs::write(folder.join("main.js"), "tampered").unwrap();
+    let synced = github.sync(&|_| None).unwrap();
+    let restored = synced[0].1.as_ref().unwrap();
+    assert_eq!(restored.entry.commit.as_deref(), Some(dev.as_str()));
+    assert_eq!(restored.entry.rev.as_deref(), Some("dev"));
+    assert_eq!(content_hash(&folder).unwrap(), installed.entry.content_hash);
+
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = github.sync(&|_| None).unwrap();
+    assert!(synced[0].1.is_ok(), "{synced:?}");
+    assert_eq!(content_hash(&folder).unwrap(), installed.entry.content_hash);
 }
 
 #[test]

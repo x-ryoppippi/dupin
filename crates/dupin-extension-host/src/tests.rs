@@ -72,7 +72,7 @@ fn sources_from(entry: &str, files: &[(&str, &str)]) -> (tempfile::TempDir, Sour
 
 fn compile(host: &Host, files: &[(&str, &str)]) -> Result<Compiled, RunError> {
     let (_folder, sources) = sources(files);
-    host.compile(&sources, Duration::from_secs(5), &|| false)
+    host.compile(&sources, Trust::Bundled, Duration::from_secs(5), &|| false)
 }
 
 /// `source` as `main.js`, compiled.
@@ -155,12 +155,16 @@ fn queries_run_in_one_resident_helper() {
         &[(DEFAULT_ENTRY, "export const search = () => [{ title: 'other' }];")],
     )
     .unwrap();
-    assert_eq!(host.helper_pid(), None, "the helper starts on the first query");
+    assert_eq!(
+        host.helper_pid(&echo),
+        None,
+        "the helper starts on the first query"
+    );
     assert_eq!(
         titles(&search(&host, &echo, "one", Duration::from_secs(5)).unwrap()),
         ["echo one"]
     );
-    let pid = host.helper_pid().unwrap();
+    let pid = host.helper_pid(&echo).unwrap();
     assert_ne!(pid, std::process::id());
     assert!(pid_is_sandboxed(pid));
     assert!(!pid_is_sandboxed(std::process::id()));
@@ -174,7 +178,7 @@ fn queries_run_in_one_resident_helper() {
     );
     host.check(&echo, Instant::now() + Duration::from_secs(5), &|| false)
         .unwrap();
-    assert_eq!(host.helper_pid(), Some(pid));
+    assert_eq!(host.helper_pid(&echo), Some(pid));
 
     let broken = compile(
         &host,
@@ -190,7 +194,7 @@ fn queries_run_in_one_resident_helper() {
         ("search-threw", "main.js:1:38: search threw TypeError: nope")
     );
     assert_eq!(
-        host.helper_pid(),
+        host.helper_pid(&echo),
         Some(pid),
         "a guest error leaves the helper running"
     );
@@ -203,7 +207,7 @@ fn every_compile_runs_in_a_helper_no_other_code_has_reached() {
     let first = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
     assert_eq!(started.load(Ordering::Relaxed), 1);
     search(&host, &first, "warm", Duration::from_secs(5)).unwrap();
-    let resident = host.helper_pid().unwrap();
+    let resident = host.helper_pid(&first).unwrap();
     assert_eq!(started.load(Ordering::Relaxed), 2);
 
     let second = compile(
@@ -219,7 +223,7 @@ fn every_compile_runs_in_a_helper_no_other_code_has_reached() {
         3,
         "the helper that ran a search compiles nothing"
     );
-    assert_eq!(host.helper_pid(), Some(resident));
+    assert_eq!(host.helper_pid(&first), Some(resident));
     assert_eq!(
         titles(&search(&host, &second, "", Duration::from_secs(5)).unwrap()),
         ["second"]
@@ -243,7 +247,7 @@ fn a_compile_neither_waits_for_a_running_search_nor_counts_the_helper_start_agai
 
     let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
     slow_host("1")
-        .compile(&sources, Duration::from_millis(100), &|| false)
+        .compile(&sources, Trust::Own, Duration::from_millis(100), &|| false)
         .expect("the limit starts once the helper is ready");
 }
 
@@ -300,7 +304,7 @@ fn typescript_compiles_in_the_helper_and_reports_its_own_lines() {
     let host = host();
     let compile_ts = |files: &[(&str, &str)]| {
         let (_folder, sources) = sources_from("main.ts", files);
-        host.compile(&sources, Duration::from_secs(5), &|| false)
+        host.compile(&sources, Trust::Bundled, Duration::from_secs(5), &|| false)
     };
     let greet = (
         "lib/greet.ts",
@@ -367,7 +371,7 @@ fn compiled_bytecode_outlives_the_helper_that_ran_it() {
     let host = host();
     let echo = compile(&host, &[(DEFAULT_ENTRY, ECHO)]).unwrap();
     search(&host, &echo, "first", Duration::from_secs(5)).unwrap();
-    let pid = host.helper_pid().unwrap();
+    let pid = host.helper_pid(&echo).unwrap();
     // SAFETY: `pid` is the helper this host started and still owns.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
     std::thread::sleep(Duration::from_millis(100));
@@ -375,7 +379,7 @@ fn compiled_bytecode_outlives_the_helper_that_ran_it() {
         titles(&search(&host, &echo, "again", Duration::from_secs(5)).unwrap()),
         ["echo again"]
     );
-    assert_ne!(host.helper_pid(), Some(pid));
+    assert_ne!(host.helper_pid(&echo), Some(pid));
 }
 
 #[test]
@@ -388,7 +392,7 @@ fn a_compile_that_outlasts_its_deadline_is_stopped() {
         &format!("export const rows = [{rows}];\nexport function search() {{ return []; }}"),
     )]);
     let started = Instant::now();
-    let diagnostic = failed(host.compile(&large, Duration::from_millis(1), &|| false));
+    let diagnostic = failed(host.compile(&large, Trust::Own, Duration::from_millis(1), &|| false));
     assert_eq!(
         (diagnostic.code.as_ref(), diagnostic.file.as_deref()),
         ("deadline", Some(DEFAULT_ENTRY)),
@@ -426,7 +430,7 @@ fn a_large_package_compiles_and_answers_within_the_helper_allowance() {
             titles(&search(&host, &large, "", Duration::from_secs(5)).unwrap()),
             ["90000"]
         );
-        pids.push(host.helper_pid().unwrap());
+        pids.push(host.helper_pid(&large).unwrap());
     }
     assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
 }
@@ -457,7 +461,7 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
         "{:?}",
         started.elapsed()
     );
-    let pid = host.helper_pid().expect("the starting helper is kept");
+    let pid = host.helper_pid(&echo).expect("the starting helper is kept");
 
     let started = Instant::now();
     let result = host.search(
@@ -479,7 +483,11 @@ fn a_helper_still_starting_neither_holds_a_call_past_its_deadline_nor_ignores_ca
         titles(&search(&host, &echo, "ready", Duration::from_secs(5)).unwrap()),
         ["echo ready"]
     );
-    assert_eq!(host.helper_pid(), Some(pid), "the same helper finished starting");
+    assert_eq!(
+        host.helper_pid(&echo),
+        Some(pid),
+        "the same helper finished starting"
+    );
 }
 
 #[test]
@@ -623,13 +631,179 @@ fn a_helper_that_speaks_out_of_turn_is_replaced_before_the_next_call() {
         titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
         ["genuine"]
     );
-    let first = host.helper_pid().unwrap();
+    let first = host.helper_pid(&echo).unwrap();
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(
         titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
         ["genuine"]
     );
-    assert_ne!(host.helper_pid(), Some(first));
+    assert_ne!(host.helper_pid(&echo), Some(first));
+}
+
+const IMPLANT_ENV: &str = "DUPIN_EXTENSION_HOST_IMPLANT";
+
+/// Not a test: a helper one package has subverted, which keeps answering. In each call for a
+/// package other than the first it ran, it makes a host request of its own under that call.
+#[test]
+fn implant_helper_entry() {
+    use std::os::fd::FromRawFd;
+    use std::os::unix::net::UnixStream;
+
+    use wire::{Answer, FromHelper, ToHelper};
+
+    if std::env::var_os(IMPLANT_ENV).is_none() {
+        return;
+    }
+    // SAFETY: the host starts this process with the socket as standard input.
+    let mut socket = unsafe { UnixStream::from_raw_fd(0) };
+    let hello = FromHelper::Hello {
+        version: wire::VERSION,
+        engine: dupin_js_runtime::engine_version().into(),
+    };
+    wire::write(&mut socket, &hello, &[]).unwrap();
+    let mut first = None;
+    while let Ok(Some((message, _))) = wire::read::<ToHelper>(&mut socket) {
+        let ToHelper::Run { id, package, .. } = message else {
+            continue;
+        };
+        if *first.get_or_insert(package) != package {
+            let request = FromHelper::Host {
+                id,
+                call: 1,
+                op: "storage.list".into(),
+            };
+            wire::write(&mut socket, &request, &[b"{}"]).unwrap();
+            loop {
+                match wire::read::<ToHelper>(&mut socket) {
+                    Ok(Some((ToHelper::Reply { .. }, _))) => break,
+                    Ok(Some(_)) => {}
+                    _ => std::process::exit(0),
+                }
+            }
+        }
+        let answer = Answer::Rows { items: Vec::new() };
+        wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).unwrap();
+    }
+    std::process::exit(0);
+}
+
+/// Host services that record the requests made of them.
+#[derive(Default)]
+struct Recorded(std::sync::Mutex<Vec<String>>);
+
+impl Services for Recorded {
+    fn call(&self, op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+        self.0.lock().unwrap().push(op.into());
+        br#"{"ok":null}"#.to_vec()
+    }
+}
+
+#[test]
+fn a_subverted_helper_never_runs_a_package_of_another_trust_domain() {
+    skip_inside_a_sandbox!();
+    let implanted = Host::new(Box::new(|| {
+        let mut command = helper_command("tests::implant_helper_entry")?;
+        command.env(IMPLANT_ENV, "1");
+        Ok(command)
+    }));
+    let compile_as = |trust| {
+        let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
+        host()
+            .compile(&sources, trust, Duration::from_secs(5), &|| false)
+            .unwrap()
+    };
+    let requests = |package: &Compiled| {
+        let services = Arc::new(Recorded::default());
+        implanted
+            .search(
+                package,
+                "",
+                10,
+                Instant::now() + Duration::from_secs(5),
+                &|| false,
+                &(services.clone() as Arc<dyn Services>),
+            )
+            .unwrap();
+        std::mem::take(&mut *services.0.lock().unwrap())
+    };
+
+    let attacker = compile_as(Trust::Own);
+    let bundled = compile_as(Trust::Bundled);
+    let other = compile_as(Trust::Own);
+    assert_eq!(requests(&attacker), Vec::<String>::new());
+    assert_eq!(requests(&bundled), Vec::<String>::new());
+    assert_eq!(requests(&other), Vec::<String>::new());
+    assert_eq!(requests(&attacker), Vec::<String>::new());
+    let pids = [&attacker, &bundled, &other].map(|package| implanted.helper_pid(package).unwrap());
+    assert!(
+        pids[0] != pids[1] && pids[0] != pids[2] && pids[1] != pids[2],
+        "{pids:?}"
+    );
+
+    // Bundled packages trust each other with a helper, so there it reaches the next one.
+    let second = compile_as(Trust::Bundled);
+    assert_eq!(requests(&second), ["storage.list"]);
+    assert_eq!(implanted.helper_pid(&second), Some(pids[1]));
+}
+
+const SPINNING_ENV: &str = "DUPIN_EXTENSION_HOST_SPINNING";
+
+/// Not a test: a subverted helper that answers every call as the real one does but keeps a
+/// thread of its own busy between calls.
+#[test]
+fn spinning_helper_entry() {
+    if std::env::var_os(SPINNING_ENV).is_some() {
+        std::thread::spawn(|| {
+            loop {
+                std::hint::black_box(0u64);
+            }
+        });
+        serve();
+    }
+}
+
+/// Polls until `done`, for at most `within`.
+fn eventually(within: Duration, done: impl Fn() -> bool) -> bool {
+    let until = Instant::now() + within;
+    while Instant::now() < until {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    done()
+}
+
+#[test]
+fn a_helper_that_works_between_calls_is_stopped_while_it_waits() {
+    skip_inside_a_sandbox!();
+    let echo = package(ECHO);
+    let resting = host();
+    search(&resting, &echo, "", Duration::from_secs(5)).unwrap();
+    let pid = resting.helper_pid(&echo).unwrap();
+
+    let spinning = Host::new(Box::new(|| {
+        let mut command = helper_command("tests::spinning_helper_entry")?;
+        command.env(SPINNING_ENV, "1");
+        Ok(command)
+    }));
+    assert_eq!(
+        titles(&search(&spinning, &echo, "", Duration::from_secs(5)).unwrap()),
+        ["echo "]
+    );
+    let busy = spinning.helper_pid(&echo).unwrap();
+    assert!(
+        eventually(Duration::from_secs(5), || spinning.helper_pid(&echo).is_none()),
+        "the helper kept working while it waited"
+    );
+    // SAFETY: signal 0 only asks whether the process exists.
+    assert_ne!(unsafe { libc::kill(busy as i32, 0) }, 0, "the helper was stopped");
+
+    assert_eq!(
+        resting.helper_pid(&echo),
+        Some(pid),
+        "a helper that only waits stays resident"
+    );
 }
 
 const UNINTERRUPTIBLE: &str = "export function search() { return [{ title: String('a'.repeat(4e6).indexOf('a'.repeat(2e6) + 'b')) }]; }";
@@ -641,7 +815,7 @@ fn a_native_call_the_engine_cant_interrupt_ends_by_its_deadline_and_the_helper_r
     let echo = package(ECHO);
     let stuck = package(UNINTERRUPTIBLE);
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
-    let first = host.helper_pid().unwrap();
+    let first = host.helper_pid(&echo).unwrap();
 
     let deadline = Duration::from_millis(300);
     let started = Instant::now();
@@ -652,13 +826,13 @@ fn a_native_call_the_engine_cant_interrupt_ends_by_its_deadline_and_the_helper_r
         took < deadline + Duration::from_millis(400),
         "ended after {took:?}"
     );
-    assert_eq!(host.helper_pid(), None, "the stuck helper was stopped");
+    assert_eq!(host.helper_pid(&echo), None, "the stuck helper was stopped");
 
     assert_eq!(
         titles(&search(&host, &echo, "after", Duration::from_secs(5)).unwrap()),
         ["echo after"]
     );
-    assert_ne!(host.helper_pid(), Some(first));
+    assert_ne!(host.helper_pid(&echo), Some(first));
 }
 
 #[test]
@@ -669,7 +843,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
     let busy = package("export function search() { for (;;) {} }");
     let stuck = package(UNINTERRUPTIBLE);
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
-    let pid = host.helper_pid().unwrap();
+    let pid = host.helper_pid(&echo).unwrap();
 
     let cancel_after = |delay: Duration| {
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -698,7 +872,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         started.elapsed()
     );
     assert_eq!(
-        host.helper_pid(),
+        host.helper_pid(&echo),
         Some(pid),
         "an interruptible guest keeps the helper"
     );
@@ -719,7 +893,7 @@ fn cancellation_is_honored_by_the_engine_or_enforced_by_stopping_the_helper() {
         "{:?}",
         started.elapsed()
     );
-    assert_eq!(host.helper_pid(), None);
+    assert_eq!(host.helper_pid(&echo), None);
 
     assert_eq!(
         titles(&search(&host, &echo, "next", Duration::from_secs(5)).unwrap()),
@@ -734,7 +908,7 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
     let echo = package(ECHO);
     let busy = package("export function search() { for (;;) {} }");
     search(&host, &echo, "warm", Duration::from_secs(5)).unwrap();
-    let pid = host.helper_pid().unwrap();
+    let pid = host.helper_pid(&echo).unwrap();
 
     let running = {
         let host = host.clone();
@@ -750,7 +924,7 @@ fn a_helper_that_dies_becomes_a_failed_query_and_the_next_one_starts_another() {
         titles(&search(&host, &echo, "again", Duration::from_secs(5)).unwrap()),
         ["echo again"]
     );
-    let restarted = host.helper_pid().unwrap();
+    let restarted = host.helper_pid(&echo).unwrap();
     assert_ne!(restarted, pid);
 
     // A helper that dies between queries is replaced before the next one.
@@ -868,7 +1042,7 @@ fn nested_sandbox_probe() {
     }
     println!("nested sandboxed {}", is_sandboxed());
     let (_folder, sources) = sources(&[(DEFAULT_ENTRY, ECHO)]);
-    let error = failed(host().compile(&sources, Duration::from_secs(5), &|| false));
+    let error = failed(host().compile(&sources, Trust::Own, Duration::from_secs(5), &|| false));
     println!("nested {} {}", error.code, error.message);
 }
 
@@ -922,7 +1096,7 @@ fn no_guest_state_outlives_its_call_in_the_resident_helper() {
             titles(&search(&host, &leaky, "", Duration::from_secs(5)).unwrap()),
             ["undefined undefined undefined false"]
         );
-        pids.push(host.helper_pid().unwrap());
+        pids.push(host.helper_pid(&leaky).unwrap());
     }
     assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
 }
@@ -1001,7 +1175,7 @@ fn a_package_the_helper_no_longer_holds_is_sent_again() {
             titles(&search(&host, &echo, "", Duration::from_secs(5)).unwrap()),
             [format!("carried after {named_alone} named alone")]
         );
-        pids.push(host.helper_pid().unwrap());
+        pids.push(host.helper_pid(&echo).unwrap());
     }
     assert!(pids.iter().all(|pid| *pid == pids[0]), "{pids:?}");
 }

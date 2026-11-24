@@ -171,10 +171,13 @@ fn exec_profiles_need_well_formed_argument_templates() {
         problem(json!({ "exec": { "run": { "output": true } } })),
         ("missing-field", "capabilities.exec.run.args".into())
     );
-    assert_eq!(
-        problem(json!({ "exec": { "run": { "args": ["a\u{0}b"] } } })),
-        ("invalid-value", "capabilities.exec.run.args[0]".into())
-    );
+    for bad in ["a\u{0}b", "line\nbreak", "\u{202e}gnirts", "zero\u{200b}width"] {
+        assert_eq!(
+            problem(json!({ "exec": { "run": { "args": ["ok", bad] } } })),
+            ("invalid-value", "capabilities.exec.run.args[1]".into()),
+            "{bad:?}: consent would show what doesn't run"
+        );
+    }
     assert_eq!(
         problem(json!({ "exec": { "@script:open": { "args": [] } } })),
         ("unknown-field", "capabilities.exec.@script:open.args".into())

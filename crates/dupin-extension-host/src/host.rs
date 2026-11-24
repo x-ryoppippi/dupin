@@ -1,6 +1,7 @@
-//! Dupin's side: starts one shared helper, on first use, for searches, and a helper of its own
-//! for each compile, action and event, and stops a helper when a call outlives its deadline,
-//! ignores a cancellation, outgrows its memory or dies.
+//! Dupin's side: starts a resident helper, on first use, for the searches of each trust domain,
+//! and a helper of its own for each compile, action and event, and stops a helper when a call
+//! outlives its deadline, ignores a cancellation, outgrows its memory or dies, or when it works
+//! or grows while it waits for a call.
 
 use std::io;
 use std::os::fd::OwnedFd;
@@ -11,7 +12,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use dupin_js_runtime::row::{RowEffect, Source, is_dictionary_url};
 use dupin_js_runtime::{
@@ -31,6 +32,14 @@ const HANDSHAKE: Duration = Duration::from_secs(5);
 /// provider's newer query replaces its older one.
 const MAX_WAITING: usize = 64;
 const IDLE: Duration = Duration::from_secs(120);
+/// How often the helpers waiting for a call are checked.
+const WATCH: Duration = Duration::from_secs(1);
+/// The processor time a helper may use between answering one call and being sent the next:
+/// enough to make the next call's engine and drop the last one's. A helper runs nothing else
+/// while it waits, so one that spends more is doing work nobody asked for.
+const RESTING_CPU: Duration = Duration::from_millis(250);
+/// Resident helpers kept at once; the one idle longest is stopped to make room.
+const MAX_RESIDENT: usize = 8;
 /// The helper's footprint beyond the package a call carries: the engine's 16 MiB heap,
 /// allocator overhead past it, the stack and the process itself.
 const FOOTPRINT_ALLOWANCE: u64 = 64 * 1024 * 1024;
@@ -72,10 +81,27 @@ pub struct Compiled {
     /// What Dupin calls this compile in every run of it, so a helper that holds its bytecode is
     /// sent only this. No other compile in this process has it.
     name: u64,
+    /// The resident helper its calls run in, shared only by compiles of the same domain.
+    domain: u64,
 }
 
-/// The name of the next compile.
+/// Whose code a package's calls may share a resident helper with. A helper answers each call's
+/// host requests with the authority of the package the call runs, so code that subverts a
+/// helper acts as every package that helper runs later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trust {
+    /// Ships with Dupin, sealed by its build: shares a helper with the other bundled packages.
+    Bundled,
+    /// Any other package: its calls run in a helper no other package's code reaches.
+    Own,
+}
+
+/// The name of the next compile. Names start above [`BUNDLED`], so no compile's own domain is
+/// the bundled packages'.
 static NEXT_COMPILE: AtomicU64 = AtomicU64::new(1);
+
+/// The domain of every bundled package.
+const BUNDLED: u64 = 0;
 
 impl std::fmt::Debug for Compiled {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,10 +115,12 @@ impl Compiled {
     /// A package with no bytecode, for tests that route or list extensions without running one.
     #[cfg(feature = "testing")]
     pub fn empty() -> Self {
+        let name = NEXT_COMPILE.fetch_add(1, Ordering::Relaxed);
         Self {
             entry: dupin_js_runtime::DEFAULT_ENTRY.into(),
             modules: Arc::from([]),
-            name: NEXT_COMPILE.fetch_add(1, Ordering::Relaxed),
+            name,
+            domain: name,
         }
     }
 
@@ -108,8 +136,8 @@ impl Compiled {
     }
 }
 
-/// One helper process shared by every JavaScript extension's searches, used by one call at a
-/// time, and a helper of its own for each compile, action and event.
+/// A resident helper process for the searches and catalogues of each trust domain, used by one
+/// call at a time, and a helper of its own for each compile, action and event.
 pub struct Host {
     shared: Arc<Shared>,
 }
@@ -125,11 +153,23 @@ struct Shared {
 
 #[derive(Default)]
 struct State {
+    /// The resident helper of each trust domain.
+    slots: HashMap<u64, Slot>,
+    reaping: bool,
+}
+
+#[derive(Default)]
+struct Slot {
     helper: Option<Helper>,
     busy: bool,
     waiting: usize,
     idle_since: Option<Instant>,
-    reaping: bool,
+}
+
+impl Slot {
+    fn is_unused(&self) -> bool {
+        self.helper.is_none() && !self.busy && self.waiting == 0
+    }
 }
 
 /// What a call does, for the diagnostics that name it.
@@ -186,14 +226,17 @@ impl Host {
 
     /// Compiles every module of `sources` in a helper started for this compile alone, which
     /// reports syntax errors and imports that leave the package or name a missing file.
-    /// `limit` is how long compiling may take once that helper is ready.
+    /// `limit` is how long compiling may take once that helper is ready. `trust` decides which
+    /// other packages' calls may share a resident helper with this package's.
     ///
     /// Every later helper loads the bytecode unvalidated, so no other package's code may have
-    /// reached the helper that writes it. Not waiting for the shared helper also keeps a busy
-    /// extension from failing another's load.
+    /// reached the helper that writes it, and what a subverted compile wrote reaches only
+    /// helpers of its own domain. Not waiting for a resident helper also keeps a busy extension
+    /// from failing another's load.
     pub fn compile(
         &self,
         sources: &Sources,
+        trust: Trust,
         limit: Duration,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Compiled, RunError> {
@@ -225,13 +268,18 @@ impl Host {
                 "the extension host returned a package Dupin can't read: {error}"
             )))
         })?;
+        let name = NEXT_COMPILE.fetch_add(1, Ordering::Relaxed);
         Ok(Compiled {
             entry: sources.entry().into(),
             modules: modules
                 .into_iter()
                 .map(|(name, bytecode)| (name, Box::from(bytecode)))
                 .collect(),
-            name: NEXT_COMPILE.fetch_add(1, Ordering::Relaxed),
+            name,
+            domain: match trust {
+                Trust::Bundled => BUNDLED,
+                Trust::Own => name,
+            },
         })
     }
 
@@ -244,7 +292,7 @@ impl Host {
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Exports, RunError> {
         let request = Request::run(package, Call::Check, Work::Search);
-        match self.call(request, deadline, is_cancelled, &no_services())? {
+        match self.call(package.domain, request, deadline, is_cancelled, &no_services())? {
             (Answer::Checked { exports }, _) => Ok(exports),
             _ => Err(mismatch()),
         }
@@ -269,7 +317,7 @@ impl Host {
             preferences,
         };
         let request = Request::run(package, call, Work::Items);
-        match self.call(request, deadline, is_cancelled, services)? {
+        match self.call(package.domain, request, deadline, is_cancelled, services)? {
             (Answer::Catalogue { page }, _) => {
                 page.validate().map_err(|problem| unshowable(problem, package))?;
                 Ok(page)
@@ -295,6 +343,7 @@ impl Host {
             limit,
         };
         match self.call(
+            package.domain,
             Request::run(package, call, Work::Search),
             deadline,
             is_cancelled,
@@ -371,19 +420,23 @@ impl Host {
         }
     }
 
-    /// The running helper's process ID, for tests and measurements.
-    pub fn helper_pid(&self) -> Option<u32> {
-        self.shared.lock().helper.as_ref().map(|helper| helper.child.id())
+    /// The process ID of the resident helper that runs `package`'s calls, for tests and
+    /// measurements.
+    pub fn helper_pid(&self, package: &Compiled) -> Option<u32> {
+        let state = self.shared.lock();
+        let helper = state.slots.get(&package.domain)?.helper.as_ref()?;
+        Some(helper.child.id())
     }
 
     fn call(
         &self,
+        domain: u64,
         request: Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
         services: &Arc<dyn Services>,
     ) -> Result<(Answer, Vec<u8>), RunError> {
-        let mut lease = self.lease(&request, deadline, is_cancelled)?;
+        let mut lease = self.lease(domain, &request, deadline, is_cancelled)?;
         if is_cancelled() {
             return Err(RunError::Cancelled);
         }
@@ -412,7 +465,7 @@ impl Host {
     }
 
     /// Runs `request` in a helper started for it alone and stopped when it ends, which neither
-    /// waits for nor holds the shared helper. `greet_by` is read from the new helper as it
+    /// waits for nor holds a resident helper. `greet_by` is read from the new helper as it
     /// starts and `deadline` once it is ready.
     fn alone(
         &self,
@@ -432,29 +485,41 @@ impl Host {
         settle(helper.run(id, request, &self.shared, deadline, is_cancelled, services))
     }
 
-    /// Waits for the helper to be free, unless the caller gives up first.
+    /// Waits for `domain`'s helper to be free, unless the caller gives up first.
     fn lease(
         &self,
+        domain: u64,
         request: &Request<'_>,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
     ) -> Result<Lease<'_>, RunError> {
         let mut state = self.shared.lock();
-        if state.busy && state.waiting >= MAX_WAITING {
+        let slot = state.slots.entry(domain).or_default();
+        if slot.busy && slot.waiting >= MAX_WAITING {
             return Err(RunError::Failed(
                 Diagnostic::new("host-busy", "too many extension calls are waiting")
                     .file(request.entry)
                     .hint("Try again; other extensions are still answering."),
             ));
         }
-        state.waiting += 1;
-        while state.busy {
+        slot.waiting += 1;
+        loop {
+            let slot = state.slots.entry(domain).or_default();
+            if !slot.busy {
+                slot.waiting -= 1;
+                slot.busy = true;
+                return Ok(Lease {
+                    helper: slot.helper.take(),
+                    domain,
+                    shared: &self.shared,
+                });
+            }
             if is_cancelled() {
-                state.waiting -= 1;
+                slot.waiting -= 1;
                 return Err(RunError::Cancelled);
             }
             if Instant::now() >= deadline {
-                state.waiting -= 1;
+                slot.waiting -= 1;
                 return Err(RunError::Failed(deadline_passed(request.work, request.entry)));
             }
             state = self
@@ -464,12 +529,6 @@ impl Host {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .0;
         }
-        state.waiting -= 1;
-        state.busy = true;
-        Ok(Lease {
-            helper: state.helper.take(),
-            shared: &self.shared,
-        })
     }
 }
 
@@ -509,40 +568,58 @@ impl Shared {
     }
 }
 
-/// The helper, held by one call; it goes back to the host when the call ends.
+/// A domain's helper, held by one call; it goes back to the host when the call ends.
 struct Lease<'a> {
     helper: Option<Helper>,
+    domain: u64,
     shared: &'a Arc<Shared>,
 }
 
 impl Drop for Lease<'_> {
     fn drop(&mut self) {
         let mut state = self.shared.lock();
-        state.helper = self.helper.take();
-        state.busy = false;
-        state.idle_since = Some(Instant::now());
-        if state.helper.is_some() && !state.reaping {
+        let slot = state.slots.entry(self.domain).or_default();
+        slot.helper = self.helper.take().map(Helper::rest);
+        slot.busy = false;
+        slot.idle_since = Some(Instant::now());
+        let resident = state.slots.values().filter(|slot| slot.helper.is_some()).count();
+        if resident > MAX_RESIDENT {
+            let oldest = state
+                .slots
+                .iter_mut()
+                .filter(|(domain, slot)| **domain != self.domain && slot.helper.is_some())
+                .min_by_key(|(_, slot)| slot.idle_since);
+            if let Some((_, slot)) = oldest {
+                slot.helper = None;
+            }
+        }
+        state.slots.retain(|_, slot| !slot.is_unused());
+        if !state.slots.is_empty() && !state.reaping {
             state.reaping = spawn_reaper(Arc::downgrade(self.shared));
         }
         drop(state);
-        self.shared.released.notify_one();
+        self.shared.released.notify_all();
     }
 }
 
-/// Stops a helper nobody has used for [`IDLE`], so an unused extension costs no process.
+/// Stops a helper nobody has used for [`IDLE`], so an unused extension costs no process, and
+/// one that is no longer idle while it waits for a call.
 fn spawn_reaper(shared: Weak<Shared>) -> bool {
     std::thread::Builder::new()
         .name("extension-host-reaper".into())
         .spawn(move || {
             loop {
-                std::thread::sleep(IDLE / 4);
+                std::thread::sleep(WATCH);
                 let Some(shared) = shared.upgrade() else { return };
                 let mut state = shared.lock();
-                let idle = state.idle_since.is_some_and(|since| since.elapsed() >= IDLE);
-                if !state.busy && idle {
-                    state.helper = None;
+                for slot in state.slots.values_mut() {
+                    let idle = slot.idle_since.is_some_and(|since| since.elapsed() >= IDLE);
+                    if idle || slot.helper.as_mut().is_some_and(|helper| !helper.is_idle()) {
+                        slot.helper = None;
+                    }
                 }
-                if state.helper.is_none() && !state.busy {
+                state.slots.retain(|_, slot| !slot.is_unused());
+                if state.slots.is_empty() {
                     state.reaping = false;
                     return;
                 }
@@ -562,6 +639,10 @@ struct Helper {
     greeted: bool,
     /// What this helper holds of the compiles it was sent: it holds them by the same rules.
     held: wire::Held<()>,
+    /// The footprint its last call was allowed, which it keeps to while it waits for the next.
+    footprint_limit: u64,
+    /// Its processor time when it answered its last call.
+    resting_since: Option<Duration>,
 }
 
 impl Drop for Helper {
@@ -609,6 +690,8 @@ impl Helper {
             started: Instant::now(),
             greeted: false,
             held: wire::Held::default(),
+            footprint_limit: FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64,
+            resting_since: None,
         })
     }
 
@@ -675,12 +758,25 @@ impl Helper {
         Greeting::Ready
     }
 
-    /// Whether the helper is alive and, once greeted, has sent nothing since its last answer.
-    /// It speaks only to answer a call, so anything queued between calls, such as a reply
-    /// forged for a later call, means it can't be trusted with another.
+    /// Marks the helper as waiting for its next call from now.
+    fn rest(mut self) -> Self {
+        self.resting_since = processor_time(self.child.id());
+        self
+    }
+
+    /// Whether the helper is alive and, once greeted, has sent nothing since its last answer,
+    /// used no more than [`RESTING_CPU`] and kept to its last call's footprint. It speaks and
+    /// works only to answer a call, so anything sent or done between calls, such as a reply
+    /// forged for a later call or threads it started itself, means it can't be trusted with
+    /// another.
     fn is_idle(&mut self) -> bool {
         let quiet = !self.greeted || matches!(self.replies.try_recv(), Err(mpsc::TryRecvError::Empty));
-        quiet && matches!(self.child.try_wait(), Ok(None))
+        let pid = self.child.id();
+        let rested = self.resting_since.is_none_or(|since| {
+            processor_time(pid).is_none_or(|now| now.saturating_sub(since) <= RESTING_CPU)
+        });
+        let small = footprint(pid).is_none_or(|bytes| bytes <= self.footprint_limit);
+        quiet && rested && small && matches!(self.child.try_wait(), Ok(None))
     }
 
     fn send(&mut self, message: &ToHelper, tail: &[&[u8]]) -> Result<(), RunError> {
@@ -748,6 +844,7 @@ impl Helper {
         };
         self.send(&message, tail)?;
         let footprint_limit = FOOTPRINT_ALLOWANCE + wire::MAX_HELD_BYTES as u64 + request.allowance;
+        self.footprint_limit = footprint_limit;
         let mut cancel_by = None;
         let mut requests = Requests::new(
             services.clone(),
@@ -996,6 +1093,45 @@ fn footprint(pid: u32) -> Option<u64> {
         unsafe { libc::proc_pid_rusage(pid as i32, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) };
     // SAFETY: a zero status means the call filled `usage`.
     (status == 0).then(|| unsafe { usage.assume_init() }.ri_phys_footprint)
+}
+
+/// The processor time the helper has used, user and system, across all its threads.
+#[cfg(target_os = "macos")]
+fn processor_time(pid: u32) -> Option<Duration> {
+    #[repr(C)]
+    struct Timebase {
+        numerator: u32,
+        denominator: u32,
+    }
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut Timebase) -> libc::c_int;
+    }
+    let mut usage = std::mem::MaybeUninit::<libc::rusage_info_v2>::zeroed();
+    // SAFETY: `usage` is large enough for the RUSAGE_INFO_V2 flavor the call writes.
+    let status =
+        unsafe { libc::proc_pid_rusage(pid as i32, libc::RUSAGE_INFO_V2, usage.as_mut_ptr().cast()) };
+    if status != 0 {
+        return None;
+    }
+    // SAFETY: a zero status means the call filled `usage`.
+    let usage = unsafe { usage.assume_init() };
+    let mut timebase = Timebase {
+        numerator: 0,
+        denominator: 0,
+    };
+    // SAFETY: `timebase` is the struct the call fills.
+    if unsafe { mach_timebase_info(&mut timebase) } != 0 || timebase.denominator == 0 {
+        return None;
+    }
+    // Mach absolute time units, which are nanoseconds only on Intel.
+    let ticks = u128::from(usage.ri_user_time) + u128::from(usage.ri_system_time);
+    let nanos = ticks * u128::from(timebase.numerator) / u128::from(timebase.denominator);
+    Some(Duration::from_nanos(u64::try_from(nanos).unwrap_or(u64::MAX)))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn processor_time(_pid: u32) -> Option<Duration> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]

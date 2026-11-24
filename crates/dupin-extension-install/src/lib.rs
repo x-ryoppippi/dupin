@@ -232,6 +232,7 @@ impl Installer {
 
     fn place(&self, target: Target<'_>, taken: Taken<'_>) -> Result<Change, Error> {
         let stage = Stage::new(&self.extensions, "install")?;
+        let on = target.locked.and_then(|locked| locked.rev.as_deref());
         // Downloads go outside the extensions folder, so the launcher's watcher doesn't rescan
         // on every object Git writes.
         let fetched = match &target.source {
@@ -246,14 +247,14 @@ impl Installer {
                     name: repo,
                     scratch: &scratch.root,
                 };
-                let fetched = self.github.resolve(&repo, rev.as_deref())?;
+                let fetched = self.github.resolve(&repo, rev.as_deref(), on)?;
                 self.github.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
             Source::Git { url, rev } => {
                 let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
                 let repo = scratch.root.join("repo.git");
-                let fetched = self.git.resolve(&repo, url, rev.as_deref())?;
+                let fetched = self.git.resolve(&repo, url, rev.as_deref(), on)?;
                 self.git.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
