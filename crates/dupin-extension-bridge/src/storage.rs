@@ -2,7 +2,7 @@
 //! quota and retention its declaration names, bounded by Dupin's maxima.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use dupin_broker::PackageId;
@@ -62,6 +62,23 @@ pub(crate) fn limits(quota_bytes: u64, retention_days: Option<u32>) -> Limits {
 
 type ErrorSink = Arc<dyn Fn(&str, &Error) + Send + Sync>;
 
+/// One package's open namespace. Deleting the data closes it for good, so a call that opened
+/// it before the deletion fails instead of writing into a namespace nothing lists any more.
+pub struct Namespace {
+    store: RwLock<Option<Arc<Store>>>,
+}
+
+impl Namespace {
+    /// Runs `op` on the store; a deletion waits until it returns.
+    pub(crate) fn with<R>(&self, op: impl FnOnce(&Store) -> Result<R, Error>) -> Result<R, Failure> {
+        let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
+        let store = store
+            .as_ref()
+            .ok_or_else(|| Failure::new("unavailable", "the package's stored data was deleted"))?;
+        op(store).map_err(failure)
+    }
+}
+
 /// Packages' namespaces under one [`dupin_storage::Storage`], each opened on first use and kept
 /// open, with a sweeper applying its retention while nothing is written.
 pub struct PackageStorage {
@@ -71,9 +88,9 @@ pub struct PackageStorage {
 }
 
 struct Opened {
-    store: Arc<Store>,
+    namespace: Arc<Namespace>,
     limits: Limits,
-    _sweeper: Sweeper,
+    sweeper: Sweeper,
 }
 
 impl PackageStorage {
@@ -93,56 +110,62 @@ impl PackageStorage {
 }
 
 impl crate::services::Storage for PackageStorage {
-    fn open(&self, namespace: &str, limits: Limits) -> Result<Arc<Store>, Failure> {
-        let mut open = self.open.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    fn open(&self, namespace: &str, limits: Limits) -> Result<Arc<Namespace>, Failure> {
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(opened) = open.get_mut(namespace) {
             if opened.limits != limits {
-                opened.store.set_limits(limits).map_err(failure)?;
+                opened.namespace.with(|store| store.set_limits(limits))?;
                 opened.limits = limits;
             } else {
                 // Reads never apply retention themselves, and the sweeper runs only hourly.
-                opened.store.sweep().map_err(failure)?;
+                opened.namespace.with(Store::sweep)?;
             }
-            return Ok(opened.store.clone());
+            return Ok(opened.namespace.clone());
         }
         let store = Arc::new(self.storage.open(namespace, limits).map_err(failure)?);
         let (on_error, name) = (self.on_error.clone(), namespace.to_owned());
         let sweeper = Sweeper::spawn(&store, SWEEP_EVERY, move |error| on_error(&name, error))
             .map_err(|error| failure(Error::Io(error)))?;
+        let opened = Arc::new(Namespace {
+            store: RwLock::new(Some(store)),
+        });
         open.insert(
             namespace.to_owned(),
             Opened {
-                store: store.clone(),
+                namespace: opened.clone(),
                 limits,
-                _sweeper: sweeper,
+                sweeper,
             },
         );
-        Ok(store)
+        Ok(opened)
     }
 
     fn discard(&self, namespace: &str) -> Result<(), Failure> {
-        let opened = self
-            .open
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(namespace);
-        let cleared = match opened {
-            Some(opened) => {
-                opened.store.clear().map_err(failure)?;
-                true
-            }
-            None => false,
-        };
-        match self.storage.discard(namespace) {
-            // A call still holding the store keeps the namespace locked, but its data is gone.
-            Err(Error::Busy) if cleared => Ok(()),
-            result => result.map_err(failure),
+        // Held to the end, so no call reopens the namespace while it is being deleted.
+        let mut open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(Opened {
+            namespace: opened,
+            sweeper,
+            ..
+        }) = open.remove(namespace)
+        {
+            drop(sweeper);
+            // The only strong reference once the sweeper has stopped, so dropping it unlocks
+            // the namespace for the deletion below.
+            drop(
+                opened
+                    .store
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take(),
+            );
         }
+        self.storage.discard(namespace).map_err(failure)
     }
 }
 
 /// What a guest learns of a storage error.
-pub(crate) fn failure(error: Error) -> Failure {
+fn failure(error: Error) -> Failure {
     let code = match &error {
         // The bridge refuses a record past Dupin's own item bound before it reaches the store,
         // so a record too large for the store is one larger than the quota.
@@ -199,5 +222,78 @@ mod tests {
         assert_eq!(widest.max_age, Some(DAY * MAX_RETENTION_DAYS));
         assert_eq!(limits(0, None).max_total_bytes, 1);
         assert_eq!(limits(0, None).max_age, None);
+    }
+
+    fn package_storage(dir: &std::path::Path) -> Arc<PackageStorage> {
+        Arc::new(PackageStorage::new(dupin_storage::Storage::new(
+            dir,
+            dupin_storage::MemoryKey::random(),
+        )))
+    }
+
+    fn record(text: &str) -> dupin_storage::NewRecord {
+        dupin_storage::NewRecord {
+            data: serde_json::json!(text),
+            blobs: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn deleting_waits_for_a_running_write_and_removes_what_it_wrote() {
+        use crate::services::Storage as _;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = package_storage(dir.path());
+        let name = namespace(&PackageId::new("notes").unwrap(), Origin::User);
+        let opened = storage.open(&name, limits(1024, None)).unwrap();
+
+        let (started, wait_started) = std::sync::mpsc::channel();
+        let (go, wait_go) = std::sync::mpsc::channel::<()>();
+        let writer = std::thread::spawn({
+            let opened = opened.clone();
+            move || {
+                opened.with(|store| {
+                    started.send(()).unwrap();
+                    wait_go.recv().unwrap();
+                    store.put_within_limits(record("written while deleting"))
+                })
+            }
+        });
+        wait_started.recv().unwrap();
+        let deleter = std::thread::spawn({
+            let (storage, name) = (storage.clone(), name.clone());
+            move || storage.discard(&name)
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!deleter.is_finished(), "the deletion waits for the write");
+        go.send(()).unwrap();
+        writer.join().unwrap().unwrap();
+        deleter.join().unwrap().unwrap();
+        assert!(
+            !dir.path().join(&name).exists(),
+            "the write went with the namespace"
+        );
+    }
+
+    #[test]
+    fn a_namespace_opened_before_its_deletion_refuses_later_calls() {
+        use crate::services::Storage as _;
+        let dir = tempfile::tempdir().unwrap();
+        let storage = package_storage(dir.path());
+        let name = namespace(&PackageId::new("notes").unwrap(), Origin::User);
+        let stale = storage.open(&name, limits(1024, None)).unwrap();
+        stale
+            .with(|store| store.put_within_limits(record("old")))
+            .unwrap();
+
+        storage.discard(&name).unwrap();
+        assert!(!dir.path().join(&name).exists());
+        let refused = stale
+            .with(|store| store.put_within_limits(record("late")))
+            .unwrap_err();
+        assert_eq!(refused.code, "unavailable");
+        assert!(!dir.path().join(&name).exists(), "nothing was written");
+
+        let fresh = storage.open(&name, limits(1024, None)).unwrap();
+        assert_eq!(fresh.with(|store| Ok(store.usage().entries)).unwrap(), 0);
     }
 }

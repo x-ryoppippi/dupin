@@ -157,17 +157,17 @@ impl Session {
             "storage.put" => {
                 let Put { data, blobs } = decode(args)?;
                 let record = new_record(data, &blobs)?;
-                let (permit, store) = self.storage(StorageOp::Write)?;
+                let (permit, namespace) = self.storage(StorageOp::Write)?;
                 // A write is an effect, so the permit is checked again just before it.
                 self.release(&permit, cancelled)?;
-                let record = store.put_within_limits(record).map_err(storage::failure)?;
+                let record = namespace.with(|store| store.put_within_limits(record))?;
                 Ok(record_json(record))
             }
             "storage.get" => {
                 let Id { id } = decode(args)?;
                 let id = record_id(&id)?;
-                let (permit, store) = self.storage(StorageOp::Read)?;
-                let record = store.get(&id).map_err(storage::failure)?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let record = namespace.with(|store| store.get(&id))?;
                 self.release(&permit, cancelled)?;
                 Ok(record.map_or(Value::Null, record_json))
             }
@@ -175,8 +175,8 @@ impl Session {
                 let ListArgs { before, limit } = decode(args)?;
                 let before = before.as_deref().map(record_id).transpose()?;
                 let limit = limit.map_or(DEFAULT_PAGE, |limit| (limit as usize).clamp(1, MAX_PAGE));
-                let (permit, store) = self.storage(StorageOp::Read)?;
-                let page = store.list(before.as_ref(), limit).map_err(storage::failure)?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let page = namespace.with(|store| store.list(before.as_ref(), limit))?;
                 self.release(&permit, cancelled)?;
                 Ok(page_json(page))
             }
@@ -185,30 +185,30 @@ impl Session {
                 let handle: dupin_storage::BlobHandle = handle
                     .parse()
                     .map_err(|_| Failure::invalid("not a blob handle"))?;
-                let (permit, store) = self.storage(StorageOp::Read)?;
-                let bytes = store.read_blob(&handle).map_err(storage::failure)?;
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let bytes = namespace.with(|store| store.read_blob(&handle))?;
                 self.release(&permit, cancelled)?;
                 Ok(json!({ "data": BASE64.encode(&*bytes) }))
             }
             "storage.delete" => {
                 let Id { id } = decode(args)?;
                 let id = record_id(&id)?;
-                let (permit, store) = self.storage(StorageOp::Delete)?;
+                let (permit, namespace) = self.storage(StorageOp::Delete)?;
                 self.release(&permit, cancelled)?;
-                let deleted = store.delete(&id).map_err(storage::failure)?;
+                let deleted = namespace.with(|store| store.delete(&id))?;
                 Ok(json!({ "deleted": deleted }))
             }
             "storage.clear" => {
                 let Nothing {} = decode(args)?;
-                let (permit, store) = self.storage(StorageOp::Delete)?;
+                let (permit, namespace) = self.storage(StorageOp::Delete)?;
                 self.release(&permit, cancelled)?;
-                store.clear().map_err(storage::failure)?;
+                namespace.with(dupin_storage::Store::clear)?;
                 Ok(Value::Null)
             }
             "storage.usage" => {
                 let Nothing {} = decode(args)?;
-                let (permit, store) = self.storage(StorageOp::Read)?;
-                let usage = store.usage();
+                let (permit, namespace) = self.storage(StorageOp::Read)?;
+                let usage = namespace.with(|store| Ok(store.usage()))?;
                 self.release(&permit, cancelled)?;
                 let limits = storage_limits(&permit)?;
                 Ok(json!({
@@ -505,7 +505,7 @@ impl Session {
     }
 
     /// The package's own namespace, open with the quota and retention the permit names.
-    fn storage(&self, op: StorageOp) -> Result<(Permit, Arc<dupin_storage::Store>), Failure> {
+    fn storage(&self, op: StorageOp) -> Result<(Permit, Arc<storage::Namespace>), Failure> {
         let permit = self.permit(&Request::Storage { op })?;
         let store = self
             .bridge

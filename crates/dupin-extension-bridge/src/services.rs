@@ -95,7 +95,7 @@ pub trait Storage: Send + Sync {
         &self,
         namespace: &str,
         limits: dupin_storage::Limits,
-    ) -> Result<Arc<dupin_storage::Store>, Failure>;
+    ) -> Result<Arc<crate::storage::Namespace>, Failure>;
     /// Deletes `namespace` and everything in it.
     fn discard(&self, namespace: &str) -> Result<(), Failure>;
 }
@@ -105,7 +105,7 @@ impl<T: Storage> Storage for Arc<T> {
         &self,
         namespace: &str,
         limits: dupin_storage::Limits,
-    ) -> Result<Arc<dupin_storage::Store>, Failure> {
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
         T::open(self, namespace, limits)
     }
 
@@ -177,7 +177,7 @@ impl Storage for Unavailable {
         &self,
         _namespace: &str,
         _limits: dupin_storage::Limits,
-    ) -> Result<Arc<dupin_storage::Store>, Failure> {
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
         Err(self.failure())
     }
     fn discard(&self, _namespace: &str) -> Result<(), Failure> {

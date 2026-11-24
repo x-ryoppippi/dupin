@@ -198,7 +198,7 @@ impl World {
             storage::limits(quota_bytes, retention_days),
         )
         .unwrap();
-        let records = store.list(None, 200).unwrap().records;
+        let records = store.with(|store| store.list(None, 200)).unwrap().records;
         records.into_iter().map(|record| record.data).collect()
     }
 
