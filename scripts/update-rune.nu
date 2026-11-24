@@ -4,8 +4,8 @@
 #
 # Cargo.toml pins every Rune crate at one rev, but Cargo.lock and Rune's source hash in
 # nix/cargo-vendor.nix only follow when someone refreshes them. autofix.ci runs this on every
-# pull request that touches either file, so a Renovate PR that only rewrites the revs comes
-# back buildable, and so does one where someone adds a patch for a crate Rune newly patches.
+# pull request, so a Renovate PR that only rewrites the revs comes back buildable, and so does
+# one where someone adds a patch for a crate Rune newly patches.
 # When the lock and the hash already match the pinned rev, it changes nothing and reaches no
 # network.
 
