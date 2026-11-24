@@ -4,11 +4,14 @@ use dupin_js_runtime::Diagnostic;
 use serde_json::Value;
 
 use crate::DECLARATIONS;
+use crate::build::CONFIG;
 use crate::manifest::MANIFEST_FILE;
 
 const TS_SOURCE: &str = "src/main.ts";
 const TS_MAIN: &str = "dist/main.js";
 const TS_MAIN_DIR: &str = "dist";
+/// The version Dupin's own checks bundle the scaffold with.
+const ROLLDOWN_VERSION: &str = "1.3.2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Template {
@@ -69,7 +72,11 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
     let (source, main) = match template {
         Template::JavaScript => (String::new(), String::new()),
         Template::TypeScript => (
-            format!("\n\t\"source\": {},", string(TS_SOURCE)),
+            format!(
+                "\n\t\"source\": {},\n\t\"devDependencies\": {{\n\t\t\"rolldown\": {}\n\t}},",
+                string(TS_SOURCE),
+                string(ROLLDOWN_VERSION)
+            ),
             format!(",\n\t\t\"main\": {}", string(TS_MAIN)),
         ),
     };
@@ -82,10 +89,10 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
     let (build_note, build_command, build_section) = match template {
         Template::JavaScript => ("", "", String::new()),
         Template::TypeScript => (
-            "bundles `src/main.ts` with Bun or esbuild, ",
+            "bundles `src/main.ts` with Rolldown, ",
             "dupin ext build .\n",
             format!(
-                "\n## Build\n\n```sh\ndupin ext build .\n```\n\n`build` bundles `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds and commits it on every push to `main`, installing only what `bun.lock` pins, so commit `bun.lock` once you add a dependency.\n"
+                "\n## Build\n\n```sh\ndupin ext build .\n```\n\nRun `bun install` once first: it installs the Rolldown that `package.json` pins and writes `bun.lock`, which you commit. `build` runs that Rolldown with `rolldown.config.ts`, bundling `{TS_SOURCE}` and its npm dependencies into one module at `{TS_MAIN}`, and fails if a dependency needs a Node built-in. Commit `{TS_MAIN}`: Dupin runs it as committed. `.github/workflows/build.yml` rebuilds it with the same configuration and commits it on every push to `main`, installing only what `bun.lock` pins.\n"
             ),
         ),
     };
@@ -117,6 +124,7 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
                 "tsconfig.json",
                 include_str!("../templates/tsconfig.json").to_owned(),
             ),
+            ("rolldown.config.ts", CONFIG.to_owned()),
             (".gitignore", include_str!("../templates/gitignore").to_owned()),
             (
                 ".github/workflows/build.yml",

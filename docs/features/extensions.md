@@ -107,7 +107,7 @@ Host services aren't connected yet. When they are, an extension will ask for the
 
 [Permissions](./permissions.md#extensions) has the rest, and [Capability broker](../capability-broker.md) the full rules.
 
-TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (for example with `esbuild main.ts --bundle --format=esm --outfile=dist/main.js`), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
+TypeScript, JSX and npm packages are built on your machine: bundle the extension into plain JavaScript (`dupin ext build` does it with Rolldown; see [Authoring](#authoring)), point `dupin.main` at the output and install the folder. Dupin runs JavaScript only, never type-checks and never runs a package manager or the package's scripts.
 
 | Limit                        | Value          |
 | ---------------------------- | -------------- |
@@ -164,21 +164,24 @@ Creates a package in a new or empty folder. The folder's name becomes the id, so
 | `fixtures/search.json`        | A query and the items `search` answers it with.                                                             |
 | `README.md`                   | How to develop, build and share the package.                                                                |
 | `tsconfig.json`, `.gitignore` | `--ts` only. The compiler sees ES2023 and nothing else, as the guest does.                                  |
-| `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Bun and commits it on every push to `main`.                       |
+| `rolldown.config.ts`          | `--ts` only. How `dupin ext build`, `dupin ext dev` and the workflow bundle `src/main.ts`.                  |
+| `.github/workflows/build.yml` | `--ts` only. Rebuilds `dist/main.js` with Rolldown and commits it on every push to `main`.                  |
 
 `dupin ext new .` names the package after the current folder.
 
-The `--ts` workflow installs exactly what `bun.lock` pins, without install scripts, so commit `bun.lock` once the package has dependencies. It installs and bundles in a job that can only read the repository; a second job, which runs no dependency code, commits the bundle.
+With `--ts`, `package.json` adds `"source": "src/main.ts"`, pins `rolldown` to an exact version in `devDependencies`, and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle. Run `bun install` once and commit the `bun.lock` it writes.
 
-With `--ts`, `package.json` adds `"source": "src/main.ts"` and `dupin.main` is `dist/main.js`. Dupin ignores `source`; it tells `dupin ext build` what to bundle.
+The `--ts` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
 
 `dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 1 has is in the `dupin` module; what the [design](../design/extension-platform.md) plans next, such as `items(ctx)`, sections, Detail and Form views and the `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary` and `calendar` capabilities, is drafted as types in its `v2` namespace. Nothing in `v2` works yet: an item with those fields fails the answer, and a manifest that declares capabilities is an error.
 
 ### `dupin ext build <dir> [--sourcemap]`
 
-A package with `source` is bundled into a single ES module at `dupin.main`, with its npm dependencies, by `bun` or, without it, `esbuild` from `PATH`. Dupin never downloads either; with neither installed the build fails and says so. `--sourcemap` also writes `<main>.map` and links it from the bundle. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
+A package with `source` is bundled into a single ES module at `dupin.main`, with its npm dependencies, by [Rolldown](https://rolldown.rs): the package's own `node_modules/.bin/rolldown`, or else `rolldown` on `PATH`. Dupin never downloads it; with neither, the build fails and says how to add it (`bun add -d rolldown` or `pnpm add -D rolldown`). Rolldown's CLI runs on Node.js.
 
-A dependency that imports a Node built-in (`fs`, `net`, `child_process` and the rest, with or without `node:`) fails the build, naming the file that imports it. Bundlers otherwise quietly stub or polyfill some built-ins for the browser, and the guest has none of them. A failed build or check puts back the `dupin.main` that was there before.
+The build uses the package's `rolldown.config.*`, which the `--ts` scaffold writes, and a package without one is bundled with the same configuration built into Dupin. `dupin ext build` sets only the output file and, with `--sourcemap`, a linked `<main>.map`. The configuration produces one ES module for `platform: "neutral"`, with dynamic imports inlined and no other chunks, keeps `dupin` as the only external import, and reads each dependency's `module` or `main` field. The package is then checked with the launcher's own loader, the same check as `dupin ext check`: the manifest is validated in full, and the bundle is compiled and linked and its top-level code run.
+
+A dependency that imports a Node built-in (`fs`, `net`, `child_process` and the rest, with or without `node:`), by `import`, `import()` or `require`, fails the build, naming the file that imports it. The configuration's resolver hook stops it before Rolldown would keep it as an external import, since the guest has no built-ins. Any other import Rolldown can't resolve, such as a dependency that isn't installed, fails the build too. A failed build or check puts back the `dupin.main` that was there before.
 
 A package without `source` is plain JavaScript and needs no build; `build` only checks it. Dupin installs packages from Git without building them, so commit the bundle; the `--ts` scaffold's workflow does that for you.
 

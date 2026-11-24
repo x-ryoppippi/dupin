@@ -2,6 +2,7 @@
   pkgs,
   crane,
   native,
+  rolldown,
 }:
 let
   inherit (native.passthru)
@@ -76,8 +77,8 @@ let
     // {
       pname = "dupin-lint-and-test";
       cargoArtifacts = debugArtifacts;
-      # The extension SDK's tests bundle a TypeScript fixture with whichever bundler is on PATH.
-      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [ pkgs.esbuild ];
+      # The extension SDK's tests bundle their fixtures with the Rolldown on PATH.
+      nativeBuildInputs = debugArgs.nativeBuildInputs ++ [ rolldown ];
       buildPhaseCargoCommand = ''
         cargo clippy --workspace --all-targets --offline --locked -- -D warnings
       '';

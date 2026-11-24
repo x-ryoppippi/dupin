@@ -14,7 +14,7 @@ The host renders each item in declared order. All-text lists retain fixed-height
 
 Registered routes and shared internal views advance the plugin migration. Native providers still call OS APIs directly. `dupin-broker` holds the extension authority model, with declared capabilities, per-revision grants and revocable permits ([capability broker](./capability-broker.md)), but no host service goes through it yet. User extensions get no host operations at all, so they need neither.
 
-Extension authoring runs outside the launcher. `dupin-ext-sdk` backs `dupin ext new`, `build` and `dev`: it scaffolds packages with the declarations in `sdk/dupin.d.ts`, bundles TypeScript with the author's own Bun or esbuild, and publishes development revisions behind a symlink the extensions scan already follows. It checks packages with `dupin-js-runtime`, as the launcher loads them. Dupin never bundles, downloads a bundler or type-checks at run time; extension providers only load the JavaScript these commands produce.
+Extension authoring runs outside the launcher. `dupin-ext-sdk` backs `dupin ext new`, `build` and `dev`: it scaffolds packages with the declarations in `sdk/dupin.d.ts`, bundles TypeScript with the author's own Rolldown, and publishes development revisions behind a symlink the extensions scan already follows. It checks packages with `dupin-js-runtime`, as the launcher loads them. Dupin never bundles, downloads a bundler or type-checks at run time; extension providers only load the JavaScript these commands produce.
 
 ## Searching off the main thread
 

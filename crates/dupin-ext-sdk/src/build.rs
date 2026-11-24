@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,160 +11,36 @@ use crate::manifest::{MANIFEST_FILE, PackageInfo, read_package};
 
 const BUILD_DEADLINE: Duration = Duration::from_secs(120);
 const MAX_REPORTED_ERROR_BYTES: usize = 900;
+const PROGRAM: &str = "rolldown";
+const CONFIG_PREFIX: &str = "rolldown.config.";
+/// The file `rolldown.config.ts` names to report a Node built-in in, so the diagnostic can point
+/// at the module that imports it.
+const REPORT_VARIABLE: &str = "DUPIN_BUILD_REPORT";
 
-/// Node's built-in modules (`require('node:module').builtinModules`). None exists in the guest,
-/// and bundlers stub or polyfill some of them silently for the browser, so an import of one is
-/// found in the bundler's metafile and fails the build instead.
-const NODE_BUILTINS: &[&str] = &[
-    "assert",
-    "assert/strict",
-    "async_hooks",
-    "buffer",
-    "child_process",
-    "cluster",
-    "console",
-    "constants",
-    "crypto",
-    "dgram",
-    "diagnostics_channel",
-    "dns",
-    "dns/promises",
-    "domain",
-    "events",
-    "fs",
-    "fs/promises",
-    "http",
-    "http2",
-    "https",
-    "inspector",
-    "inspector/promises",
-    "module",
-    "net",
-    "os",
-    "path",
-    "path/posix",
-    "path/win32",
-    "perf_hooks",
-    "process",
-    "punycode",
-    "querystring",
-    "readline",
-    "readline/promises",
-    "repl",
-    "stream",
-    "stream/consumers",
-    "stream/promises",
-    "stream/web",
-    "string_decoder",
-    "sys",
-    "timers",
-    "timers/promises",
-    "tls",
-    "trace_events",
-    "tty",
-    "url",
-    "util",
-    "util/types",
-    "v8",
-    "vm",
-    "wasi",
-    "worker_threads",
-    "zlib",
-];
+/// What `dupin ext new --ts` writes as `rolldown.config.ts`, and what a package without a
+/// Rolldown configuration of its own is bundled with.
+pub(crate) const CONFIG: &str = include_str!("../templates/rolldown.config.ts");
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BundlerKind {
-    Bun,
-    Esbuild,
-}
-
-impl BundlerKind {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Bun => "bun",
-            Self::Esbuild => "esbuild",
-        }
-    }
-}
-
-/// A bundler already installed on the author's machine. Dupin never downloads one.
+/// The Rolldown CLI already installed for a package. Dupin never downloads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Bundler {
-    pub(crate) kind: BundlerKind,
-    program: PathBuf,
+pub struct Rolldown {
+    pub(crate) program: PathBuf,
 }
 
-impl Bundler {
-    /// Bun if it is on `PATH`, otherwise esbuild.
-    pub fn find() -> Option<Self> {
-        Self::all_on(&std::env::var_os("PATH").unwrap_or_default())
+impl Rolldown {
+    /// The package's own `node_modules/.bin/rolldown`, otherwise `rolldown` on `PATH`.
+    pub fn find(package_dir: &Path) -> Option<Self> {
+        Self::find_on(package_dir, &std::env::var_os("PATH").unwrap_or_default())
+    }
+
+    pub(crate) fn find_on(package_dir: &Path, path: &OsStr) -> Option<Self> {
+        let local = std::path::absolute(package_dir.join("node_modules/.bin").join(PROGRAM)).ok();
+        local
             .into_iter()
-            .next()
+            .chain(std::env::split_paths(path).map(|dir| dir.join(PROGRAM)))
+            .find(|program| is_executable(program))
+            .map(|program| Self { program })
     }
-
-    /// Every supported bundler on the search path `path`, Bun first.
-    pub(crate) fn all_on(path: &OsStr) -> Vec<Self> {
-        [BundlerKind::Bun, BundlerKind::Esbuild]
-            .into_iter()
-            .filter_map(|kind| {
-                std::env::split_paths(path)
-                    .map(|dir| dir.join(kind.name()))
-                    .find(|program| is_executable(program))
-                    .map(|program| Self { kind, program })
-            })
-            .collect()
-    }
-
-    fn arguments(&self, source: &str, outfile: &Path, metafile: &Path, sourcemap: bool) -> Vec<OsString> {
-        let flag = |flag: &str, value: &Path| {
-            let mut arg = OsString::from(flag);
-            arg.push(value);
-            arg
-        };
-        let (fixed, external): (&[&str], &str) = match self.kind {
-            BundlerKind::Bun => (
-                &["build", source, "--format=esm", "--target=browser"],
-                "--external=",
-            ),
-            BundlerKind::Esbuild => (
-                &[
-                    source,
-                    "--bundle",
-                    "--format=esm",
-                    "--platform=browser",
-                    "--log-level=error",
-                ],
-                "--external:",
-            ),
-        };
-        let mut args: Vec<OsString> = fixed.iter().map(OsString::from).collect();
-        match self.kind {
-            // Bun 1.4 writes a linked source map build to the working directory, ignoring the
-            // folder `--outfile` names; `--outdir` is honored.
-            BundlerKind::Bun => {
-                args.push(flag("--outdir=", outfile.parent().unwrap_or(Path::new("."))));
-                args.push(flag(
-                    "--entry-naming=",
-                    Path::new(outfile.file_name().unwrap_or_default()),
-                ));
-            }
-            BundlerKind::Esbuild => args.push(flag("--outfile=", outfile)),
-        }
-        args.push(flag("--metafile=", metafile));
-        if sourcemap {
-            args.push("--sourcemap=linked".into());
-        }
-        args.extend(externals().map(|name| OsString::from(format!("{external}{name}"))));
-        args
-    }
-}
-
-/// `dupin` is the host's module. Node built-ins stay imports so that esbuild, which would fail
-/// to resolve them, records them in the metafile like Bun does.
-fn externals() -> impl Iterator<Item = String> {
-    std::iter::once("dupin".to_owned())
-        .chain(NODE_BUILTINS.iter().map(|name| (*name).to_owned()))
-        .chain(std::iter::once("node:*".to_owned()))
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -182,8 +58,8 @@ pub struct BuildOptions {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Built {
     pub package: PackageInfo,
-    /// The bundler that ran, or `None` for a package whose `dupin.main` is its source.
-    pub bundler: Option<BundlerKind>,
+    /// The Rolldown that ran, or `None` for a package whose `dupin.main` is its source.
+    pub rolldown: Option<PathBuf>,
     /// `dupin.main`, relative to the package.
     pub output: String,
     pub sourcemap: Option<String>,
@@ -194,7 +70,7 @@ pub struct Built {
 /// held before, so a broken build never replaces a working entry.
 pub fn build(
     dir: &Path,
-    bundler: Option<&Bundler>,
+    rolldown: Option<&Rolldown>,
     options: BuildOptions,
     validate: &dyn Fn(&Path) -> Result<(), Diagnostic>,
 ) -> Result<Built, Diagnostic> {
@@ -204,15 +80,15 @@ pub fn build(
         return Ok(Built {
             output: package.main.clone(),
             package,
-            bundler: None,
+            rolldown: None,
             sourcemap: None,
         });
     }
-    let bundler = bundler.ok_or_else(missing_bundler)?;
+    let rolldown = rolldown.ok_or_else(missing_rolldown)?;
     let outfile = dir.join(&package.main);
     let map = map_path(&outfile);
     let previous = [&outfile, &map].map(|path| std::fs::read(path).ok());
-    let result = bundle(dir, &package, bundler, &outfile, options).and_then(|()| validate(dir));
+    let result = bundle(dir, &package, rolldown, &outfile, options).and_then(|()| validate(dir));
     if let Err(error) = result {
         for (path, contents) in [&outfile, &map].into_iter().zip(previous) {
             let _ = match contents {
@@ -226,18 +102,18 @@ pub fn build(
         output: package.main.clone(),
         sourcemap: options.sourcemap.then(|| format!("{}.map", package.main)),
         package,
-        bundler: Some(bundler.kind),
+        rolldown: Some(rolldown.program.clone()),
     })
 }
 
-pub(crate) fn missing_bundler() -> Diagnostic {
+pub(crate) fn missing_rolldown() -> Diagnostic {
     Diagnostic::new(
         "bundler-missing",
-        "Neither `bun` nor `esbuild` is on PATH, and `source` needs bundling",
+        "Rolldown is neither in the package's node_modules nor on PATH, and `source` needs bundling",
     )
     .file(MANIFEST_FILE)
     .field("source")
-    .hint("Install Bun (https://bun.sh) or esbuild; Dupin never downloads one.")
+    .hint("Add it to the package with `bun add -d rolldown` or `pnpm add -D rolldown`; Dupin never downloads a bundler.")
 }
 
 fn map_path(outfile: &Path) -> PathBuf {
@@ -246,12 +122,26 @@ fn map_path(outfile: &Path) -> PathBuf {
     PathBuf::from(map)
 }
 
-/// Runs `bundler` in `dir` to write the package's `source` and its dependencies into `outfile`
-/// as one ES module.
+/// The package's own `rolldown.config.*`, relative to it.
+fn own_config(dir: &Path) -> Option<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with(CONFIG_PREFIX))
+        .collect();
+    found.sort();
+    found.into_iter().next()
+}
+
+/// Runs Rolldown in `dir` to write the package's `source` and its dependencies into `outfile`
+/// as one ES module, with the package's own Rolldown configuration or else [`CONFIG`].
 pub(crate) fn bundle(
     dir: &Path,
     package: &PackageInfo,
-    bundler: &Bundler,
+    rolldown: &Rolldown,
     outfile: &Path,
     options: BuildOptions,
 ) -> Result<(), Diagnostic> {
@@ -265,48 +155,48 @@ pub(crate) fn bundle(
     let unwritable = |error: std::io::Error| {
         Diagnostic::new("unwritable", format!("Couldn't create its folder: {error}")).file(&package.main)
     };
-    // The bundler runs in `dir`, so a path relative to this process would be read from there.
+    // Rolldown runs in `dir`, so a path relative to this process would be read from there.
     let outfile = std::path::absolute(outfile).map_err(unwritable)?;
     if let Some(parent) = outfile.parent() {
         std::fs::create_dir_all(parent).map_err(unwritable)?;
     }
-    let metafile = std::env::temp_dir().join(format!(
-        "dupin-build-{}-{}.json",
+    let scratch = std::env::temp_dir().join(format!(
+        "dupin-build-{}-{}",
         std::process::id(),
         BUILDS.fetch_add(1, Ordering::Relaxed)
     ));
-    let outcome = run(Command::new(&bundler.program)
-        .args(bundler.arguments(source, &outfile, &metafile, options.sourcemap))
-        .current_dir(dir));
-    let metadata = std::fs::read(&metafile);
-    let _ = std::fs::remove_file(&metafile);
-    let stderr = outcome.map_err(|error| {
-        Diagnostic::new(
-            "build-failed",
-            format!("Couldn't run {}: {error}", bundler.kind.name()),
-        )
-        .file(source)
-    })?;
-    if let Some(stderr) = stderr {
-        return Err(Diagnostic::new(
-            "build-failed",
-            format!("{} failed: {stderr}", bundler.kind.name()),
-        )
-        .file(source)
-        .hint("Fix the error above and build again."));
+    let report = scratch.with_extension("json");
+    let fallback = scratch.with_extension("config.ts");
+    let config = match own_config(dir) {
+        Some(name) => PathBuf::from(name),
+        None => {
+            std::fs::write(&fallback, CONFIG).map_err(|error| {
+                Diagnostic::new(
+                    "build-failed",
+                    format!("Couldn't write Rolldown's configuration: {error}"),
+                )
+                .file(source)
+            })?;
+            fallback.clone()
+        }
+    };
+    let mut command = Command::new(&rolldown.program);
+    command
+        .arg("--config")
+        .arg(&config)
+        .arg("--file")
+        .arg(&outfile)
+        .env(REPORT_VARIABLE, &report)
+        .env("NO_COLOR", "1")
+        .current_dir(dir);
+    if options.sourcemap {
+        command.arg("--sourcemap");
     }
-    let metadata: Value = metadata
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .ok_or_else(|| {
-            Diagnostic::new(
-                "build-failed",
-                format!("{} wrote no metafile", bundler.kind.name()),
-            )
-            .file(source)
-            .hint("Update Bun or esbuild to a version that supports `--metafile`.")
-        })?;
-    if let Some((importer, builtin)) = node_builtin_import(&metadata) {
+    let outcome = run(&mut command);
+    let reported = std::fs::read(&report).ok();
+    let _ = std::fs::remove_file(&report);
+    let _ = std::fs::remove_file(&fallback);
+    if let Some((importer, builtin)) = reported.as_deref().and_then(node_builtin_import) {
         return Err(Diagnostic::new(
             "node-builtin",
             format!("imports the Node built-in `{builtin}`, which Dupin extensions don't have"),
@@ -316,11 +206,22 @@ pub(crate) fn bundle(
             "Use a dependency that runs in a browser, or drop it. Extensions reach the system through Dupin, not Node.",
         ));
     }
-    if !outfile.is_file() {
+    let stderr = outcome.map_err(|error| {
+        Diagnostic::new("build-failed", format!("Couldn't run Rolldown: {error}"))
+            .file(source)
+            .hint("Rolldown's CLI needs Node.js on PATH.")
+    })?;
+    if let Some(stderr) = stderr {
         return Err(
-            Diagnostic::new("build-failed", format!("{} wrote nothing", bundler.kind.name()))
-                .file(&package.main),
+            Diagnostic::new("build-failed", format!("Rolldown failed: {stderr}"))
+                .file(source)
+                .hint("Fix the error above and build again."),
         );
+    }
+    if !outfile.is_file() {
+        return Err(Diagnostic::new("build-failed", "Rolldown wrote nothing")
+            .file(&package.main)
+            .hint("Keep `output.file` in the Rolldown configuration; `dupin ext build` sets it to `dupin.main`."));
     }
     Ok(())
 }
@@ -361,8 +262,14 @@ fn run(command: &mut Command) -> std::io::Result<Option<String>> {
     }
 }
 
-fn summarize(stderr: &str) -> String {
-    let text = stderr.trim();
+/// Rolldown's error output without the JavaScript stack traces under each error.
+pub(crate) fn summarize(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("at "))
+        .collect();
+    let joined = lines.join("\n");
+    let text = joined.trim();
     if text.is_empty() {
         return "it exited with an error".into();
     }
@@ -376,27 +283,12 @@ fn summarize(stderr: &str) -> String {
     format!("{}…", &text[..end])
 }
 
-/// The first input file in an esbuild or Bun metafile that imports a Node built-in, and that
-/// built-in as written.
-pub(crate) fn node_builtin_import(metadata: &Value) -> Option<(String, String)> {
-    let inputs = metadata.get("inputs")?.as_object()?;
-    let mut names: Vec<&String> = inputs.keys().collect();
-    names.sort();
-    names.into_iter().find_map(|name| {
-        inputs[name]
-            .get("imports")?
-            .as_array()?
-            .iter()
-            .find_map(|import| {
-                ["original", "path"]
-                    .into_iter()
-                    .filter_map(|key| import.get(key)?.as_str())
-                    .find(|specifier| is_node_builtin(specifier))
-                    .map(|specifier| (name.clone(), specifier.to_owned()))
-            })
-    })
-}
-
-fn is_node_builtin(specifier: &str) -> bool {
-    specifier.starts_with("node:") || NODE_BUILTINS.contains(&specifier)
+/// The module and the Node built-in it imports, from the report [`CONFIG`] writes.
+pub(crate) fn node_builtin_import(report: &[u8]) -> Option<(String, String)> {
+    let report: Value = serde_json::from_slice(report).ok()?;
+    let found = report.get("nodeBuiltin")?;
+    Some((
+        found.get("importer")?.as_str()?.to_owned(),
+        found.get("specifier")?.as_str()?.to_owned(),
+    ))
 }

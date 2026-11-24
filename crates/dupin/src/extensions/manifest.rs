@@ -389,7 +389,7 @@ mod tests {
 
     fn package(dupin: &str) -> String {
         format!(
-            r#"{{"name": "word-count", "version": "0.1.0", "scripts": {{"build": "esbuild"}}, "dependencies": {{"x": "1"}}, "dupin": {dupin}}}"#
+            r#"{{"name": "word-count", "version": "0.1.0", "scripts": {{"build": "rolldown -c"}}, "dependencies": {{"x": "1"}}, "dupin": {dupin}}}"#
         )
     }
 
