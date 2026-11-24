@@ -34,7 +34,7 @@ pub mod window_management;
 pub mod workspace;
 
 pub use apps::{AppsProvider, AppsWatcher};
-pub use calendar::{CalendarProvider, FIXTURE_CLOCK};
+pub use calendar::{EventStore, FIXTURE_CLOCK};
 pub use dictionary::DictionaryProvider;
 pub use folder::FolderProvider;
 pub use recent::RecentProvider;

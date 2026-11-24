@@ -5,7 +5,8 @@ use dupin_core::snippets::SnippetCatalog;
 use dupin_core::{
     CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
-use dupin_mac::{AppsProvider, CalendarProvider, system_commands};
+use dupin_mac::privacy::CalendarAccess;
+use dupin_mac::{AppsProvider, system_commands};
 
 use crate::features::{MANIFEST, apps::APPS, files::FILES};
 
@@ -18,6 +19,8 @@ pub struct Registration {
     pub scripts: Arc<RwLock<crate::scripts::catalog::Catalog>>,
     pub file_demotions: Arc<RwLock<Vec<String>>>,
     pub system_provider: Arc<system_commands::SystemProvider>,
+    /// The built-in commands bundled extensions answer, by command.
+    pub ports: HashMap<CommandId, Arc<crate::features::extensions::Port>>,
 }
 
 pub struct ConfiguredCommands {
@@ -103,7 +106,8 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
 pub(super) struct Providers<'a> {
     pub registration: &'a mut Registration,
     pub apps: Arc<AppsProvider>,
-    pub calendar: Arc<CalendarProvider>,
+    /// `None` in a headless run, which reads fixture events.
+    pub calendar_access: Option<CalendarAccess>,
     pub clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
     pub calculator: Arc<crate::calculator::Calculator>,
 }
@@ -112,13 +116,18 @@ impl Providers<'_> {
     pub fn add(&mut self, command: &str, provider: Arc<dyn Provider>) {
         self.registration.providers.insert(id(command), provider);
     }
+
+    /// Where the bundled extension that ports `command` is handed in once it loads.
+    pub fn port(&mut self, command: &str) -> Arc<crate::features::extensions::Port> {
+        self.registration.ports.entry(id(command)).or_default().clone()
+    }
 }
 
 pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
     history: History,
-    calendar: CalendarProvider,
+    calendar_access: Option<CalendarAccess>,
     clipboard: Arc<Mutex<dupin_core::clipboard::History>>,
     calculator: crate::calculator::Calculator,
 ) -> Result<Registration, CommandError> {
@@ -143,11 +152,12 @@ pub fn register(
         file_demotions,
         scripts,
         system_provider,
+        ports: HashMap::new(),
     };
     let mut providers = Providers {
         registration: &mut registration,
         apps,
-        calendar: Arc::new(calendar),
+        calendar_access,
         clipboard,
         calculator: Arc::new(calculator),
     };
@@ -481,7 +491,7 @@ mod tests {
 
     #[test]
     fn calendar_queries_use_an_opt_in_explicit_route_with_upcoming_results() {
-        use dupin_core::{Action, Delivery, Effect, Intent, Request, Session};
+        use dupin_core::{Action, Batch, Delivery, Effect, Intent, Item, Session};
 
         let base = configured(&Config::default()).unwrap();
         assert!(base.registry.keyword("cal").is_none());
@@ -511,11 +521,37 @@ mod tests {
         assert_eq!(command, &calendar);
         assert!(query.is_empty());
         let generation = *generation;
-        CalendarProvider::fixtures()
-            .search_batches(&Request::detached(query, 30), &mut |batch| {
-                session.deliver_from(calendar.clone(), Delivery::Presented { generation, batch });
-            })
-            .unwrap();
+        let event = |title: &str| Item {
+            id: title.into(),
+            payload: Default::default(),
+            view: dupin_core::View::Text {
+                title: title.into(),
+                subtitle: "10:00 · Work".into(),
+            },
+            record_usage: false,
+            icon: None,
+            matched: Vec::new(),
+            completion: None,
+            score: None,
+            primary: Some("open".into()),
+            alternate: None,
+            actions: vec![dupin_core::ItemAction::new(
+                "open",
+                "Open in Calendar",
+                Action::OpenUrl(format!("ical://ekevent/{title}?method=show&options=more")),
+            )],
+        };
+        for (section, titles) in [
+            ("Today", &["Project planning", "Design review"][..]),
+            ("Tomorrow", &["Out of office"]),
+            ("Wednesday 25 November", &["Dentist"]),
+        ] {
+            let batch = Batch::section(
+                section.to_owned(),
+                titles.iter().map(|title| event(title)).collect(),
+            );
+            session.deliver_from(calendar.clone(), Delivery::Presented { generation, batch });
+        }
         session.deliver_from(calendar.clone(), Delivery::Done { generation });
         assert_eq!(session.items().len(), 4);
         assert_eq!(session.section_start(0), Some("Today"));
@@ -636,6 +672,29 @@ mod tests {
         session.set_query("wc two words");
         assert_eq!(session.command_id(), &words);
         assert_eq!(session.query(), "two words");
+    }
+
+    #[test]
+    fn the_calendar_extension_answers_calendar_search_only_while_it_is_on() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let calendar = [Arc::new(extension("Calendar", "cal"))];
+        let mut off = configured(&Config::default()).unwrap();
+        let added = add_extensions(&mut off, &calendar);
+        assert!(added.registered.is_empty() && added.problems.is_empty());
+        assert!(off.registry.keyword("cal").is_none());
+
+        let mut on = configured(&Config::parse("[calendar]\nenabled = true").unwrap()).unwrap();
+        let added = add_extensions(&mut on, &calendar);
+        assert!(added.problems.is_empty(), "{:?}", added.problems);
+        let routes: Vec<_> = added
+            .registered
+            .iter()
+            .map(|(command, extension, role)| (command.as_str(), extension.id.as_str(), *role))
+            .collect();
+        assert_eq!(routes, [(CALENDAR, "calendar", Role::Keyword)]);
+        assert_eq!(on.registry.keyword("cal").map(CommandId::as_str), Some(CALENDAR));
     }
 
     #[test]

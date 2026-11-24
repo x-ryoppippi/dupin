@@ -259,13 +259,13 @@ For each scenario the results give p50, p95 and p99 of the total, and p50 and p9
 A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it and its extensions directory:
 
 ```toml
-[features.calendar.extension]
-config = "scripts/latency/calendar-extension.toml"
+[features.dictionary.extension]
+config = "scripts/latency/dictionary-extension.toml"
 provider = "<the extension's command id>"
-extensions = "scripts/latency/calendar-extension.extensions"
+extensions = "scripts/latency/dictionary-extension.extensions"
 ```
 
-Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's does. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
 
 ```toml
 [features.snippets.extension]

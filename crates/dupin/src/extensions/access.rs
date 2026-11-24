@@ -73,7 +73,7 @@ pub fn open(platform: Platform) -> Bridge {
             .unwrap_or_default();
         let services = Services {
             calendar: Box::new(Calendars(calendar::Calendar::new(
-                dupin_mac::CalendarProvider::fixtures(),
+                dupin_mac::EventStore::fixtures(),
             ))),
             ..Services::none()
         };
@@ -109,9 +109,9 @@ pub fn open(platform: Platform) -> Bridge {
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
             dupin_mac::DictionaryProvider::default(),
         ))),
-        calendar: Box::new(Calendars(calendar::Calendar::new(
-            dupin_mac::CalendarProvider::new(platform.calendar_access),
-        ))),
+        calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
+            platform.calendar_access,
+        )))),
     };
     let bridge = match (base_path(), local_path()) {
         (Some(base), Some(local)) => Bridge::open(&base, &local, services),
@@ -212,7 +212,7 @@ impl services::Dictionary for Dictionaries {
     }
 }
 
-struct Calendars(calendar::Calendar<dupin_mac::CalendarProvider>);
+struct Calendars(calendar::Calendar<dupin_mac::EventStore>);
 
 impl services::Calendar for Calendars {
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure> {

@@ -27,15 +27,11 @@
 config = "scripts/headless/config/dupin/config.toml"
 provider = "apps.search"
 
-[features.calendar.native]
+# Calendar search is the bundled extension `calendar`, held to the native search it replaced
+# until the native one was removed.
+[features.calendar.extension]
 config = "scripts/headless/calendar.toml"
 provider = "calendar.events"
-
-# The bundled Calendar extension, under its own keyword while the built-in is off.
-[features.calendar.extension]
-extends = "native"
-settings = { calendar = { enabled = false } }
-provider = "extension.calendar"
 
 [features.dictionary.native]
 config = "scripts/headless/config/dupin/config.toml"
