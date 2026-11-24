@@ -21,8 +21,33 @@
           )
         ) cfg.bundledExtensions
       );
-      bundledNames = cfg.package.bundledExtensions or [ ];
+      bundled = cfg.package.bundledExtensions or { };
+      bundledNames = lib.attrNames bundled;
       unknownBundled = lib.subtractLists bundledNames (lib.attrNames cfg.bundledExtensions);
+      # A denial of a scope the package doesn't declare would deny nothing.
+      undeclaredDenials = lib.concatLists (
+        lib.mapAttrsToList (
+          name: extension:
+          let
+            declared = bundled.${name} or [ ];
+            undeclared = lib.subtractLists declared extension.deny;
+          in
+          lib.optional (lib.elem name bundledNames && undeclared != [ ])
+            "${name} doesn't declare ${lib.concatStringsSep ", " undeclared}; it declares ${
+              if declared == [ ] then "no scopes" else lib.concatStringsSep ", " declared
+            }"
+        ) cfg.bundledExtensions
+      );
+      # The scope keys the capability broker reads; an entry it can't read keeps its package off.
+      scope =
+        let
+          host = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
+          name = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
+        in
+        lib.types.strMatching (
+          "storage|dictionary|calendar|clipboard:(read|write|watch|paste)|windows:(read|arrange)"
+          + "|(files|exec|script):${name}|http:https://${host}(\\.${host})*(:[0-9]{1,5})?"
+        );
       # The capability broker's declarative base. Dupin knows a package by `name` in its
       # package.json, whatever its folder is called, and its grants name the revision Dupin
       # computes from the package. Only Dupin computes both, so they are filled in when the file
@@ -95,7 +120,7 @@
               '';
             };
             grants = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
+              type = lib.types.listOf scope;
               default = [ ];
               example = [
                 "http:https://api.example.com"
@@ -112,7 +137,7 @@
               '';
             };
             deny = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
+              type = lib.types.listOf scope;
               default = [ ];
               example = [ "clipboard:read" ];
               description = "Scopes the package may never be granted, even from Dupin.";
@@ -152,13 +177,13 @@
             '';
           };
           deny = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
+            type = lib.types.listOf scope;
             default = [ ];
             example = [ "calendar" ];
             description = ''
               Scopes the package may never use, although it ships with them granted, named as
               the capability broker names them, such as `calendar`, `clipboard:watch` or
-              `windows:arrange`.
+              `windows:arrange`. Each must be one the package declares.
             '';
           };
         };
@@ -237,6 +262,10 @@
           {
             assertion = unknownBundled == [ ];
             message = "programs.dupin.bundledExtensions: programs.dupin.package bundles no ${lib.concatStringsSep ", " unknownBundled}; it bundles ${lib.concatStringsSep ", " bundledNames}.";
+          }
+          {
+            assertion = undeclaredDenials == [ ];
+            message = "programs.dupin.bundledExtensions: ${lib.concatStringsSep "; " undeclaredDenials}.";
           }
         ];
 

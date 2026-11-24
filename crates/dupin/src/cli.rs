@@ -414,11 +414,17 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtRevision(folder) => {
-            let (package, revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
+            let (package, revision, capabilities) =
+                crate::extensions::declaration_of(std::path::Path::new(&folder))?;
             if json {
+                let scopes: Vec<_> = capabilities
+                    .scopes()
+                    .map(|scope| scope.key().to_string())
+                    .collect();
                 return Ok(serde_json::json!({
                     "package": package.to_string(),
                     "revision": revision.to_string(),
+                    "scopes": scopes,
                 }));
             }
             println!("{revision}");

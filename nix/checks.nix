@@ -52,6 +52,25 @@ in
           module = self.homeManagerModules.default;
           inherit (dupin) bundledExtensions;
         };
+        # The scope keys the Home Manager module checks denials against, read by Nix from each
+        # bundled package.json, against what Dupin itself reads from the packages it ships.
+        bundled-extension-scopes =
+          pkgs.runCommand "dupin-bundled-extension-scopes"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              expected = builtins.toJSON dupin.bundledExtensions;
+              passAsFile = [ "expected" ];
+            }
+            ''
+              export HOME=$TMPDIR
+              for package in ${dupin}/Applications/Dupin.app/Contents/Resources/extensions/*/; do
+                ${lib.getExe' dupin "dupin"} ext revision "$package" --json \
+                  | jq -c '{(.package): .scopes}'
+              done | jq -s --sort-keys 'add | map_values(sort)' > actual.json
+              jq --sort-keys 'map_values(sort)' "$expectedPath" > expected.json
+              diff expected.json actual.json
+              touch $out
+            '';
         treefmt-typos-report-only =
           pkgs.runCommand "dupin-treefmt-typos-report-only"
             { nativeBuildInputs = [ config.treefmt.build.wrapper ]; }

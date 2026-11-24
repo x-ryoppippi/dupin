@@ -4,7 +4,7 @@
   lib,
   pkgs,
   module,
-  # The package.json names the real package bundles.
+  # The scopes the real package's bundled packages declare, by their package.json names.
   bundledExtensions,
 }:
 let
@@ -90,6 +90,14 @@ let
   };
   bundledOnly = evaluate { bundledExtensions.window-management.enable = true; };
   unbundled = evaluate { bundledExtensions.word-count.enable = true; };
+  undeclared = evaluate { bundledExtensions.calendar.deny = [ "clipboard:read" ]; };
+  # A scope the broker can't read is a type error, whichever option names it.
+  rejects =
+    dupin:
+    let
+      inherit ((evaluate dupin).programs.dupin) extensions bundledExtensions;
+    in
+    !(builtins.tryEval (builtins.deepSeq [ extensions bundledExtensions ] true)).success;
   # Two folders of one package, whose grants would both apply to it.
   clashing = evaluate {
     extensions = [
@@ -113,12 +121,48 @@ assert declared.xdg.configFile."dupin/extensions/word-count".source == fixture;
 assert declared.xdg.configFile."dupin/extensions/my-notes".source == notes;
 assert declared.launchd.agents.dupin.enable;
 assert !failed declared && failed duplicated;
-assert lib.all (name: lib.elem name bundledExtensions) [
-  "window-management"
-  "calendar"
-  "clipboard-history"
-];
-assert !failed bundledOnly && failed unbundled;
+assert bundledExtensions.calendar == [ "calendar" ];
+assert
+  bundledExtensions.window-management == [
+    "windows:read"
+    "windows:arrange"
+  ];
+assert lib.elem "clipboard:watch" bundledExtensions.clipboard-history;
+assert bundledExtensions.dupin == [ ];
+assert !failed bundledOnly && failed unbundled && failed undeclared;
+assert lib.hasInfix "it declares calendar"
+  (lib.findFirst (a: !a.assertion) null undeclared.assertions).message;
+assert rejects { bundledExtensions.calendar.deny = [ "calender" ]; };
+assert rejects {
+  extensions = [
+    {
+      src = fixture;
+      deny = [ "clipboard:copy" ];
+    }
+  ];
+};
+assert rejects {
+  extensions = [
+    {
+      src = fixture;
+      grants = [ "http:http://api.example.com" ];
+    }
+  ];
+};
+assert
+  !rejects {
+    extensions = [
+      {
+        src = fixture;
+        grants = [
+          "http:https://api.example.com:8443"
+          "files:notes"
+          "script:build.v2"
+          "storage"
+        ];
+      }
+    ];
+  };
 pkgs.runCommand "dupin-home-manager-module"
   {
     nativeBuildInputs = [

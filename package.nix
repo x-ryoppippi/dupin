@@ -33,10 +33,54 @@ let
     (root + /assets/logo/dupin.svg)
     (root + /extensions)
   ];
-  # What the broker knows each bundled package by, after `bundled:`: `name` in its package.json.
-  bundledExtensions = lib.mapAttrsToList (
-    folder: _: (lib.importJSON (root + "/extensions/${folder}/package.json")).name
-  ) (lib.filterAttrs (_: type: type == "directory") (builtins.readDir (root + /extensions)));
+  # Each bundled package by the name the broker knows it by after `bundled:`, `name` in its
+  # package.json, with the scope keys its capabilities declare. checks.bundled-extension-scopes
+  # holds these scope keys to what Dupin itself reads.
+  scopesOf =
+    capabilities:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        kind: declared:
+        if
+          lib.elem kind [
+            "storage"
+            "dictionary"
+            "calendar"
+          ]
+        then
+          [ kind ]
+        else if
+          lib.elem kind [
+            "clipboard"
+            "windows"
+          ]
+        then
+          map (access: "${kind}:${access}") declared
+        else if kind == "http" then
+          map (entry: "http:${entry.origin}") declared
+        else if kind == "files" then
+          map (name: "files:${name}") (lib.attrNames declared)
+        else if kind == "exec" then
+          map (
+            name:
+            if lib.hasPrefix "@script:" name then
+              "script:${lib.removePrefix "@script:" name}"
+            else
+              "exec:${name}"
+          ) (lib.attrNames declared)
+        else
+          throw "package.nix doesn't know the scope keys of the `${kind}` capability"
+      ) capabilities
+    );
+  bundledExtensions = lib.listToAttrs (
+    lib.mapAttrsToList (
+      folder: _:
+      let
+        manifest = lib.importJSON (root + "/extensions/${folder}/package.json");
+      in
+      lib.nameValuePair manifest.name (scopesOf (manifest.dupin.capabilities or { }))
+    ) (lib.filterAttrs (_: type: type == "directory") (builtins.readDir (root + /extensions)))
+  );
   cargoSrc = lib.fileset.toSource {
     inherit root;
     fileset = cargoFiles;
