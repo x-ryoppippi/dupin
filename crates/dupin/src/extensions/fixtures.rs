@@ -167,17 +167,7 @@ impl<'a> Held<'a> {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Vec<Row>, RunError> {
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let mut fetch = |cursor: Option<&str>, reason, settings: &Preferences| {
-            host.items(
-                &self.extension.compiled,
-                cursor,
-                reason,
-                &dupin_extension_host::Preferences::encode(&self.extension.preferences_with(settings)),
-                deadline,
-                cancelled,
-                &call.services,
-            )
-        };
+        let mut fetch = self.extension.fetch(host, deadline, cancelled, &call.services);
         let asking = Asking {
             preferences,
             generation: call.generation,

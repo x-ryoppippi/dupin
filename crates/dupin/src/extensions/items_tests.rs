@@ -700,3 +700,30 @@ fn search_answers_before_anything_is_typed_only_when_the_package_asks() {
     assert_eq!(titles_of(&provider, ""), [r#"Upcoming """#]);
     assert_eq!(titles_of(&provider, "rev"), [r#"Upcoming "rev""#]);
 }
+
+#[test]
+fn every_part_is_asked_for_with_the_settings_it_is_handed() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let source =
+        "export function items(ctx) { return { cursor: JSON.stringify(ctx.preferences), items: [] }; }";
+    let (_folder, extension) = package("", &[("main.js", source)]);
+    let settings = |value: u32| {
+        let mut settings = dupin_js_runtime::Preferences::new();
+        settings.insert("n".into(), value.into());
+        Arc::new(settings)
+    };
+    let (first, second) = (settings(1), settings(2));
+    let services = no_services();
+    let never = || false;
+    let mut fetch = extension.fetch(super::host(), Instant::now() + QUERY_DEADLINE, &never, &services);
+    let mut cursor = |settings| {
+        fetch(None, dupin_js_runtime::Reason::Load, settings)
+            .unwrap()
+            .cursor
+            .unwrap()
+    };
+    assert_eq!(cursor(&first), r#"{"n":1}"#);
+    assert_eq!(cursor(&first), r#"{"n":1}"#);
+    assert_eq!(cursor(&second), r#"{"n":2}"#);
+    assert_eq!(cursor(&first), r#"{"n":1}"#);
+}

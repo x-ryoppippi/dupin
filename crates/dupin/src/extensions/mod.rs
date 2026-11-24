@@ -185,29 +185,46 @@ impl Extension {
             generation: call.generation,
             role,
         };
+        let never = || false;
         self.catalogue
-            .search(query, limit, asking, &mut self.fetch(deadline, call), self)
+            .search(
+                query,
+                limit,
+                asking,
+                &mut self.fetch(host(), deadline, &never, &call.services),
+                self,
+            )
             .map_err(|error| self.located(error))
     }
 
-    fn fetch(
-        &self,
+    /// Asks `host` for the parts of the package's catalogue. Every part of one catalogue is
+    /// asked for with the same settings, which may hold thousands of snippets, so their
+    /// preferences are encoded once, and again only for other settings.
+    fn fetch<'a>(
+        &'a self,
+        host: &'a Host,
         deadline: Instant,
-        call: &Call,
-    ) -> impl FnMut(Option<&str>, Reason, &Preferences) -> Result<CataloguePage, RunError> {
-        // Every part of one catalogue is asked for with the same settings.
-        let mut encoded = None;
+        cancelled: &'a dyn Fn() -> bool,
+        services: &'a Arc<dyn Services>,
+    ) -> impl FnMut(Option<&str>, Reason, &Arc<Preferences>) -> Result<CataloguePage, RunError> + 'a {
+        let mut encoded: Option<(Arc<Preferences>, dupin_extension_host::Preferences)> = None;
         move |cursor, reason, settings| {
-            host().items(
+            let held = encoded.take().filter(|(held, _)| Arc::ptr_eq(held, settings));
+            let (_, preferences) = encoded.insert(held.unwrap_or_else(|| {
+                let preferences = self.preferences_with(settings);
+                (
+                    settings.clone(),
+                    dupin_extension_host::Preferences::encode(&preferences),
+                )
+            }));
+            host.items(
                 &self.compiled,
                 cursor,
                 reason,
-                encoded.get_or_insert_with(|| {
-                    dupin_extension_host::Preferences::encode(&self.preferences_with(settings))
-                }),
+                preferences,
                 deadline,
-                &|| false,
-                &call.services,
+                cancelled,
+                services,
             )
         }
     }
