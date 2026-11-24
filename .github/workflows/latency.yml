@@ -5,36 +5,12 @@ name: Latency
 # is larger than many real changes. A feature whose bundled extension is declared beside its
 # native implementation must match it, or, once the native one is deleted, match what this job
 # measured of it at its last commit (scripts/latency/native-baseline.json), so that comparison
-# fails the job. Dispatching with `ref` measures that commit's native implementations instead,
-# to record such a baseline.
+# fails the job. CI calls this workflow whenever the app could have changed, and its required
+# e2e job fails unless this one passed, so a port that falls behind native can't merge.
+# Dispatching with `ref` measures that commit's native implementations instead, to record such a
+# baseline.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/**'
-      - 'extensions/**'
-      - 'scripts/latency.nu'
-      - 'scripts/latency/**'
-      - 'scripts/headless/**'
-      - 'scripts/fixtures/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'nix/cargo-artifacts.nix'
-      - 'nix/cargo-vendor.nix'
-      - '.github/workflows/latency.yml'
-  pull_request:
-    paths:
-      - 'crates/**'
-      - 'extensions/**'
-      - 'scripts/latency.nu'
-      - 'scripts/latency/**'
-      - 'scripts/headless/**'
-      - 'scripts/fixtures/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'nix/cargo-artifacts.nix'
-      - 'nix/cargo-vendor.nix'
-      - '.github/workflows/latency.yml'
+  workflow_call:
   workflow_dispatch:
     inputs:
       ref:
@@ -42,10 +18,8 @@ on:
         type: string
         required: false
 
-# A newer push supersedes a run, but each dispatch is one of a baseline's repeated measurements.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
-  cancel-in-progress: true
+# No concurrency group: a called workflow's would be CI's own, and each dispatch is one of a
+# baseline's repeated measurements.
 
 permissions:
   contents: read
@@ -100,7 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow latency.yml --branch main --event push \
+          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
             --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
           if [ -z "$run" ] || ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --name latency --dir "$RUNNER_TEMP/main"; then
             echo "No latency baseline from main yet." >> "$GITHUB_STEP_SUMMARY"
