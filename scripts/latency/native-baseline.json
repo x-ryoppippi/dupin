@@ -1,0 +1,33 @@
+{
+	"schema": 1,
+	"results": [
+		{
+			"id": "snippets.sig",
+			"feature": "snippets",
+			"implementation": "native",
+			"commit": "aeac2950af59c737c7b9095be886a36e913de8e9",
+			"runs": 1,
+			"p50_ms": 1.0806660000000001,
+			"p95_ms": 1.437875,
+			"p99_ms": 1.535792,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.020583,
+					"p95": 0.027458
+				},
+				"provider_ms": {
+					"p50": 0.027708999999999998,
+					"p95": 0.042249999999999996
+				},
+				"merge_ms": {
+					"p50": 0.805542,
+					"p95": 1.20425
+				},
+				"layout_ms": {
+					"p50": 0.177167,
+					"p95": 0.275417
+				}
+			}
+		}
+	]
+}

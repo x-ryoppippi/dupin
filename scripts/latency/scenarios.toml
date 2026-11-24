@@ -49,7 +49,7 @@ config = "scripts/headless/config/dupin/config.toml"
 provider = "web.keywords"
 
 # Snippets are the bundled extension `snippets`, held to the native search it replaced until the
-# native one was removed.
+# native one was removed; scripts/latency/native-baseline.json keeps what CI measured of it.
 [features.snippets.extension]
 config = "scripts/headless/snippets.toml"
 provider = "snippets.search"
