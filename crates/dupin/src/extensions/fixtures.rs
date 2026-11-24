@@ -534,9 +534,8 @@ pub fn snap(
         )
     })?;
     let render_failed = |message: String| {
-        Diagnostic::new("render-failed", message).hint(
-            "`snap` runs Dupin headless, which a debug build or one with Rune's `tooling` feature can do.",
-        )
+        Diagnostic::new("render-failed", message)
+            .hint("`snap` runs this Dupin headless; a build without Rune's `tooling` feature can't.")
     };
     let scratch = tempfile::Builder::new()
         .prefix("dupin-snap-")

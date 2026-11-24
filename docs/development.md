@@ -158,7 +158,7 @@ RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
 
 ## Headless renders
 
-Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
+Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
 
 ```sh
 cargo build -p dupin
@@ -236,14 +236,14 @@ nu scripts/footprint.nu
 `scripts/latency.nu` measures how long Dupin takes from a typed key to the first frame that shows every provider's results for the new query. It drives a headless `--realtime` run with Rune's scripted keys, which reach the query field and the session as a window's keys do, against the same fixtures as the headless renders (calendar, dictionary, clipboard), so it needs no permissions. `DUPIN_LATENCY=<file>` makes a headless run write one JSON line per edit of the query; a window never writes it.
 
 ```sh
-cargo build --profile latency -p dupin --features tooling   # target/latency/dupin
+cargo build --profile latency -p dupin                       # target/latency/dupin
 nu scripts/latency.nu run                                    # target/latency/results.json
 nu scripts/latency.nu run --only calendar --runs 1           # a quick look at one feature
 nu scripts/latency.nu compare main.json pr.json              # fails on a p95 regression
 nu scripts/latency.nu parity target/latency/results.json     # extensions against native
 ```
 
-`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and Rune's headless tooling, so numbers are only comparable between builds of that profile on one machine.
+`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
 Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
