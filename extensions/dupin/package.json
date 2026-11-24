@@ -4,6 +4,7 @@
 	"private": true,
 	"dupin": {
 		"title": "Dupin",
-		"keyword": "help"
+		"keyword": "help",
+		"main": "main.ts"
 	}
 }

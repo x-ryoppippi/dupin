@@ -10,7 +10,16 @@
 		"strict": true,
 		"noEmit": true,
 		"isolatedModules": true,
-		"verbatimModuleSyntax": true
+		"verbatimModuleSyntax": true,
+		"erasableSyntaxOnly": true,
+		"allowImportingTsExtensions": true
 	},
-	"include": ["*/**/*.js", "*/**/*.mjs", "*/**/*.ts", "../sdk/dupin.d.ts"]
+	"include": [
+		"*/**/*.js",
+		"*/**/*.mjs",
+		"*/**/*.ts",
+		"*/**/*.mts",
+		"*/**/*.tsx",
+		"../sdk/dupin.d.ts"
+	]
 }

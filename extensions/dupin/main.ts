@@ -1,9 +1,8 @@
-// @ts-check
+import type { Item } from 'dupin';
 
 const repository = 'https://github.com/x-ryoppippi/dupin';
 
-/** @type {import('dupin').Item[]} */
-const rows = [
+const rows: Item[] = [
 	{
 		title: 'Using Dupin',
 		subtitle: 'Search, keywords, actions and the panel',
@@ -36,11 +35,10 @@ const rows = [
 	},
 ];
 
-/** @type {import('dupin').Search} */
-export const search = (query) => {
+export function search(query: string): Item[] {
 	const words = query.toLowerCase().split(/\s+/u).filter(Boolean);
 	return rows.filter((row) => {
 		const text = `${row.title} ${row.subtitle ?? ''}`.toLowerCase();
 		return words.every((word) => text.includes(word));
 	});
-};
+}
