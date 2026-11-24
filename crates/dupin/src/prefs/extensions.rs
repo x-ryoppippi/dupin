@@ -68,8 +68,9 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     rows.push(note(
         k,
         "Bundled extensions ship with Dupin and are on until you turn them off. \
-         Run dupin ext eject NAME to copy one into the extensions folder and edit it there; \
-         delete the copy to go back to the bundled one.",
+         One that answers a built-in command needs both that command's setting and its switch \
+         here on. Run dupin ext eject NAME to copy one into the extensions folder and edit it \
+         there; delete the copy to go back to the bundled one.",
     ));
     rows
 }

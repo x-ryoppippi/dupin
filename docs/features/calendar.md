@@ -12,9 +12,11 @@ Press Enter to open the original event in Calendar. Dupin uses an undocumented C
 
 Turn on **Calendar search** in Settings → Search, or set `enabled = true` in `[calendar]`. This reserves the `cal` keyword. Turning the setting off removes the command immediately.
 
+Calendar has a second switch: its row in Settings → Extensions, which turns the `calendar` package on or off as it does any extension. `cal` answers only while both are on. **Calendar search** decides whether the command and its keyword exist; the package switch decides whether its extension may run. With Calendar search on and the package off, `cal` says Calendar search isn't available, and the package's row says it is off.
+
 ## How it works
 
-Calendar search is the [bundled extension](./extensions.md#bundled-extensions) `calendar`, a TypeScript package in [`extensions/calendar`](../../extensions/calendar) that ships inside Dupin.app. **Calendar search** is its switch: it runs only while the setting is on, under the `cal` keyword. Settings → Extensions lists it as a built-in command, with where it comes from, its switch and its grant. It reads events through the [`calendar` capability](./extensions.md#calendar), which the bundled package holds from the start for 30 days back and 90 ahead, and lays them out itself. macOS's Calendars access is still Dupin's to ask for, as above, never the extension's.
+Calendar search is the [bundled extension](./extensions.md#bundled-extensions) `calendar`, a TypeScript package in [`extensions/calendar`](../../extensions/calendar) that ships inside Dupin.app. It runs only while **Calendar search** is on, under the `cal` keyword. Settings → Extensions lists it as a built-in command, with where it comes from, its package switch and its grant, as [Configuration](#configuration) describes. It reads events through the [`calendar` capability](./extensions.md#calendar), which the bundled package holds from the start for 30 days back and 90 ahead, and lays them out itself. macOS's Calendars access is still Dupin's to ask for, as above, never the extension's.
 
 The calendar service matches the typed words against each event's title and location, so a keystroke sends only the matching events to the extension. JavaScript in the extension host has no `Intl`, so the service also hands over each event's day, time and dates as this Mac's locale and time zone write them, and the Calendar link Enter opens.
 
