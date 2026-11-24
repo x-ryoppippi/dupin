@@ -535,7 +535,7 @@ Events come earliest start first, and the limit keeps the earliest. With `order:
 
 `"windows": ["read", "arrange"]` declares each kind of access separately; both act on the focused window of the app that was in front when the panel opened, and both need macOS Accessibility access, which only **Request Access**, or turning on a bundled extension that ships off, asks for.
 
-- **Read**: `windows.displays()` returns every display, the primary one first, as `{ frame, visibleFrame, scale }`, where `visibleFrame` leaves out the menu bar and the Dock and `scale` is pixels per point; `windows.focused()` returns `{ frame, app: { name, bundleId } }`, or `null` when that app has no window.
+- **Read**: `windows.displays()` returns every display, the primary one first, as `{ frame, visibleFrame, scale }`, where `visibleFrame` leaves out the menu bar and the Dock and `scale` is pixels per point; `windows.focused()` returns `{ frame, app: { name, bundleId } }`, or `null` when that app has no window or Dupin itself was in front; the displays are read either way.
 - **Arrange**: `windows.setFrame({ x, y, width, height })` moves and resizes that window when you choose an action and resolves to the frame it took, which the app may constrain. A frame that lies off every display is `out-of-scope`, and one that isn't finite, starts more than 1,000,000 points from the origin or is not from above 0 to 100,000 points wide and tall is `invalid`.
 
 Frames are in points, in one space for every display: the origin is the primary display's top-left corner and `y` grows downwards. The extension computes where a window goes; Dupin only reads and moves it:

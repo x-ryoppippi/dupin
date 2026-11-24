@@ -29,24 +29,39 @@ unsafe extern "C" {
 struct Target {
     pid: i32,
     app: App,
+}
+
+#[derive(Clone, Default)]
+struct Captured {
     displays: Vec<Display>,
+    /// None while Dupin itself was in front, since its own windows are never arranged.
+    target: Option<Target>,
+}
+
+impl Captured {
+    fn new(displays: Vec<Display>, front: Option<Target>) -> Self {
+        let target = front.filter(|target| target.pid > 0 && target.pid as u32 != std::process::id());
+        Self { displays, target }
+    }
 }
 
 /// What was in front of Dupin when the panel last opened: the app whose focused window the
 /// `windows` capability reads and moves, and the displays then, which AppKit reads only on the
 /// main thread.
 #[derive(Default)]
-pub struct Front(Mutex<Option<Target>>);
+pub struct Front(Mutex<Captured>);
 
 impl Front {
-    /// Notes the frontmost app and the displays. Call it on the main thread as the panel opens,
+    /// Notes the displays and the frontmost app. Call it on the main thread as the panel opens,
     /// while the app the user was in is still in front.
     pub fn capture(&self) {
-        let target = MainThreadMarker::new().and_then(|main| {
-            let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-            let pid = app.processIdentifier();
-            (pid > 0 && pid as u32 != std::process::id()).then(|| Target {
-                pid,
+        let Some(main) = MainThreadMarker::new() else {
+            return;
+        };
+        let front = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .map(|app| Target {
+                pid: app.processIdentifier(),
                 app: App {
                     name: app
                         .localizedName()
@@ -54,18 +69,20 @@ impl Front {
                         .unwrap_or_default(),
                     bundle_id: app.bundleIdentifier().map(|id| id.to_string()),
                 },
-                displays: displays(main),
-            })
-        });
-        *self.lock() = target;
+            });
+        *self.lock() = Captured::new(displays(main), front);
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Target>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Captured> {
         self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    fn displays(&self) -> Vec<Display> {
+        self.lock().displays.clone()
+    }
+
     fn target(&self) -> Option<Target> {
-        self.lock().clone()
+        self.lock().target.clone()
     }
 }
 
@@ -104,7 +121,7 @@ impl windows::Windows for Windows {
     }
 
     fn displays(&self) -> Result<Vec<Display>, ServiceError> {
-        Ok(self.0.target().map(|target| target.displays).unwrap_or_default())
+        Ok(self.0.displays())
     }
 
     fn focused(&self) -> Result<Option<Window>, ServiceError> {
@@ -227,6 +244,35 @@ mod tests {
     use dupin_host_services::windows::Windows as _;
 
     use super::*;
+
+    fn display() -> Display {
+        let frame = Frame::new(0.0, 0.0, 1440.0, 900.0);
+        Display {
+            frame,
+            visible_frame: frame,
+            scale: 2.0,
+        }
+    }
+
+    #[test]
+    fn with_dupin_in_front_the_displays_are_still_read_but_there_is_no_window() {
+        let dupin = Target {
+            pid: std::process::id() as i32,
+            app: App {
+                name: "Dupin".into(),
+                bundle_id: None,
+            },
+        };
+        let front = Front::default();
+        *front.lock() = Captured::new(vec![display()], Some(dupin));
+        let windows = Windows(std::sync::Arc::new(front));
+        assert_eq!(windows.displays(), Ok(vec![display()]));
+        assert_eq!(windows.focused(), Ok(None));
+        assert_eq!(
+            windows.set_frame(Frame::new(0.0, 0.0, 100.0, 100.0)),
+            Err(no_window())
+        );
+    }
 
     #[test]
     fn nothing_captured_reads_as_no_window_and_no_displays() {
