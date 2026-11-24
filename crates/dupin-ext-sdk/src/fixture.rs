@@ -14,14 +14,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 /// The format version a fixture states in `"fixture"`.
-pub const VERSION: u32 = 1;
-pub const FOLDER: &str = "fixtures";
-pub const MAX_FIXTURE_BYTES: usize = 1024 * 1024;
-pub const MAX_FIXTURES: usize = 64;
+const VERSION: u32 = 1;
+const FOLDER: &str = "fixtures";
+const MAX_FIXTURE_BYTES: usize = 1024 * 1024;
+const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-pub const EXPECTATIONS: [&str; 9] = [
+const EXPECTATIONS: [&str; 9] = [
     "rows",
     "selected",
     "effect",
@@ -36,9 +36,9 @@ pub const EXPECTATIONS: [&str; 9] = [
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Fixture {
-    pub fixture: u32,
+    fixture: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
+    description: Option<String>,
     #[serde(default)]
     pub environment: Environment,
     #[serde(default, skip_serializing_if = "Replies::is_empty")]
@@ -114,19 +114,19 @@ impl Default for Window {
 pub struct Step {
     /// Typed after the keyword, replacing the query; the step waits for the answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub query: Option<String>,
+    query: Option<String>,
     /// Moves the selection to this row, counting from 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub select: Option<usize>,
+    select: Option<usize>,
     /// Chooses the selected row's action with this title or id. A `run` action calls the
     /// package's handler as Enter would; any other effect is recorded, never carried out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activate: Option<String>,
+    activate: Option<String>,
     /// Calls the package's `events[event]` with `data`, as a watch Dupin keeps for it would.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event: Option<String>,
+    event: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub data: Option<Value>,
+    data: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect: Option<Map<String, Value>>,
 }
@@ -199,7 +199,7 @@ pub struct Replies {
 }
 
 impl Replies {
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self == &Self::default()
     }
 }
@@ -232,9 +232,9 @@ pub struct HttpResponse {
     pub headers: BTreeMap<String, String>,
     /// The body as text; `json` gives it as JSON instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
+    body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub json: Option<Value>,
+    json: Option<Value>,
 }
 
 fn ok() -> u16 {
@@ -641,13 +641,13 @@ pub fn compare(expected: &Map<String, Value>, actual: &Map<String, Value>) -> Ve
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Difference {
-    pub path: String,
+    path: String,
     /// Absent when the outcome has something the fixture doesn't expect.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected: Option<Value>,
+    expected: Option<Value>,
     /// Absent when the outcome lacks something the fixture expects.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub actual: Option<Value>,
+    actual: Option<Value>,
 }
 
 impl std::fmt::Display for Difference {
