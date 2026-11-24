@@ -627,7 +627,7 @@ mod tests {
         dupin_extension_host::skip_inside_a_sandbox!();
         let (_folder, provider, bridge) = declaring(
             r#"{"storage": {"quotaBytes": 1024}}"#,
-            "import { storage } from 'dupin'; export async function search() { try { await storage.keys(); } catch (error) { return [{ title: error.code }]; } }",
+            "import { storage } from 'dupin'; export async function search() { try { await storage.usage(); } catch (error) { return [{ title: error.code }]; } }",
         );
         let rows = search(&provider, "x");
         assert_eq!(rows[0].id, "consent:turn-on");

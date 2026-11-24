@@ -22,10 +22,10 @@ pub enum Request {
         name: ScopeName,
         output: bool,
     },
-    /// `size_after` is the package's stored bytes once a write completes.
+    /// Its quota isn't checked here: only the store can check it and write in one step, so
+    /// the service applies the quota the permit's scope names.
     Storage {
         op: StorageOp,
-        size_after: u64,
     },
     Clipboard(ClipboardAccess),
     DictionaryLookup,
@@ -102,10 +102,6 @@ impl Request {
                     name,
                 },
             ) => (*output && !allowed).then(|| format!("returning the output of “{name}” isn't declared")),
-            (Self::Storage { op, size_after }, Scope::Storage { quota_bytes, .. }) => {
-                (*op == StorageOp::Write && size_after > quota_bytes)
-                    .then(|| format!("storage would exceed its {quota_bytes}-byte quota"))
-            }
             (
                 Self::CalendarRead {
                     past_days,

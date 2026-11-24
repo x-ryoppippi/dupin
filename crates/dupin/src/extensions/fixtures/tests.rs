@@ -333,22 +333,28 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
     let (_root, package) = capable(
         json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["write", "watch"] }),
         "import { storage, clipboard } from 'dupin';\n\
+         async function find(key) {\n\
+         \tconst { records } = await storage.list();\n\
+         \treturn records.find((record) => key in record.data);\n\
+         }\n\
          export async function search() {\n\
-         \tconst count = (await storage.get('count')) ?? 0;\n\
-         \tconst last = (await storage.get('last')) ?? 'none';\n\
+         \tconst count = (await find('count'))?.data.count ?? 0;\n\
+         \tconst last = (await find('last'))?.data.last ?? 'none';\n\
          \treturn [{ title: `count ${count}, last ${last}`, actions: [{ title: 'Bump', run: 'bump', data: { by: 2 } }] }];\n\
          }\n\
          export const actions = {\n\
          \tasync bump(data) {\n\
-         \t\tconst count = ((await storage.get('count')) ?? 0) + data.by;\n\
-         \t\tawait storage.set('count', count);\n\
+         \t\tconst old = await find('count');\n\
+         \t\tconst count = (old?.data.count ?? 0) + data.by;\n\
+         \t\tif (old) await storage.delete(old.id);\n\
+         \t\tawait storage.put({ count });\n\
          \t\tawait clipboard.writeText(String(count));\n\
          \t\treturn { type: 'toast', text: `now ${count}` };\n\
          \t},\n\
          };\n\
          export const events = {\n\
          \tasync clipboard(event) {\n\
-         \t\tawait storage.set('last', event.text);\n\
+         \t\tawait storage.put({ last: event.text });\n\
          \t},\n\
          };\n",
     );
@@ -357,7 +363,7 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
         "actions.json",
         json!({
             "fixture": 1,
-            "replies": { "storage": { "count": 1 } },
+            "replies": { "storage": [{ "count": 1 }] },
             "steps": [
                 { "query": "x" },
                 { "activate": "Bump" },
@@ -376,12 +382,12 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
             "effect": { "run": { "action": "bump", "data": { "by": 2 } } },
             "toasts": ["now 3"],
             "clipboard": ["3"],
-            "storage": { "count": 3 },
+            "storage": [{ "count": 3 }],
         })
     );
     assert_eq!(
         steps[2]["outcome"],
-        json!({ "storage": { "count": 3, "last": "elsewhere" } })
+        json!({ "storage": [{ "count": 3 }, { "last": "elsewhere" }] })
     );
     assert_eq!(steps[3]["outcome"]["rows"][0]["title"], "count 3, last elsewhere");
 }

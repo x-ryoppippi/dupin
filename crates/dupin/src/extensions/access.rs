@@ -6,8 +6,10 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
-use dupin_extension_bridge::services::{self, Services, Subscription, Unavailable};
-use dupin_extension_bridge::{Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, Scope, Trigger};
+use dupin_extension_bridge::services::{self, Services, Subscription};
+use dupin_extension_bridge::{
+    Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
+};
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
 use dupin_host_services::{calendar, clipboard, dictionary, exec};
 use dupin_mac::privacy::CalendarAccess;
@@ -27,6 +29,20 @@ pub fn base_path() -> Option<PathBuf> {
 
 pub fn local_path() -> Option<PathBuf> {
     crate::store::data_dir().map(|dir| dir.join(LOCAL_FILE))
+}
+
+/// The root of every `dupin-storage` namespace, in Dupin's data directory.
+pub fn storage_path() -> Option<PathBuf> {
+    crate::store::data_dir().map(|dir| dir.join("storage"))
+}
+
+/// Encrypted storage under the data key in the user's Keychain, which is read only when a
+/// namespace is first opened.
+pub fn storage() -> Option<dupin_storage::Storage> {
+    Some(dupin_storage::Storage::new(
+        storage_path()?,
+        dupin_mac::keychain::KeychainKey,
+    ))
 }
 
 /// What the platform services need from the launcher.
@@ -63,7 +79,14 @@ pub fn open(platform: Platform) -> Bridge {
             scripts: platform.scripts,
             runner: platform.runner,
         }),
-        storage: Box::new(Unavailable("extension storage isn't available in this build yet")),
+        storage: match storage() {
+            Some(storage) => Box::new(PackageStorage::new(storage).on_error(|namespace, error| {
+                crate::log::warn(&format!("extension storage {namespace}: {error}"));
+            })),
+            None => Box::new(services::Unavailable(
+                "extension storage needs XDG_DATA_HOME or HOME",
+            )),
+        },
         clipboard: Box::new(Pasteboard {
             history: platform.history,
             service: OnceLock::new(),
