@@ -12,7 +12,7 @@ use dupin_broker::{
     ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
 };
 use dupin_extension_http as http;
-use dupin_host_services::{exec, files};
+use dupin_host_services::{calendar, exec, files};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -37,6 +37,8 @@ const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_INPUTS: usize = 32;
 const MAX_INPUT_BYTES: usize = 4 * 1024;
 const MAX_EVENTS: usize = 500;
+/// A calendar query's words, as the panel's query field holds them.
+const MAX_QUERY_BYTES: usize = 4 * 1024;
 /// The guest's own read limit can lower these but never raise them past the service's.
 const DEFAULT_READ_BYTES: usize = 256 * 1024;
 const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
@@ -138,7 +140,9 @@ struct Word {
 struct Range {
     from: f64,
     to: f64,
+    query: Option<String>,
     limit: Option<u64>,
+    order: Option<calendar::Order>,
 }
 
 impl Session {
@@ -250,7 +254,16 @@ impl Session {
                 Ok(json!({ "entries": entries }))
             }
             "calendar.events" => {
-                let Range { from, to, limit } = decode(args)?;
+                let Range {
+                    from,
+                    to,
+                    query,
+                    limit,
+                    order,
+                } = decode(args)?;
+                if let Some(query) = &query {
+                    bounded(query, "query", MAX_QUERY_BYTES)?;
+                }
                 let instant = |value: f64, name: &str| {
                     if value.is_finite() && value.fract() == 0.0 && value.abs() < 8.64e15 {
                         Ok(value as i64)
@@ -269,8 +282,16 @@ impl Session {
                     future_days,
                 })?;
                 let limit = limit.map_or(MAX_EVENTS, |limit| (limit as usize).min(MAX_EVENTS));
-                let events = calendar.events(from, to, limit, permit.scope())?;
+                let events = calendar.events(
+                    from,
+                    to,
+                    query.as_deref(),
+                    limit,
+                    order.unwrap_or_default(),
+                    permit.scope(),
+                )?;
                 self.release(&permit, cancelled)?;
+                self.issue_links(&events);
                 Ok(json!({ "events": events }))
             }
             _ => Err(Failure::new(

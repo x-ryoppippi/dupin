@@ -16,6 +16,8 @@ fn event(id: &str, title: &str, calendar: &str, start: Millis, end: Millis) -> E
         },
         location: None,
         url: None,
+        link: None,
+        labels: Labels::default(),
     }
 }
 
@@ -102,6 +104,51 @@ fn calendars_query_and_limit_narrow_the_events() {
     assert_eq!(range(None, Some(" ROOM design "), None), ["Design review"]);
     assert_eq!(range(None, Some("nothing"), None), Vec::<String>::new());
     assert_eq!(range(None, None, Some(2)), ["Dentist", "Project planning"]);
+}
+
+#[test]
+fn a_latest_first_read_keeps_the_events_nearest_the_end_of_the_range() {
+    let calendar = Calendar::new(fixture(OsAccess::Allowed));
+    let query = Query::new(TODAY - 3 * DAY, TODAY + 3 * DAY, None, None, Some(2))
+        .unwrap()
+        .ordered(Order::Latest);
+    assert_eq!(
+        titles(&calendar.events(&query, WEEK).unwrap()),
+        ["Out of office", "Design review"]
+    );
+}
+
+#[test]
+fn titles_come_as_one_line_that_fits_a_row() {
+    let calendar = Calendar::new(Fixture {
+        access: OsAccess::Allowed,
+        today: TODAY,
+        events: vec![
+            event(
+                "pasted",
+                " Sync:\r\n\tweekly \u{0007} review ",
+                "Work",
+                TODAY,
+                TODAY + HOUR,
+            ),
+            event(
+                "long",
+                &"会議".repeat(200),
+                "Work",
+                TODAY + HOUR,
+                TODAY + 2 * HOUR,
+            ),
+        ],
+    });
+    let query = Query::new(TODAY, TODAY + DAY, None, Some("weekly"), None).unwrap();
+    assert_eq!(
+        titles(&calendar.events(&query, WEEK).unwrap()),
+        ["Sync: weekly review"]
+    );
+    let query = Query::new(TODAY, TODAY + DAY, None, Some("会議"), None).unwrap();
+    let [event] = calendar.events(&query, WEEK).unwrap().try_into().unwrap();
+    assert!(event.title.len() <= MAX_TITLE_BYTES);
+    assert!(event.title.starts_with("会議"));
 }
 
 #[test]
@@ -236,6 +283,7 @@ fn events_serialize_for_javascript_within_their_bounds() {
         events: vec![Event {
             location: Some("  ".into()),
             url: Some(format!("https://example.com/{}", "a".repeat(MAX_URL_BYTES))),
+            link: Some(format!("ical://ekevent/{}", "a".repeat(MAX_URL_BYTES))),
             calendar: CalendarInfo {
                 name: "Work".into(),
                 color: Some("red".into()),
@@ -245,9 +293,11 @@ fn events_serialize_for_javascript_within_their_bounds() {
     });
     let query = Query::new(TODAY, TODAY + DAY, None, None, None).unwrap();
     let [event] = calendar.events(&query, WEEK).unwrap().try_into().unwrap();
-    assert!(event.title.len() <= MAX_TEXT_BYTES);
+    assert!(event.title.len() <= MAX_TITLE_BYTES);
+    assert!(event.title.chars().all(|ch| ch == 'é'));
     assert_eq!(event.location, None);
     assert_eq!(event.url, None);
+    assert_eq!(event.link, None);
     assert_eq!(event.calendar.color, None);
 
     let json = serde_json::to_value(&fixture(OsAccess::Allowed).events[0]).unwrap();
@@ -262,6 +312,8 @@ fn events_serialize_for_javascript_within_their_bounds() {
             "calendar": { "name": "Work", "color": "#1badf8" },
             "location": "Meeting room",
             "url": "https://example.com/review",
+            "link": null,
+            "labels": { "day": "", "time": null, "dates": "" },
         })
     );
 }

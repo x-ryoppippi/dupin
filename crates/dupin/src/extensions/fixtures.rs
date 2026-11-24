@@ -206,7 +206,7 @@ impl<'a> Held<'a> {
 }
 
 /// What the launcher's keyword answers `query` with: `search`'s rows for a query that isn't
-/// blank, then the catalogue's matches.
+/// blank, or for any query when the manifest sets `emptyQuery`, then the catalogue's matches.
 fn query_rows(
     host: &Host,
     extension: &Extension,
@@ -218,7 +218,7 @@ fn query_rows(
     let exports = host.check(&extension.compiled, Instant::now() + QUERY_DEADLINE, cancelled)?;
     let limit = dupin_js_runtime::MAX_ROWS;
     let mut rows = Vec::new();
-    if exports.search && !query.trim().is_empty() {
+    if exports.search && (extension.empty_query || !query.trim().is_empty()) {
         rows = host.search(
             &extension.compiled,
             query,

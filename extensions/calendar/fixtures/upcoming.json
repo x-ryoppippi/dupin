@@ -1,0 +1,288 @@
+{
+	"fixture": 1,
+	"description": "Before anything is typed: the next seven days under a heading for each day, an event under way under Today, and Enter opens the event in Calendar.",
+	"environment": {
+		"now": "2026-11-23T08:00:00Z",
+		"timeZone": "UTC"
+	},
+	"replies": {
+		"calendar": [
+			{
+				"id": "review:1795183200000",
+				"title": "Design review",
+				"start": 1795183200000,
+				"end": 1795186800000,
+				"allDay": false,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": "Meeting room",
+				"url": null,
+				"link": "ical://ekevent/20261120T140000Z/review?method=show&options=more",
+				"labels": {
+					"day": "Friday 20 November",
+					"time": "14:00 – 15:00",
+					"dates": "20 Nov, 14:00 – 15:00"
+				}
+			},
+			{
+				"id": "trip:1795338000000",
+				"title": "Design offsite",
+				"start": 1795338000000,
+				"end": 1795539600000,
+				"allDay": false,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": "Lisbon",
+				"url": null,
+				"link": "ical://ekevent/20261122T090000Z/trip?method=show&options=more",
+				"labels": {
+					"day": "Sunday 22 November",
+					"time": null,
+					"dates": "22 Nov, 09:00 – 24 Nov, 17:00"
+				}
+			},
+			{
+				"id": "standup:1795417200000",
+				"title": "Standup",
+				"start": 1795417200000,
+				"end": 1795422600000,
+				"allDay": false,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": null,
+				"url": null,
+				"link": "ical://ekevent/20261123T070000Z/standup?method=show&options=more",
+				"labels": {
+					"day": "Monday 23 November",
+					"time": "07:00 – 08:30",
+					"dates": "23 Nov, 07:00 – 08:30"
+				}
+			},
+			{
+				"id": "planning:1795428000000",
+				"title": "Project planning",
+				"start": 1795428000000,
+				"end": 1795431600000,
+				"allDay": false,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": "Studio",
+				"url": null,
+				"link": "ical://ekevent/20261123T100000Z/planning?method=show&options=more",
+				"labels": {
+					"day": "Monday 23 November",
+					"time": "10:00 – 11:00",
+					"dates": "23 Nov, 10:00 – 11:00"
+				}
+			},
+			{
+				"id": "holiday:1795478400000",
+				"title": "Out of office",
+				"start": 1795478400000,
+				"end": 1795564800000,
+				"allDay": true,
+				"calendar": {
+					"name": "Personal",
+					"color": "#cc73e1"
+				},
+				"location": null,
+				"url": null,
+				"link": "ical://ekevent/20261124T000000Z/holiday?method=show&options=more",
+				"labels": {
+					"day": "Tuesday 24 November",
+					"time": "All day",
+					"dates": "24 Nov · All day"
+				}
+			},
+			{
+				"id": "untitled:1795510800000",
+				"title": "  ",
+				"start": 1795510800000,
+				"end": 1795514400000,
+				"allDay": false,
+				"calendar": {
+					"name": "Personal",
+					"color": "#cc73e1"
+				},
+				"location": null,
+				"url": null,
+				"link": "ical://ekevent/20261124T090000Z/untitled?method=show&options=more",
+				"labels": {
+					"day": "Tuesday 24 November",
+					"time": "09:00 – 10:00",
+					"dates": "24 Nov, 09:00 – 10:00"
+				}
+			},
+			{
+				"id": "dentist:1795600800000",
+				"title": "Dentist",
+				"start": 1795600800000,
+				"end": 1795602600000,
+				"allDay": false,
+				"calendar": {
+					"name": "Personal",
+					"color": "#cc73e1"
+				},
+				"location": "High Street",
+				"url": null,
+				"link": "ical://ekevent/20261125T100000Z/dentist?method=show&options=more",
+				"labels": {
+					"day": "Wednesday 25 November",
+					"time": "10:00 – 10:30",
+					"dates": "25 Nov, 10:00 – 10:30"
+				}
+			},
+			{
+				"id": "sync:1795690800000",
+				"title": "Design sync",
+				"start": 1795690800000,
+				"end": 1795694400000,
+				"allDay": false,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": null,
+				"url": null,
+				"link": "ical://ekevent/20261126T110000Z/sync?method=show&options=more",
+				"labels": {
+					"day": "Thursday 26 November",
+					"time": "11:00 – 12:00",
+					"dates": "26 Nov, 11:00 – 12:00"
+				}
+			},
+			{
+				"id": "conference:1796860800000",
+				"title": "Rust conference",
+				"start": 1796860800000,
+				"end": 1796947200000,
+				"allDay": true,
+				"calendar": {
+					"name": "Work",
+					"color": "#1badf8"
+				},
+				"location": "Berlin",
+				"url": null,
+				"link": "ical://ekevent/20261210T000000Z/conference?method=show&options=more",
+				"labels": {
+					"day": "Thursday 10 December",
+					"time": "All day",
+					"dates": "10 Dec · All day"
+				}
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"id": "trip:1795338000000",
+						"title": "Design offsite",
+						"subtitle": "22 Nov, 09:00 – 24 Nov, 17:00 · Work",
+						"section": "Today",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261122T090000Z/trip?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "standup:1795417200000",
+						"title": "Standup",
+						"subtitle": "07:00 – 08:30 · Work",
+						"section": "Today",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261123T070000Z/standup?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "planning:1795428000000",
+						"title": "Project planning",
+						"subtitle": "10:00 – 11:00 · Work",
+						"section": "Today",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261123T100000Z/planning?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "holiday:1795478400000",
+						"title": "Out of office",
+						"subtitle": "All day · Personal",
+						"section": "Tomorrow",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261124T000000Z/holiday?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "untitled:1795510800000",
+						"title": "Untitled event",
+						"subtitle": "09:00 – 10:00 · Personal",
+						"section": "Tomorrow",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261124T090000Z/untitled?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "dentist:1795600800000",
+						"title": "Dentist",
+						"subtitle": "10:00 – 10:30 · Personal",
+						"section": "Wednesday 25 November",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261125T100000Z/dentist?method=show&options=more"
+							}
+						]
+					},
+					{
+						"id": "sync:1795690800000",
+						"title": "Design sync",
+						"subtitle": "11:00 – 12:00 · Work",
+						"section": "Thursday 26 November",
+						"actions": [
+							{
+								"title": "Open in Calendar",
+								"url": "ical://ekevent/20261126T110000Z/sync?method=show&options=more"
+							}
+						]
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"select": 2
+		},
+		{
+			"activate": "Open in Calendar",
+			"expect": {
+				"effect": {
+					"url": "ical://ekevent/20261123T100000Z/planning?method=show&options=more"
+				}
+			}
+		}
+	]
+}

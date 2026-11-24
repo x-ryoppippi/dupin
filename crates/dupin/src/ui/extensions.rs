@@ -8,8 +8,9 @@ use dupin_js_runtime::{Acted, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
-use crate::extensions::packages::Packages;
+use crate::extensions::packages::{Kind, Packages};
 use crate::extensions::{ACTION_DEADLINE, Catalog, Extension, Origin, Role, Watch};
+use crate::features::extensions::Port;
 
 /// The bundled extensions, always, and the extensions folder while `extensions = true`; which
 /// of them run; and which own a command and searcher now.
@@ -21,6 +22,9 @@ pub(super) struct Extensions {
     /// change of the user's choices needs another.
     active: Vec<Arc<Extension>>,
     registered: HashMap<CommandId, (Arc<Extension>, Role)>,
+    /// The built-in commands bundled extensions answer, which keep their searcher and take
+    /// the extension that runs now.
+    ports: HashMap<CommandId, Arc<Port>>,
     /// Every guest call's host requests go through it.
     pub(super) bridge: Bridge,
 }
@@ -34,13 +38,14 @@ struct Folder {
 }
 
 impl Extensions {
-    pub(super) fn new(bridge: Bridge) -> Self {
+    pub(super) fn new(bridge: Bridge, ports: HashMap<CommandId, Arc<Port>>) -> Self {
         Self {
             bundled: Folder::default(),
             user: Folder::default(),
             packages: Packages::new(bridge.clone()),
             active: Vec::new(),
             registered: HashMap::new(),
+            ports,
             bridge,
         }
     }
@@ -150,19 +155,27 @@ impl Ui {
             .map(|(id, extension, role)| (id, (extension, role)))
             .collect();
         let current = self.session.command_id();
-        let active_changed = registered.get(current).is_some_and(|(next, _)| {
-            self.extensions
-                .registered
+        let answers = |registered: &HashMap<CommandId, (Arc<Extension>, Role)>| {
+            registered
                 .get(current)
-                .is_some_and(|(current, _)| !Arc::ptr_eq(next, current))
-        });
+                .map(|(extension, _)| Arc::as_ptr(extension))
+        };
+        let active_changed = answers(&registered) != answers(&self.extensions.registered)
+            && (self.extensions.registered.contains_key(current)
+                || self.extensions.ports.contains_key(current));
+        let ports = &self.extensions.ports;
         self.extensions.registered.retain(|id, (extension, _)| {
             let keep = registered
                 .get(id)
                 .is_some_and(|(next, _)| Arc::ptr_eq(next, extension));
             if !keep {
-                self.searchers.remove(id);
-                self.deadlines.remove(id);
+                match ports.get(id) {
+                    Some(port) => port.set(None),
+                    None => {
+                        self.searchers.remove(id);
+                        self.deadlines.remove(id);
+                    }
+                }
             }
             keep
         });
@@ -175,16 +188,37 @@ impl Ui {
                 role,
                 self.extensions.bridge.clone(),
             );
-            let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
-            self.searchers.insert(id.clone(), searcher);
+            match self.extensions.ports.get(&id) {
+                Some(port) => port.set(Some(provider)),
+                None => {
+                    let searcher = spawn_searcher(self.me.clone(), id.clone(), provider);
+                    self.searchers.insert(id.clone(), searcher);
+                }
+            }
             self.extensions.registered.insert(id, (extension, role));
         }
         let routed: Vec<_> = self.extensions.registered.values().cloned().collect();
-        let listing = self.extensions.packages.listing(|extension| {
-            routed
-                .iter()
-                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
-        });
+        // A feature's own switch turns its bundled extension on and off, so Settings lists only
+        // a changed copy of one, which runs as third-party code.
+        let listing = self
+            .extensions
+            .packages
+            .listing(|extension| {
+                routed
+                    .iter()
+                    .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+            })
+            .into_iter()
+            .filter(|listed| {
+                !(matches!(listed.kind, Kind::Bundled | Kind::Copy)
+                    && listed
+                        .package
+                        .as_str()
+                        .strip_prefix("bundled:")
+                        .and_then(crate::features::ported_command)
+                        .is_some())
+            })
+            .collect();
         let problems: Vec<_> = self
             .extensions
             .bundled

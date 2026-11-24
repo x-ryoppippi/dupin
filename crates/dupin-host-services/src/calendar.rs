@@ -6,7 +6,7 @@
 //! Request Access, following the shared Calendar access policy.
 
 use dupin_broker::{OsAccess, OsPermission, Scope};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::service::{ServiceError, bounded};
 
@@ -15,8 +15,10 @@ pub const MAX_EVENTS: usize = 500;
 pub const MAX_QUERY_CHARS: usize = 200;
 pub const MAX_CALENDARS: usize = 32;
 pub const MAX_CALENDAR_NAME_BYTES: usize = 256;
-/// Each title, location and calendar name.
+/// Each location and calendar name.
 pub const MAX_TEXT_BYTES: usize = 1024;
+/// What an extension's row title holds, so an event's title fits its row as it comes.
+pub const MAX_TITLE_BYTES: usize = 512;
 pub const MAX_URL_BYTES: usize = 2048;
 
 pub const PERMISSION: OsPermission = OsPermission::Calendars;
@@ -29,6 +31,7 @@ pub type Millis = i64;
 pub struct Event {
     /// Stable for one occurrence of a recurring event.
     pub id: String,
+    /// One line, up to [`MAX_TITLE_BYTES`].
     pub title: String,
     pub start: Millis,
     pub end: Millis,
@@ -36,6 +39,23 @@ pub struct Event {
     pub calendar: CalendarInfo,
     pub location: Option<String>,
     pub url: Option<String>,
+    /// Opens this occurrence in the Mac's Calendar.
+    pub link: Option<String>,
+    pub labels: Labels,
+}
+
+/// The event's dates as this Mac's locale writes them, in its time zone, which a guest
+/// without `Intl` can't do itself.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Labels {
+    /// The day it starts, such as “Wednesday 25 November”, with the year when that isn't
+    /// this year.
+    pub day: String,
+    /// Only its time, such as “10:00–11:00”, or “All day”, when it falls within one day.
+    pub time: Option<String>,
+    /// Its dates as well, with the year when either isn't this year.
+    pub dates: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -46,6 +66,17 @@ pub struct CalendarInfo {
     pub color: Option<String>,
 }
 
+/// Which end of the range a read's limit keeps.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Order {
+    /// Earliest start first.
+    #[default]
+    Earliest,
+    /// Latest start first, for the events nearest the end of a range in the past.
+    Latest,
+}
+
 /// A validated read: events overlapping `start..end`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
@@ -54,6 +85,7 @@ pub struct Query {
     calendars: Option<Vec<String>>,
     terms: Vec<String>,
     limit: usize,
+    order: Order,
 }
 
 impl Query {
@@ -98,7 +130,12 @@ impl Query {
                 .map(str::to_owned)
                 .collect(),
             limit,
+            order: Order::Earliest,
         })
+    }
+
+    pub fn ordered(self, order: Order) -> Self {
+        Self { order, ..self }
     }
 }
 
@@ -134,6 +171,11 @@ pub trait Calendars: Send + Sync {
     fn day_offset(&self, at: Millis) -> Result<i64, ServiceError>;
     /// Events overlapping `start..end`, in any order.
     fn events(&self, start: Millis, end: Millis) -> Result<Vec<Event>, ServiceError>;
+    /// Fills in the `link` and `labels` of the events a read returns, once the rest are left
+    /// out, since writing dates takes far longer than matching them.
+    fn describe(&self, events: &mut [Event]) {
+        let _ = events;
+    }
 }
 
 pub struct Calendar<C> {
@@ -160,7 +202,7 @@ impl<C: Calendars> Calendar<C> {
         })
     }
 
-    /// The events the query matches, earliest first, within the declared `bounds`.
+    /// The events the query matches, in its order, within the declared `bounds`.
     pub fn events(&self, query: &Query, bounds: Bounds) -> Result<Vec<Event>, ServiceError> {
         if let Some(error) = ServiceError::from_access(PERMISSION, self.backend.access()) {
             return Err(error);
@@ -195,7 +237,11 @@ impl<C: Calendars> Calendar<C> {
             })
             .collect();
         events.sort_by(|a, b| a.start.cmp(&b.start).then_with(|| a.id.cmp(&b.id)));
+        if query.order == Order::Latest {
+            events.reverse();
+        }
         events.truncate(query.limit);
+        self.backend.describe(&mut events);
         Ok(events.into_iter().map(Event::bounded).collect())
     }
 }
@@ -204,7 +250,7 @@ impl Event {
     fn bounded(self) -> Self {
         Self {
             id: bounded(self.id, MAX_TEXT_BYTES),
-            title: bounded(self.title, MAX_TEXT_BYTES),
+            title: bounded(one_line(&self.title), MAX_TITLE_BYTES),
             calendar: CalendarInfo {
                 name: bounded(self.calendar.name, MAX_TEXT_BYTES),
                 color: self.calendar.color.filter(|color| is_hex_color(color)),
@@ -214,9 +260,19 @@ impl Event {
                 .filter(|location| !location.trim().is_empty())
                 .map(|location| bounded(location, MAX_TEXT_BYTES)),
             url: self.url.filter(|url| url.len() <= MAX_URL_BYTES),
+            link: self.link.filter(|link| link.len() <= MAX_URL_BYTES),
             ..self
         }
     }
+}
+
+/// `text` with each run of spaces, line breaks and other control characters as one space,
+/// since a title pasted from an invitation may carry them.
+fn one_line(text: &str) -> String {
+    text.split(|ch: char| ch.is_whitespace() || ch.is_control())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn is_hex_color(color: &str) -> bool {
