@@ -4,7 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 # The release version lives in VERSION, which tagpr bumps. Crate versions stay put so a
-# release doesn't rewrite Cargo.lock and the vendored-dependency hash in flake.nix.
+# release doesn't rewrite Cargo.lock.
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"

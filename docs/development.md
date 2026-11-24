@@ -80,13 +80,13 @@ authentication, warmup or native E2E succeeded.
 
 ## Dependency builds
 
-The version lives in `VERSION` (see [releasing](./releasing.md)). `package.nix` holds the hash of the vendored Cargo dependencies; after `Cargo.lock` changes, refresh it with `nu scripts/update-cargo-hash.nu` (nix-update). The vendor derivation's name carries `Cargo.lock`'s hash, so a stale hash fails the next local build instead of only CI. On every pull request, the autofix.ci workflow runs the same script and pushes the refreshed hash.
+The version lives in `VERSION` (see [releasing](./releasing.md)). `nix/cargo-vendor.nix` vendors the Cargo dependencies from `Cargo.lock` alone, crates.io packages by their lock checksums and Git packages by their locked rev, so a lock change needs no hash update. Every Nix build of the workspace uses that one vendor tree.
 
 Flake builds share compiled dependencies separately for release and debug.
 The [Nix cache experiment](../experiments/nix-cargo-cache/README.md) compares
 source-edit builds against the original builder. `dupin.baseline` exposes that
-builder and its vendor-hash definition; the hash update script evaluates it so
-updates still target `package.nix`. The non-flake `default.nix` build uses it too.
+builder. The non-flake `default.nix` build uses it too, with crane at the rev
+`flake.lock` pins.
 
 ## Formatting
 
