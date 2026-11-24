@@ -6,6 +6,7 @@ use crate::row::{self, PageChange, RowAction, RowEffect};
 fn items(source: &str, cursor: Option<&str>, reason: Reason) -> Result<CataloguePage, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
     loaded.unwrap().items(
+        &engine(),
         cursor,
         reason,
         "{}",
@@ -31,12 +32,13 @@ fn a_package_may_export_items_search_or_both() {
         ),
     ] {
         let (_folder, loaded) = package(&[("main.js", source)]);
-        let found = loaded.unwrap().check(timeout(DEADLINE)).unwrap();
+        let found = loaded.unwrap().check(&engine(), timeout(DEADLINE)).unwrap();
         assert_eq!((found.search, found.items), exports, "{source}");
     }
     let (_folder, loaded) = package(&[("main.js", "export function search() { return []; }")]);
     assert_eq!(
         failure_of(loaded.unwrap().items(
+            &engine(),
             None,
             Reason::Load,
             "{}",
@@ -247,7 +249,14 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
     )]);
     let package = loaded.unwrap();
     let act = |name: &str, data: &str| {
-        package.action(name, data, "{}", timeout(DEADLINE), &mut Unavailable::default())
+        package.action(
+            &engine(),
+            name,
+            data,
+            "{}",
+            timeout(DEADLINE),
+            &mut Unavailable::default(),
+        )
     };
     assert_eq!(
         act("forget", r#"{"id":"rune"}"#).unwrap(),

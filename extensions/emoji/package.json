@@ -1,0 +1,15 @@
+{
+	"name": "emoji",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Emoji & Symbols",
+		"keyword": "emoji",
+		"main": "main.ts",
+		"capabilities": {
+			"clipboard": [
+				"paste"
+			]
+		}
+	}
+}

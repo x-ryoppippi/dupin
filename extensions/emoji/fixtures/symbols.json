@@ -1,0 +1,2340 @@
+{
+	"fixture": 1,
+	"description": "Symbols that are not emoji, such as currency signs and arrows, are listed too.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "euro",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "💶",
+								"title": "Copy"
+							},
+							{
+								"paste": "💶",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "💶"
+								},
+								{
+									"label": "Name",
+									"text": "euro banknote"
+								},
+								{
+									"label": "日本語",
+									"text": "ユーロ札"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F4B6"
+								},
+								{
+									"label": "Keywords",
+									"text": "banknote, bill, currency, euro, money, note, お札, お金, ユーロ, ユーロ札, 札束, 通貨"
+								}
+							]
+						},
+						"id": "1f4b6",
+						"keywords": [
+							"euro banknote",
+							"banknote",
+							"bill",
+							"currency",
+							"euro",
+							"money",
+							"note",
+							"お札",
+							"お金",
+							"ユーロ",
+							"ユーロ札",
+							"札束",
+							"通貨"
+						],
+						"title": "💶 Euro banknote"
+					},
+					{
+						"actions": [
+							{
+								"copy": "€",
+								"title": "Copy"
+							},
+							{
+								"paste": "€",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "€"
+								},
+								{
+									"label": "Name",
+									"text": "euro"
+								},
+								{
+									"label": "日本語",
+									"text": "ユーロ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+20AC"
+								},
+								{
+									"label": "Keywords",
+									"text": "currency, EUR, ユーロ, 通貨"
+								}
+							]
+						},
+						"id": "20ac",
+						"keywords": ["euro", "currency", "EUR", "ユーロ", "通貨"],
+						"title": "€ Euro"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🌍",
+								"title": "Copy"
+							},
+							{
+								"paste": "🌍",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🌍"
+								},
+								{
+									"label": "Name",
+									"text": "globe showing Europe-Africa"
+								},
+								{
+									"label": "日本語",
+									"text": "地球（ヨーロッパとアフリカ）"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F30D"
+								},
+								{
+									"label": "Keywords",
+									"text": "Africa, earth, Europe, globe, world, アフリカ, ヨーロッパ, 地球, 地球（ヨーロッパとアフリカ）"
+								}
+							]
+						},
+						"id": "1f30d",
+						"keywords": [
+							"globe showing Europe-Africa",
+							"Africa",
+							"earth",
+							"Europe",
+							"globe",
+							"world",
+							"アフリカ",
+							"ヨーロッパ",
+							"地球",
+							"地球（ヨーロッパとアフリカ）"
+						],
+						"title": "🌍 Globe showing Europe-Africa"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🏤",
+								"title": "Copy"
+							},
+							{
+								"paste": "🏤",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🏤"
+								},
+								{
+									"label": "Name",
+									"text": "post office"
+								},
+								{
+									"label": "日本語",
+									"text": "西洋の郵便局"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F3E4"
+								},
+								{
+									"label": "Keywords",
+									"text": "European, post, 建物, 西洋の郵便局, 郵便"
+								}
+							]
+						},
+						"id": "1f3e4",
+						"keywords": ["post office", "European", "post", "建物", "西洋の郵便局", "郵便"],
+						"title": "🏤 Post office"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🏰",
+								"title": "Copy"
+							},
+							{
+								"paste": "🏰",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🏰"
+								},
+								{
+									"label": "Name",
+									"text": "castle"
+								},
+								{
+									"label": "日本語",
+									"text": "西洋の城"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F3F0"
+								},
+								{
+									"label": "Keywords",
+									"text": "European, キャッスル, 城, 建物, 西洋の城"
+								}
+							]
+						},
+						"id": "1f3f0",
+						"keywords": ["castle", "European", "キャッスル", "城", "建物", "西洋の城"],
+						"title": "🏰 Castle"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🇪🇺",
+								"title": "Copy"
+							},
+							{
+								"paste": "🇪🇺",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🇪🇺"
+								},
+								{
+									"label": "Name",
+									"text": "flag: European Union"
+								},
+								{
+									"label": "日本語",
+									"text": "旗: 欧州連合"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F1EA U+1F1FA"
+								},
+								{
+									"label": "Keywords",
+									"text": "flag, 旗, 旗: 欧州連合, 欧州連合"
+								}
+							]
+						},
+						"id": "1f1ea-1f1fa",
+						"keywords": ["flag: European Union", "flag", "旗", "旗: 欧州連合", "欧州連合"],
+						"title": "🇪🇺 Flag: European Union"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙆‍♂️",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙆‍♂️",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙆🏻‍♂️",
+								"title": "Copy 🙆🏻‍♂️ light skin tone"
+							},
+							{
+								"copy": "🙆🏼‍♂️",
+								"title": "Copy 🙆🏼‍♂️ medium-light skin tone"
+							},
+							{
+								"copy": "🙆🏽‍♂️",
+								"title": "Copy 🙆🏽‍♂️ medium skin tone"
+							},
+							{
+								"copy": "🙆🏾‍♂️",
+								"title": "Copy 🙆🏾‍♂️ medium-dark skin tone"
+							},
+							{
+								"copy": "🙆🏿‍♂️",
+								"title": "Copy 🙆🏿‍♂️ dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙆‍♂️"
+								},
+								{
+									"label": "Name",
+									"text": "man gesturing OK"
+								},
+								{
+									"label": "日本語",
+									"text": "OKのポーズをする男"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F646 U+200D U+2642 U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "gesture, hand, man, OK, OKのポーズをする男, オーケー, オッケー, ジェスチャー, 丸, 男性"
+								}
+							]
+						},
+						"id": "1f646-200d-2642-fe0f",
+						"keywords": [
+							"man gesturing OK",
+							"gesture",
+							"hand",
+							"man",
+							"OK",
+							"OKのポーズをする男",
+							"オーケー",
+							"オッケー",
+							"ジェスチャー",
+							"丸",
+							"男性"
+						],
+						"title": "🙆‍♂️ Man gesturing OK"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙆",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙆",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙆🏻",
+								"title": "Copy 🙆🏻 light skin tone"
+							},
+							{
+								"copy": "🙆🏼",
+								"title": "Copy 🙆🏼 medium-light skin tone"
+							},
+							{
+								"copy": "🙆🏽",
+								"title": "Copy 🙆🏽 medium skin tone"
+							},
+							{
+								"copy": "🙆🏾",
+								"title": "Copy 🙆🏾 medium-dark skin tone"
+							},
+							{
+								"copy": "🙆🏿",
+								"title": "Copy 🙆🏿 dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙆"
+								},
+								{
+									"label": "Name",
+									"text": "person gesturing OK"
+								},
+								{
+									"label": "日本語",
+									"text": "OKのポーズをする人"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F646"
+								},
+								{
+									"label": "Keywords",
+									"text": "gesture, hand, OK, OKのポーズをする人, オーケー, ジェスチャー, 丸, 人"
+								}
+							]
+						},
+						"id": "1f646",
+						"keywords": [
+							"person gesturing OK",
+							"gesture",
+							"hand",
+							"OK",
+							"OKのポーズをする人",
+							"オーケー",
+							"ジェスチャー",
+							"丸",
+							"人"
+						],
+						"title": "🙆 Person gesturing OK"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙆‍♀️",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙆‍♀️",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙆🏻‍♀️",
+								"title": "Copy 🙆🏻‍♀️ light skin tone"
+							},
+							{
+								"copy": "🙆🏼‍♀️",
+								"title": "Copy 🙆🏼‍♀️ medium-light skin tone"
+							},
+							{
+								"copy": "🙆🏽‍♀️",
+								"title": "Copy 🙆🏽‍♀️ medium skin tone"
+							},
+							{
+								"copy": "🙆🏾‍♀️",
+								"title": "Copy 🙆🏾‍♀️ medium-dark skin tone"
+							},
+							{
+								"copy": "🙆🏿‍♀️",
+								"title": "Copy 🙆🏿‍♀️ dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙆‍♀️"
+								},
+								{
+									"label": "Name",
+									"text": "woman gesturing OK"
+								},
+								{
+									"label": "日本語",
+									"text": "OKのポーズをする女"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F646 U+200D U+2640 U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "gesture, hand, OK, woman, OKのポーズをする女, オーケー, オッケー, ジェスチャー, 丸, 女性"
+								}
+							]
+						},
+						"id": "1f646-200d-2640-fe0f",
+						"keywords": [
+							"woman gesturing OK",
+							"gesture",
+							"hand",
+							"OK",
+							"woman",
+							"OKのポーズをする女",
+							"オーケー",
+							"オッケー",
+							"ジェスチャー",
+							"丸",
+							"女性"
+						],
+						"title": "🙆‍♀️ Woman gesturing OK"
+					},
+					{
+						"actions": [
+							{
+								"copy": "₶",
+								"title": "Copy"
+							},
+							{
+								"paste": "₶",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "₶"
+								},
+								{
+									"label": "Name",
+									"text": "livre tournois"
+								},
+								{
+									"label": "日本語",
+									"text": "トゥールリーブル"
+								},
+								{
+									"label": "Code points",
+									"text": "U+20B6"
+								},
+								{
+									"label": "Keywords",
+									"text": "currency, トゥールリーブル, 通貨"
+								}
+							]
+						},
+						"id": "20b6",
+						"keywords": ["livre tournois", "currency", "トゥールリーブル", "通貨"],
+						"title": "₶ Livre tournois"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⊰",
+								"title": "Copy"
+							},
+							{
+								"paste": "⊰",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⊰"
+								},
+								{
+									"label": "Name",
+									"text": "precedes under relation"
+								},
+								{
+									"label": "日本語",
+									"text": "前置関係"
+								},
+								{
+									"label": "Code points",
+									"text": "U+22B0"
+								},
+								{
+									"label": "Keywords",
+									"text": "mathematics, set operator, 前置関係, 数学記号, 集合演算子"
+								}
+							]
+						},
+						"id": "22b0",
+						"keywords": [
+							"precedes under relation",
+							"mathematics",
+							"set operator",
+							"前置関係",
+							"数学記号",
+							"集合演算子"
+						],
+						"title": "⊰ Precedes under relation"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇗",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇗",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇗"
+								},
+								{
+									"label": "Name",
+									"text": "north east double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "北東二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D7"
+								},
+								{
+									"label": "Keywords",
+									"text": "北東二重矢印"
+								}
+							]
+						},
+						"id": "21d7",
+						"keywords": ["north east double arrow", "北東二重矢印"],
+						"title": "⇗ North east double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇘",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇘",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇘"
+								},
+								{
+									"label": "Name",
+									"text": "south east double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "南東二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D8"
+								},
+								{
+									"label": "Keywords",
+									"text": "南東二重矢印"
+								}
+							]
+						},
+						"id": "21d8",
+						"keywords": ["south east double arrow", "南東二重矢印"],
+						"title": "⇘ South east double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⊱",
+								"title": "Copy"
+							},
+							{
+								"paste": "⊱",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⊱"
+								},
+								{
+									"label": "Name",
+									"text": "succeeds under relation"
+								},
+								{
+									"label": "日本語",
+									"text": "後置関係"
+								},
+								{
+									"label": "Code points",
+									"text": "U+22B1"
+								},
+								{
+									"label": "Keywords",
+									"text": "mathematics, set operator, 後置関係, 数学記号, 集合演算子"
+								}
+							]
+						},
+						"id": "22b1",
+						"keywords": [
+							"succeeds under relation",
+							"mathematics",
+							"set operator",
+							"後置関係",
+							"数学記号",
+							"集合演算子"
+						],
+						"title": "⊱ Succeeds under relation"
+					},
+					{
+						"actions": [
+							{
+								"copy": "➿",
+								"title": "Copy"
+							},
+							{
+								"paste": "➿",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "➿"
+								},
+								{
+									"label": "Name",
+									"text": "double curly loop"
+								},
+								{
+									"label": "日本語",
+									"text": "ダブルループ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+27BF"
+								},
+								{
+									"label": "Keywords",
+									"text": "curl, double, loop, ダブルループ, フリーダイヤル, ループ, 記号, 輪っか"
+								}
+							]
+						},
+						"id": "27bf",
+						"keywords": [
+							"double curly loop",
+							"curl",
+							"double",
+							"loop",
+							"ダブルループ",
+							"フリーダイヤル",
+							"ループ",
+							"記号",
+							"輪っか"
+						],
+						"title": "➿ Double curly loop"
+					},
+					{
+						"actions": [
+							{
+								"copy": "▨",
+								"title": "Copy"
+							},
+							{
+								"paste": "▨",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "▨"
+								},
+								{
+									"label": "Name",
+									"text": "square upper right lower left fill"
+								},
+								{
+									"label": "日本語",
+									"text": "右上左下斜め縞線入りの四角"
+								},
+								{
+									"label": "Code points",
+									"text": "U+25A8"
+								},
+								{
+									"label": "Keywords",
+									"text": "右上左下斜め縞線入りの四角"
+								}
+							]
+						},
+						"id": "25a8",
+						"keywords": ["square upper right lower left fill", "右上左下斜め縞線入りの四角"],
+						"title": "▨ Square upper right lower left fill"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙅‍♂️",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙅‍♂️",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙅🏻‍♂️",
+								"title": "Copy 🙅🏻‍♂️ light skin tone"
+							},
+							{
+								"copy": "🙅🏼‍♂️",
+								"title": "Copy 🙅🏼‍♂️ medium-light skin tone"
+							},
+							{
+								"copy": "🙅🏽‍♂️",
+								"title": "Copy 🙅🏽‍♂️ medium skin tone"
+							},
+							{
+								"copy": "🙅🏾‍♂️",
+								"title": "Copy 🙅🏾‍♂️ medium-dark skin tone"
+							},
+							{
+								"copy": "🙅🏿‍♂️",
+								"title": "Copy 🙅🏿‍♂️ dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙅‍♂️"
+								},
+								{
+									"label": "Name",
+									"text": "man gesturing NO"
+								},
+								{
+									"label": "日本語",
+									"text": "ダメのポーズをする男"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F645 U+200D U+2642 U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "forbidden, gesture, hand, man, prohibited, NG, ジェスチャー, ダメのポーズをする男, バツ, 男, 男性"
+								}
+							]
+						},
+						"id": "1f645-200d-2642-fe0f",
+						"keywords": [
+							"man gesturing NO",
+							"forbidden",
+							"gesture",
+							"hand",
+							"man",
+							"prohibited",
+							"NG",
+							"ジェスチャー",
+							"ダメのポーズをする男",
+							"バツ",
+							"男",
+							"男性"
+						],
+						"title": "🙅‍♂️ Man gesturing NO"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙅",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙅",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙅🏻",
+								"title": "Copy 🙅🏻 light skin tone"
+							},
+							{
+								"copy": "🙅🏼",
+								"title": "Copy 🙅🏼 medium-light skin tone"
+							},
+							{
+								"copy": "🙅🏽",
+								"title": "Copy 🙅🏽 medium skin tone"
+							},
+							{
+								"copy": "🙅🏾",
+								"title": "Copy 🙅🏾 medium-dark skin tone"
+							},
+							{
+								"copy": "🙅🏿",
+								"title": "Copy 🙅🏿 dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙅"
+								},
+								{
+									"label": "Name",
+									"text": "person gesturing NO"
+								},
+								{
+									"label": "日本語",
+									"text": "ダメのポーズをする人"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F645"
+								},
+								{
+									"label": "Keywords",
+									"text": "forbidden, gesture, hand, prohibited, NG, ジェスチャー, だめ, ダメのポーズをする人, バツ, 人"
+								}
+							]
+						},
+						"id": "1f645",
+						"keywords": [
+							"person gesturing NO",
+							"forbidden",
+							"gesture",
+							"hand",
+							"prohibited",
+							"NG",
+							"ジェスチャー",
+							"だめ",
+							"ダメのポーズをする人",
+							"バツ",
+							"人"
+						],
+						"title": "🙅 Person gesturing NO"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙅‍♀️",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙅‍♀️",
+								"title": "Paste"
+							},
+							{
+								"copy": "🙅🏻‍♀️",
+								"title": "Copy 🙅🏻‍♀️ light skin tone"
+							},
+							{
+								"copy": "🙅🏼‍♀️",
+								"title": "Copy 🙅🏼‍♀️ medium-light skin tone"
+							},
+							{
+								"copy": "🙅🏽‍♀️",
+								"title": "Copy 🙅🏽‍♀️ medium skin tone"
+							},
+							{
+								"copy": "🙅🏾‍♀️",
+								"title": "Copy 🙅🏾‍♀️ medium-dark skin tone"
+							},
+							{
+								"copy": "🙅🏿‍♀️",
+								"title": "Copy 🙅🏿‍♀️ dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙅‍♀️"
+								},
+								{
+									"label": "Name",
+									"text": "woman gesturing NO"
+								},
+								{
+									"label": "日本語",
+									"text": "ダメのポーズをする女"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F645 U+200D U+2640 U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "forbidden, gesture, hand, prohibited, woman, NG, ジェスチャー, ダメのポーズをする女, バツ, 女, 女性"
+								}
+							]
+						},
+						"id": "1f645-200d-2640-fe0f",
+						"keywords": [
+							"woman gesturing NO",
+							"forbidden",
+							"gesture",
+							"hand",
+							"prohibited",
+							"woman",
+							"NG",
+							"ジェスチャー",
+							"ダメのポーズをする女",
+							"バツ",
+							"女",
+							"女性"
+						],
+						"title": "🙅‍♀️ Woman gesturing NO"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇖",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇖",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇖"
+								},
+								{
+									"label": "Name",
+									"text": "north west double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "北西二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D6"
+								},
+								{
+									"label": "Keywords",
+									"text": "北西二重矢印"
+								}
+							]
+						},
+						"id": "21d6",
+						"keywords": ["north west double arrow", "北西二重矢印"],
+						"title": "⇖ North west double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇙",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇙",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇙"
+								},
+								{
+									"label": "Name",
+									"text": "south west double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "南西二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D9"
+								},
+								{
+									"label": "Keywords",
+									"text": "南西二重矢印"
+								}
+							]
+						},
+						"id": "21d9",
+						"keywords": ["south west double arrow", "南西二重矢印"],
+						"title": "⇙ South west double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇵",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇵",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇵"
+								},
+								{
+									"label": "Name",
+									"text": "downwards arrow leftwards upwards arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "下矢印上矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21F5"
+								},
+								{
+									"label": "Keywords",
+									"text": "下矢印上矢印"
+								}
+							]
+						},
+						"id": "21f5",
+						"keywords": ["downwards arrow leftwards upwards arrow", "下矢印上矢印"],
+						"title": "⇵ Downwards arrow leftwards upwards arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "▧",
+								"title": "Copy"
+							},
+							{
+								"paste": "▧",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "▧"
+								},
+								{
+									"label": "Name",
+									"text": "square upper left lower right fill"
+								},
+								{
+									"label": "日本語",
+									"text": "左上右下斜め縞線入りの四角"
+								},
+								{
+									"label": "Code points",
+									"text": "U+25A7"
+								},
+								{
+									"label": "Keywords",
+									"text": "左上右下斜め縞線入りの四角"
+								}
+							]
+						},
+						"id": "25a7",
+						"keywords": ["square upper left lower right fill", "左上右下斜め縞線入りの四角"],
+						"title": "▧ Square upper left lower right fill"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇐",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇐",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇐"
+								},
+								{
+									"label": "Name",
+									"text": "leftwards double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "左向き二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D0"
+								},
+								{
+									"label": "Keywords",
+									"text": "左向き二重矢印"
+								}
+							]
+						},
+						"id": "21d0",
+						"keywords": ["leftwards double arrow", "左向き二重矢印"],
+						"title": "⇐ Leftwards double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇔",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇔",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇔"
+								},
+								{
+									"label": "Name",
+									"text": "left right double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "二重両矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D4"
+								},
+								{
+									"label": "Keywords",
+									"text": "二重両矢印"
+								}
+							]
+						},
+						"id": "21d4",
+						"keywords": ["left right double arrow", "二重両矢印"],
+						"title": "⇔ Left right double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇍",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇍",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇍"
+								},
+								{
+									"label": "Name",
+									"text": "leftwards double arrow stroke"
+								},
+								{
+									"label": "日本語",
+									"text": "斜線付き左向き二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21CD"
+								},
+								{
+									"label": "Keywords",
+									"text": "斜線付き左向き二重矢印"
+								}
+							]
+						},
+						"id": "21cd",
+						"keywords": ["leftwards double arrow stroke", "斜線付き左向き二重矢印"],
+						"title": "⇍ Leftwards double arrow stroke"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇜",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇜",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇜"
+								},
+								{
+									"label": "Name",
+									"text": "leftwards squiggle arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "左向きよじれ矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21DC"
+								},
+								{
+									"label": "Keywords",
+									"text": "左向きよじれ矢印"
+								}
+							]
+						},
+						"id": "21dc",
+						"keywords": ["leftwards squiggle arrow", "左向きよじれ矢印"],
+						"title": "⇜ Leftwards squiggle arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇎",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇎",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇎"
+								},
+								{
+									"label": "Name",
+									"text": "left right double arrow stroke"
+								},
+								{
+									"label": "日本語",
+									"text": "斜線付き二重両矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21CE"
+								},
+								{
+									"label": "Keywords",
+									"text": "斜線付き二重両矢印"
+								}
+							]
+						},
+						"id": "21ce",
+						"keywords": ["left right double arrow stroke", "斜線付き二重両矢印"],
+						"title": "⇎ Left right double arrow stroke"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🔳",
+								"title": "Copy"
+							},
+							{
+								"paste": "🔳",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🔳"
+								},
+								{
+									"label": "Name",
+									"text": "white square button"
+								},
+								{
+									"label": "日本語",
+									"text": "白枠四角"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F533"
+								},
+								{
+									"label": "Keywords",
+									"text": "button, geometric, outlined, square, ボタン, 四角ボタン, 正方形, 白枠四角"
+								}
+							]
+						},
+						"id": "1f533",
+						"keywords": [
+							"white square button",
+							"button",
+							"geometric",
+							"outlined",
+							"square",
+							"ボタン",
+							"四角ボタン",
+							"正方形",
+							"白枠四角"
+						],
+						"title": "🔳 White square button"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫰",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫰",
+								"title": "Paste"
+							},
+							{
+								"copy": "🫰🏻",
+								"title": "Copy 🫰🏻 light skin tone"
+							},
+							{
+								"copy": "🫰🏼",
+								"title": "Copy 🫰🏼 medium-light skin tone"
+							},
+							{
+								"copy": "🫰🏽",
+								"title": "Copy 🫰🏽 medium skin tone"
+							},
+							{
+								"copy": "🫰🏾",
+								"title": "Copy 🫰🏾 medium-dark skin tone"
+							},
+							{
+								"copy": "🫰🏿",
+								"title": "Copy 🫰🏿 dark skin tone"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫰"
+								},
+								{
+									"label": "Name",
+									"text": "hand with index finger and thumb crossed"
+								},
+								{
+									"label": "日本語",
+									"text": "親指と人差し指をクロス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAF0"
+								},
+								{
+									"label": "Keywords",
+									"text": "expensive, heart, love, money, snap, 手, 指, 指をクロス, 親指と人差し指をクロス"
+								}
+							]
+						},
+						"id": "1faf0",
+						"keywords": [
+							"hand with index finger and thumb crossed",
+							"expensive",
+							"heart",
+							"love",
+							"money",
+							"snap",
+							"手",
+							"指",
+							"指をクロス",
+							"親指と人差し指をクロス"
+						],
+						"title": "🫰 Hand with index finger and thumb crossed"
+					},
+					{
+						"actions": [
+							{
+								"copy": "◙",
+								"title": "Copy"
+							},
+							{
+								"paste": "◙",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "◙"
+								},
+								{
+									"label": "Name",
+									"text": "filled square containing hollow circle"
+								},
+								{
+									"label": "日本語",
+									"text": "黒四角の中に白丸"
+								},
+								{
+									"label": "Code points",
+									"text": "U+25D9"
+								},
+								{
+									"label": "Keywords",
+									"text": "inverse hollow circle, 黒四角の中に白丸"
+								}
+							]
+						},
+						"id": "25d9",
+						"keywords": [
+							"filled square containing hollow circle",
+							"inverse hollow circle",
+							"黒四角の中に白丸"
+						],
+						"title": "◙ Filled square containing hollow circle"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🇹🇫",
+								"title": "Copy"
+							},
+							{
+								"paste": "🇹🇫",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🇹🇫"
+								},
+								{
+									"label": "Name",
+									"text": "flag: French Southern Territories"
+								},
+								{
+									"label": "日本語",
+									"text": "旗: 仏領極南諸島"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F1F9 U+1F1EB"
+								},
+								{
+									"label": "Keywords",
+									"text": "flag, 旗, 旗: 仏領極南諸島, 仏領極南諸島"
+								}
+							]
+						},
+						"id": "1f1f9-1f1eb",
+						"keywords": [
+							"flag: French Southern Territories",
+							"flag",
+							"旗",
+							"旗: 仏領極南諸島",
+							"仏領極南諸島"
+						],
+						"title": "🇹🇫 Flag: French Southern Territories"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⋭",
+								"title": "Copy"
+							},
+							{
+								"paste": "⋭",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⋭"
+								},
+								{
+									"label": "Name",
+									"text": "does not contain as normal subgroup equal"
+								},
+								{
+									"label": "日本語",
+									"text": "正規部分群（逆方向）又は等しいの否定"
+								},
+								{
+									"label": "Code points",
+									"text": "U+22ED"
+								},
+								{
+									"label": "Keywords",
+									"text": "group theory, mathematics, 数学記号, 正規部分群（逆方向）又は等しいの否定, 群論"
+								}
+							]
+						},
+						"id": "22ed",
+						"keywords": [
+							"does not contain as normal subgroup equal",
+							"group theory",
+							"mathematics",
+							"数学記号",
+							"正規部分群（逆方向）又は等しいの否定",
+							"群論"
+						],
+						"title": "⋭ Does not contain as normal subgroup equal"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Copy",
+			"expect": {
+				"effect": {
+					"copy": "💶"
+				}
+			}
+		},
+		{
+			"query": "rightwards arrow",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "⇥",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇥",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇥"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow bar"
+								},
+								{
+									"label": "日本語",
+									"text": "右縦棒付き右矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21E5"
+								},
+								{
+									"label": "Keywords",
+									"text": "右縦棒付き右矢印"
+								}
+							]
+						},
+						"id": "21e5",
+						"keywords": ["rightwards arrow bar", "右縦棒付き右矢印"],
+						"title": "⇥ Rightwards arrow bar"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↣",
+								"title": "Copy"
+							},
+							{
+								"paste": "↣",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↣"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow tail"
+								},
+								{
+									"label": "日本語",
+									"text": "尾付き右向き矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21A3"
+								},
+								{
+									"label": "Keywords",
+									"text": "尾付き右向き矢印"
+								}
+							]
+						},
+						"id": "21a3",
+						"keywords": ["rightwards arrow tail", "尾付き右向き矢印"],
+						"title": "↣ Rightwards arrow tail"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↬",
+								"title": "Copy"
+							},
+							{
+								"paste": "↬",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↬"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow loop"
+								},
+								{
+									"label": "日本語",
+									"text": "ループ付き右向き矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21AC"
+								},
+								{
+									"label": "Keywords",
+									"text": "ループ付き右向き矢印"
+								}
+							]
+						},
+						"id": "21ac",
+						"keywords": ["rightwards arrow loop", "ループ付き右向き矢印"],
+						"title": "↬ Rightwards arrow loop"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↛",
+								"title": "Copy"
+							},
+							{
+								"paste": "↛",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↛"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow stroke"
+								},
+								{
+									"label": "日本語",
+									"text": "斜線付き右向き矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+219B"
+								},
+								{
+									"label": "Keywords",
+									"text": "斜線付き右向き矢印"
+								}
+							]
+						},
+						"id": "219b",
+						"keywords": ["rightwards arrow stroke", "斜線付き右向き矢印"],
+						"title": "↛ Rightwards arrow stroke"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↦",
+								"title": "Copy"
+							},
+							{
+								"paste": "↦",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↦"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow from bar"
+								},
+								{
+									"label": "日本語",
+									"text": "棒からの右向き矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21A6"
+								},
+								{
+									"label": "Keywords",
+									"text": "棒からの右向き矢印"
+								}
+							]
+						},
+						"id": "21a6",
+						"keywords": ["rightwards arrow from bar", "棒からの右向き矢印"],
+						"title": "↦ Rightwards arrow from bar"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↴",
+								"title": "Copy"
+							},
+							{
+								"paste": "↴",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↴"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow corner downwards"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き下曲がり矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21B4"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き下曲がり矢印"
+								}
+							]
+						},
+						"id": "21b4",
+						"keywords": ["rightwards arrow corner downwards", "右向き下曲がり矢印"],
+						"title": "↴ Rightwards arrow corner downwards"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↝",
+								"title": "Copy"
+							},
+							{
+								"paste": "↝",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↝"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards wave arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き波線矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+219D"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き波線矢印"
+								}
+							]
+						},
+						"id": "219d",
+						"keywords": ["rightwards wave arrow", "右向き波線矢印"],
+						"title": "↝ Rightwards wave arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇄",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇄",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇄"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards arrow over leftwards arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右矢印左矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21C4"
+								},
+								{
+									"label": "Keywords",
+									"text": "右矢印左矢印"
+								}
+							]
+						},
+						"id": "21c4",
+						"keywords": ["rightwards arrow over leftwards arrow", "右矢印左矢印"],
+						"title": "⇄ Rightwards arrow over leftwards arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇒",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇒",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇒"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards double arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21D2"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き二重矢印"
+								}
+							]
+						},
+						"id": "21d2",
+						"keywords": ["rightwards double arrow", "右向き二重矢印"],
+						"title": "⇒ Rightwards double arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇛",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇛",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇛"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards triple arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き三重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21DB"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き三重矢印"
+								}
+							]
+						},
+						"id": "21db",
+						"keywords": ["rightwards triple arrow", "右向き三重矢印"],
+						"title": "⇛ Rightwards triple arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇢",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇢",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇢"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards dashed arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き破線矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21E2"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き破線矢印"
+								}
+							]
+						},
+						"id": "21e2",
+						"keywords": ["rightwards dashed arrow", "右向き破線矢印"],
+						"title": "⇢ Rightwards dashed arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇨",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇨",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇨"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards hollow arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き白矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21E8"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き白矢印"
+								}
+							]
+						},
+						"id": "21e8",
+						"keywords": ["rightwards hollow arrow", "右向き白矢印"],
+						"title": "⇨ Rightwards hollow arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇉",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇉",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇉"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards paired arrows"
+								},
+								{
+									"label": "日本語",
+									"text": "右向きペア矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21C9"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向きペア矢印"
+								}
+							]
+						},
+						"id": "21c9",
+						"keywords": ["rightwards paired arrows", "右向きペア矢印"],
+						"title": "⇉ Rightwards paired arrows"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇝",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇝",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇝"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards squiggle arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向きよじれ矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21DD"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向きよじれ矢印"
+								}
+							]
+						},
+						"id": "21dd",
+						"keywords": ["rightwards squiggle arrow", "右向きよじれ矢印"],
+						"title": "⇝ Rightwards squiggle arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇏",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇏",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇏"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards double arrow stroke"
+								},
+								{
+									"label": "日本語",
+									"text": "斜線付き右向き二重矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21CF"
+								},
+								{
+									"label": "Keywords",
+									"text": "斜線付き右向き二重矢印"
+								}
+							]
+						},
+						"id": "21cf",
+						"keywords": ["rightwards double arrow stroke", "斜線付き右向き二重矢印"],
+						"title": "⇏ Rightwards double arrow stroke"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↠",
+								"title": "Copy"
+							},
+							{
+								"paste": "↠",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↠"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards two headed arrow"
+								},
+								{
+									"label": "日本語",
+									"text": "右向き二重鏃矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21A0"
+								},
+								{
+									"label": "Keywords",
+									"text": "右向き二重鏃矢印"
+								}
+							]
+						},
+						"id": "21a0",
+						"keywords": ["rightwards two headed arrow", "右向き二重鏃矢印"],
+						"title": "↠ Rightwards two headed arrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "↹",
+								"title": "Copy"
+							},
+							{
+								"paste": "↹",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "↹"
+								},
+								{
+									"label": "Name",
+									"text": "leftwards over rightwards arrow bars"
+								},
+								{
+									"label": "日本語",
+									"text": "右縦棒付き右矢印の上に左縦棒付き左矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21B9"
+								},
+								{
+									"label": "Keywords",
+									"text": "arrow, bar, leftwards, rightwards, 右縦棒付き右矢印の上に左縦棒付き左矢印"
+								}
+							]
+						},
+						"id": "21b9",
+						"keywords": [
+							"leftwards over rightwards arrow bars",
+							"arrow",
+							"bar",
+							"leftwards",
+							"rightwards",
+							"右縦棒付き右矢印の上に左縦棒付き左矢印"
+						],
+						"title": "↹ Leftwards over rightwards arrow bars"
+					},
+					{
+						"actions": [
+							{
+								"copy": "⇁",
+								"title": "Copy"
+							},
+							{
+								"paste": "⇁",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "⇁"
+								},
+								{
+									"label": "Name",
+									"text": "rightwards harpoon barb downwards"
+								},
+								{
+									"label": "日本語",
+									"text": "とげが下向きの右向き銛型矢印"
+								},
+								{
+									"label": "Code points",
+									"text": "U+21C1"
+								},
+								{
+									"label": "Keywords",
+									"text": "barb, とげが下向きの右向き銛型矢印"
+								}
+							]
+						},
+						"id": "21c1",
+						"keywords": [
+							"rightwards harpoon barb downwards",
+							"barb",
+							"とげが下向きの右向き銛型矢印"
+						],
+						"title": "⇁ Rightwards harpoon barb downwards"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

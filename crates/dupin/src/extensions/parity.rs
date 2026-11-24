@@ -68,6 +68,10 @@ pub(crate) fn seen(provider: &dyn Provider, query: &str, limit: usize) -> Vec<Se
                                 request: dupin_core::ExtensionRequest::Run { action, .. },
                                 ..
                             } => format!("run {action}"),
+                            Action::Extension {
+                                request: dupin_core::ExtensionRequest::Paste { text },
+                                ..
+                            } => format!("paste {text}"),
                             other => format!("{other:?}"),
                         };
                         (action.title.clone(), effect)

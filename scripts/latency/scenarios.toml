@@ -20,6 +20,8 @@
 #   provider = "extension.snippets"
 #   extensions = "scripts/latency/snippets.extensions"
 #
+# A feature that only an extension has ever answered has nothing native to keep parity with, so
+# its implementation names `budget_ms` instead: `parity` fails when its p95 exceeds it.
 # `clipboard_entries` replaces the clipboard history's five fixture entries with that many,
 # from `clipboard-fixture` in scripts/latency.nu.
 #
@@ -77,6 +79,17 @@ config = "scripts/headless/config/dupin/config.toml"
 settings = { extensions = true }
 provider = "extension-search.catalogue"
 extensions = "scripts/latency/catalogue.extensions"
+
+# The bundled Emoji & Symbols catalogue under its keyword, held to the keystroke budget, since
+# nothing native ever answered it. The latency binary is built outside the source tree, so it
+# finds no bundled extensions there: the repository's `extensions/` is its extensions folder
+# instead, where a copy of a bundled package runs as the package does.
+[features.emoji.extension]
+config = "scripts/headless/config/dupin/config.toml"
+settings = { extensions = true }
+provider = "extension.emoji"
+extensions = "extensions"
+budget_ms = 5.0
 
 [[scenarios]]
 id = "search.saf"
@@ -137,3 +150,16 @@ id = "search-catalogue.term"
 feature = "search-catalogue"
 prefix = ""
 typed = "term"
+
+[[scenarios]]
+id = "emoji.thumb"
+feature = "emoji"
+prefix = "emoji "
+typed = "thumb"
+
+# A Japanese keyword, as an input method commits it.
+[[scenarios]]
+id = "emoji.ja"
+feature = "emoji"
+prefix = "emoji "
+typed = "にっこり"

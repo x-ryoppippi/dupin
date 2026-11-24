@@ -195,6 +195,13 @@ impl Ui {
             Some(PendingPaste::Snippet(snippet)) => self.deliver_snippet(snippet, true, tx),
             Some(PendingPaste::ClipboardEntry(entry)) => self.deliver_clipboard_entry(entry, true, tx),
             Some(PendingPaste::Clipboard) => self.paste_clipboard(),
+            Some(PendingPaste::Extension { text, permit }) => {
+                if self.extensions.bridge.validate(&permit) {
+                    self.paste_text(text);
+                } else {
+                    tx.copy(text);
+                }
+            }
             None => {}
         }
         if let Some(notice) = self.notice_after_close.take() {

@@ -1,0 +1,2548 @@
+{
+	"fixture": 1,
+	"description": "The keyword alone lists the catalogue in Unicode order, under its groups.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "😀",
+								"title": "Copy"
+							},
+							{
+								"paste": "😀",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😀"
+								},
+								{
+									"label": "Name",
+									"text": "grinning face"
+								},
+								{
+									"label": "日本語",
+									"text": "にっこり笑う"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F600"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, grin, スマイル, にっこり, にっこり笑う, 笑う, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f600",
+						"keywords": [
+							"grinning face",
+							"face",
+							"grin",
+							"スマイル",
+							"にっこり",
+							"にっこり笑う",
+							"笑う",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😀 Grinning face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😃",
+								"title": "Copy"
+							},
+							{
+								"paste": "😃",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😃"
+								},
+								{
+									"label": "Name",
+									"text": "grinning face with big eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "わーい"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F603"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, mouth, open, smile, スマイル, わーい, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f603",
+						"keywords": [
+							"grinning face with big eyes",
+							"face",
+							"mouth",
+							"open",
+							"smile",
+							"スマイル",
+							"わーい",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😃 Grinning face with big eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😄",
+								"title": "Copy"
+							},
+							{
+								"paste": "😄",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😄"
+								},
+								{
+									"label": "Name",
+									"text": "grinning face with smiling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F604"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, mouth, open, smile, スマイル, わーい, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f604",
+						"keywords": [
+							"grinning face with smiling eyes",
+							"eye",
+							"face",
+							"mouth",
+							"open",
+							"smile",
+							"スマイル",
+							"わーい",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😄 Grinning face with smiling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😁",
+								"title": "Copy"
+							},
+							{
+								"paste": "😁",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😁"
+								},
+								{
+									"label": "Name",
+									"text": "beaming face with smiling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "にやっと笑う"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F601"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, grin, smile, スマイル, にやっと笑う, 笑う, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f601",
+						"keywords": [
+							"beaming face with smiling eyes",
+							"eye",
+							"face",
+							"grin",
+							"smile",
+							"スマイル",
+							"にやっと笑う",
+							"笑う",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😁 Beaming face with smiling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😆",
+								"title": "Copy"
+							},
+							{
+								"paste": "😆",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😆"
+								},
+								{
+									"label": "Name",
+									"text": "grinning squinting face"
+								},
+								{
+									"label": "日本語",
+									"text": "きゃー"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F606"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, laugh, mouth, satisfied, smile, きゃー, スマイル, 嬉しい, 満足, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f606",
+						"keywords": [
+							"grinning squinting face",
+							"face",
+							"laugh",
+							"mouth",
+							"satisfied",
+							"smile",
+							"きゃー",
+							"スマイル",
+							"嬉しい",
+							"満足",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😆 Grinning squinting face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😅",
+								"title": "Copy"
+							},
+							{
+								"paste": "😅",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😅"
+								},
+								{
+									"label": "Name",
+									"text": "grinning face with sweat"
+								},
+								{
+									"label": "日本語",
+									"text": "冷や汗笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F605"
+								},
+								{
+									"label": "Keywords",
+									"text": "cold, face, open, smile, sweat, スマイル, 冷や汗, 冷や汗笑顔, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f605",
+						"keywords": [
+							"grinning face with sweat",
+							"cold",
+							"face",
+							"open",
+							"smile",
+							"sweat",
+							"スマイル",
+							"冷や汗",
+							"冷や汗笑顔",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😅 Grinning face with sweat"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤣",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤣",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤣"
+								},
+								{
+									"label": "Name",
+									"text": "rolling on the floor laughing"
+								},
+								{
+									"label": "日本語",
+									"text": "笑い転げる"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F923"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, floor, laugh, rofl, rolling, rotfl, スマイル, 笑い転げる, 笑う, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f923",
+						"keywords": [
+							"rolling on the floor laughing",
+							"face",
+							"floor",
+							"laugh",
+							"rofl",
+							"rolling",
+							"rotfl",
+							"スマイル",
+							"笑い転げる",
+							"笑う",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤣 Rolling on the floor laughing"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😂",
+								"title": "Copy"
+							},
+							{
+								"paste": "😂",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😂"
+								},
+								{
+									"label": "Name",
+									"text": "face with tears of joy"
+								},
+								{
+									"label": "日本語",
+									"text": "嬉し泣き"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F602"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, joy, laugh, tear, スマイル, 嬉し泣き, 涙, 笑う, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f602",
+						"keywords": [
+							"face with tears of joy",
+							"face",
+							"joy",
+							"laugh",
+							"tear",
+							"スマイル",
+							"嬉し泣き",
+							"涙",
+							"笑う",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😂 Face with tears of joy"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙂",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙂",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙂"
+								},
+								{
+									"label": "Name",
+									"text": "slightly smiling face"
+								},
+								{
+									"label": "日本語",
+									"text": "微笑む"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F642"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, smile, スマイル, 微笑み, 微笑む, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f642",
+						"keywords": [
+							"slightly smiling face",
+							"face",
+							"smile",
+							"スマイル",
+							"微笑み",
+							"微笑む",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🙂 Slightly smiling face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙃",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙃",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙃"
+								},
+								{
+									"label": "Name",
+									"text": "upside-down face"
+								},
+								{
+									"label": "日本語",
+									"text": "さかさまの顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F643"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, upside-down, さかさま, さかさまの顔, 顔"
+								}
+							]
+						},
+						"id": "1f643",
+						"keywords": [
+							"upside-down face",
+							"face",
+							"upside-down",
+							"さかさま",
+							"さかさまの顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🙃 Upside-down face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫠",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫠",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫠"
+								},
+								{
+									"label": "Name",
+									"text": "melting face"
+								},
+								{
+									"label": "日本語",
+									"text": "溶けている顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE0"
+								},
+								{
+									"label": "Keywords",
+									"text": "disappear, dissolve, liquid, melt, とろける, 液体, 溶けそう, 溶けている顔, 溶ける, 顔"
+								}
+							]
+						},
+						"id": "1fae0",
+						"keywords": [
+							"melting face",
+							"disappear",
+							"dissolve",
+							"liquid",
+							"melt",
+							"とろける",
+							"液体",
+							"溶けそう",
+							"溶けている顔",
+							"溶ける",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫠 Melting face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😉",
+								"title": "Copy"
+							},
+							{
+								"paste": "😉",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😉"
+								},
+								{
+									"label": "Name",
+									"text": "winking face"
+								},
+								{
+									"label": "日本語",
+									"text": "ウインク"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F609"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, wink, ウィンク, ウインク, 顔"
+								}
+							]
+						},
+						"id": "1f609",
+						"keywords": ["winking face", "face", "wink", "ウィンク", "ウインク", "顔"],
+						"section": "Smileys & Emotion",
+						"title": "😉 Winking face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😊",
+								"title": "Copy"
+							},
+							{
+								"paste": "😊",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😊"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with smiling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "にこにこ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F60A"
+								},
+								{
+									"label": "Keywords",
+									"text": "blush, eye, face, smile, スマイル, にこにこ, 微笑み, 目を細める, 頬を赤らめる, 顔"
+								}
+							]
+						},
+						"id": "1f60a",
+						"keywords": [
+							"smiling face with smiling eyes",
+							"blush",
+							"eye",
+							"face",
+							"smile",
+							"スマイル",
+							"にこにこ",
+							"微笑み",
+							"目を細める",
+							"頬を赤らめる",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😊 Smiling face with smiling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😇",
+								"title": "Copy"
+							},
+							{
+								"paste": "😇",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😇"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with halo"
+								},
+								{
+									"label": "日本語",
+									"text": "天使の輪がついた笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F607"
+								},
+								{
+									"label": "Keywords",
+									"text": "angel, face, fantasy, halo, innocent, スマイル, 天使の輪, 天使の輪がついた笑顔, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f607",
+						"keywords": [
+							"smiling face with halo",
+							"angel",
+							"face",
+							"fantasy",
+							"halo",
+							"innocent",
+							"スマイル",
+							"天使の輪",
+							"天使の輪がついた笑顔",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😇 Smiling face with halo"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🥰",
+								"title": "Copy"
+							},
+							{
+								"paste": "🥰",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🥰"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with hearts"
+								},
+								{
+									"label": "日本語",
+									"text": "ハートの笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F970"
+								},
+								{
+									"label": "Keywords",
+									"text": "adore, crush, hearts, in love, ハートの笑顔, メロメロ, ラブ, 夢中, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f970",
+						"keywords": [
+							"smiling face with hearts",
+							"adore",
+							"crush",
+							"hearts",
+							"in love",
+							"ハートの笑顔",
+							"メロメロ",
+							"ラブ",
+							"夢中",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🥰 Smiling face with hearts"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😍",
+								"title": "Copy"
+							},
+							{
+								"paste": "😍",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😍"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with heart-eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "目がハートの笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F60D"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, love, smile, スマイル, ハート, ラブ, 目がハートの笑顔, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f60d",
+						"keywords": [
+							"smiling face with heart-eyes",
+							"eye",
+							"face",
+							"love",
+							"smile",
+							"スマイル",
+							"ハート",
+							"ラブ",
+							"目がハートの笑顔",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😍 Smiling face with heart-eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤩",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤩",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤩"
+								},
+								{
+									"label": "Name",
+									"text": "star-struck"
+								},
+								{
+									"label": "日本語",
+									"text": "目が星の笑顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F929"
+								},
+								{
+									"label": "Keywords",
+									"text": "eyes, face, grinning, star, スマイル, 星, 目が星の笑顔, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f929",
+						"keywords": [
+							"star-struck",
+							"eyes",
+							"face",
+							"grinning",
+							"star",
+							"スマイル",
+							"星",
+							"目が星の笑顔",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤩 Star-struck"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😘",
+								"title": "Copy"
+							},
+							{
+								"paste": "😘",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😘"
+								},
+								{
+									"label": "Name",
+									"text": "face blowing a kiss"
+								},
+								{
+									"label": "日本語",
+									"text": "投げキッス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F618"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, kiss, キス, ちゅっ, ハート, 投げキッス, 顔"
+								}
+							]
+						},
+						"id": "1f618",
+						"keywords": [
+							"face blowing a kiss",
+							"face",
+							"kiss",
+							"キス",
+							"ちゅっ",
+							"ハート",
+							"投げキッス",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😘 Face blowing a kiss"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😗",
+								"title": "Copy"
+							},
+							{
+								"paste": "😗",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😗"
+								},
+								{
+									"label": "Name",
+									"text": "kissing face"
+								},
+								{
+									"label": "日本語",
+									"text": "キス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F617"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, kiss, キス, ちゅっ, 顔"
+								}
+							]
+						},
+						"id": "1f617",
+						"keywords": ["kissing face", "face", "kiss", "キス", "ちゅっ", "顔"],
+						"section": "Smileys & Emotion",
+						"title": "😗 Kissing face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "☺️",
+								"title": "Copy"
+							},
+							{
+								"paste": "☺️",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "☺️"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face"
+								},
+								{
+									"label": "日本語",
+									"text": "スマイリー"
+								},
+								{
+									"label": "Code points",
+									"text": "U+263A U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, outlined, relaxed, smile, スマイリー, スマイル, ほっ, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "263a-fe0f",
+						"keywords": [
+							"smiling face",
+							"face",
+							"outlined",
+							"relaxed",
+							"smile",
+							"スマイリー",
+							"スマイル",
+							"ほっ",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "☺️ Smiling face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😚",
+								"title": "Copy"
+							},
+							{
+								"paste": "😚",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😚"
+								},
+								{
+									"label": "Name",
+									"text": "kissing face with closed eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "ちゅっ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F61A"
+								},
+								{
+									"label": "Keywords",
+									"text": "closed, eye, face, kiss, キス, ちゅっ, 目を閉じる, 顔"
+								}
+							]
+						},
+						"id": "1f61a",
+						"keywords": [
+							"kissing face with closed eyes",
+							"closed",
+							"eye",
+							"face",
+							"kiss",
+							"キス",
+							"ちゅっ",
+							"目を閉じる",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😚 Kissing face with closed eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😙",
+								"title": "Copy"
+							},
+							{
+								"paste": "😙",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😙"
+								},
+								{
+									"label": "Name",
+									"text": "kissing face with smiling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "にっこりキス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F619"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, kiss, smile, キス, スマイル, ちゅっ, にっこりキス, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f619",
+						"keywords": [
+							"kissing face with smiling eyes",
+							"eye",
+							"face",
+							"kiss",
+							"smile",
+							"キス",
+							"スマイル",
+							"ちゅっ",
+							"にっこりキス",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😙 Kissing face with smiling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🥲",
+								"title": "Copy"
+							},
+							{
+								"paste": "🥲",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🥲"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with tear"
+								},
+								{
+									"label": "日本語",
+									"text": "嬉し涙の顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F972"
+								},
+								{
+									"label": "Keywords",
+									"text": "grateful, proud, relieved, smiling, tear, touched, じーん, 嬉し涙の顔, 感動, 泣く, 涙, 顔"
+								}
+							]
+						},
+						"id": "1f972",
+						"keywords": [
+							"smiling face with tear",
+							"grateful",
+							"proud",
+							"relieved",
+							"smiling",
+							"tear",
+							"touched",
+							"じーん",
+							"嬉し涙の顔",
+							"感動",
+							"泣く",
+							"涙",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🥲 Smiling face with tear"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😋",
+								"title": "Copy"
+							},
+							{
+								"paste": "😋",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😋"
+								},
+								{
+									"label": "Name",
+									"text": "face savoring food"
+								},
+								{
+									"label": "日本語",
+									"text": "にこにこぺろり"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F60B"
+								},
+								{
+									"label": "Keywords",
+									"text": "delicious, face, savouring, smile, yum, うまい, おいしい, スマイル, にこにこぺろり, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f60b",
+						"keywords": [
+							"face savoring food",
+							"delicious",
+							"face",
+							"savouring",
+							"smile",
+							"yum",
+							"うまい",
+							"おいしい",
+							"スマイル",
+							"にこにこぺろり",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😋 Face savoring food"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😛",
+								"title": "Copy"
+							},
+							{
+								"paste": "😛",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😛"
+								},
+								{
+									"label": "Name",
+									"text": "face with tongue"
+								},
+								{
+									"label": "日本語",
+									"text": "舌を出した顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F61B"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, tongue, べー, べろ, 舌, 舌を出した顔, 顔"
+								}
+							]
+						},
+						"id": "1f61b",
+						"keywords": [
+							"face with tongue",
+							"face",
+							"tongue",
+							"べー",
+							"べろ",
+							"舌",
+							"舌を出した顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😛 Face with tongue"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😜",
+								"title": "Copy"
+							},
+							{
+								"paste": "😜",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😜"
+								},
+								{
+									"label": "Name",
+									"text": "winking face with tongue"
+								},
+								{
+									"label": "日本語",
+									"text": "あっかんべー"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F61C"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, joke, tongue, wink, あっかんべー, ジョーク, べー, 冗談, 舌, 顔"
+								}
+							]
+						},
+						"id": "1f61c",
+						"keywords": [
+							"winking face with tongue",
+							"eye",
+							"face",
+							"joke",
+							"tongue",
+							"wink",
+							"あっかんべー",
+							"ジョーク",
+							"べー",
+							"冗談",
+							"舌",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😜 Winking face with tongue"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤪",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤪",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤪"
+								},
+								{
+									"label": "Name",
+									"text": "zany face"
+								},
+								{
+									"label": "日本語",
+									"text": "ふざけた顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F92A"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, goofy, large, small, おかしい, ジョーク, ふざけ, ふざけた顔, 顔"
+								}
+							]
+						},
+						"id": "1f92a",
+						"keywords": [
+							"zany face",
+							"eye",
+							"goofy",
+							"large",
+							"small",
+							"おかしい",
+							"ジョーク",
+							"ふざけ",
+							"ふざけた顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤪 Zany face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😝",
+								"title": "Copy"
+							},
+							{
+								"paste": "😝",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😝"
+								},
+								{
+									"label": "Name",
+									"text": "squinting face with tongue"
+								},
+								{
+									"label": "日本語",
+									"text": "目を閉じてべー"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F61D"
+								},
+								{
+									"label": "Keywords",
+									"text": "eye, face, horrible, taste, tongue, べー, べろ, わーい, 目を閉じてべー, 舌, 顔"
+								}
+							]
+						},
+						"id": "1f61d",
+						"keywords": [
+							"squinting face with tongue",
+							"eye",
+							"face",
+							"horrible",
+							"taste",
+							"tongue",
+							"べー",
+							"べろ",
+							"わーい",
+							"目を閉じてべー",
+							"舌",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😝 Squinting face with tongue"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤑",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤑",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤑"
+								},
+								{
+									"label": "Name",
+									"text": "money-mouth face"
+								},
+								{
+									"label": "日本語",
+									"text": "お金の顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F911"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, money, mouth, お金の顔, べー, べろ, 舌, 顔"
+								}
+							]
+						},
+						"id": "1f911",
+						"keywords": [
+							"money-mouth face",
+							"face",
+							"money",
+							"mouth",
+							"お金の顔",
+							"べー",
+							"べろ",
+							"舌",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤑 Money-mouth face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤗",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤗",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤗"
+								},
+								{
+									"label": "Name",
+									"text": "smiling face with open hands"
+								},
+								{
+									"label": "日本語",
+									"text": "ハグ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F917"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, hug, hugging, open hands, smiling face, スマイル, ハグ, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f917",
+						"keywords": [
+							"smiling face with open hands",
+							"face",
+							"hug",
+							"hugging",
+							"open hands",
+							"smiling face",
+							"スマイル",
+							"ハグ",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤗 Smiling face with open hands"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤭",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤭",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤭"
+								},
+								{
+									"label": "Name",
+									"text": "face with hand over mouth"
+								},
+								{
+									"label": "日本語",
+									"text": "口に手を当てた顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F92D"
+								},
+								{
+									"label": "Keywords",
+									"text": "whoops, クスクス, スマイル, 内緒, 口に手を当てた顔, 笑顔, 顔"
+								}
+							]
+						},
+						"id": "1f92d",
+						"keywords": [
+							"face with hand over mouth",
+							"whoops",
+							"クスクス",
+							"スマイル",
+							"内緒",
+							"口に手を当てた顔",
+							"笑顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤭 Face with hand over mouth"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫢",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫢",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫢"
+								},
+								{
+									"label": "Name",
+									"text": "face with open eyes and hand over mouth"
+								},
+								{
+									"label": "日本語",
+									"text": "目を開けて口に手を当てた顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE2"
+								},
+								{
+									"label": "Keywords",
+									"text": "amazement, awe, disbelief, embarrass, scared, surprise, おそれ, おののき, びっくり, 目を開けて口に手を当てた顔, 顔, 驚き"
+								}
+							]
+						},
+						"id": "1fae2",
+						"keywords": [
+							"face with open eyes and hand over mouth",
+							"amazement",
+							"awe",
+							"disbelief",
+							"embarrass",
+							"scared",
+							"surprise",
+							"おそれ",
+							"おののき",
+							"びっくり",
+							"目を開けて口に手を当てた顔",
+							"顔",
+							"驚き"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫢 Face with open eyes and hand over mouth"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫣",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫣",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫣"
+								},
+								{
+									"label": "Name",
+									"text": "face with peeking eye"
+								},
+								{
+									"label": "日本語",
+									"text": "指の間からのぞき見る顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE3"
+								},
+								{
+									"label": "Keywords",
+									"text": "captivated, peep, stare, こわごわ, のぞき見, 指の間からのぞき見る顔, 盗み見, 顔"
+								}
+							]
+						},
+						"id": "1fae3",
+						"keywords": [
+							"face with peeking eye",
+							"captivated",
+							"peep",
+							"stare",
+							"こわごわ",
+							"のぞき見",
+							"指の間からのぞき見る顔",
+							"盗み見",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫣 Face with peeking eye"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤫",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤫",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤫"
+								},
+								{
+									"label": "Name",
+									"text": "shushing face"
+								},
+								{
+									"label": "日本語",
+									"text": "しーっ"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F92B"
+								},
+								{
+									"label": "Keywords",
+									"text": "quiet, shush, しー, しーっ, しっ, 静かに, 顔"
+								}
+							]
+						},
+						"id": "1f92b",
+						"keywords": [
+							"shushing face",
+							"quiet",
+							"shush",
+							"しー",
+							"しーっ",
+							"しっ",
+							"静かに",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤫 Shushing face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤔",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤔",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤔"
+								},
+								{
+									"label": "Name",
+									"text": "thinking face"
+								},
+								{
+									"label": "日本語",
+									"text": "考える顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F914"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, thinking, うーん, 考える, 考える顔, 考え中, 顔"
+								}
+							]
+						},
+						"id": "1f914",
+						"keywords": [
+							"thinking face",
+							"face",
+							"thinking",
+							"うーん",
+							"考える",
+							"考える顔",
+							"考え中",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤔 Thinking face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫡",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫡",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫡"
+								},
+								{
+									"label": "Name",
+									"text": "saluting face"
+								},
+								{
+									"label": "日本語",
+									"text": "敬礼する顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE1"
+								},
+								{
+									"label": "Keywords",
+									"text": "OK, salute, sunny, troops, yes, オーケー, 了解, 敬礼, 敬礼する顔, 軍隊, 顔"
+								}
+							]
+						},
+						"id": "1fae1",
+						"keywords": [
+							"saluting face",
+							"OK",
+							"salute",
+							"sunny",
+							"troops",
+							"yes",
+							"オーケー",
+							"了解",
+							"敬礼",
+							"敬礼する顔",
+							"軍隊",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫡 Saluting face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤐",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤐",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤐"
+								},
+								{
+									"label": "Name",
+									"text": "zipper-mouth face"
+								},
+								{
+									"label": "日本語",
+									"text": "口チャック"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F910"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, mouth, zip, zipper, チャック, 口, 口チャック, 顔"
+								}
+							]
+						},
+						"id": "1f910",
+						"keywords": [
+							"zipper-mouth face",
+							"face",
+							"mouth",
+							"zip",
+							"zipper",
+							"チャック",
+							"口",
+							"口チャック",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤐 Zipper-mouth face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤨",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤨",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤨"
+								},
+								{
+									"label": "Name",
+									"text": "face with raised eyebrow"
+								},
+								{
+									"label": "日本語",
+									"text": "眉を上げた顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F928"
+								},
+								{
+									"label": "Keywords",
+									"text": "distrust, skeptic, 疑い, 眉を上げた顔, 顔, 驚き"
+								}
+							]
+						},
+						"id": "1f928",
+						"keywords": [
+							"face with raised eyebrow",
+							"distrust",
+							"skeptic",
+							"疑い",
+							"眉を上げた顔",
+							"顔",
+							"驚き"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤨 Face with raised eyebrow"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😐",
+								"title": "Copy"
+							},
+							{
+								"paste": "😐",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😐"
+								},
+								{
+									"label": "Name",
+									"text": "neutral face"
+								},
+								{
+									"label": "日本語",
+									"text": "ポーカーフェイス"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F610"
+								},
+								{
+									"label": "Keywords",
+									"text": "deadpan, face, meh, neutral, ポーカーフェイス, 無表情, 顔"
+								}
+							]
+						},
+						"id": "1f610",
+						"keywords": [
+							"neutral face",
+							"deadpan",
+							"face",
+							"meh",
+							"neutral",
+							"ポーカーフェイス",
+							"無表情",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😐 Neutral face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😑",
+								"title": "Copy"
+							},
+							{
+								"paste": "😑",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😑"
+								},
+								{
+									"label": "Name",
+									"text": "expressionless face"
+								},
+								{
+									"label": "日本語",
+									"text": "無表情"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F611"
+								},
+								{
+									"label": "Keywords",
+									"text": "expressionless, face, inexpressive, meh, unexpressive, 無感情, 無表情, 顔"
+								}
+							]
+						},
+						"id": "1f611",
+						"keywords": [
+							"expressionless face",
+							"expressionless",
+							"face",
+							"inexpressive",
+							"meh",
+							"unexpressive",
+							"無感情",
+							"無表情",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😑 Expressionless face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😶",
+								"title": "Copy"
+							},
+							{
+								"paste": "😶",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😶"
+								},
+								{
+									"label": "Name",
+									"text": "face without mouth"
+								},
+								{
+									"label": "日本語",
+									"text": "口のない顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F636"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, mouth, quiet, silent, だんまり, 口なし, 口のない顔, 沈黙, 顔"
+								}
+							]
+						},
+						"id": "1f636",
+						"keywords": [
+							"face without mouth",
+							"face",
+							"mouth",
+							"quiet",
+							"silent",
+							"だんまり",
+							"口なし",
+							"口のない顔",
+							"沈黙",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😶 Face without mouth"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫥",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫥",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫥"
+								},
+								{
+									"label": "Name",
+									"text": "dotted line face"
+								},
+								{
+									"label": "日本語",
+									"text": "点線の顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE5"
+								},
+								{
+									"label": "Keywords",
+									"text": "depressed, disappear, hide, introvert, invisible, 内向的, 内気, 憂鬱, 点線の顔, 落胆, 顔"
+								}
+							]
+						},
+						"id": "1fae5",
+						"keywords": [
+							"dotted line face",
+							"depressed",
+							"disappear",
+							"hide",
+							"introvert",
+							"invisible",
+							"内向的",
+							"内気",
+							"憂鬱",
+							"点線の顔",
+							"落胆",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫥 Dotted line face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😶‍🌫️",
+								"title": "Copy"
+							},
+							{
+								"paste": "😶‍🌫️",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😶‍🌫️"
+								},
+								{
+									"label": "Name",
+									"text": "face in clouds"
+								},
+								{
+									"label": "日本語",
+									"text": "雲の中の顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F636 U+200D U+1F32B U+FE0F"
+								},
+								{
+									"label": "Keywords",
+									"text": "absentminded, face in the fog, head in clouds, うわの空, ぼんやり, 夢中, 放心状態, 雲の中の顔, 顔"
+								}
+							]
+						},
+						"id": "1f636-200d-1f32b-fe0f",
+						"keywords": [
+							"face in clouds",
+							"absentminded",
+							"face in the fog",
+							"head in clouds",
+							"うわの空",
+							"ぼんやり",
+							"夢中",
+							"放心状態",
+							"雲の中の顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😶‍🌫️ Face in clouds"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😏",
+								"title": "Copy"
+							},
+							{
+								"paste": "😏",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😏"
+								},
+								{
+									"label": "Name",
+									"text": "smirking face"
+								},
+								{
+									"label": "日本語",
+									"text": "薄笑いをする顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F60F"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, smirk, にやり, ふっ, 薄笑いをする顔, 顔"
+								}
+							]
+						},
+						"id": "1f60f",
+						"keywords": [
+							"smirking face",
+							"face",
+							"smirk",
+							"にやり",
+							"ふっ",
+							"薄笑いをする顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😏 Smirking face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😒",
+								"title": "Copy"
+							},
+							{
+								"paste": "😒",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😒"
+								},
+								{
+									"label": "Name",
+									"text": "unamused face"
+								},
+								{
+									"label": "日本語",
+									"text": "しらけた"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F612"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, unamused, unhappy, ジト目, しらけ, しらけた, しらける, 顔"
+								}
+							]
+						},
+						"id": "1f612",
+						"keywords": [
+							"unamused face",
+							"face",
+							"unamused",
+							"unhappy",
+							"ジト目",
+							"しらけ",
+							"しらけた",
+							"しらける",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😒 Unamused face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🙄",
+								"title": "Copy"
+							},
+							{
+								"paste": "🙄",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🙄"
+								},
+								{
+									"label": "Name",
+									"text": "face with rolling eyes"
+								},
+								{
+									"label": "日本語",
+									"text": "上を見る顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F644"
+								},
+								{
+									"label": "Keywords",
+									"text": "eyeroll, eyes, face, rolling, 上を見る顔, 上目, 顔"
+								}
+							]
+						},
+						"id": "1f644",
+						"keywords": [
+							"face with rolling eyes",
+							"eyeroll",
+							"eyes",
+							"face",
+							"rolling",
+							"上を見る顔",
+							"上目",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🙄 Face with rolling eyes"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😬",
+								"title": "Copy"
+							},
+							{
+								"paste": "😬",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😬"
+								},
+								{
+									"label": "Name",
+									"text": "grimacing face"
+								},
+								{
+									"label": "日本語",
+									"text": "しかめ面"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F62C"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, grimace, いー, しかめっ面, しかめ面, しかめ顔, 顔"
+								}
+							]
+						},
+						"id": "1f62c",
+						"keywords": [
+							"grimacing face",
+							"face",
+							"grimace",
+							"いー",
+							"しかめっ面",
+							"しかめ面",
+							"しかめ顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😬 Grimacing face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "😮‍💨",
+								"title": "Copy"
+							},
+							{
+								"paste": "😮‍💨",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "😮‍💨"
+								},
+								{
+									"label": "Name",
+									"text": "face exhaling"
+								},
+								{
+									"label": "日本語",
+									"text": "息を吐く顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F62E U+200D U+1F4A8"
+								},
+								{
+									"label": "Keywords",
+									"text": "exhale, gasp, groan, relief, whisper, whistle, あきらめ, ため息, ほっとした, 安心, 息を吐く顔, 顔"
+								}
+							]
+						},
+						"id": "1f62e-200d-1f4a8",
+						"keywords": [
+							"face exhaling",
+							"exhale",
+							"gasp",
+							"groan",
+							"relief",
+							"whisper",
+							"whistle",
+							"あきらめ",
+							"ため息",
+							"ほっとした",
+							"安心",
+							"息を吐く顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "😮‍💨 Face exhaling"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🤥",
+								"title": "Copy"
+							},
+							{
+								"paste": "🤥",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🤥"
+								},
+								{
+									"label": "Name",
+									"text": "lying face"
+								},
+								{
+									"label": "日本語",
+									"text": "うそつきの顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1F925"
+								},
+								{
+									"label": "Keywords",
+									"text": "face, lie, pinocchio, うそつきの顔, ピノキオの顔, 嘘つき, 顔"
+								}
+							]
+						},
+						"id": "1f925",
+						"keywords": [
+							"lying face",
+							"face",
+							"lie",
+							"pinocchio",
+							"うそつきの顔",
+							"ピノキオの顔",
+							"嘘つき",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🤥 Lying face"
+					},
+					{
+						"actions": [
+							{
+								"copy": "🫨",
+								"title": "Copy"
+							},
+							{
+								"paste": "🫨",
+								"title": "Paste"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Character",
+									"text": "🫨"
+								},
+								{
+									"label": "Name",
+									"text": "shaking face"
+								},
+								{
+									"label": "日本語",
+									"text": "震えている顔"
+								},
+								{
+									"label": "Code points",
+									"text": "U+1FAE8"
+								},
+								{
+									"label": "Keywords",
+									"text": "earthquake, face, shaking, shock, vibrate, ショック, 地震, 振動, 震えている, 震えている顔, 顔"
+								}
+							]
+						},
+						"id": "1fae8",
+						"keywords": [
+							"shaking face",
+							"earthquake",
+							"face",
+							"shaking",
+							"shock",
+							"vibrate",
+							"ショック",
+							"地震",
+							"振動",
+							"震えている",
+							"震えている顔",
+							"顔"
+						],
+						"section": "Smileys & Emotion",
+						"title": "🫨 Shaking face"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}

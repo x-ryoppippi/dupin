@@ -89,6 +89,9 @@ pub enum ExtensionRequest {
         action: String,
         data: Option<serde_json::Value>,
     },
+    /// Paste the text into the frontmost app while the extension holds `clipboard:paste`, or
+    /// copy it.
+    Paste { text: String },
     /// Grant the scope named `scope` as `revision` declares it, which the row showed.
     Allow { scope: String, revision: String },
     /// Turn the scope off, so the extension stops asking for it.

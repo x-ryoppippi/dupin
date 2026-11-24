@@ -215,7 +215,7 @@ pub(super) fn row_item(
             _ => None,
         })
         .unwrap_or_default();
-    let (mut copy, mut open) = (false, false);
+    let (mut copy, mut paste, mut open) = (false, false, false);
     let mut alternate = None;
     let actions: Vec<ItemAction> = offered
         .into_iter()
@@ -232,6 +232,14 @@ pub(super) fn row_item(
                 RowEffect::Copy { text } => {
                     ItemAction::new(&name(&mut copy, "copy"), &action.title, Action::Copy(text))
                 }
+                RowEffect::Paste { text } => ItemAction::new(
+                    &name(&mut paste, "paste"),
+                    &action.title,
+                    Action::Extension {
+                        extension: extension.id.clone(),
+                        request: ExtensionRequest::Paste { text },
+                    },
+                ),
                 RowEffect::OpenUrl { url } => {
                     ItemAction::new(&name(&mut open, "open"), &action.title, Action::OpenUrl(url))
                 }
@@ -594,6 +602,24 @@ mod tests {
         );
         assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
         assert_eq!(rows[0].payload, Payload::text("2"));
+    }
+
+    #[test]
+    fn a_paste_action_asks_for_its_extension_and_a_copy_is_its_payload() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(
+            "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: '🍵' }, { title: 'Copy', copy: '🍵' }] }]; }",
+        );
+        let rows = search(&provider, "tea");
+        assert_eq!(rows[0].primary.as_deref(), Some("paste"));
+        assert_eq!(
+            rows[0].action("paste"),
+            Some(&Action::Extension {
+                extension: provider.extension.id.clone(),
+                request: ExtensionRequest::Paste { text: "🍵".into() },
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::text("🍵"));
     }
 
     #[test]

@@ -352,9 +352,10 @@ impl Ui {
         let Some(extension) = self.registered_extension(&extension) else {
             return;
         };
-        let ExtensionRequest::Run { action, data } = request else {
-            self.answer_extension_row(None, extension, request, tx);
-            return;
+        let (action, data) = match request {
+            ExtensionRequest::Run { action, data } => (action, data),
+            ExtensionRequest::Paste { text } => return self.run_paste(&extension, text, tx),
+            request => return self.answer_extension_row(None, extension, request, tx),
         };
         let bridge = self.extensions.bridge.clone();
         let me = self.me.clone();
@@ -424,7 +425,7 @@ impl Ui {
                 .find(|request| request.key().to_string() == key)
         };
         let outcome = match request {
-            ExtensionRequest::Run { .. } => return,
+            ExtensionRequest::Run { .. } | ExtensionRequest::Paste { .. } => return,
             ExtensionRequest::Allow { scope, revision } => match pending(&scope) {
                 Some(request) if request.revision.as_str() == revision => bridge
                     .allow(&id, &request.revision, &request.scope, None)
@@ -447,6 +448,10 @@ impl Ui {
                     }
                     Some(dupin_extension_bridge::OsPermission::Pasteboard) => {
                         self.request_clipboard_access();
+                        Ok(String::new())
+                    }
+                    Some(dupin_extension_bridge::OsPermission::Accessibility) => {
+                        crate::extensions::access::request_accessibility();
                         Ok(String::new())
                     }
                     None => Ok(String::new()),

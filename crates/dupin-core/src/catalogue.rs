@@ -474,18 +474,7 @@ fn entry_bytes(entry: &Entry) -> usize {
     let actions: usize = item
         .actions
         .iter()
-        .map(|action| {
-            action.id.len()
-                + action.title.len()
-                + match &action.action {
-                    Action::Copy(text) | Action::OpenUrl(text) => text.len(),
-                    Action::Extension {
-                        request: crate::ExtensionRequest::Run { action, data },
-                        ..
-                    } => action.len() + data.as_ref().map_or(0, |data| data.to_string().len()),
-                    _ => 0,
-                }
-        })
+        .map(|action| action.id.len() + action.title.len() + action_bytes(&action.action))
         .sum();
     item.id.len()
         + view
@@ -495,6 +484,71 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.section.as_ref().map_or(0, |section| section.len())
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
         + entry.match_text.as_ref().map_or(0, String::len)
+}
+
+/// Every action names each of its variants, so one added later must say what it holds.
+fn action_bytes(action: &Action) -> usize {
+    use crate::ExtensionRequest;
+    let path = |path: &std::path::Path| path.as_os_str().len();
+    let paths = |paths: &[std::path::PathBuf]| paths.iter().map(|p| path(p)).sum::<usize>();
+    match action {
+        Action::Open(p)
+        | Action::ChooseApplication(p)
+        | Action::Trash(p)
+        | Action::Browse(p)
+        | Action::Rename(p)
+        | Action::Duplicate(p)
+        | Action::Compress(p)
+        | Action::Reveal(p)
+        | Action::Preview(p)
+        | Action::ScriptArguments(p) => path(p),
+        Action::OpenWith { path: p, application } => path(p) + path(application),
+        Action::ChooseDestination { path: p, .. } => path(p),
+        Action::OpenUrl(text) | Action::Copy(text) | Action::Snippet { text, .. } => text.len(),
+        Action::Share {
+            target,
+            paths: shared,
+        } => {
+            paths(shared)
+                + match target {
+                    crate::ShareTarget::Picker => 0,
+                    crate::ShareTarget::Service { name, label } => name.len() + label.len(),
+                }
+        }
+        Action::CopyFiles(shared) => paths(shared),
+        Action::Push(page) => {
+            page.view.len()
+                + page.title.len()
+                + page
+                    .context
+                    .as_ref()
+                    .map_or(0, |context| context.to_string().len())
+        }
+        Action::RunScript(run) => {
+            path(&run.path) + run.title.len() + run.args.iter().map(String::len).sum::<usize>()
+        }
+        Action::Extension { extension, request } => {
+            extension.len()
+                + match request {
+                    ExtensionRequest::Run { action, data } => {
+                        action.len() + data.as_ref().map_or(0, |data| data.to_string().len())
+                    }
+                    ExtensionRequest::Paste { text } => text.len(),
+                    ExtensionRequest::Allow { scope, revision } => scope.len() + revision.len(),
+                    ExtensionRequest::Deny { scope } | ExtensionRequest::RequestAccess { scope } => {
+                        scope.len()
+                    }
+                    ExtensionRequest::TurnOn | ExtensionRequest::Review => 0,
+                }
+        }
+        Action::System(_)
+        | Action::RestoreClipboardEntry { .. }
+        | Action::DeleteClipboardEntry(_)
+        | Action::ClearClipboardHistory
+        | Action::RequestClipboardAccess
+        | Action::OpenPreferences
+        | Action::ArrangeWindow(_) => 0,
+    }
 }
 
 #[cfg(test)]
@@ -767,5 +821,48 @@ mod tests {
         );
         assert_eq!(titles(&catalogue.search("", 10, 0)), ["Alpha", "Beta"]);
         assert_eq!(catalogue.bytes(), "aAlphabBeta".len());
+    }
+
+    #[test]
+    fn the_text_every_action_carries_counts_toward_the_budget() {
+        let with = |action: Action| {
+            let mut row = entry("a", "A");
+            row.item.actions = vec![crate::ItemAction::new("p", "P", action)];
+            row
+        };
+        let text = "x".repeat(16 * 1024);
+        let paste = Action::Extension {
+            extension: "emoji".into(),
+            request: crate::ExtensionRequest::Paste { text: text.clone() },
+        };
+        let overhead = "aA".len() + "pP".len();
+        for (action, held) in [
+            (paste, "emoji".len() + text.len()),
+            (Action::Copy(text.clone()), text.len()),
+            (
+                Action::Snippet {
+                    text: text.clone(),
+                    paste: true,
+                },
+                text.len(),
+            ),
+        ] {
+            let mut catalogue = Catalogue::default();
+            catalogue
+                .apply(Change::Reset(vec![with(action.clone())]), LIMITS)
+                .unwrap();
+            assert_eq!(catalogue.bytes(), overhead + held, "{action:?}");
+            let tight = Limits {
+                rows: 10,
+                bytes: text.len(),
+            };
+            assert!(
+                matches!(
+                    Catalogue::default().apply(Change::Reset(vec![with(action.clone())]), tight),
+                    Err(ChangeError::TooManyBytes { .. })
+                ),
+                "{action:?}"
+            );
+        }
     }
 }

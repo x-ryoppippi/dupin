@@ -516,12 +516,13 @@ impl Parser {
             "read" => Some(ClipboardAccess::Read),
             "write" => Some(ClipboardAccess::Write),
             "watch" => Some(ClipboardAccess::Watch),
+            "paste" => Some(ClipboardAccess::Paste),
             _ => {
                 parser.report(
                     "invalid-value",
                     field,
                     format!("`{text}` isn't a clipboard access"),
-                    Some("Use read, write or watch."),
+                    Some("Use read, write, watch or paste."),
                 );
                 None
             }

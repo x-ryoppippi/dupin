@@ -1,0 +1,7 @@
+{
+	"events": [
+		{ "t": 1.0, "type": "type", "text": "emoji thumbs up" },
+		{ "t": 2.5, "type": "key", "name": "Right" },
+		{ "t": 3.0, "type": "mark", "name": "end" }
+	]
+}

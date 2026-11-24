@@ -57,6 +57,11 @@ enum PendingPaste {
     ClipboardEntry(u64),
     /// What an extension's action just put on the clipboard.
     Clipboard,
+    /// An extension row's text, pasted only while the permit to paste for it still holds.
+    Extension {
+        text: String,
+        permit: dupin_extension_bridge::Permit,
+    },
 }
 
 pub struct Windows {

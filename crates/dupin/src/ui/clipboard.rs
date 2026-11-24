@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use dupin_core::clipboard::Content;
+use dupin_extension_bridge::{ClipboardAccess, Request, Trigger};
 use rune::Tx;
 
 use super::{Busy, PendingPaste, Ui};
+use crate::extensions::Extension;
 
 const PASTE_ACCESS_NOTICE: &str = "Copied. To paste into the front app as well, allow Dupin in System Settings › Privacy & Security › Accessibility.";
 
@@ -42,6 +44,27 @@ impl Ui {
             dupin_mac::clipboard::request_access();
             drop(busy);
         });
+    }
+
+    /// Paste an extension row's text once the panel closes, while the extension holds
+    /// `clipboard:paste` and macOS lets Dupin post ⌘V, or copy it now. A refusal for want of
+    /// consent waits in the panel and Settings, as a request from the extension's code would.
+    pub(super) fn run_paste(&mut self, extension: &Extension, text: String, tx: &mut Tx) {
+        let paste = Request::Clipboard(ClipboardAccess::Paste);
+        match self
+            .extensions
+            .bridge
+            .authorize(&extension.package, &paste, Trigger::Activation)
+        {
+            Ok(permit) if !rune::tooling::is_headless() && self.may_paste(PASTE_ACCESS_NOTICE) => {
+                self.paste_after_close = Some(PendingPaste::Extension { text, permit });
+            }
+            Ok(_) => tx.copy(text),
+            Err(refused) => {
+                tx.copy(text);
+                self.notice_after_close = Some(format!("Copied instead. {refused}"));
+            }
+        }
     }
 
     /// Copy the entry back now, or paste it once the panel closes if access is granted.

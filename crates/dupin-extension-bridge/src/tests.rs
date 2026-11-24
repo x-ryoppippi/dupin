@@ -1051,3 +1051,59 @@ fn a_declared_base_changed_while_running_applies_its_denials_at_once() {
         "an unchanged file is not read again"
     );
 }
+
+#[test]
+fn an_effect_dupin_performs_for_a_package_is_decided_like_its_own_requests() {
+    let bridge = Bridge::new(
+        Broker::new(Base::default(), Local::default()),
+        None,
+        Services::none(),
+    );
+    let id = PackageId::new("emoji").unwrap();
+    let paste = Request::Clipboard(ClipboardAccess::Paste);
+    let declares = |value| Capabilities::parse(&value).unwrap();
+    let _ = bridge.install(&id, revision(), declares(serde_json::json!({})));
+    bridge.set_enabled(&id, true).unwrap();
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "undeclared");
+
+    let _ = bridge.install(
+        &id,
+        revision(),
+        declares(serde_json::json!({ "clipboard": ["paste"] })),
+    );
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "needs-consent");
+    let pending = bridge.pending(Some(&id));
+    assert_eq!(pending[0].key().to_string(), "clipboard:paste");
+    bridge.allow(&id, &revision(), &pending[0].scope, None).unwrap();
+    assert_eq!(
+        bridge.authorize(&id, &paste, Trigger::Query).unwrap_err().code(),
+        "needs-activation"
+    );
+    let refused = bridge.authorize(&id, &paste, Trigger::Activation).unwrap_err();
+    assert_eq!(refused.code(), "needs-consent");
+    assert_eq!(
+        bridge.pending(Some(&id))[0].permission,
+        Some(OsPermission::Accessibility)
+    );
+
+    bridge.set_os_access(OsPermission::Accessibility, OsAccess::Allowed);
+    let permit = bridge.authorize(&id, &paste, Trigger::Activation).unwrap();
+    assert!(bridge.validate(&permit));
+    bridge
+        .revoke(&id, &ScopeKey::Clipboard(ClipboardAccess::Paste))
+        .unwrap();
+    assert!(
+        !bridge.validate(&permit),
+        "a revocation reaches a paste not yet made"
+    );
+    let missing = PackageId::new("missing").unwrap();
+    assert_eq!(
+        bridge
+            .authorize(&missing, &paste, Trigger::Activation)
+            .unwrap_err()
+            .code(),
+        "not-installed"
+    );
+}

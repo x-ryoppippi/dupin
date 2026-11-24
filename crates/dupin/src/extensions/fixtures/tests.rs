@@ -718,3 +718,75 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         2
     );
 }
+
+#[test]
+fn a_query_matches_the_items_catalogue_as_the_launcher_does() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "clipboard": ["paste"] }),
+        "export function items(ctx) {\n\
+         \tconst rows = [\n\
+         \t\t{ id: 'tea', title: 'Green tea', keywords: ['matcha'], actions: [{ title: 'Paste', paste: 'tea' }] },\n\
+         \t\t{ id: 'coffee', title: 'Coffee', keywords: ['espresso'] },\n\
+         \t];\n\
+         \treturn ctx.reason === 'more'\n\
+         \t\t? { type: 'update', append: [{ id: 'cocoa', title: 'Cocoa' }] }\n\
+         \t\t: { items: rows, cursor: '2', more: true };\n\
+         }\n",
+    );
+    write_fixture(
+        &package,
+        "items.json",
+        json!({ "fixture": 1, "steps": [
+            { "query": "" },
+            { "query": "matcha" },
+            { "activate": "paste" },
+            { "query": "coco" },
+        ] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    let steps = steps(&report, 0);
+    let titles = |step: usize| -> Vec<&str> {
+        steps[step]["outcome"]["rows"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}", report.text))
+            .iter()
+            .map(|row| row["title"].as_str().unwrap())
+            .collect()
+    };
+    assert_eq!(titles(0), ["Green tea", "Coffee", "Cocoa"]);
+    assert_eq!(titles(1), ["Green tea"]);
+    assert_eq!(steps[1]["outcome"]["rows"][0]["keywords"], json!(["matcha"]));
+    assert_eq!(steps[2]["outcome"], json!({ "effect": { "paste": "tea" } }));
+    assert_eq!(titles(3), ["Cocoa"]);
+}
+
+#[test]
+fn a_paste_the_package_may_not_make_copies_instead_and_says_why() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let main = "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: 'tea' }] }]; }\n";
+    for (capabilities, consent, code) in [
+        (json!({}), json!({}), "undeclared"),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "deny" }),
+            "revoked",
+        ),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "pending" }),
+            "needs-consent",
+        ),
+    ] {
+        let (_root, package) = capable(capabilities, main);
+        write_fixture(
+            &package,
+            "paste.json",
+            json!({ "fixture": 1, "replies": { "consent": consent }, "steps": [{ "query": "tea" }, { "activate": "paste" }] }),
+        );
+        let report = test(&package, false, &|| false).unwrap();
+        let outcome = &steps(&report, 0)[1]["outcome"];
+        assert_eq!(outcome["effect"], json!({ "copy": "tea" }), "{}", report.text);
+        assert_eq!(outcome["error"]["code"], code, "{}", report.text);
+    }
+}
