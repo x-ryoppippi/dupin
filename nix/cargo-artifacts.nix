@@ -2,6 +2,7 @@
   pkgs,
   crane,
   native,
+  cargo-hawk,
 }:
 let
   inherit (native.passthru)
@@ -90,6 +91,29 @@ let
       installPhaseCommand = "touch $out";
     }
   );
+  # Hawk compiles with its own toolchain, so it can't reuse the other dependency outputs.
+  hawkArgs = baseArgs // {
+    pname = "dupin-hawk";
+    env = checkEnv;
+    nativeBuildInputs = [
+      pkgs.nushell
+      cargo-hawk
+    ];
+    postPatch = ''
+      cp ${../hawk.toml} hawk.toml
+    '';
+    buildPhaseCargoCommand = "nu ${../scripts/hawk.nu}";
+    doCheck = false;
+  };
+  hawkArtifacts = craneLib.buildDepsOnly (hawkArgs // depsArgs);
+  hawk = craneLib.mkCargoDerivation (
+    hawkArgs
+    // {
+      cargoArtifacts = hawkArtifacts;
+      doInstallCargoArtifacts = false;
+      installPhaseCommand = "touch $out";
+    }
+  );
   cargoBinary = craneLib.buildPackage (
     releaseArgs
     // {
@@ -119,6 +143,8 @@ pkgs.stdenv.mkDerivation (
         releaseArtifacts
         debugArtifacts
         lintAndTest
+        hawkArtifacts
+        hawk
         cargoVendorDir
         cargoBinary
         ;
