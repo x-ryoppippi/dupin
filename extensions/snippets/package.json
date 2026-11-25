@@ -10,6 +10,9 @@
 		"capabilities": {
 			"clipboard": [
 				"paste"
+			],
+			"snippets": [
+				"write"
 			]
 		}
 	}

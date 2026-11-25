@@ -42,29 +42,41 @@ pub(super) const FEATURE: Feature = Feature {
 
 fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {
     let command = id(SNIPPETS);
-    commands.registry.register(
-        CommandSpec::new(
-            command.clone(),
-            config.snippets.len(),
-            presentation(
-                "Search snippets",
-                Some("Snippets"),
-                Some("No snippets yet: add them to config.toml  ·  ⌫ back to apps"),
-                Some("No matching snippets"),
-                false,
-                0.0,
-            ),
-        )
-        .with_query_eligibility(QueryEligibility::Any),
-    )?;
+    let spec = CommandSpec::new(
+        command.clone(),
+        // Every snippet, and the row that adds one.
+        dupin_core::snippets::MAX_SNIPPETS + 1,
+        presentation(
+            "Search snippets",
+            Some("Snippets"),
+            Some("No snippets yet  ·  ⌫ back to apps"),
+            Some("No matching snippets"),
+            false,
+            0.0,
+        ),
+    )
+    .with_query_eligibility(QueryEligibility::Any);
+    // With no snippet at all, the command isn't suggested as its keyword is typed, nor listed
+    // by `?`; its keyword still enters it, where the first one is added.
+    let none = config.snippets.is_empty() && crate::snippets::library().stored().is_empty();
+    commands
+        .registry
+        .register(if none { spec.unhinted() } else { spec })?;
     commands.add_keywords(&command, &config.snippet_keywords, "snippet_keywords");
     Ok(())
 }
 
 fn prepare(config: &Config, commands: &mut Configure) {
-    let (snippets, notice) = dupin_core::snippets::preferences(config);
+    let library = crate::snippets::library();
+    let (snippets, notice) =
+        dupin_core::snippets::preferences(&config.snippets, &library.stored(), config.snippet_paste);
     commands.snippets = snippets;
     commands.notices.extend(notice);
+    commands.notices.extend(
+        library
+            .problem()
+            .map(|problem| format!("Stored snippets couldn't be read: {problem}")),
+    );
 }
 
 fn start(providers: &mut Providers) {
@@ -72,12 +84,14 @@ fn start(providers: &mut Providers) {
     providers.add(SNIPPETS, Arc::new(SnippetSearch { port }));
 }
 
-fn reload(ui: &mut Ui, _: &Config, commands: &mut ConfiguredCommands) -> bool {
+fn reload(ui: &mut Ui, config: &Config, commands: &mut ConfiguredCommands) -> bool {
+    crate::snippets::library().declare(&config.snippets, config.snippet_paste);
     let changed = hand_over(std::mem::take(&mut commands.snippets));
     changed && ui.session.command_id().as_str() == SNIPPETS
 }
 
-/// Hands config.toml's snippets to the bundled package, and says whether they changed.
+/// Hands the snippets, config.toml's and the stored ones, to the bundled package, and says
+/// whether they changed.
 pub(crate) fn hand_over(snippets: Preferences) -> bool {
     preferences::set(BUNDLED_PACKAGE, snippets)
 }
@@ -185,6 +199,32 @@ mod tests {
         assert_eq!(ids("sig"), [("snippet:sig".to_owned(), None)]);
     }
 
+    #[test]
+    fn the_command_is_suggested_once_there_is_a_snippet_and_its_keyword_always_enters_it() {
+        let hinted = |config: &Config| {
+            let registry = crate::commands::configured(config).unwrap().registry;
+            Session::new(History::default(), registry)
+                .unwrap()
+                .provider_spec(&id(SNIPPETS))
+                .unwrap()
+                .hinted()
+        };
+        assert!(!hinted(&Config::default()));
+        let config = Config {
+            snippets: BTreeMap::from([("sig".into(), snippet(None, "Best wishes"))]),
+            ..Config::default()
+        };
+        assert!(hinted(&config));
+        let registry = crate::commands::configured(&Config::default()).unwrap().registry;
+        let mut session = Session::new(History::default(), registry).unwrap();
+        session.set_query("snip ");
+        assert_eq!(
+            session.command_id().as_str(),
+            SNIPPETS,
+            "where the first one is added"
+        );
+    }
+
     // One test, so nothing else changes the package's preferences while it runs.
     #[test]
     fn the_bundled_extension_lists_config_snippets_under_their_command() {
@@ -203,7 +243,7 @@ mod tests {
             snippet_paste: true,
             ..Config::default()
         };
-        let (held, notice) = dupin_core::snippets::preferences(&config);
+        let (held, notice) = dupin_core::snippets::preferences(&config.snippets, &[], config.snippet_paste);
         assert!(notice.unwrap().contains("invalid"));
         preferences::set(extension.package.as_str(), held);
         let found = rows(&port, "sig", 10);
@@ -269,8 +309,62 @@ mod tests {
                 );
             })
             .unwrap();
-        assert_eq!(session.items().len(), config.snippets.len());
-        assert_eq!(session.items()[0].primary.as_deref(), Some("copy"));
+        assert_eq!(
+            session.items().len(),
+            config.snippets.len() + 1,
+            "every snippet, and the row that adds one"
+        );
+        let first = session
+            .items()
+            .iter()
+            .find(|item| item.id.starts_with("snippet:"))
+            .unwrap();
+        assert_eq!(first.primary.as_deref(), Some("copy"));
+        assert!(session.items().iter().any(|item| item.id == "add-snippet"));
+
+        // Stored snippets list beside config.toml's, which keeps a keyword both hold, and only
+        // a stored one offers to be edited and deleted.
+        let stored = |keyword: &str, name: &str, text: &str| dupin_core::snippets::Snippet {
+            keyword: keyword.into(),
+            name: Some(name.into()),
+            text: text.into(),
+        };
+        let (held, notice) = dupin_core::snippets::preferences(
+            &config.snippets,
+            &[
+                stored("note", "Meeting note", "Notes for {date}"),
+                stored("snippet-01", "Shadowed", "never listed"),
+            ],
+            false,
+        );
+        assert!(notice.unwrap().contains("`snippet-01`"));
+        preferences::set(extension.package.as_str(), held);
+        let titles = |item: &Item| {
+            item.actions
+                .iter()
+                .map(|action| action.title.clone())
+                .collect::<Vec<_>>()
+        };
+        let note = rows(&search, "Meeting", 10).remove(0);
+        assert_eq!(note.id, "snippet:note");
+        assert_eq!(
+            titles(&note),
+            [
+                "Copy to Clipboard",
+                "Edit Snippet",
+                "Delete Snippet",
+                "Add Snippet"
+            ]
+        );
+        let declared = rows(&search, "snippet-01", 10).remove(0);
+        assert_eq!(
+            declared.view,
+            View::Text {
+                title: "snippet-01".into(),
+                subtitle: "snippet-01  ·  Example 1".into(),
+            }
+        );
+        assert_eq!(titles(&declared), ["Copy to Clipboard", "Add Snippet"]);
 
         // What config.toml may hand over always fits the catalogue: as many snippets as it
         // holds, or their whole text budget spent on the longest keywords and names, loaded
@@ -280,7 +374,8 @@ mod tests {
         for snippets in [many.collect(), long.collect::<BTreeMap<_, _>>()] {
             config.snippets = snippets;
             config.snippet_paste = true;
-            let (held, notice) = dupin_core::snippets::preferences(&config);
+            let (held, notice) =
+                dupin_core::snippets::preferences(&config.snippets, &[], config.snippet_paste);
             assert!(notice.is_some());
             let listed = held["snippets"].as_array().unwrap();
             let last = listed.last().unwrap()["keyword"].as_str().unwrap().to_owned();

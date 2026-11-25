@@ -570,6 +570,11 @@ declare module 'dupin' {
 		clipboard?: ('read' | 'write' | 'watch' | 'paste')[];
 		dictionary?: ['lookup'];
 		calculator?: ['evaluate'];
+		/**
+		 * Add, change and delete the snippets the user stores in Dupin, from an action the user
+		 * chose. The package Dupin ships for Snippets holds it from the start.
+		 */
+		snippets?: ['write'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
 		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
@@ -840,6 +845,33 @@ declare module 'dupin' {
 		 * characters it doesn't take, an error or an answer longer than 256 bytes.
 		 */
 		evaluate(expression: string): Promise<Calculation | null>;
+	};
+
+	/** What stops a snippet from being stored, one line per field; no field when it was stored. */
+	export interface SnippetProblems {
+		readonly keyword?: string;
+		readonly name?: string;
+		readonly text?: string;
+	}
+
+	/**
+	 * `snippets` capability: the snippets the user stores in Dupin, encrypted, beside the ones
+	 * config.toml declares, which no package changes. Only an action the user chose may call it.
+	 */
+	export const snippets: {
+		/**
+		 * Stores the snippet in place of the stored one keyed `replaces`, or as a new one without
+		 * it. Dupin checks it as config.toml's: a keyword of 1–32 bytes without spaces that no
+		 * other snippet has, a one-line name of up to 80 characters or none, and 1 byte to 64 KiB
+		 * of text; a keyword or name over 1 KiB, or text over 128 KiB, fails with `invalid`.
+		 * Resolves to what is wrong, by field, which a form's `fieldErrors` can show as it is.
+		 */
+		save(
+			snippet: { keyword: string; name?: string | null; text: string },
+			options?: { replaces?: string | null },
+		): Promise<SnippetProblems>;
+		/** Deletes the stored snippet `keyword`; `false` when there was none. */
+		delete(keyword: string): Promise<boolean>;
 	};
 
 	export interface CalendarEvent {

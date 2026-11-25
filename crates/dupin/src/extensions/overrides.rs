@@ -61,11 +61,13 @@ fn case(name: &str) -> Option<Override> {
             "emoji",
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
         ),
+        // Writing the user's stored snippets is the most a copy could reach, so it is the use
+        // an edited copy must be allowed again; pasting follows the same grants.
         "snippets" => Override::built_in(
             "snippets",
             Config::default(),
             None,
-            Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
+            Some(Use::Effect(Request::SnippetsWrite)),
         ),
         "web-search" => Override::extension("web-search", None),
         "window-management" => Override::extension(

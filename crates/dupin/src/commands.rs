@@ -197,6 +197,7 @@ pub fn register(
     crate::extensions::hand_over_kinds(composition.kinds().clone());
     crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web.preferences);
     let web = Arc::new(RwLock::new(crate::web::WebSearches::default()));
+    crate::snippets::library().declare(&config.snippets, config.snippet_paste);
     crate::features::snippets::hand_over(snippets);
     let file_demotions = Arc::new(RwLock::new(config.file_demotions.clone()));
     let scripts = Arc::new(RwLock::new(crate::scripts::catalog::Catalog::default()));
