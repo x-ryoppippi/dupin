@@ -5,6 +5,16 @@ Type a calculation in app search, such as `12*3`, `2^10`, `(1+2)/3` or
 The answer appears above apps. Press Enter to copy the displayed number without
 units or the approximation label. Turn Calculator off in **Settings → Search**.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/calculator/arithmetic-dark.png" />
+<img alt="The panel with “12*3” typed and its answer, 36." src="../images/calculator/arithmetic-light.png" width="680" />
+</picture>
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/calculator/units-dark.png" />
+<img alt="The panel with “5 km to mi” typed and the answer, approx. 3.1068559612 mi." src="../images/calculator/units-light.png" width="680" />
+</picture>
+
 Calculator is a [bundled extension](./extensions.md#bundled-extensions), `calculator`,
 that works each calculation out with Dupin's calculator. Dupin hands it what you type
 in the main search only when it has a digit in it, so names and words never reach it.

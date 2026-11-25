@@ -7,6 +7,11 @@ main search, or `window` and Space to list them all. Enter moves and resizes the
 focused window of the app that was in front when you opened the panel, then
 hides Dupin.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/window-management/commands-dark.png" />
+<img alt="The panel with “left half” typed, showing the Left Half command from Window Management." src="../images/window-management/commands-light.png" width="680" />
+</picture>
+
 | Command                               | Puts the window                                                                                            |
 | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | Left Half, Right Half                 | On the left or right half of the display's usable area, outside the Dock and menu bar.                     |

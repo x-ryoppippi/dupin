@@ -2,6 +2,11 @@
 
 Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Space by default; see [configuration](./configuration.md)) shows the panel; pressing it again, Esc, or clicking elsewhere hides it.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="images/usage/search-dark.png" />
+<img alt="The Dupin panel with “ma” typed: Maps first, then the Search Apple Maps web search tagged with its maps keyword, then Mail, Magnifier, App Store and other apps." src="images/usage/search-light.png" width="680" />
+</picture>
+
 ## Keys
 
 | Key                                     | In the panel                                                                      |

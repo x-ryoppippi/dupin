@@ -2,6 +2,11 @@
 
 `define` or `d` followed by Space switches to Dictionary Services ("Define"). Type a word to see its definition from the dictionaries enabled in Dictionary.app. Dupin lays the entry out from Dictionary.app's text: the pronunciation beside a label; each part of speech (noun, verb, …) under a subheading with its numbered senses (1 2 3 or ① ② ③) as a numbered list; the sub-senses after each `•` nested under their sense; examples after a sense's colon or a `▸` in italics; antonyms labeled in bold; and parts such as Phrases and Origin under their own headings. Text in any other layout shows as paragraphs, so nothing is left out. A word no dictionary has shows No definition found. Backspace on an empty query returns to app search. Set `dictionary_keywords` in [configuration](#configuration) to choose other aliases.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/dictionary/entry-dark.png" />
+<img alt="Dictionary mode with “serendipity” typed: the entry with its pronunciation, its noun sense with an example in italics, and its origin." src="../images/dictionary/entry-light.png" width="680" />
+</picture>
+
 Enter opens the word in Dictionary.app. Right Arrow, Cmd+K or the Actions link opens its action screen, with **Open in Dictionary**, **Copy Definition**, which copies the definition as the dictionary wrote it, and Send to….
 
 ## The bundled extension

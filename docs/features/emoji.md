@@ -2,6 +2,16 @@
 
 Type `emoji`, then Space, to pick an emoji or symbol ("Emoji & Symbols"). With nothing typed, the list starts with Smileys & Emotion and runs in Unicode's order under its groups: People & Body, Animals & Nature, Food & Drink, Travel & Places, Activities, Objects, Symbols and Flags, then Text Symbols, such as `€`, `→`, `±` and `≠`, that aren't emoji. Type to narrow it by name or keyword in English or Japanese: `thumbs`, `euro`, `にっこり` or `日本` all find what you would expect. The groups give way to one list ranked as apps are, with the emoji you pick most often for a query first. Backspace on an empty query returns to app search.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/emoji/browse-dark.png" />
+<img alt="Emoji &amp; Symbols before anything is typed: the Smileys &amp; Emotion group, with grinning face selected and its details shown." src="../images/emoji/browse-light.png" width="680" />
+</picture>
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/emoji/search-dark.png" />
+<img alt="Emoji &amp; Symbols with “thumbs” typed: thumbs up selected with its name, Japanese name, code points and keywords, then thumbs down and crossed fingers." src="../images/emoji/search-light.png" width="680" />
+</picture>
+
 The selected row shows the character, its name, its Japanese name, its code points and the keywords that find it. Enter copies the character and closes the panel. Right Arrow, ⌘K or the Actions link opens its other actions:
 
 | Action                             | Does                                                                                                                                                                                 |

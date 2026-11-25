@@ -2,9 +2,19 @@
 
 An extension is a folder that answers one keyword. Type its keyword and Space, then a query: Dupin hands the query to the extension and shows the rows it returns. An extension is a JavaScript module. Some extensions ship with Dupin and are on from the start; any others are third-party code, so they are off until you turn them on.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/extensions/keyword-dark.png" />
+<img alt="The Word Count example extension after its keyword: a Word Count chip, “two words” typed, and its answer, 2 words." src="../images/extensions/keyword-light.png" width="680" />
+</picture>
+
 ## Turning them on
 
 `extensions` turns on the extensions folder: third-party folders in `extensions/` beside `config.toml`, each answering its own keyword. It is off by default; **Extensions folder** in Settings → Extensions is the same switch.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/extensions-dark.png" />
+<img alt="Settings → Extensions, with the Extensions folder switch turned off and the folder it runs extensions from." src="../images/settings/extensions-light.png" width="760" />
+</picture>
 
 ```toml
 extensions = false # run extensions from the extensions folder beside config.toml
@@ -306,6 +316,11 @@ A `run` action keeps the launcher open. The function receives `data`, `null` whe
 ### Views and forms
 
 A `push` action, or a `push` effect, opens a page of the package's own above the list: the module's `views` export names each page's function, which answers with a list, a detail or a form. The page's title, after the keyword's chip, is the action's title. Dupin holds each page's `state`, the JSON its push carried, and hands it back; Esc, or ⌫ in an empty field, closes the page and selects again the row it opened from. At most eight pages are open at once.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/extensions/form-dark.png" />
+<img alt="The Notes example's New Note form: a required Title, a multi-line Note, a Pinned checkbox and a Label picker, with ⌘↩ Save at the foot." src="../images/extensions/form-light.png" width="680" />
+</picture>
 
 ```js
 import { storage } from 'dupin';

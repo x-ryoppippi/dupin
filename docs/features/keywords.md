@@ -6,6 +6,11 @@ A keyword typed at the start of the main search, then Space, enters a command's 
 
 While what you type in the main search is a keyword, or the start of one, the command it reaches shows as a row, with the keyword and `␣` (Space) as a tag at its end, such as **Calendar** `cal ␣`. Enter or Tab on that row enters the command exactly as typing the keyword and Space does; for a web search it leaves the alias and a space in the query. The rows a keyword reaches directly, such as a web search's, show the keyword as a tag too.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/keywords/typing-dark.png" />
+<img alt="The panel with “ca” typed: the Calendar app first, then the Calendar search command tagged “cal ␣”, then Calculator, Contacts and other apps." src="../images/keywords/typing-light.png" width="680" />
+</picture>
+
 The row never pushes the best match down for a short query:
 
 - An exact keyword of three or more characters, such as `cal` or `define`, leads the results.
@@ -14,6 +19,11 @@ The row never pushes the best match down for a short query:
 - A web search's own alias already shows its search first, so it adds no second row.
 
 Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extensions.md#a-javascript-extension). An empty query shows what it always did.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/keywords/list-dark.png" />
+<img alt="The panel with “?” typed, listing commands with their keywords as tags: Calendar (cal), Dictionary (d, define), Dupin (help), Emoji &amp; Symbols (emoji), File Contents (in), Files (Space) and web searches." src="../images/keywords/list-light.png" width="680" />
+</picture>
 
 Keywords are case-sensitive when typed with Space; the rows match them in any case, and Enter or Tab types them as configured.
 
@@ -58,3 +68,8 @@ An alias is 1 to 32 ASCII letters, digits, underscores or hyphens, and config.to
 ## Settings
 
 Settings → Keywords lists every command, web search, app and file a keyword reaches with its keywords, the aliases among them drawn quieter, and each extension with its keyword. Below that it lists your aliases, each with what it reaches and, if it is left out, why, with Remove, and fields to add one. The last card edits `dictionary_keywords` and `snippet_keywords`, separated by spaces. A key set in a read-only config.toml, such as one Home Manager writes, is shown locked. With Home Manager, set them in `programs.dupin.settings.aliases`.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/keywords-dark.png" />
+<img alt="Settings → Keywords, listing each command and web search with its keywords, the aliases section and the Dictionary and snippet keyword fields." src="../images/settings/keywords-light.png" width="760" />
+</picture>

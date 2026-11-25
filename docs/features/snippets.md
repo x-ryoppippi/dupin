@@ -2,6 +2,11 @@
 
 Type `snip`, then Space, to list your [snippets](#configuration) ("Snippets"); type to narrow them by name or keyword. Each row shows the snippet's name, its keyword and the start of its text. Enter copies the text, with any date, time or clipboard placeholders filled in, and closes the panel; paste it wherever you like. Backspace on an empty query returns to app search.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/snippets/list-dark.png" />
+<img alt="The snippets list: Home address, Quote the clipboard, Email signature and Checked stamp, each with its keyword and the start of its text." src="../images/snippets/list-light.png" width="680" />
+</picture>
+
 With pasting turned on in Settings → Search, Enter pastes the snippet into the app you were using and ⌘Enter only copies it. The actions screen (Right Arrow or ⌘K) offers both. Turning on **Paste snippets** in Settings requests Accessibility access when needed. Snippets don't expand as you type in other apps.
 
 Snippets you use often rank higher, as apps do.

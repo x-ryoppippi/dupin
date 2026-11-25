@@ -4,6 +4,11 @@
 
 A shader can animate behind the panel, the query field and its results, while it shows, as Ghostty's `custom-shader` does behind a terminal. `"flow"` is the built-in one, the accent color flowing as warped noise, swelling as you type. `"off"`, the default, draws nothing and leaves the panel plain glass. Anything else is the path to a WGSL file: `~/` is the home directory, and a relative path is relative to `config.toml`.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/appearance-dark.png" />
+<img alt="Settings → Appearance: a theme preview with light, dark and system appearance, palette, font, width, rows and corners, then the backdrop and shaders folder." src="../images/settings/appearance-light.png" width="760" />
+</picture>
+
 Settings offers `flow`, `off`, the shaders in [`examples/shaders`](../../examples/shaders) and every `.wgsl` file in the `shaders` folder beside `config.toml`; the Shaders folder row on the Appearance page opens it. Picking an example copies it into the folder, unless a copy is already there, and points `backdrop` at the copy, so you can edit it.
 
 Dupin reads the file each time the panel shows and compiles it when its text has changed, so you can edit a shader and see it at the next hotkey press. A file that can't be read or doesn't compile shows its error in the panel at every summon until it's fixed; meanwhile Dupin keeps the last version that compiled, or draws `flow`. [`examples/shaders`](../../examples/shaders) describes how to write one.
@@ -36,6 +41,16 @@ Each appearance accepts `background`, `text`, `secondary`, `accent`, `selected_t
 `hover` and `separator` as `#RRGGBB`. Omitted colors use the system palette. The
 background remains a tint over Liquid Glass; headless rendering uses its opaque fallback.
 Choose contrasting text and selection colors when overriding the palette.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/appearance/ocean-dark.png" />
+<img alt="The panel in a theme with a 400-point panel, monospace font and a blue tint, showing Search GitHub for dupin." src="../images/appearance/ocean-light.png" width="680" />
+</picture>
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/appearance/rose-dark.png" />
+<img alt="The panel in a rose-tinted theme, showing Search GitHub for dupin." src="../images/appearance/rose-light.png" width="680" />
+</picture>
 
 `font_family` is `"system"` (San Francisco), `"monospace"` (SF Mono), or any font
 installed on the Mac by the name Font Book shows — `"Menlo"`, `"JetBrains Mono"`,

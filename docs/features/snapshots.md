@@ -15,6 +15,11 @@ uses the metadata the Snapshots window reads, and reads the archive only when th
 keyword is entered before the window has; the main search never reads it. See
 [Keywords](./keywords.md) for `snap` and the other keywords.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/snapshots/list-dark.png" />
+<img alt="Saved snapshots listed under a Snapshots chip, each with when it was saved, its mode and its query." src="../images/snapshots/list-light.png" width="680" />
+</picture>
+
 Snapshots show historical content, including the visible result list, without
 running saved actions. **Resume search** (⌘R) explicitly runs the original mode
 and query again when its command is still available. Removed extensions leave

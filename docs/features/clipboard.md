@@ -2,6 +2,11 @@
 
 Turn on clipboard history in Settings → Search (it is off by default; see [configuration](#configuration)). Then type `clip`, or an [alias](./keywords.md#aliases) for `clipboard`, and Space: a "Clipboard" chip shows the mode and the list starts with your most recent copies, each with how long ago it was copied. Type to keep only entries containing every word, ignoring case; the list stays newest first. ↑ and ↓ move through the list even with an empty query. Clipboard search terms are not kept for query recall.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/clipboard/history-dark.png" />
+<img alt="Clipboard history with a copied 1280×720 PNG selected, showing a preview of the image, its dimensions, size and the app it was copied from." src="../images/clipboard/history-light.png" width="680" />
+</picture>
+
 Each kind of copy shows its own way:
 
 - **Text** shows its first words, up to 200 characters, with its line or character count. Words match anywhere in the text. Dupin holds at most 8 MB of a history's text in memory to match it: past that, the newest entries are still found by all their text and older ones by as much of their beginning as fits, and when even that runs short, their first words are shortened.

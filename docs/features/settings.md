@@ -4,6 +4,16 @@ Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`,
 
 Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,. Settings → Keywords lists every keyword and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/general-dark.png" />
+<img alt="Settings → General: hotkey, selection hotkey, display, position, input source, launch at login and more, with the pages in the sidebar." src="../images/settings/general-light.png" width="760" />
+</picture>
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/search-dark.png" />
+<img alt="Settings → Search: switches for the calculator, currency conversion, recent items, calendar search, clipboard history and snippet pasting." src="../images/settings/search-light.png" width="760" />
+</picture>
+
 Settings saves to `config.toml` when it is writable. With a read-only file, the keys it sets are locked: rows show **Managed by Nix** when the file links into the Nix store, and **Set in config.toml** otherwise. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
 
 **Open config.toml** at the foot of the Settings sidebar opens the file in its default editor, and **Open Config Folder** shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist.

@@ -2,6 +2,11 @@
 
 Settings → Permissions shows which features use each grant and what macOS has allowed. Choose **Request Access** to ask for a grant for the first time, even while its feature is off. Choose **Open System Settings** to manage an existing decision. Dupin refreshes the status when the Calendar request finishes and when Settings regains focus.
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/settings/permissions-dark.png" />
+<img alt="Settings → Permissions: Accessibility, Calendars and Paste from Other Apps, each with its status and a Request Access button." src="../images/settings/permissions-light.png" width="760" />
+</picture>
+
 Turning on **Calendar search** or **Paste snippets**, recording a **Selection hotkey** for the first time, or turning on the bundled **Window Management** in Settings → Extensions requests the corresponding access when needed. You can also be prompted on first use if you enabled a feature through `config.toml`. Starting Dupin, opening Settings and reloading configuration only check access. File search uses the Spotlight index and needs no grant.
 
 ## Extensions
