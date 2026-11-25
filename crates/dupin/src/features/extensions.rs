@@ -116,11 +116,10 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             continue;
         }
         let keyword = &extension.keyword;
-        let holder = if configured.web.aliases.contains(keyword) {
-            Some("a web search in config.toml")
-        } else {
-            configured.registry.keyword(keyword).map(|_| "another command")
-        };
+        let holder = configured.registry.holder(keyword).map(|holder| match holder {
+            dupin_core::KeywordHolder::Web(_) => "a web search in config.toml",
+            dupin_core::KeywordHolder::Command(_) => "another command",
+        });
         if let Some(holder) = holder {
             added.problems.push(format!(
                 "{}: keyword `{keyword}` is already used by {holder}",

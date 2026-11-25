@@ -86,7 +86,10 @@ impl Session {
             Intent::Actions => self.actions(None),
             Intent::Complete => {
                 let item = self.actionable_items().get(self.search.selected)?;
-                if let Some(completion) = item.completion.clone() {
+                if let Some(Action::Keyword(keyword)) = item.action(super::keywords::ACTION) {
+                    let keyword = keyword.clone();
+                    self.enter_keyword(&keyword)
+                } else if let Some(completion) = item.completion.clone() {
                     self.complete(&completion)
                 } else {
                     let Action::Browse(folder) = item.action("browse")? else {
@@ -130,6 +133,22 @@ impl Session {
             Intent::Dismiss if self.page().is_some() => self.leave_view(),
             Intent::Dismiss => self.dismiss(),
         })
+    }
+
+    /// Types `keyword` and Space, as a row the keyword reaches offers: a command's keyword
+    /// enters its search, a web search's alias is left in the query, and no keyword is Space on
+    /// an empty query.
+    pub(super) fn enter_keyword(&mut self, keyword: &str) -> Vec<Effect> {
+        if !keyword.is_empty() {
+            return self.complete(&format!("{keyword} "));
+        }
+        let Some(command) = self.commands.space_on_empty(&self.search.command).cloned() else {
+            return Vec::new();
+        };
+        self.search.query.clear();
+        let mut effects = vec![Effect::ClearQuery];
+        effects.extend(self.switch(command, true));
+        effects
     }
 
     fn complete(&mut self, completion: &str) -> Vec<Effect> {

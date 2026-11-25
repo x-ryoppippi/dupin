@@ -69,7 +69,8 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
                 true,
                 2.0,
             ),
-        ),
+        )
+        .with_title("File Contents"),
         CommandSpec::new(
             id(BROWSE),
             file_limit,

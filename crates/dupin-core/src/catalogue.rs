@@ -590,7 +590,9 @@ fn action_bytes(action: &Action) -> usize {
         | Action::ScriptArguments(p) => path(p),
         Action::OpenWith { path: p, application } => path(p) + path(application),
         Action::ChooseDestination { path: p, .. } => path(p),
-        Action::OpenUrl(text) | Action::Copy(text) | Action::Snippet { text, .. } => text.len(),
+        Action::OpenUrl(text) | Action::Copy(text) | Action::Keyword(text) | Action::Snippet { text, .. } => {
+            text.len()
+        }
         Action::Share {
             target,
             paths: shared,

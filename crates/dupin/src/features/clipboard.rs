@@ -50,7 +50,8 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
                 4.0,
             ),
         )
-        .with_query_eligibility(QueryEligibility::Any);
+        .with_query_eligibility(QueryEligibility::Any)
+        .with_title("Clipboard History");
         spec.private_results = true;
         commands.registry.register(spec)?;
         commands.registry.add_keyword(&clipboard, "clip")?;

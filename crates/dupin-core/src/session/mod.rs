@@ -4,11 +4,13 @@
 
 mod actions;
 mod intents;
+mod keywords;
 mod navigation;
 mod search;
 mod selection;
 mod snapshots;
 
+pub use keywords::keyword_tag;
 pub use navigation::{Anchor, Navigated};
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -172,6 +174,10 @@ struct SearchState {
     active_order: Vec<CommandId>,
     active_pin: Option<CommandId>,
     active_limit: usize,
+    /// The rows for the commands the main search's query is a keyword of, and how many of
+    /// them lead the results; the rest follow the first of the providers' rows.
+    suggestions: Vec<Item>,
+    leading: usize,
     selected: usize,
     selection_held: bool,
     results: Results,
@@ -225,6 +231,8 @@ impl SearchState {
             active_order: Vec::new(),
             active_pin: None,
             active_limit: 0,
+            suggestions: Vec::new(),
+            leading: 0,
             selected: 0,
             selection_held: false,
             results: Results::Idle,

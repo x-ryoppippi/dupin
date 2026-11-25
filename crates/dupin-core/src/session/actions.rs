@@ -65,6 +65,7 @@ impl Session {
         match action.action {
             Action::Browse(folder) => return self.browse(folder),
             Action::Push(page) => return self.push(page),
+            Action::Keyword(keyword) => return self.enter_keyword(&keyword),
             Action::Rename(path) => return self.begin_rename(path),
             Action::ChooseDestination { path, transfer } => return self.begin_destination(path, transfer),
             _ => {}

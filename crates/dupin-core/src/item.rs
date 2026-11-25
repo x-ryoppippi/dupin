@@ -62,6 +62,9 @@ pub enum Action {
     OpenPreferences,
     /// Show another view of the same command inside the panel.
     Push(Page),
+    /// Type the keyword and Space in the main search, as a row the keyword reaches offers;
+    /// an empty keyword is Space on an empty query.
+    Keyword(String),
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
     /// Run the script config.toml names, by its file name in the scripts folder, with the

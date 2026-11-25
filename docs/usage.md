@@ -4,26 +4,27 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 
 ## Keys
 
-| Key                                     | In the panel                                          |
-| --------------------------------------- | ----------------------------------------------------- |
-| Hotkey                                  | Show or hide the panel                                |
-| Type                                    | Fuzzy-search installed apps                           |
-| Space on an empty query                 | Search files with Spotlight, by file and display name |
-| `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`  |
-| `define` or `d`, then Space             | Look up a word in macOS dictionaries                  |
-| `clip` then Space                       | Search the clipboard history, when it is on           |
-| `emoji` then Space                      | Pick an emoji or symbol                               |
-| ⌫ on an empty query                     | Leave a folder or the current search mode             |
-| ↑ ↓                                     | Move the selection                                    |
-| Tab at the end of an unselected input   | Complete the selected keyword, or browse the folder   |
-| ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                   |
-| ↩                                       | Open the app or file                                  |
-| ⌘↩                                      | Reveal the file in Finder                             |
-| ⌘Y                                      | Preview the selected app or file with Quick Look      |
-| → at the end of the input, ⌘K or Ctrl+K | Show actions for the selected result                  |
-| Esc, or clicking elsewhere              | Hide the panel                                        |
-| ⌘Q                                      | Quit Dupin                                            |
-| ⌘,                                      | Open Settings                                         |
+| Key                                     | In the panel                                                                      |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| Hotkey                                  | Show or hide the panel                                                            |
+| Type                                    | Fuzzy-search installed apps                                                       |
+| Space on an empty query                 | Search files with Spotlight, by file and display name                             |
+| `in` then Space                         | Search inside files with Spotlight, as Alfred's `in`                              |
+| `define` or `d`, then Space             | Look up a word in macOS dictionaries                                              |
+| `clip` then Space                       | Search the clipboard history, when it is on                                       |
+| `emoji` then Space                      | Pick an emoji or symbol                                                           |
+| `?`                                     | List every command and its keyword ([Keywords](./features/keywords.md))           |
+| ⌫ on an empty query                     | Leave a folder or the current search mode                                         |
+| ↑ ↓                                     | Move the selection                                                                |
+| Tab at the end of an unselected input   | Complete the selected keyword or enter the selected command, or browse the folder |
+| ↑ on an empty query, then ↑ ↓           | Recall searches in the current mode                                               |
+| ↩                                       | Open the app or file                                                              |
+| ⌘↩                                      | Reveal the file in Finder                                                         |
+| ⌘Y                                      | Preview the selected app or file with Quick Look                                  |
+| → at the end of the input, ⌘K or Ctrl+K | Show actions for the selected result                                              |
+| Esc, or clicking elsewhere              | Hide the panel                                                                    |
+| ⌘Q                                      | Quit Dupin                                                                        |
+| ⌘,                                      | Open Settings                                                                     |
 
 Completed searches are remembered for the current Dupin process when you clear
 the input, hide the panel or activate a result. With an empty input, ↑ recalls the
@@ -33,6 +34,7 @@ This history holds up to 100 terms and is separate from app-ranking history.
 
 ## Features
 
+- [Keywords](./features/keywords.md)
 - [Apps](./features/apps.md)
 - [Recent items](./features/recent-items.md)
 - [Files](./features/files.md)

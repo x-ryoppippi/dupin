@@ -27,18 +27,21 @@ pub(super) const FEATURE: Feature = Feature {
 
 fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {
     let command = id(DICTIONARY);
-    commands.registry.register(CommandSpec::new(
-        command.clone(),
-        1,
-        presentation(
-            "Look up a word",
-            Some("Define"),
-            Some("Type a word  ·  ⌫ back to apps"),
-            Some("No definition found"),
-            true,
-            3.0,
-        ),
-    ))?;
+    commands.registry.register(
+        CommandSpec::new(
+            command.clone(),
+            1,
+            presentation(
+                "Look up a word",
+                Some("Define"),
+                Some("Type a word  ·  ⌫ back to apps"),
+                Some("No definition found"),
+                true,
+                3.0,
+            ),
+        )
+        .with_title("Dictionary"),
+    )?;
     commands.add_keywords(&command, &config.dictionary_keywords, "dictionary_keywords");
     Ok(())
 }

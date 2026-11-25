@@ -42,6 +42,12 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
 fn prepare(config: &Config, commands: &mut Configure) {
     let (web, notice) =
         crate::web::configured(config, |keyword| commands.registry.keyword(keyword).is_some());
+    for (alias, name) in &web.aliases {
+        commands
+            .registry
+            .add_web_alias(alias.clone(), crate::web::web_search_title(name))
+            .expect("configured web aliases are checked against the command keywords");
+    }
     commands.web = web;
     commands.notices.extend(notice);
 }

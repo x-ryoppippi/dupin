@@ -22,8 +22,9 @@ pub mod session;
 pub mod snippets;
 
 pub use command::{
-    CommandError, CommandId, CommandRegistry, CommandSpec, QueryEligibility, QueryPresentation,
+    CommandError, CommandId, CommandRegistry, CommandSpec, KeywordHolder, QueryEligibility, QueryPresentation,
 };
+pub(crate) use command::{KeywordEntry, KeywordTarget};
 pub use config::{Backdrop, Config, DisplaySelection, InputSource, Position};
 pub use detail::Detail;
 pub use history::History;

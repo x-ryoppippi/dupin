@@ -259,14 +259,10 @@ fn routed_keywords(bundled: Vec<(PathBuf, String, String)>) -> impl Fn(&str) -> 
             return Some(format!("the bundled `{name}` extension"));
         }
         let commands = commands.as_ref()?;
-        if let Some(command) = commands.registry.keyword(keyword) {
-            return Some(format!("the `{command}` command"));
-        }
-        commands
-            .web
-            .aliases
-            .contains(keyword)
-            .then(|| "a web search in config.toml".to_owned())
+        Some(match commands.registry.holder(keyword)? {
+            dupin_core::KeywordHolder::Command(command) => format!("the `{command}` command"),
+            dupin_core::KeywordHolder::Web(_) => "a web search in config.toml".to_owned(),
+        })
     }
 }
 

@@ -7,7 +7,7 @@ use crate::form::Form;
 use crate::searcher::Delivery;
 use crate::{Accessory, Batch, CommandId, Detail, Item};
 
-use super::{Effect, Results, SearchState, Session};
+use super::{Effect, Results, SearchState, Session, keywords};
 
 #[derive(Debug)]
 pub(super) struct ProviderState {
@@ -347,10 +347,27 @@ impl Session {
             }
             return true;
         }
+        let after = self.search.leading + usize::from(!items.is_empty());
+        for (index, item) in self.search.suggestions.iter().enumerate() {
+            let at = if index < self.search.leading {
+                index
+            } else {
+                after + index - self.search.leading
+            };
+            items.insert(at.min(items.len()), item.clone());
+            origins.insert(at.min(origins.len()), keywords::origin());
+        }
+        items.truncate(self.search.active_limit);
+        origins.truncate(self.search.active_limit);
         self.search.items = items;
         self.search.origins = origins;
         let providers = &self.search.providers;
+        let suggestions = &self.search.suggestions;
         self.search.presentations.retain(|origin, rows| {
+            if *origin == keywords::origin() {
+                rows.retain(|id, _| suggestions.iter().any(|item| item.id == *id));
+                return !rows.is_empty();
+            }
             providers.get(origin).is_some_and(|state| {
                 rows.retain(|id, _| state.ids.contains(id));
                 !rows.is_empty()
@@ -424,6 +441,7 @@ impl Session {
                 )
             })
             .collect();
+        self.suggest();
         provider_ids
             .into_iter()
             .map(|command| Effect::Search {
@@ -449,6 +467,8 @@ impl Session {
         self.search.origins.clear();
         self.search.presentations.clear();
         self.search.providers.clear();
+        self.search.suggestions.clear();
+        self.search.leading = 0;
         self.search.selected = 0;
         self.search.results = Results::Idle;
     }

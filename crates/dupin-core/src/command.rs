@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -82,6 +82,8 @@ impl QueryEligibility {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandSpec {
     id: CommandId,
+    /// What lists of commands call it, where its chip is not a name of its own.
+    title: Option<String>,
     pub result_limit: usize,
     candidate_limit: Option<usize>,
     fallback: bool,
@@ -95,6 +97,7 @@ impl CommandSpec {
     pub fn new(id: CommandId, result_limit: usize, presentation: QueryPresentation) -> Self {
         Self {
             id,
+            title: None,
             result_limit,
             candidate_limit: None,
             fallback: false,
@@ -103,6 +106,19 @@ impl CommandSpec {
             deadline: std::time::Duration::from_secs(30),
             query_eligibility: QueryEligibility::NonEmpty,
         }
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// The command's name: its title, or else its chip or placeholder.
+    fn title(&self) -> &str {
+        self.title
+            .as_deref()
+            .or(self.presentation.chip.as_deref())
+            .unwrap_or(&self.presentation.placeholder)
     }
 
     pub fn with_query_eligibility(mut self, eligibility: QueryEligibility) -> Self {
@@ -140,6 +156,7 @@ pub enum CommandError {
     InvalidKeyword(String),
     UnknownCommand(CommandId),
     KeywordConflict { keyword: String, command: CommandId },
+    WebAliasConflict(String),
     MissingDefault(CommandId),
     MissingSpaceTarget(CommandId),
 }
@@ -160,6 +177,12 @@ impl fmt::Display for CommandError {
                 f,
                 "keyword `{keyword}` for `{command}` is already assigned to another command"
             ),
+            Self::WebAliasConflict(alias) => {
+                write!(
+                    f,
+                    "web search alias `{alias}` is already assigned to another command"
+                )
+            }
             Self::MissingDefault(id) => write!(f, "default command `{id}` is not registered"),
             Self::MissingSpaceTarget(id) => write!(f, "Space target `{id}` is not registered"),
         }
@@ -168,6 +191,49 @@ impl fmt::Display for CommandError {
 
 impl std::error::Error for CommandError {}
 
+/// What answers a keyword.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeywordHolder<'a> {
+    Command(&'a CommandId),
+    /// A web search, by its title.
+    Web(&'a str),
+}
+
+/// What a keyword reaches: a command's own search, or a web search the main search answers.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum KeywordTarget {
+    Command(CommandId),
+    /// A web search, by its alias.
+    Web(String),
+}
+
+impl fmt::Display for KeywordTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Command(id) => write!(f, "command:{id}"),
+            Self::Web(alias) => write!(f, "web:{alias}"),
+        }
+    }
+}
+
+/// One command, or web search, and the keywords that reach it, shortest first. The files
+/// search that Space on an empty query enters has none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct KeywordEntry {
+    pub(crate) target: KeywordTarget,
+    pub(crate) title: String,
+    pub(crate) subtitle: String,
+    pub(crate) keywords: Vec<String>,
+}
+
+fn checked(keyword: String) -> Result<String, CommandError> {
+    if keyword.trim().is_empty() || keyword.trim() != keyword {
+        Err(CommandError::InvalidKeyword(keyword))
+    } else {
+        Ok(keyword)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
     default: CommandId,
@@ -175,6 +241,8 @@ pub struct CommandRegistry {
     destination_search: Option<CommandId>,
     commands: HashMap<CommandId, CommandSpec>,
     keywords: HashMap<String, CommandId>,
+    /// Web search aliases, by alias, with what a list of commands calls each.
+    web: BTreeMap<String, String>,
     defaults: Vec<CommandId>,
     pinned: Option<CommandId>,
     browser: Option<CommandId>,
@@ -191,6 +259,7 @@ impl CommandRegistry {
             destination_search: None,
             commands: HashMap::new(),
             keywords: HashMap::new(),
+            web: BTreeMap::new(),
         }
     }
 
@@ -297,9 +366,12 @@ impl CommandRegistry {
         if !self.commands.contains_key(command) {
             return Err(CommandError::UnknownCommand(command.clone()));
         }
-        let keyword = keyword.into();
-        if keyword.trim().is_empty() || keyword.trim() != keyword {
-            return Err(CommandError::InvalidKeyword(keyword));
+        let keyword = checked(keyword.into())?;
+        if self.web.contains_key(&keyword) {
+            return Err(CommandError::KeywordConflict {
+                keyword,
+                command: command.clone(),
+            });
         }
         if let Some(existing) = self.keywords.get(&keyword) {
             if existing != command {
@@ -312,6 +384,62 @@ impl CommandRegistry {
         }
         self.keywords.insert(keyword, command.clone());
         Ok(())
+    }
+
+    /// Reserve `alias` for the web search called `title`, which a row of the main search
+    /// answers rather than a command.
+    pub fn add_web_alias(
+        &mut self,
+        alias: impl Into<String>,
+        title: impl Into<String>,
+    ) -> Result<(), CommandError> {
+        let alias = checked(alias.into())?;
+        if self.web.contains_key(&alias) || self.keywords.contains_key(&alias) {
+            return Err(CommandError::WebAliasConflict(alias));
+        }
+        self.web.insert(alias, title.into());
+        Ok(())
+    }
+
+    /// What answers `keyword`, a command or a web search.
+    pub fn holder(&self, keyword: &str) -> Option<KeywordHolder<'_>> {
+        self.keywords
+            .get(keyword)
+            .map(KeywordHolder::Command)
+            .or_else(|| self.web.get(keyword).map(|title| KeywordHolder::Web(title)))
+    }
+
+    /// Every command a keyword reaches, the files search Space reaches and every web search,
+    /// by title.
+    pub(crate) fn entries(&self) -> Vec<KeywordEntry> {
+        let mut commands: BTreeMap<&CommandId, Vec<String>> = BTreeMap::new();
+        for (keyword, command) in &self.keywords {
+            commands.entry(command).or_default().push(keyword.clone());
+        }
+        if let Some(files) = &self.space_on_empty {
+            commands.entry(files).or_default();
+        }
+        let mut entries: Vec<KeywordEntry> = commands
+            .into_iter()
+            .filter_map(|(id, mut keywords)| {
+                let spec = self.commands.get(id)?;
+                keywords.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+                Some(KeywordEntry {
+                    target: KeywordTarget::Command(id.clone()),
+                    title: spec.title().to_owned(),
+                    subtitle: spec.presentation.placeholder.clone(),
+                    keywords,
+                })
+            })
+            .chain(self.web.iter().map(|(alias, title)| KeywordEntry {
+                target: KeywordTarget::Web(alias.clone()),
+                title: title.clone(),
+                subtitle: "Web search".into(),
+                keywords: vec![alias.clone()],
+            }))
+            .collect();
+        entries.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.target.cmp(&b.target)));
+        entries
     }
 
     pub(crate) fn validate(&self) -> Result<(), CommandError> {
@@ -350,7 +478,7 @@ impl CommandRegistry {
         self.keywords.get(keyword)
     }
 
-    /// Every keyword some command answers.
+    /// Every keyword some command answers, web search aliases aside.
     pub fn keywords(&self) -> impl Iterator<Item = &str> {
         self.keywords.keys().map(String::as_str)
     }

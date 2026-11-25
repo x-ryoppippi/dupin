@@ -3,12 +3,15 @@
 //! `items()` catalogue, and Dupin matches the alias and fills the URL itself, so typing calls
 //! into no package.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use dupin_core::config::Config;
-use dupin_core::{Action, Item, ItemAction, Payload, Provider, ProviderError, Request, View};
+use dupin_core::session::keyword_tag;
+use dupin_core::{
+    Accessory, Action, Batch, Item, ItemAction, Payload, Provider, ProviderError, Request, View,
+};
 use dupin_extension_bridge::{Bridge, Call, PackageId, Trigger};
 use dupin_js_runtime::web_search::{self, PLACEHOLDER, WebSearch};
 use serde_json::{Map, Value, json};
@@ -27,8 +30,14 @@ pub fn reaches_main_search(package: &PackageId) -> bool {
     package.as_str() == WEB_SEARCH_PACKAGE
 }
 
-/// The aliases the bundled package lists while config.toml sets no `web_searches`.
-pub const DEFAULT_ALIASES: [&str; 4] = ["g", "gh", "maps", "yt"];
+/// The aliases the bundled package lists while config.toml sets no `web_searches`, with the
+/// names it gives them.
+pub const DEFAULT_SEARCHES: [(&str, &str); 4] = [
+    ("g", "Google"),
+    ("gh", "GitHub"),
+    ("maps", "Apple Maps"),
+    ("yt", "YouTube"),
+];
 
 /// config.toml's web searches as the bundled package receives them.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -36,9 +45,9 @@ pub struct Configured {
     /// `web_searches` and `web_fallbacks`, only what is set and only entries the package can
     /// list, which it reads as `ctx.preferences`.
     pub preferences: Map<String, Value>,
-    /// The aliases it lists from them, or its defaults. Like any configured keyword, no
-    /// extension keyword takes one.
-    pub aliases: HashSet<String>,
+    /// The aliases it lists from them, or its defaults, with their names. The command
+    /// registry reserves them, so no extension keyword takes one.
+    pub aliases: BTreeMap<String, String>,
 }
 
 /// config.toml's web searches for the bundled package, with a notice for the entries it can't
@@ -55,7 +64,7 @@ pub fn configured(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Confi
                 && valid_name(&search.name)
                 && web_search::check_template(&search.url).is_ok()
             {
-                configured.aliases.insert(keyword.clone());
+                configured.aliases.insert(keyword.clone(), search.name.clone());
                 listed.insert(keyword.clone(), json!({ "name": search.name, "url": search.url }));
             } else {
                 problems.push(CONFLICT);
@@ -65,11 +74,11 @@ pub fn configured(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Confi
             .preferences
             .insert("webSearches".into(), Value::Object(listed));
     } else {
-        for alias in DEFAULT_ALIASES {
+        for (alias, name) in DEFAULT_SEARCHES {
             if is_reserved(alias) {
                 problems.push(CONFLICT);
             } else {
-                configured.aliases.insert(alias.to_owned());
+                configured.aliases.insert(alias.to_owned(), name.to_owned());
             }
         }
     }
@@ -85,7 +94,7 @@ pub fn configured(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Confi
             problems.push("Duplicate web fallbacks were ignored.");
             continue;
         }
-        if configured.aliases.contains(keyword) {
+        if configured.aliases.contains_key(keyword) {
             fallbacks.push(Value::from(keyword.as_str()));
         } else {
             problems.push("Web fallbacks without a valid configured search were ignored.");
@@ -107,6 +116,12 @@ pub fn configured(config: &Config, is_reserved: impl Fn(&str) -> bool) -> (Confi
         unique.join(" ")
     });
     (configured, notice)
+}
+
+/// What the command registry calls the web search named `name`, as the bundled package titles
+/// its row.
+pub fn web_search_title(name: &str) -> String {
+    format!("Search {name}")
 }
 
 fn valid_name(name: &str) -> bool {
@@ -271,7 +286,10 @@ pub(crate) fn item(shown: &Item, search: &WebSearch, query: &str, complete: bool
     })
 }
 
-fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Item> {
+/// A row and the alias that reaches it.
+type Reached = (Item, String);
+
+fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Reached> {
     let raw = raw.trim_start();
     let boundary = raw.find(char::is_whitespace).unwrap_or(raw.len());
     let alias = &raw[..boundary];
@@ -283,10 +301,10 @@ fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<It
         .searches(deadline)
         .into_iter()
         .find(|(_, search)| search.alias == alias)
-        .and_then(|(shown, search)| item(&shown, &search, query, true))
+        .and_then(|(shown, search)| Some((item(&shown, &search, query, true)?, search.alias)))
 }
 
-fn fallback_items(searches: &WebSearches, raw: &str, limit: usize, deadline: Instant) -> Vec<Item> {
+fn fallback_items(searches: &WebSearches, raw: &str, limit: usize, deadline: Instant) -> Vec<Reached> {
     let query = raw.trim();
     if query.is_empty() {
         return Vec::new();
@@ -299,7 +317,7 @@ fn fallback_items(searches: &WebSearches, raw: &str, limit: usize, deadline: Ins
     fallbacks.sort_by_key(|(position, ..)| *position);
     fallbacks
         .iter()
-        .filter_map(|(_, shown, search)| item(shown, search, query, false))
+        .filter_map(|(_, shown, search)| Some((item(shown, search, query, false)?, search.alias.clone())))
         .take(limit)
         .collect()
 }
@@ -317,6 +335,11 @@ impl WebProvider {
 
 impl Provider for WebProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.search_batches(request, &mut |batch| emit(batch.items))
+    }
+
+    /// Each row shows the alias that reaches it as a tag.
+    fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         if request.is_cancelled() || request.limit == 0 {
             return Ok(());
         }
@@ -327,16 +350,24 @@ impl Provider for WebProvider {
             searches.clone()
         };
         let deadline = Instant::now() + QUERY_DEADLINE;
-        let items = if self.fallback {
+        let rows = if self.fallback {
             fallback_items(&searches, &request.query, request.limit, deadline)
         } else {
             alias_item(&searches, &request.query, deadline)
                 .into_iter()
                 .collect()
         };
-        if !items.is_empty() && !request.is_cancelled() {
-            emit(items);
+        if rows.is_empty() || request.is_cancelled() {
+            return Ok(());
         }
+        let mut batch = Batch::default();
+        for (item, alias) in rows {
+            batch
+                .accessories
+                .insert(item.id.clone(), vec![Accessory::Tag(keyword_tag(&alias))]);
+            batch.items.push(item);
+        }
+        emit(batch);
         Ok(())
     }
 }
@@ -378,16 +409,14 @@ mod tests {
     }
 
     fn aliases(configured: &Configured) -> Vec<&str> {
-        let mut aliases: Vec<_> = configured.aliases.iter().map(String::as_str).collect();
-        aliases.sort_unstable();
-        aliases
+        configured.aliases.keys().map(String::as_str).collect()
     }
 
     #[test]
     fn config_reaches_the_package_only_once_set_and_without_entries_it_could_not_list() {
         let (web, notice) = configured(&Config::default(), |_| false);
         assert!(web.preferences.is_empty());
-        assert_eq!(aliases(&web), DEFAULT_ALIASES);
+        assert_eq!(aliases(&web), DEFAULT_SEARCHES.map(|(alias, _)| alias));
         assert_eq!(notice, None);
 
         let mut config = Config {
@@ -574,7 +603,12 @@ mod tests {
         let held = sources.held().expect("typing loaded the catalogue");
         let mut listed: Vec<_> = held.iter().map(|(_, search)| search.alias.as_str()).collect();
         listed.sort_unstable();
-        assert_eq!(listed, DEFAULT_ALIASES);
+        assert_eq!(listed, DEFAULT_SEARCHES.map(|(alias, _)| alias));
+        // The registry names the defaults as the package titles them.
+        for (alias, name) in DEFAULT_SEARCHES {
+            let (shown, _) = held.iter().find(|(_, search)| search.alias == alias).unwrap();
+            assert_eq!(shown.display_title(), web_search_title(name));
+        }
         let receivers =
             crate::receivers::for_payload(&dupin_mac::kinds::native(), &Payload::text("日本語 +&/#?"), &held);
         let receivers: Vec<_> = receivers

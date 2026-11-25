@@ -279,7 +279,11 @@ mod tests {
             .collect();
         assert_eq!(listed, ["web"]);
         assert_eq!(web.preferences["webFallbacks"], serde_json::json!(["web"]));
-        assert_eq!(web.aliases, ["web".to_owned()].into());
+        assert_eq!(web.aliases.keys().collect::<Vec<_>>(), ["web"]);
+        assert!(matches!(
+            registry.holder("web"),
+            Some(dupin_core::KeywordHolder::Web("Search Example"))
+        ));
 
         let mut session = Session::new(History::default(), registry).unwrap();
         assert!(matches!(

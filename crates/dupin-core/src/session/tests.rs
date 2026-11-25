@@ -1067,7 +1067,7 @@ fn completing_a_result_keeps_the_raw_query_and_searches_it() {
 #[test]
 fn completing_a_keyword_prefix_uses_existing_keyword_routing() {
     let mut s = session();
-    let generation = searched(&s.set_query("d")).1;
+    let generation = searched(&s.set_query("dict")).1;
     s.deliver(Delivery::Batch {
         generation,
         items: vec![completion_item("Dictionary", "define serendipity")],
