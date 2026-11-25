@@ -94,6 +94,8 @@ pub struct CommandSpec {
     pub presentation: QueryPresentation,
     pub deadline: std::time::Duration,
     pub(crate) query_eligibility: QueryEligibility,
+    /// Whether rows that name commands while the main search is typed, and `?`, name it.
+    hinted: bool,
 }
 
 impl CommandSpec {
@@ -109,6 +111,7 @@ impl CommandSpec {
             presentation,
             deadline: std::time::Duration::from_secs(30),
             query_eligibility: QueryEligibility::NonEmpty,
+            hinted: true,
         }
     }
 
@@ -132,6 +135,17 @@ impl CommandSpec {
             .as_deref()
             .or(self.presentation.chip.as_deref())
             .unwrap_or(&self.presentation.placeholder)
+    }
+
+    /// Keeps the command out of the rows that name commands as the main search's query is
+    /// typed, and out of `?`, while its keywords still enter it.
+    pub fn unhinted(mut self) -> Self {
+        self.hinted = false;
+        self
+    }
+
+    pub fn hinted(&self) -> bool {
+        self.hinted
     }
 
     pub fn with_query_eligibility(mut self, eligibility: QueryEligibility) -> Self {
@@ -580,6 +594,16 @@ impl CommandRegistry {
             entry
         }));
         entries.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.target.cmp(&b.target)));
+        entries
+    }
+
+    /// [`Self::entries`] without the commands that are [`CommandSpec::unhinted`].
+    pub(crate) fn hinted_entries(&self) -> Vec<KeywordEntry> {
+        let mut entries = self.entries();
+        entries.retain(|entry| match &entry.target {
+            KeywordTarget::Command(id) => self.commands.get(id).is_none_or(|spec| spec.hinted),
+            _ => true,
+        });
         entries
     }
 

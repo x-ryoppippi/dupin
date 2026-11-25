@@ -34,6 +34,20 @@ impl RowText {
 }
 
 impl Ui {
+    /// The stored snippets changed, from Settings or the launcher's form, or were first read:
+    /// the command is suggested again once there is one, and its list shows them.
+    pub(crate) fn snippets_changed(&mut self, tx: &mut Tx) {
+        let config = self.configuration.values.borrow().clone();
+        self.apply_config(&config, tx);
+        // A page of the package's own refreshes as its action ends; only the list is searched again.
+        if self.session.command_id().as_str() == crate::features::snippets::SNIPPETS
+            && self.session.depth() == 0
+        {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
+    }
+
     /// Copy the snippet now, or paste it once the panel closes if access is granted.
     pub(super) fn run_snippet(&mut self, text: String, paste: bool, tx: &mut Tx) {
         let snippet = SnippetRun::now(text);

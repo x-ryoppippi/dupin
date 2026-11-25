@@ -186,8 +186,9 @@ fn thumbnail(bridge: &Bridge, job: &Job) -> Option<Vec<u8>> {
         Err(failure) => {
             if !matches!(failure.code(), "needs-consent" | "disabled" | "not-found") {
                 crate::log::warn(&format!(
-                    "extension {}: couldn't draw an image: {failure}",
-                    job.image.extension
+                    "extension {}: couldn't draw an image: {}",
+                    job.image.extension,
+                    failure.code()
                 ));
             }
             None

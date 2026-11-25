@@ -77,12 +77,20 @@ struct State {
     stored: Mutex<Vec<Value>>,
     effects: Mutex<Effects>,
     windows: Option<windows::Service<windows::Fixture>>,
+    /// The snippets the fixture hands the package, which its `snippets` calls change.
+    snippets: Mutex<Snippets>,
 }
 
 impl Fixture {
     /// `name` is the fixture's path in the package, for diagnostics.
-    pub fn open(extension: &Extension, name: &str, replies: &Replies, now: i64) -> Result<Self, Diagnostic> {
-        let replier = Replier::new(replies, now)?;
+    pub fn open(
+        extension: &Extension,
+        name: &str,
+        replies: &Replies,
+        preferences: &serde_json::Map<String, Value>,
+        now: i64,
+    ) -> Result<Self, Diagnostic> {
+        let replier = Replier::new(replies, preferences, now)?;
         let bridge = Bridge::new(
             Broker::new(Base::default(), Local::default()),
             None,
@@ -101,10 +109,63 @@ impl Fixture {
     pub fn take_effects(&self) -> Effects {
         self.replier.take_effects()
     }
+
+    /// The `snippets` and `paste` preferences, when a `snippets` call changed the snippets
+    /// since the last call, as Dupin hands them to the bundled package after a change.
+    pub fn take_snippets(&self) -> Option<serde_json::Map<String, Value>> {
+        let mut snippets = lock(&self.replier.state.snippets);
+        std::mem::take(&mut snippets.changed).then(|| {
+            dupin_core::snippets::preferences(&snippets.declared, &snippets.stored, snippets.paste).0
+        })
+    }
+}
+
+/// The fixture's snippets: `ctx.preferences.snippets` split by where each comes from, which a
+/// `snippets` call checks and changes as Dupin's own library does, without storage.
+#[derive(Default)]
+struct Snippets {
+    declared: BTreeMap<String, dupin_core::config::Snippet>,
+    stored: Vec<dupin_core::snippets::Snippet>,
+    paste: bool,
+    changed: bool,
+}
+
+impl Snippets {
+    fn seeded(preferences: &serde_json::Map<String, Value>) -> Self {
+        let mut snippets = Self {
+            paste: preferences
+                .get("paste")
+                .and_then(Value::as_bool)
+                .unwrap_or_default(),
+            ..Self::default()
+        };
+        let listed = preferences.get("snippets").and_then(Value::as_array);
+        for entry in listed.into_iter().flatten() {
+            let Ok(snippet) = serde_json::from_value::<dupin_core::snippets::Snippet>(entry.clone()) else {
+                continue;
+            };
+            if entry.get("source").and_then(Value::as_str) == Some("config") {
+                snippets.declared.insert(
+                    snippet.keyword,
+                    dupin_core::config::Snippet {
+                        name: snippet.name,
+                        text: snippet.text,
+                    },
+                );
+            } else {
+                snippets.stored.push(snippet);
+            }
+        }
+        snippets
+    }
 }
 
 impl Replier {
-    fn new(replies: &Replies, now: i64) -> Result<Self, Diagnostic> {
+    fn new(
+        replies: &Replies,
+        preferences: &serde_json::Map<String, Value>,
+        now: i64,
+    ) -> Result<Self, Diagnostic> {
         let scratch = tempfile::Builder::new()
             .prefix("dupin-fixture-")
             .tempdir()
@@ -130,6 +191,7 @@ impl Replier {
             stored: Mutex::new(replies.storage.clone()),
             effects: Mutex::default(),
             windows,
+            snippets: Mutex::new(Snippets::seeded(preferences)),
         });
         Ok(Self { state, scratch })
     }
@@ -143,6 +205,7 @@ impl Replier {
             clipboard: shared(),
             dictionary: shared(),
             calculator: shared(),
+            snippets: shared(),
             calendar: shared(),
             windows: shared(),
         }
@@ -303,7 +366,7 @@ impl Headless {
             .map_err(|error| Diagnostic::new("invalid-package", error.to_string()))?;
         Ok(Self {
             package,
-            replier: Replier::new(&parsed.replies, now)?,
+            replier: Replier::new(&parsed.replies, &parsed.preferences, now)?,
             granted: Mutex::default(),
         })
     }
@@ -560,6 +623,38 @@ impl services::Calculator for Shared {
             .get(expression)
             .cloned()
             .ok_or_else(|| missing(format!("working out {}", Value::from(expression))))
+    }
+}
+
+impl services::Snippets for Shared {
+    fn save(&self, draft: services::SnippetDraft, replaces: Option<&str>) -> Result<Value, Failure> {
+        let draft = dupin_core::snippets::Snippet {
+            keyword: draft.keyword,
+            name: draft.name,
+            text: draft.text,
+        }
+        .normalized();
+        let mut snippets = lock(&self.0.snippets);
+        let problems =
+            dupin_core::snippets::check_save(&snippets.declared, &snippets.stored, &draft, replaces);
+        if problems.is_empty() {
+            snippets.stored.retain(|snippet| {
+                Some(snippet.keyword.as_str()) != replaces && snippet.keyword != draft.keyword
+            });
+            snippets.stored.push(draft);
+            snippets.stored.sort_by(|a, b| a.keyword.cmp(&b.keyword));
+            snippets.changed = true;
+        }
+        serde_json::to_value(problems).map_err(|error| Failure::new("failed", error.to_string()))
+    }
+
+    fn delete(&self, keyword: &str) -> Result<bool, Failure> {
+        let mut snippets = lock(&self.0.snippets);
+        let before = snippets.stored.len();
+        snippets.stored.retain(|snippet| snippet.keyword != keyword);
+        let deleted = snippets.stored.len() != before;
+        snippets.changed |= deleted;
+        Ok(deleted)
     }
 }
 

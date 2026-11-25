@@ -181,7 +181,13 @@ pub(super) fn replay(
     let mut replayer = Replayer {
         extension,
         host: fixture_host(name, fixture)?,
-        world: services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?,
+        world: services::Fixture::open(
+            extension,
+            name,
+            &fixture.replies,
+            &fixture.preferences,
+            guest_environment(fixture).now,
+        )?,
         preferences: Arc::new(fixture.preferences.clone()),
         held: super::Held::new(extension),
         cancelled,
@@ -544,6 +550,13 @@ impl Replayer<'_> {
             self.cancelled,
             &self.call(Trigger::Activation).services,
         );
+        // Dupin hands the bundled snippets package its changed snippets before the action
+        // that changed them answers, so what it shows next lists them.
+        if let Some(snippets) = self.world.take_snippets() {
+            let mut preferences = (*self.preferences).clone();
+            preferences.extend(snippets);
+            self.preferences = Arc::new(preferences);
+        }
         if let Ok(acted) = &acted
             && acted.invalidated
         {

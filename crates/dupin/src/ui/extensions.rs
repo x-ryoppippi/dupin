@@ -323,7 +323,7 @@ impl Ui {
                     }
                     Ok(_) | Err(RunError::Cancelled) => {}
                     Err(RunError::Failed(diagnostic)) => {
-                        crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                        crate::log::warn(&format!("extension {}: {}", extension.id, diagnostic.for_log()));
                     }
                 }
             });
@@ -580,7 +580,7 @@ impl Ui {
             Ok(acted) => acted.effect,
             Err(RunError::Cancelled) => None,
             Err(RunError::Failed(diagnostic)) => {
-                crate::log::warn(&format!("extension {name}: {diagnostic}"));
+                crate::log::warn(&format!("extension {name}: {}", diagnostic.for_log()));
                 self.show_notice(format!("{name} failed: {}", diagnostic.message), tx);
                 None
             }

@@ -151,6 +151,25 @@ pub trait Calculator: Send + Sync {
     fn evaluate(&self, expression: &str, cancelled: &AtomicBool) -> Result<Value, Failure>;
 }
 
+/// A snippet a package asks Dupin to store, as the guest sent it, before Dupin checks it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnippetDraft {
+    pub keyword: String,
+    pub name: Option<String>,
+    pub text: String,
+}
+
+/// The snippets the user stores in Dupin, which only the user's own actions change.
+pub trait Snippets: Send + Sync {
+    /// Stores `draft` in place of the stored snippet with the keyword `replaces`, or as a new
+    /// one without it. Returns what is wrong with each field, by field name, as a JSON object
+    /// that is empty when the snippet was stored.
+    fn save(&self, draft: SnippetDraft, replaces: Option<&str>) -> Result<Value, Failure>;
+    /// Deletes the stored snippet `keyword`, and says whether there was one. config.toml's
+    /// snippets are not stored and stay.
+    fn delete(&self, keyword: &str) -> Result<bool, Failure>;
+}
+
 pub trait Calendar: Send + Sync {
     /// The whole local days before and after today that `[from, to)` (milliseconds since the
     /// epoch) reaches, which the broker checks against the declared window.
@@ -246,6 +265,15 @@ impl Calculator for Unavailable {
     }
 }
 
+impl Snippets for Unavailable {
+    fn save(&self, _draft: SnippetDraft, _replaces: Option<&str>) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn delete(&self, _keyword: &str) -> Result<bool, Failure> {
+        Err(self.failure())
+    }
+}
+
 impl Calendar for Unavailable {
     fn window(&self, _from: i64, _to: i64) -> Result<(u32, u32), Failure> {
         Err(self.failure())
@@ -292,6 +320,7 @@ pub struct Services {
     pub clipboard: Box<dyn Clipboard>,
     pub dictionary: Box<dyn Dictionary>,
     pub calculator: Box<dyn Calculator>,
+    pub snippets: Box<dyn Snippets>,
     pub calendar: Box<dyn Calendar>,
     pub windows: Box<dyn Windows>,
 }
@@ -306,6 +335,7 @@ impl Services {
             clipboard: Box::new(Unavailable("the clipboard isn't available")),
             dictionary: Box::new(Unavailable("the dictionary isn't available")),
             calculator: Box::new(Unavailable("the calculator isn't available")),
+            snippets: Box::new(Unavailable("snippets aren't available")),
             calendar: Box::new(Unavailable("calendars aren't available")),
             windows: Box::new(Unavailable("windows aren't available")),
         }
@@ -323,6 +353,27 @@ pub(crate) mod fixture {
     use std::time::Duration;
 
     use super::*;
+
+    /// Snippets by keyword, refusing a keyword with a space as Dupin does.
+    #[derive(Clone, Default)]
+    pub(crate) struct Snippets(pub(crate) Arc<Mutex<BTreeMap<String, SnippetDraft>>>);
+
+    impl super::Snippets for Snippets {
+        fn save(&self, draft: SnippetDraft, replaces: Option<&str>) -> Result<Value, Failure> {
+            if draft.keyword.contains(' ') {
+                return Ok(serde_json::json!({ "keyword": "A keyword has no spaces" }));
+            }
+            let mut stored = self.0.lock().unwrap();
+            if let Some(replaced) = replaces {
+                stored.remove(replaced);
+            }
+            stored.insert(draft.keyword.clone(), draft);
+            Ok(serde_json::json!({}))
+        }
+        fn delete(&self, keyword: &str) -> Result<bool, Failure> {
+            Ok(self.0.lock().unwrap().remove(keyword).is_some())
+        }
+    }
 
     /// Answers every fetch with `body` after `delay`, recording each request.
     #[derive(Default)]

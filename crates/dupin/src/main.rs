@@ -25,6 +25,7 @@ mod scripts;
 mod settings;
 mod shader;
 mod snapshots;
+mod snippets;
 mod store;
 mod symbols;
 mod trace;

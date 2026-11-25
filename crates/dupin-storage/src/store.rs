@@ -597,6 +597,12 @@ impl Storage {
         Ok(store)
     }
 
+    /// Whether `namespace` was ever opened here, found without asking for the key, so an owner
+    /// with nothing stored need not read the key store at all.
+    pub fn exists(&self, namespace: &str) -> bool {
+        validate_namespace(namespace).is_ok() && self.dir.join(namespace).is_dir()
+    }
+
     /// Deletes a namespace that is not open, for example one sealed with a lost key.
     pub fn discard(&self, namespace: &str) -> Result<(), Error> {
         validate_namespace(namespace)?;

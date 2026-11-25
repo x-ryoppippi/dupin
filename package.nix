@@ -47,6 +47,7 @@ let
             "storage"
             "dictionary"
             "calculator"
+            "snippets"
             "calendar"
             "query"
           ]

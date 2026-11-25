@@ -35,6 +35,10 @@ const MAX_PAGE: usize = 200;
 const MAX_PAGE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORD_CHARS: usize = 200;
 const MAX_EXPRESSION_BYTES: usize = 512;
+/// What a snippet's keyword or name may be before Dupin checks it against its own, narrower
+/// rules and answers with what is wrong.
+const MAX_SNIPPET_FIELD_BYTES: usize = 1024;
+const MAX_SNIPPET_TEXT_BYTES: usize = 128 * 1024;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_INPUTS: usize = 32;
 const MAX_INPUT_BYTES: usize = 4 * 1024;
@@ -170,6 +174,21 @@ struct Word {
 #[serde(deny_unknown_fields)]
 struct Expression {
     expression: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SnippetArgs {
+    keyword: String,
+    name: Option<String>,
+    text: String,
+    replaces: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Keyword {
+    keyword: String,
 }
 
 #[derive(Deserialize)]
@@ -319,6 +338,41 @@ impl Session {
                 let answer = self.bridge.services.calculator.evaluate(&expression, cancelled)?;
                 self.release(&permit, cancelled)?;
                 Ok(answer)
+            }
+            "snippets.save" => {
+                let SnippetArgs {
+                    keyword,
+                    name,
+                    text,
+                    replaces,
+                } = decode(args)?;
+                bounded(&keyword, "keyword", MAX_SNIPPET_FIELD_BYTES)?;
+                bounded(
+                    name.as_deref().unwrap_or_default(),
+                    "name",
+                    MAX_SNIPPET_FIELD_BYTES,
+                )?;
+                bounded(&text, "text", MAX_SNIPPET_TEXT_BYTES)?;
+                bounded(
+                    replaces.as_deref().unwrap_or_default(),
+                    "replaces",
+                    MAX_SNIPPET_FIELD_BYTES,
+                )?;
+                let permit = self.permit(&Request::SnippetsWrite)?;
+                // Storing it is the effect, so the permit is checked again just before it.
+                self.release(&permit, cancelled)?;
+                self.bridge.services.snippets.save(
+                    crate::services::SnippetDraft { keyword, name, text },
+                    replaces.as_deref(),
+                )
+            }
+            "snippets.delete" => {
+                let Keyword { keyword } = decode(args)?;
+                bounded(&keyword, "keyword", MAX_SNIPPET_FIELD_BYTES)?;
+                let permit = self.permit(&Request::SnippetsWrite)?;
+                self.release(&permit, cancelled)?;
+                let deleted = self.bridge.services.snippets.delete(&keyword)?;
+                Ok(json!({ "deleted": deleted }))
             }
             "calendar.events" => {
                 let Range {

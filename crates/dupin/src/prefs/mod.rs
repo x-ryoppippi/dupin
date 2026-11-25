@@ -10,6 +10,7 @@ mod general;
 mod keywords;
 mod permissions;
 mod search;
+mod snippets;
 mod updates;
 pub mod welcome;
 
@@ -47,6 +48,7 @@ enum Page {
     General,
     Search,
     Keywords,
+    Snippets,
     Appearance,
     Extensions,
     Permissions,
@@ -59,6 +61,7 @@ impl Page {
             Page::General => "General",
             Page::Search => "Search",
             Page::Keywords => "Keywords",
+            Page::Snippets => "Snippets",
             Page::Appearance => "Appearance",
             Page::Extensions => "Extensions",
             Page::Permissions => "Permissions",
@@ -72,6 +75,7 @@ impl Page {
             Page::General => "page-general",
             Page::Search => "page-search",
             Page::Keywords => "page-keywords",
+            Page::Snippets => "page-snippets",
             Page::Appearance => "page-appearance",
             Page::Extensions => "page-extensions",
             Page::Permissions => "page-permissions",
@@ -84,6 +88,7 @@ impl Page {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
             Page::Keywords => &icons::KEYBOARD,
+            Page::Snippets => &icons::QUOTE,
             Page::Appearance => &icons::SPARKLES,
             Page::Extensions => &icons::PUZZLE,
             Page::Permissions => &icons::SHIELD,
@@ -122,13 +127,16 @@ pub struct Prefs {
     /// Why the last Allow, Revoke or switch on Extensions didn't apply.
     extension_problem: Option<String>,
     keywords: keywords::Keywords,
+    snippets: snippets::Snippets,
+    /// Settings itself, which a change written on a worker thread reports back to.
+    me: AppHandle<Prefs>,
 }
 
 impl Prefs {
     pub fn new(
         (current, locked_keys): (Rc<RefCell<Config>>, crate::settings::LockedKeys),
         binding: Arc<Binding>,
-        panel: AppHandle<Ui>,
+        (panel, me): (AppHandle<Ui>, AppHandle<Prefs>),
         updater: Updater,
         settings: Arc<crate::settings::Service>,
         welcome: bool,
@@ -148,6 +156,8 @@ impl Prefs {
             preview_dark: None,
             active_radius,
             keywords: keywords::Keywords::new(&config),
+            snippets: snippets::Snippets::new(&config),
+            me,
             config,
             current,
             page: Page::General,
@@ -231,6 +241,7 @@ impl Prefs {
         self.reflect_launch_hotkey();
         if config != self.config {
             self.keywords.reflect(&config, Some(&self.config));
+            self.snippets.reflect(&config);
         }
         self.config = config;
     }
@@ -351,6 +362,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (None, Page::General) => general::page(s, k, hair),
         (None, Page::Search) => search::page(s, k, hair),
         (None, Page::Keywords) => keywords::page(s, k, hair),
+        (None, Page::Snippets) => snippets::page(s, k, hair),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Extensions) => extensions::problem(s, k)
             .into_iter()
@@ -437,6 +449,7 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         Page::General,
         Page::Search,
         Page::Keywords,
+        Page::Snippets,
         Page::Appearance,
         Page::Extensions,
     ]
@@ -566,11 +579,11 @@ mod tests {
         ))
         .handle();
         let binding = Arc::new(Binding::new(panel.clone()));
-        let updater = Updater::start(false, panel.clone(), prefs);
+        let updater = Updater::start(false, panel.clone(), prefs.clone());
         Prefs::new(
             (current, Default::default()),
             binding,
-            panel,
+            (panel, prefs),
             updater,
             settings,
             welcome,
@@ -668,6 +681,47 @@ mod tests {
             s.remove_alias("d");
             assert!(!s.config.aliases.0.contains_key("d"));
         });
+    }
+
+    #[test]
+    fn the_snippets_page_lists_config_toml_snippets_read_only_and_adds_stored_ones() {
+        use rune::accesskit::Role;
+
+        let config =
+            Config::parse("[snippets.sig]\nname = \"Email signature\"\ntext = \"Best wishes\"").unwrap();
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Snippets);
+        assert_eq!(
+            state.snippet_rows(),
+            [("sig".to_owned(), dupin_core::snippets::Source::Config)]
+        );
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        runtime.frame(0.0);
+        let tree = runtime.accessibility_tree();
+        let button = |label: &str| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+        };
+        assert!(button("Add Snippet"));
+        assert!(!button("Edit"), "config.toml's snippet is never edited here");
+        assert!(!button("Delete"));
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Email signature"))
+        );
+        runtime.update(|s, _| s.add_snippet());
+        runtime.frame(0.0);
+        let tree = runtime.accessibility_tree();
+        for label in ["Name", "Keyword", "Text", "Save Snippet"] {
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.label() == Some(label)),
+                "missing {label}"
+            );
+        }
     }
 
     #[test]
