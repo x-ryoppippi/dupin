@@ -4,7 +4,7 @@ Type `snip`, then Space, to list your snippets ("Snippets"); type to narrow them
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/snippets/list-dark.png" />
-<img alt="The snippets list: Home address, Quote the clipboard, Email signature and Checked stamp, each with its keyword and the start of its text." src="../images/snippets/list-light.png" width="680" />
+<img alt="The snippets list: Add Snippet, then Home address, Quote the clipboard, Email signature and Checked stamp, each with its keyword, the start of its text and a config.toml tag." src="../images/snippets/list-light.png" width="680" />
 </picture>
 
 With pasting turned on in Settings → Search, Enter pastes the snippet into the app you were using and ⌘Enter only copies it. The actions screen (Right Arrow or ⌘K) offers both. Turning on **Paste snippets** in Settings requests Accessibility access when needed. Snippets don't expand as you type in other apps.
