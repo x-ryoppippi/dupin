@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -14,6 +14,8 @@ enum Action {
     Help,
     ExtHelp,
     Version,
+    /// Print the third-party notices Dupin.app carries.
+    Licenses,
     Open(Option<String>),
     Pick(bool),
     Get,
@@ -142,6 +144,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["--help" | "-h"] => Ok(Action::Help),
         ["ext", "--help" | "-h" | "help"] => Ok(Action::ExtHelp),
         ["--version" | "-V"] => Ok(Action::Version),
+        ["--licenses"] => Ok(Action::Licenses),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
         ["pick"] => Ok(Action::Pick(false)),
@@ -249,19 +252,19 @@ pub fn run() -> bool {
             if json || !value.is_null() || picked {
                 if !json && picked {
                     if let Some(s) = value.as_str() {
-                        println!("{s}");
+                        crate::out::outln!("{s}");
                     } else {
-                        println!("{value}");
+                        crate::out::outln!("{value}");
                     }
                 } else {
-                    println!("{value}");
+                    crate::out::outln!("{value}");
                 }
             }
             true
         }
         Err(Failure::Message(error)) => {
             if json {
-                println!("{}", serde_json::json!({"error": error}));
+                crate::out::outln!("{}", serde_json::json!({"error": error}));
             } else {
                 eprintln!("dupin: {error}");
             }
@@ -269,15 +272,15 @@ pub fn run() -> bool {
         }
         Err(Failure::Report(report, text)) => {
             if json {
-                println!("{report}");
+                crate::out::outln!("{report}");
             } else {
-                print!("{text}");
+                crate::out::out!("{text}");
             }
             std::process::exit(1)
         }
         Err(Failure::Diagnostic(diagnostic)) => {
             if json {
-                println!(
+                crate::out::outln!(
                     "{}",
                     serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
                 );
@@ -294,7 +297,11 @@ pub fn run() -> bool {
 
 fn owns_arguments(args: &[String]) -> bool {
     args.first().is_some_and(|first| {
-        !first.starts_with('-') || matches!(first.as_str(), "--help" | "-h" | "--version" | "-V" | "--json")
+        !first.starts_with('-')
+            || matches!(
+                first.as_str(),
+                "--help" | "-h" | "--version" | "-V" | "--licenses" | "--json"
+            )
     })
 }
 fn isolated_render(args: &[String], output: &str) -> Result<Value, String> {
@@ -336,7 +343,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({"help": HELP}));
             }
-            println!("{HELP}");
+            crate::out::outln!("{HELP}");
             Ok(Value::Null)
         }
         Action::ExtHelp => {
@@ -344,7 +351,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({"help": help}));
             }
-            println!("{help}");
+            crate::out::outln!("{help}");
             Ok(Value::Null)
         }
         Action::Version => {
@@ -352,7 +359,16 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 Ok(serde_json::json!({"version":version}))
             } else {
-                println!("dupin {version}");
+                crate::out::outln!("dupin {version}");
+                Ok(Value::Null)
+            }
+        }
+        Action::Licenses => {
+            let (path, notices) = crate::notices::read()?;
+            if json {
+                Ok(serde_json::json!({"path": path, "notices": notices}))
+            } else {
+                crate::out::out!("{notices}");
                 Ok(Value::Null)
             }
         }
@@ -421,7 +437,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "defaultSearch": extension.default_search,
                 }));
             }
-            println!(
+            crate::out::outln!(
                 "{} {} answers `{}` with {}{}",
                 extension.name,
                 extension.version,
@@ -449,7 +465,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "scopes": scopes,
                 }));
             }
-            println!("{revision}");
+            crate::out::outln!("{revision}");
             Ok(Value::Null)
         }
         Action::ExtRun(folder, query) => {
@@ -466,7 +482,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(answer_json(&batches));
             }
-            print!("{}", describe_answer(&batches));
+            crate::out::out!("{}", describe_answer(&batches));
             Ok(Value::Null)
         }
         Action::ExtTest(folder, update) => {
@@ -477,7 +493,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(report.json);
             }
-            print!("{}", report.text);
+            crate::out::out!("{}", report.text);
             Ok(Value::Null)
         }
         Action::ExtSnap(folder, fixture, output, step) => {
@@ -491,9 +507,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(snapped_json(&snapped));
             }
-            println!(
+            crate::out::outln!(
                 "Rendered step {} of {fixture} to {output}: {}×{} points at {}×",
-                snapped.step, snapped.width, snapped.height, snapped.scale
+                snapped.step,
+                snapped.width,
+                snapped.height,
+                snapped.scale
             );
             Ok(Value::Null)
         }
@@ -509,12 +528,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "extensions": config.extensions,
                 }));
             }
-            println!(
+            crate::out::outln!(
                 "Copied the bundled {name} to {}. It replaces the bundled one while the extensions folder is on, without the bundled grants once you change it; delete it to go back.",
                 copy.display()
             );
             if !config.extensions {
-                println!(
+                crate::out::outln!(
                     "The extensions folder is off: turn it on in Settings → Extensions to use your copy."
                 );
             }
@@ -526,9 +545,9 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({ "created": files }));
             }
-            println!("Created {folder}:");
+            crate::out::outln!("Created {folder}:");
             for file in files {
-                println!("  {file}");
+                crate::out::outln!("  {file}");
             }
             Ok(Value::Null)
         }
@@ -553,8 +572,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 }));
             }
             match rolldown {
-                Some(rolldown) => println!("Built {} with {rolldown}", built.output),
-                None => println!(
+                Some(rolldown) => crate::out::outln!("Built {} with {rolldown}", built.output),
+                None => crate::out::outln!(
                     "{} runs as written, needs no build and passes the check",
                     built.output
                 ),
@@ -602,7 +621,7 @@ fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagn
 /// `--json`, otherwise a line on stdout or a diagnostic on stderr.
 fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::Diagnostic>, json: bool) {
     match (outcome, json) {
-        (Ok(published), true) => println!(
+        (Ok(published), true) => crate::out::outln!(
             "{}",
             serde_json::json!({
                 "published": published.name,
@@ -610,13 +629,13 @@ fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::D
                 "path": published.link,
             })
         ),
-        (Ok(published), false) => println!(
+        (Ok(published), false) => crate::out::outln!(
             "Published {} revision {} to {}",
             published.name,
             published.revision,
             published.link.display()
         ),
-        (Err(diagnostic), true) => println!(
+        (Err(diagnostic), true) => crate::out::outln!(
             "{}",
             serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
         ),
@@ -1114,6 +1133,8 @@ mod tests {
             assert!(!owns_arguments(&[flag.into()]));
         }
         assert!(owns_arguments(&["pick".into()]));
+        assert!(owns_arguments(&["--licenses".into()]));
+        assert_eq!(parse(&["--licenses".into()]).unwrap(), Action::Licenses);
         assert!(owns_arguments(&["invalid-subcommand".into()]));
         assert!(parse(&["open".into(), "--bad".into()]).is_err());
         let args = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
