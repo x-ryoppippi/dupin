@@ -12,18 +12,18 @@ use crate::row::{
 };
 
 /// Fields one form may have.
-pub const MAX_FIELDS: usize = 16;
+pub(crate) const MAX_FIELDS: usize = 16;
 pub(crate) const MAX_FIELD_ID_BYTES: usize = 64;
 pub(crate) const MAX_FIELD_TITLE_BYTES: usize = 128;
 /// What a text field holds, its default or what is typed.
-pub const MAX_TEXT_FIELD_BYTES: usize = 1024;
+pub(crate) const MAX_TEXT_FIELD_BYTES: usize = 1024;
 /// What a multi-line text field holds.
 pub const MAX_TEXTAREA_BYTES: usize = 16 * 1024;
 pub(crate) const MAX_OPTIONS: usize = 32;
 pub(crate) const MAX_OPTION_BYTES: usize = 128;
 pub(crate) const MAX_EMPTY_TEXT_BYTES: usize = 256;
 /// One field's error, as a form's submit or Dupin's own check gives it.
-pub const MAX_FIELD_ERROR_BYTES: usize = 256;
+pub(crate) const MAX_FIELD_ERROR_BYTES: usize = 256;
 
 /// What `views[name](ctx)` answered.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,13 +112,6 @@ impl FieldKind {
             FieldKind::Checkbox { .. } | FieldKind::Select { .. } => None,
         }
     }
-
-    pub fn required(&self) -> bool {
-        matches!(
-            self,
-            FieldKind::Text { required: true, .. } | FieldKind::Textarea { required: true, .. }
-        )
-    }
 }
 
 fn line(name: &str, value: &str, cap: usize) -> Result<(), String> {
@@ -188,7 +181,7 @@ impl ViewAnswer {
 }
 
 impl Form {
-    pub fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         line("title", &self.title, MAX_TITLE_BYTES)?;
         check_handler(&self.submit).map_err(|message| message.replace("`run`", "`submit`"))?;
         if let Some(title) = &self.submit_title {

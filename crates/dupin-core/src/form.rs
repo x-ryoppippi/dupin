@@ -64,7 +64,7 @@ impl Field {
     }
 
     /// What is wrong with `value` for this field, as Dupin shows it under the field.
-    pub fn problem(&self, value: &Value) -> Option<String> {
+    fn problem(&self, value: &Value) -> Option<String> {
         match (&self.kind, value) {
             (
                 FieldKind::Text {

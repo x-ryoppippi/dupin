@@ -37,7 +37,7 @@ pub(crate) const MAX_HANDLER_BYTES: usize = 64;
 const MAX_DATA_BYTES: usize = 4096;
 const MAX_DATA_DEPTH: usize = 16;
 /// What a page holds for its view between calls.
-pub const MAX_STATE_BYTES: usize = 16 * 1024;
+const MAX_STATE_BYTES: usize = 16 * 1024;
 /// Accessories one row shows at its end.
 pub(crate) const MAX_ACCESSORIES: usize = 3;
 pub(crate) const MAX_ACCESSORY_BYTES: usize = 64;
@@ -103,7 +103,7 @@ pub enum Accessory {
 }
 
 impl Accessory {
-    pub fn text(&self) -> &str {
+    fn text(&self) -> &str {
         match self {
             Accessory::Text(text) | Accessory::Tag(text) => text,
         }
@@ -706,7 +706,7 @@ pub(crate) fn check_data(data: &serde_json::Value) -> Result<(), String> {
 }
 
 /// A page's state, which Dupin holds for its view and hands back with every call there.
-pub fn check_state(state: &serde_json::Value) -> Result<(), String> {
+pub(crate) fn check_state(state: &serde_json::Value) -> Result<(), String> {
     check_json(state, "state", MAX_STATE_BYTES)
 }
 
