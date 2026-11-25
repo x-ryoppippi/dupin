@@ -1,6 +1,7 @@
 //! Subsequence matching for short names (app names, file names), ranked the way launchers
 //! are expected to rank: a prefix beats a word start, which beats a run in the middle, which
-//! beats letters scattered across the name.
+//! beats letters scattered across the name. A query typed whole from a word start ranks above
+//! every match that isn't, whatever the usage history adds.
 
 /// A match of a query against a name: higher `score` ranks first, and `positions` are the
 /// character indices in the name that matched, in order.
@@ -18,6 +19,11 @@ const GAP: i32 = 3;
 const GAP_START: i32 = 6;
 /// Shorter names win ties: "Safari" over "Safari Technology Preview" for "saf".
 const LENGTH: i32 = 1;
+/// Added when the query runs unbroken from a word start ("ar" in "Ardia", "time" in
+/// "FaceTime"): more than [`crate::history::MAX_BOOST`] plus the widest gap between two
+/// matches' other scores, so usage orders such matches among themselves but never lifts a
+/// scattered one ("ar" in "Calendar", or "Apple Radio" by its initials) above them.
+pub const RUN_FROM_WORD_START: i32 = 2048;
 
 /// Matches `query` against `name`, ignoring case and whitespace in the query.
 /// None when the query's characters don't all appear in order.
@@ -166,7 +172,21 @@ fn search(
         .enumerate()
         .filter_map(|(j, s)| s.map(|s| (j, s)))
         .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
-    Some((j, total - LENGTH * n as i32))
+    let run = if runs_from_word_start(query, chars, lower) {
+        RUN_FROM_WORD_START
+    } else {
+        0
+    };
+    Some((j, total - LENGTH * n as i32 + run))
+}
+
+fn runs_from_word_start(query: &[char], chars: &[char], lower: &[char]) -> bool {
+    lower.len() >= query.len()
+        && (0..=lower.len() - query.len()).any(|start| {
+            lower[start] == query[0]
+                && position_bonus(chars, start) == WORD_START
+                && lower[start..start + query.len()] == *query
+        })
 }
 
 fn is_subsequence(query: &[char], name: &[char]) -> bool {
@@ -244,6 +264,21 @@ mod tests {
         assert_eq!(rank("note", &["Notes", "No Tears Edition"])[0], "Notes");
     }
 
+    #[test]
+    fn a_query_typed_from_a_word_start_outranks_every_other_match_by_a_class() {
+        let strong = |query, name| score(query, name).unwrap().score >= RUN_FROM_WORD_START;
+        assert!(strong("ar", "Ardia"));
+        assert!(strong("time", "FaceTime"));
+        assert!(strong("6", "Alfred 6"));
+        assert!(!strong("ar", "Calendar"));
+        assert!(!strong("ar", "Apple Radio"));
+        assert!(!strong("vsc", "Visual Studio Code"));
+        assert_eq!(
+            rank("ar", &["Spark", "Apple Radio", "Ardia", "Calendar"]),
+            ["Ardia", "Apple Radio", "Spark", "Calendar"]
+        );
+    }
+
     /// The quadratic search the running maximum replaced.
     fn naive(query: &str, name: &str) -> Option<Match> {
         let query = Query::new(query)?.0;
@@ -295,6 +330,9 @@ mod tests {
             .filter_map(|(j, s)| s.map(|s| (j, s)))
             .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
         total -= LENGTH * n as i32;
+        if runs_from_word_start(&query, &chars, &lower) {
+            total += RUN_FROM_WORD_START;
+        }
         let mut positions = vec![0; query.len()];
         for i in (0..query.len()).rev() {
             positions[i] = j;

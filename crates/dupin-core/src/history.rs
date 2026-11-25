@@ -28,15 +28,19 @@ fn weight(age_secs: u64) -> f64 {
     }
 }
 
-/// The boost for frecency is logarithmic and bounded: it reorders results that match about
-/// equally well, but a strong match (a prefix) still beats a weak one (scattered letters)
-/// that was opened often. A first visit adds about 55 and a hundred recent ones about 110,
-/// where fuzzy scores for a prefix and a scattered match differ by well over 100.
+/// The boost for frecency is logarithmic: it reorders results that match about equally well.
+/// A first visit adds about 55 and a hundred recent ones about 110.
 const FRECENCY_SCALE: f64 = 12.0;
-/// Picked before for exactly this query: Alfred's knowledge puts it first.
+/// Picked before for exactly this query: Alfred's knowledge puts it first among matches as
+/// good as it.
 const SAME_QUERY: i32 = 1000;
 /// Picked before for a longer query this one begins (picked for "safari", now "saf").
 const LONGER_QUERY: i32 = 200;
+/// The most the history adds to a score. The matcher keeps its classes of match further apart
+/// than this ([`crate::fuzzy::RUN_FROM_WORD_START`]), so picks and frecency never lift a
+/// scattered match over the query typed from a word start: an app the user can't see can't be
+/// picked, so a boost that hid it would only ever grow.
+pub const MAX_BOOST: i32 = SAME_QUERY + 300;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct History {
@@ -143,7 +147,7 @@ impl History {
         } else {
             0
         };
-        knowledge + (entry.frecency(now).ln_1p() * FRECENCY_SCALE) as i32
+        (knowledge + (entry.frecency(now).ln_1p() * FRECENCY_SCALE) as i32).min(MAX_BOOST)
     }
 
     /// Sort ranked items (all with a `score`) by score plus boost, keeping the providers'
@@ -213,6 +217,151 @@ mod tests {
         let mut far = vec![app("Prefix", 300), app("Often", 100)];
         history.rerank(&mut far, "q", NOW);
         assert_eq!(titles(&far), ["Prefix", "Often"]);
+    }
+
+    /// Apps as Spotlight names them, ranked as the apps source ranks them before usage.
+    const APPS: &[(&str, &[&str])] = &[
+        ("Music", &["Apple Music", "Apple Radio", "Cloud Music Library"]),
+        ("Arc", &[]),
+        ("Ardia", &[]),
+        ("Arto", &[]),
+        ("AppCleaner", &[]),
+        ("Activity Monitor", &[]),
+        ("Alfred 6", &[]),
+        ("AdGuard Mini", &[]),
+        ("AirPort Utility", &[]),
+        ("AirDrop & Continuity", &[]),
+        ("Spark", &[]),
+        ("Calendar", &[]),
+        ("1Password", &[]),
+        ("1Password for Safari", &[]),
+        ("Passwords", &[]),
+        ("Script Editor", &["AppleScript Editor"]),
+        ("Image Playground", &[]),
+        ("Pages Creator Studio", &[]),
+        ("Keynote Creator Studio", &[]),
+        (".Karabiner-VirtualHIDDevice-Manager", &[]),
+    ];
+
+    fn matched(query: &str) -> Vec<Item> {
+        let mut items: Vec<Item> = APPS
+            .iter()
+            .filter_map(|(name, aliases)| {
+                let on_name = crate::fuzzy::score(query, name).map(|m| m.score);
+                let on_alias = aliases
+                    .iter()
+                    .filter_map(|alias| crate::fuzzy::score(query, alias))
+                    .map(|m| m.score - 8)
+                    .max();
+                on_name.max(on_alias).map(|score| app(name, score))
+            })
+            .collect();
+        items.sort_by_key(|item| std::cmp::Reverse(item.score));
+        items
+    }
+
+    #[test]
+    fn usage_never_lifts_a_scattered_match_over_the_query_typed_from_a_word_start() {
+        let mut history = History::default();
+        let mut open = |name: &str, query: &str, times: u64| {
+            for i in 0..times {
+                history.record(&format!("/A/{name}.app"), query, NOW - i * DAY / 8);
+            }
+        };
+        for (name, times) in [
+            ("Music", 400),
+            ("Spark", 300),
+            ("Calendar", 300),
+            ("1Password", 200),
+            ("Activity Monitor", 100),
+            ("Arto", 80),
+        ] {
+            open(name, "", times);
+        }
+        open("Ardia", "a", 3);
+        // Picks made while the app wanted was off screen.
+        for (query, names) in [
+            (
+                "ar",
+                &[
+                    "Spark",
+                    "Calendar",
+                    "AirPort Utility",
+                    "Activity Monitor",
+                    "AppCleaner",
+                    "Alfred 6",
+                    "Arto",
+                ][..],
+            ),
+            (
+                "ard",
+                &[
+                    "AdGuard Mini",
+                    "Alfred 6",
+                    "1Password",
+                    "Script Editor",
+                    "Passwords",
+                    "1Password for Safari",
+                    "Image Playground",
+                ][..],
+            ),
+            (
+                "ardi",
+                &[
+                    "Music",
+                    "AdGuard Mini",
+                    "Script Editor",
+                    "Pages Creator Studio",
+                    "Keynote Creator Studio",
+                    "1Password for Safari",
+                    ".Karabiner-VirtualHIDDevice-Manager",
+                    "AirDrop & Continuity",
+                ][..],
+            ),
+        ] {
+            for name in names {
+                open(name, query, 1);
+            }
+        }
+        let shown = |query: &str| {
+            let mut items = matched(query);
+            history.rerank(&mut items, query, NOW);
+            items
+                .iter()
+                .take(8)
+                .map(|item| item.display_title().to_owned())
+                .collect::<Vec<_>>()
+        };
+        for query in ["ar", "ard", "ardi"] {
+            let rows = shown(query);
+            assert!(rows.iter().any(|row| row == "Ardia"), "{query}: {rows:?}");
+        }
+        assert_eq!(shown("ar")[..3], ["Arto", "Ardia", "Arc"]);
+        for query in ["ard", "ardi", "ardia"] {
+            assert_eq!(shown(query)[0], "Ardia", "{query}");
+        }
+        assert_eq!(
+            shown("ardi")[1],
+            "Music",
+            "the pick for this query leads what Apple Radio's initials match"
+        );
+    }
+
+    #[test]
+    fn the_history_adds_at_most_its_bound() {
+        let mut history = History::default();
+        history.items.insert(
+            "/A/Often.app".into(),
+            Entry {
+                count: u32::MAX,
+                visits: vec![NOW],
+                queries: HashMap::from([("q".into(), u32::MAX)]),
+            },
+        );
+        assert_eq!(history.boost("/A/Often.app", "q", NOW), MAX_BOOST);
+        let strong = crate::fuzzy::score("ab", &format!("{} ab", "x".repeat(250))).unwrap();
+        let weak = crate::fuzzy::score("ab", "A x b").unwrap();
+        assert!(strong.score > weak.score + MAX_BOOST);
     }
 
     #[test]

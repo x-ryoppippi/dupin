@@ -65,7 +65,11 @@ pub fn score(
     ));
     total = total.saturating_sub(depth_penalty(path));
     if !demotions.is_empty() && is_demoted(path, demotions) {
-        total = total.saturating_sub(NOISE_DEMOTION);
+        // A noisy file's words count as scattered matches at best.
+        let words = i32::try_from(seen_words.len()).unwrap_or(i32::MAX);
+        total = total
+            .saturating_sub(NOISE_DEMOTION)
+            .saturating_sub(fuzzy::RUN_FROM_WORD_START.saturating_mul(words));
     }
 
     positions.sort_unstable();
