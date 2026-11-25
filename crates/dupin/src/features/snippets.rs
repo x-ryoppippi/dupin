@@ -36,6 +36,7 @@ pub(super) const FEATURE: Feature = Feature {
         paste_notice: Some(PASTE_NOTICE),
         enabled: |_| true,
     }),
+    sources: &[],
 };
 
 fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandError> {

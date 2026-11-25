@@ -575,7 +575,8 @@ mod tests {
         let mut listed: Vec<_> = held.iter().map(|(_, search)| search.alias.as_str()).collect();
         listed.sort_unstable();
         assert_eq!(listed, DEFAULT_ALIASES);
-        let receivers = crate::receivers::for_payload(&Payload::text("日本語 +&/#?"), &held);
+        let receivers =
+            crate::receivers::for_payload(&dupin_mac::kinds::native(), &Payload::text("日本語 +&/#?"), &held);
         let receivers: Vec<_> = receivers
             .iter()
             .map(|receiver| (receiver.id.as_str(), receiver.title.as_str()))
@@ -646,7 +647,8 @@ mod tests {
                 "{titles:?}"
             );
         }
-        let receivers = crate::receivers::for_payload(&Payload::text("term"), &refreshed);
+        let receivers =
+            crate::receivers::for_payload(&dupin_mac::kinds::native(), &Payload::text("term"), &refreshed);
         assert!(receivers.contains(&ItemAction::new(
             "web:g",
             "Search Example (g)",

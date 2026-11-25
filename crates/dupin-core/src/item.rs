@@ -293,8 +293,20 @@ pub struct Item {
 }
 
 impl Item {
-    /// A file system entry: Enter opens it, ⌘Enter reveals it.
+    /// A file system entry: Enter opens it, ⌘Enter reveals it. A source gives it the rest of
+    /// its kind's actions with [`Kinds`](crate::kind::Kinds).
     pub fn path(path: PathBuf, title: String, matched: Vec<usize>) -> Self {
+        let opening = crate::kind::opening(&path);
+        Self::path_with(path, title, matched, opening)
+    }
+
+    /// A file system entry with the actions its kind resolved.
+    pub(crate) fn path_with(
+        path: PathBuf,
+        title: String,
+        matched: Vec<usize>,
+        resolved: crate::kind::Resolved,
+    ) -> Self {
         let subtitle = path
             .parent()
             .map(|p| tilde(&p.to_string_lossy()))
@@ -311,12 +323,9 @@ impl Item {
             matched,
             completion: None,
             score: None,
-            primary: Some("open".into()),
-            alternate: Some("reveal".into()),
-            actions: vec![
-                ItemAction::new("open", "Open", Action::Open(path.clone())),
-                ItemAction::new("reveal", "Reveal in Finder", Action::Reveal(path)),
-            ],
+            primary: resolved.primary,
+            alternate: resolved.alternate,
+            actions: resolved.actions,
         }
     }
 

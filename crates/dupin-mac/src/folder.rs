@@ -4,15 +4,24 @@ use std::cmp::Reverse;
 use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 
-use dupin_core::{Item, Provider, ProviderError, Request, fuzzy};
+use dupin_core::{Item, Provider, ProviderError, Request};
 use objc2::rc::autoreleasepool;
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::NSString;
 
+use crate::kinds::Rows;
+
 /// Lists `Request::folder`, folders first and then by name. The query filters the entries
 /// fuzzily; hidden entries appear only when it starts with a dot.
-#[derive(Default)]
-pub struct FolderProvider;
+pub struct FolderProvider {
+    rows: Rows,
+}
+
+impl FolderProvider {
+    pub fn new(rows: Rows) -> Self {
+        Self { rows }
+    }
+}
 
 struct Entry {
     path: PathBuf,
@@ -41,7 +50,7 @@ impl Provider for FolderProvider {
             let (score, matched) = if filter.is_empty() {
                 (None, Vec::new())
             } else {
-                let Some(found) = fuzzy::score(filter, &name) else {
+                let Some(found) = self.rows.matcher.score(filter, &name) else {
                     continue;
                 };
                 (Some(found.score), found.positions)
@@ -55,13 +64,19 @@ impl Provider for FolderProvider {
             });
         }
         entries.sort_by_cached_key(|entry| (Reverse(entry.score), !entry.folder, entry.name.to_lowercase()));
-        emit(entries.into_iter().take(request.limit).map(item).collect());
+        emit(
+            entries
+                .into_iter()
+                .take(request.limit)
+                .map(|entry| item(&self.rows.kinds, entry))
+                .collect(),
+        );
         Ok(())
     }
 }
 
-fn item(entry: Entry) -> Item {
-    let mut item = crate::file_actions::item_with_folder(entry.path, entry.name, entry.matched, entry.folder);
+fn item(kinds: &dupin_core::kind::Kinds, entry: Entry) -> Item {
+    let mut item = kinds.file(entry.path, entry.name, entry.matched, entry.folder);
     if let dupin_core::View::Text { subtitle, .. } = &mut item.view {
         // Every entry shares the browsed folder, which the chip already names.
         subtitle.clear();
@@ -107,7 +122,7 @@ mod tests {
         let mut request = Request::detached(query, 100);
         request.folder = Some(folder.to_path_buf());
         let mut items = Vec::new();
-        FolderProvider
+        FolderProvider::new(Rows::native())
             .search(&request, &mut |batch| items.extend(batch))
             .unwrap();
         items
@@ -152,8 +167,9 @@ mod tests {
     fn a_missing_folder_fails_and_no_folder_lists_nothing() {
         let mut request = Request::detached("", 10);
         request.folder = Some("/nonexistent/dupin".into());
-        assert!(FolderProvider.search(&request, &mut |_| {}).is_err());
+        let provider = FolderProvider::new(Rows::native());
+        assert!(provider.search(&request, &mut |_| {}).is_err());
         request.folder = None;
-        assert!(FolderProvider.search(&request, &mut |_| unreachable!()).is_ok());
+        assert!(provider.search(&request, &mut |_| unreachable!()).is_ok());
     }
 }

@@ -13,8 +13,11 @@ pub(super) mod snippets;
 pub(super) mod system;
 pub(super) mod web;
 
+use dupin_core::filter::Filters;
+use dupin_core::kind::Kinds;
 use dupin_core::{CommandError, Config};
 use dupin_extension_bridge::PackageId;
+use dupin_mac::kinds::Rows;
 use dupin_mac::privacy::Permission;
 
 use crate::commands::{Configure, ConfiguredCommands, Providers};
@@ -30,6 +33,19 @@ pub(super) struct Feature {
     /// The bundled extension that answers the feature's command, which then never answers a
     /// keyword of its own.
     bundled: Option<Bundled>,
+    /// The native sources the feature's commands search.
+    pub sources: &'static [Source],
+}
+
+/// A native source, and what it may be composed with.
+pub(super) struct Source {
+    /// The name configuration addresses it by.
+    pub name: &'static str,
+    /// The command it answers.
+    pub command: &'static str,
+    /// The matcher it starts with, for a source that matches its own candidates; `None` for
+    /// one that matches through an index of its own, such as Spotlight.
+    pub matcher: Option<&'static str>,
 }
 
 impl Feature {
@@ -40,7 +56,34 @@ impl Feature {
         reload: |_, _, _| false,
         permissions: &[],
         bundled: None,
+        sources: &[],
     };
+}
+
+fn source(name: &str) -> &'static Source {
+    MANIFEST
+        .iter()
+        .flat_map(|feature| feature.sources)
+        .find(|source| source.name == name)
+        .unwrap_or_else(|| panic!("no feature registers the source {name}"))
+}
+
+/// The command the source `name` answers.
+pub(super) fn source_command(name: &str) -> &'static str {
+    source(name).command
+}
+
+/// What the source `name` turns its candidates into rows with: the matcher it is composed
+/// with and the kinds.
+pub(crate) fn source_rows(name: &str, kinds: &Kinds, filters: &Filters) -> Rows {
+    let matcher = source(name)
+        .matcher
+        .and_then(|matcher| filters.matcher(matcher))
+        .unwrap_or_else(|| panic!("the source {name} has no matcher Dupin registers"));
+    Rows {
+        matcher,
+        kinds: kinds.clone(),
+    }
 }
 
 #[derive(Clone, Copy)]

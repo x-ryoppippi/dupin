@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use dupin_core::filter::Filters;
+use dupin_core::kind::Kinds;
 use dupin_core::{
     CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
 };
@@ -106,6 +108,8 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
 pub(super) struct Providers<'a> {
     pub registration: &'a mut Registration,
     pub apps: Arc<AppsProvider>,
+    pub kinds: Kinds,
+    filters: Filters,
     /// `None` in a headless run, which reads fixture events.
     pub calendar_access: Option<CalendarAccess>,
     pub calculator: Arc<crate::calculator::Calculator>,
@@ -114,6 +118,16 @@ pub(super) struct Providers<'a> {
 impl Providers<'_> {
     pub fn add(&mut self, command: &str, provider: Arc<dyn Provider>) {
         self.registration.providers.insert(id(command), provider);
+    }
+
+    /// Register the native source `name` as its command's provider.
+    pub fn add_source(&mut self, name: &str, provider: Arc<dyn Provider>) {
+        self.add(crate::features::source_command(name), provider);
+    }
+
+    /// What the native source `name` is composed with.
+    pub fn rows(&self, name: &str) -> dupin_mac::kinds::Rows {
+        crate::features::source_rows(name, &self.kinds, &self.filters)
     }
 
     /// Where the bundled extension that ports `command` is handed in once it loads.
@@ -125,6 +139,7 @@ impl Providers<'_> {
 pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
+    kinds: Kinds,
     history: History,
     calendar_access: Option<CalendarAccess>,
     calculator: crate::calculator::Calculator,
@@ -155,6 +170,8 @@ pub fn register(
     let mut providers = Providers {
         registration: &mut registration,
         apps,
+        kinds,
+        filters: Filters::native(),
         calendar_access,
         calculator: Arc::new(calculator),
     };
@@ -267,6 +284,41 @@ mod tests {
                 "settings.search",
                 "web.keywords",
                 "web.fallbacks",
+            ]
+        );
+    }
+
+    #[test]
+    fn native_sources_answer_registered_commands_with_matchers_dupin_registers() {
+        let config = Config {
+            show_recent: true,
+            ..Config::default()
+        };
+        let ConfiguredCommands { registry, .. } = configured(&config).unwrap();
+        let ids = registry.ids();
+        let (kinds, filters) = (dupin_mac::kinds::native(), Filters::native());
+        let mut sources = Vec::new();
+        for source in MANIFEST.iter().flat_map(|feature| feature.sources) {
+            assert!(
+                ids.iter().any(|id| id == source.command),
+                "{} answers no command",
+                source.name
+            );
+            assert_eq!(crate::features::source_command(source.name), source.command);
+            if let Some(matcher) = source.matcher {
+                let rows = crate::features::source_rows(source.name, &kinds, &filters);
+                assert_eq!(rows.matcher.name(), matcher);
+            }
+            sources.push((source.name, source.command, source.matcher));
+        }
+        assert_eq!(
+            sources,
+            [
+                ("files", "files.names", None),
+                ("files.contents", "files.contents", None),
+                ("folder", "files.browse", Some("builtin.fuzzy")),
+                ("apps", "apps.search", Some("builtin.fuzzy")),
+                ("recent", "recent.items", None),
             ]
         );
     }

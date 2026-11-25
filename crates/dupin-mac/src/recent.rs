@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use dupin_core::kind::Kinds;
 use dupin_core::{Item, Provider, ProviderError, Request, session::RecentHistory};
 
 use crate::AppsProvider;
@@ -9,11 +10,12 @@ use crate::AppsProvider;
 pub struct RecentProvider {
     apps: Arc<AppsProvider>,
     history: RecentHistory,
+    kinds: Kinds,
 }
 
 impl RecentProvider {
-    pub fn new(apps: Arc<AppsProvider>, history: RecentHistory) -> Self {
-        Self { apps, history }
+    pub fn new(apps: Arc<AppsProvider>, history: RecentHistory, kinds: Kinds) -> Self {
+        Self { apps, history, kinds }
     }
 }
 
@@ -27,7 +29,7 @@ impl Provider for RecentProvider {
             return Ok(());
         }
         let apps = self.apps.catalog_items();
-        let items = collect_items(&ids, &apps, request.limit, || request.is_cancelled());
+        let items = collect_items(&self.kinds, &ids, &apps, request.limit, || request.is_cancelled());
         if !items.is_empty() && !request.is_cancelled() {
             emit(items);
         }
@@ -36,6 +38,7 @@ impl Provider for RecentProvider {
 }
 
 fn collect_items(
+    kinds: &Kinds,
     ids: &[String],
     apps: &HashMap<PathBuf, Item>,
     limit: usize,
@@ -52,7 +55,7 @@ fn collect_items(
                 return Some(item.clone());
             }
             let title = path.file_name()?.to_string_lossy().into_owned();
-            Some(crate::file_actions::item(path.to_owned(), title, Vec::new()))
+            Some(crate::kinds::file(kinds, path.to_owned(), title, Vec::new()))
         })
         .take(limit)
         .collect()
@@ -76,15 +79,16 @@ mod tests {
         };
         let apps = HashMap::from([(app.clone(), expected.clone())]);
         let ids = [root.join("missing"), app, file.clone()].map(|p| p.to_string_lossy().into_owned());
-        let items = collect_items(&ids, &apps, 2, || false);
+        let kinds = crate::kinds::native();
+        let items = collect_items(&kinds, &ids, &apps, 2, || false);
         assert_eq!(items[0], expected);
         assert_eq!(items[1].id, file.to_string_lossy());
         assert_eq!(
             items[1],
-            crate::file_actions::item(file, "report.txt".into(), Vec::new())
+            crate::kinds::file(&kinds, file, "report.txt".into(), Vec::new())
         );
-        assert_eq!(collect_items(&ids, &apps, 1, || false).len(), 1);
-        assert!(collect_items(&ids, &apps, 2, || true).is_empty());
+        assert_eq!(collect_items(&kinds, &ids, &apps, 1, || false).len(), 1);
+        assert!(collect_items(&kinds, &ids, &apps, 2, || true).is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

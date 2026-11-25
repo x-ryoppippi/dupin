@@ -127,6 +127,8 @@ pub struct Ui {
     /// Why something wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
     sharing: dupin_mac::sharing::Picker,
+    /// What gives each row its actions and Send to… its choices.
+    kinds: dupin_core::kind::Kinds,
     panel_window: Option<rune::WindowHandle>,
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
@@ -178,7 +180,12 @@ impl Ui {
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
-        let apps_provider = Arc::new(AppsProvider::standard());
+        let kinds = dupin_mac::kinds::native();
+        let apps_provider = Arc::new(AppsProvider::standard(crate::features::source_rows(
+            crate::features::apps::SOURCE,
+            &kinds,
+            &dupin_core::filter::Filters::native(),
+        )));
         let currency = crate::calculator::Currency::start({
             let me = me.clone();
             move || {
@@ -194,6 +201,7 @@ impl Ui {
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
+            kinds.clone(),
             history,
             (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
             currency.calculator(),
@@ -291,6 +299,7 @@ impl Ui {
             paste_after_close: None,
             notice_after_close: None,
             sharing: dupin_mac::sharing::Picker::default(),
+            kinds,
             panel_window: None,
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,

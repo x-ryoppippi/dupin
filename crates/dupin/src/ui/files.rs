@@ -17,12 +17,13 @@ impl Ui {
     }
 
     pub(super) fn rename_file(&self, row: String, path: PathBuf, name: String) {
+        let kinds = self.kinds.clone();
         self.on_file_worker(
             FileAction::Rename,
             path,
             move |path| {
                 dupin_mac::file_ops::rename(path, &name)
-                    .map(|renamed| dupin_mac::file_actions::item(renamed, name, Vec::new()))
+                    .map(|renamed| dupin_mac::kinds::file(&kinds, renamed, name, Vec::new()))
             },
             move |ui, _, item| {
                 let notice = format!("Renamed to “{}”", item.display_title());

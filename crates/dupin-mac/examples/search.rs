@@ -6,6 +6,7 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use dupin_core::{Delivery, Provider, Searcher};
+use dupin_mac::kinds::{self, Rows};
 use dupin_mac::{AppsProvider, SpotlightProvider, Target};
 
 fn main() {
@@ -13,9 +14,9 @@ fn main() {
     let kind = args.next().unwrap_or_default();
     let query = args.collect::<Vec<_>>().join(" ");
     let provider: Arc<dyn Provider> = match kind.as_str() {
-        "apps" => Arc::new(AppsProvider::standard()),
-        "files" => Arc::new(SpotlightProvider::new(Target::Names)),
-        "in" => Arc::new(SpotlightProvider::new(Target::Contents)),
+        "apps" => Arc::new(AppsProvider::standard(Rows::native())),
+        "files" => Arc::new(SpotlightProvider::new(Target::Names, kinds::native())),
+        "in" => Arc::new(SpotlightProvider::new(Target::Contents, kinds::native())),
         _ => return eprintln!("usage: search apps|files|in <query>"),
     };
     let (tx, rx) = mpsc::channel();

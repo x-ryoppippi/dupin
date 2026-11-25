@@ -2,7 +2,7 @@
 
 Right Arrow at the end of an unselected input, or Cmd+K, opens the selected
 result's action screen: Open, Browse (folders), Open with…, Reveal in Finder, Quick Look, Copy name, Rename…, Move to…, Copy to…, Duplicate, Compress, Move to Trash and Send to…. Escape cancels the
-screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. App results offer Open, Reveal, Quick Look and Send to….
+screen and returns to the exact search and selection. Use ↑ and ↓ to select an action, Enter to run it, and Left or Escape to return. Ctrl+K also opens actions. App results offer Open, Reveal, Quick Look and Send to…. File search, content search, [folder browsing](./folder-browsing.md), [recent items](./recent-items.md) and a renamed result all offer the same file actions in the same order.
 
 Open with… lists the applications registered for the selected file or folder, with its default handler first. Choose an application to open the item. Left or Escape returns to Actions without changing the query. Move to Trash opens a confirmation with Cancel selected; choose Move to Trash explicitly to continue. Held Enter cannot confirm. After success the file leaves the current result list. Failures appear in the launcher.
 

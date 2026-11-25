@@ -184,11 +184,11 @@ export function items(ctx) {
 
 A catalogue's items may also carry:
 
-| Item field  | Value                                                                                                                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `matchText` | Up to 64 KiB of text that [matching words](#matching-words) finds the item by; it never shows.                                                                                                                |
-| `time`      | Milliseconds since the epoch, as `Date.now()` gives them, that the item is from. Its subtitle starts with how long ago that was, written each time the item shows: `5 min ago · …`.                           |
-| `file`      | An absolute path: the item shows that file's Finder icon unless it has an `icon` or an `image`, and while the file is gone it shows as **Unavailable**, without its icon or image or its `needsFile` actions. |
+| Item field  | Value                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `matchText` | Up to 64 KiB of text that [matching words](#matching-words) finds the item by; it never shows.                                                                                                                                                                                                                                                                                                                           |
+| `time`      | Milliseconds since the epoch, as `Date.now()` gives them, that the item is from. Its subtitle starts with how long ago that was, written each time the item shows: `5 min ago · …`.                                                                                                                                                                                                                                      |
+| `file`      | An absolute path: the item shows that file's Finder icon unless it has an `icon` or an `image`, and while the file is gone it shows as **Unavailable**, without its icon or image or its `needsFile` actions. The item only shows the file: Dupin adds none of the actions it offers on a file it found itself, such as Open, Move to Trash or sharing it from Send to…, since the extension, not Dupin, chose the path. |
 
 #### Matching words
 

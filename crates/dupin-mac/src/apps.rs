@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use dupin_core::fuzzy;
+use dupin_core::kind::Kinds;
 use dupin_core::{Item, Provider, ProviderError, Request, View};
+
+use crate::kinds::Rows;
 
 pub type AppsWatcher = crate::watcher::PathWatcher;
 
@@ -38,6 +40,7 @@ pub struct AppsProvider {
     /// from the system costs about half a millisecond a bundle, too much to repeat for every
     /// app on each rescan.
     names: Mutex<HashMap<PathBuf, (Option<SystemTime>, Names)>>,
+    rows: Rows,
 }
 
 type Names = (String, Vec<String>);
@@ -45,7 +48,7 @@ type Names = (String, Vec<String>);
 impl AppsProvider {
     /// `/Applications`, `/System/Applications` and `~/Applications`, with their subfolders
     /// (`Utilities` among them).
-    pub fn standard() -> Self {
+    pub fn standard(rows: Rows) -> Self {
         let mut roots = vec![
             PathBuf::from("/Applications"),
             PathBuf::from("/System/Applications"),
@@ -53,11 +56,12 @@ impl AppsProvider {
         if let Some(home) = std::env::var_os("HOME") {
             roots.push(Path::new(&home).join("Applications"));
         }
-        Self::with_roots(roots)
+        Self::with_roots(roots, rows)
     }
 
-    fn with_roots(roots: Vec<PathBuf>) -> Self {
+    fn with_roots(roots: Vec<PathBuf>, rows: Rows) -> Self {
         AppsProvider {
+            rows,
             roots,
             index: Mutex::new(None),
             revision: AtomicU64::new(0),
@@ -93,7 +97,7 @@ impl AppsProvider {
     pub(crate) fn catalog_items(&self) -> HashMap<PathBuf, Item> {
         self.apps()
             .into_iter()
-            .map(|app| (app.path.clone(), app.item(Vec::new())))
+            .map(|app| (app.path.clone(), app.item(&self.rows.kinds, Vec::new())))
             .collect()
     }
 
@@ -134,19 +138,17 @@ impl AppsProvider {
 
 impl Provider for AppsProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
-        emit(rank(&self.apps(), &request.query, request.limit));
+        emit(rank(&self.apps(), &request.query, request.limit, &self.rows));
         Ok(())
     }
 }
 
 impl App {
-    fn item(&self, matched: Vec<usize>) -> Item {
-        let mut item = Item {
+    fn item(&self, kinds: &Kinds, matched: Vec<usize>) -> Item {
+        Item {
             icon: Some(dupin_core::Icon::File(self.icon.clone())),
-            ..Item::path(self.path.clone(), self.name.clone(), matched)
-        };
-        crate::quick_look::add_action(&mut item);
-        item
+            ..kinds.app(self.path.clone(), self.name.clone(), matched)
+        }
     }
 
     /// Take the displayed name and the extra names the system reports, keeping the file name
@@ -180,16 +182,21 @@ const ALIAS_PENALTY: i32 = 8;
 
 /// Best matches first; equal scores keep the shorter, then alphabetical, name. An app matched
 /// through an alias shows the alias in its subtitle, since its title doesn't contain the query.
-fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
+fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
+    let matcher = &*rows.matcher;
     let mut hits: Vec<(i32, Option<&str>, Vec<usize>, &App)> = apps
         .iter()
         .filter_map(|app| {
-            let on_name = fuzzy::score(query, &app.name).map(|m| (m.score, None, m.positions));
+            let on_name = matcher
+                .score(query, &app.name)
+                .map(|m| (m.score, None, m.positions));
             let on_alias = app
                 .aliases
                 .iter()
                 .filter_map(|a| {
-                    fuzzy::score(query, a).map(|m| (m.score - ALIAS_PENALTY, Some(a.as_str()), Vec::new()))
+                    matcher
+                        .score(query, a)
+                        .map(|m| (m.score - ALIAS_PENALTY, Some(a.as_str()), Vec::new()))
                 })
                 .max_by_key(|(score, ..)| *score);
             let (score, alias, positions) = match (on_name, on_alias) {
@@ -209,7 +216,7 @@ fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
-            let mut item = app.item(positions);
+            let mut item = app.item(&rows.kinds, positions);
             if let (Some(alias), View::Text { subtitle, .. }) = (alias, &mut item.view) {
                 *subtitle = format!("{alias} · {subtitle}");
             }
@@ -291,6 +298,14 @@ mod tests {
     }
     use super::*;
 
+    fn rows() -> Rows {
+        Rows::native()
+    }
+
+    fn rank(apps: &[App], query: &str, limit: usize) -> Vec<Item> {
+        super::rank(apps, query, limit, &rows())
+    }
+
     static NEXT_TREE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
     fn tree(paths: &[&str]) -> PathBuf {
@@ -369,6 +384,43 @@ mod tests {
     }
 
     #[test]
+    fn ranks_with_the_matcher_it_is_composed_with() {
+        struct Prefix;
+        impl dupin_core::filter::Matcher for Prefix {
+            fn name(&self) -> &'static str {
+                "test.prefix"
+            }
+            fn score(&self, query: &str, text: &str) -> Option<dupin_core::fuzzy::Match> {
+                text.to_lowercase()
+                    .starts_with(&query.to_lowercase())
+                    .then(|| dupin_core::fuzzy::Match {
+                        score: 0,
+                        positions: (0..query.chars().count()).collect(),
+                    })
+            }
+        }
+        let apps = [
+            app("Hush Safe", &[]),
+            app("Safari", &[]),
+            app("Notes", &["Safe Notes"]),
+        ];
+        let rows = Rows {
+            matcher: Arc::new(Prefix),
+            kinds: crate::kinds::native(),
+        };
+        let items = super::rank(&apps, "saf", 10, &rows);
+        let titles: Vec<_> = items.iter().map(Item::display_title).collect();
+        assert_eq!(titles, ["Safari", "Notes"]);
+        assert_eq!(items[0].matched, [0, 1, 2]);
+        assert_eq!(text_subtitle(&items[1]), "Safe Notes · /Applications");
+        assert_eq!(
+            rank(&apps, "saf", 10).len(),
+            3,
+            "the fuzzy matcher finds all three"
+        );
+    }
+
+    #[test]
     fn results_open_the_link_but_show_the_bundles_icon() {
         let app = App {
             name: "Safari".into(),
@@ -440,7 +492,7 @@ mod tests {
     #[test]
     fn invalidating_the_index_picks_up_new_bundles() {
         let root = tree(&[]);
-        let provider = AppsProvider::with_roots(vec![root.clone()]);
+        let provider = AppsProvider::with_roots(vec![root.clone()], rows());
         assert!(provider.apps().is_empty());
 
         fs::create_dir_all(root.join("New App.app")).unwrap();
@@ -454,7 +506,7 @@ mod tests {
     fn folder_watcher_invalidates_the_index_after_a_bundle_is_added() {
         let root = tree(&[]);
         let missing = root.join("Applications");
-        let provider = Arc::new(AppsProvider::with_roots(vec![missing.clone()]));
+        let provider = Arc::new(AppsProvider::with_roots(vec![missing.clone()], rows()));
         assert!(provider.apps().is_empty());
         let (changed, event) = std::sync::mpsc::channel();
         let watcher = provider

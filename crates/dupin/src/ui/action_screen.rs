@@ -394,8 +394,11 @@ impl Ui {
         };
         let web = self.web.read().unwrap().clone();
         let held = web.held();
-        let actions =
-            crate::receivers::for_payload(&screen.item.payload, held.as_deref().unwrap_or_default());
+        let actions = crate::receivers::for_payload(
+            &self.kinds,
+            &screen.item.payload,
+            held.as_deref().unwrap_or_default(),
+        );
         if actions.is_empty() {
             return;
         }
@@ -436,7 +439,7 @@ impl Ui {
             return;
         };
         if let ActionStage::Receivers { actions, .. } = &mut screen.stage {
-            *actions = crate::receivers::for_payload(&screen.item.payload, searches);
+            *actions = crate::receivers::for_payload(&self.kinds, &screen.item.payload, searches);
             crate::trace::action_screen("receivers with web searches");
         }
     }
@@ -675,7 +678,7 @@ mod action_screen_tests {
         screen.selected = screen.item.actions.len();
         assert_eq!(screen.key(&Key::Enter, false), ActionKey::SendTo);
         screen.stage = ActionStage::Receivers {
-            actions: crate::receivers::for_payload(&screen.item.payload, &[]),
+            actions: crate::receivers::for_payload(&dupin_mac::kinds::native(), &screen.item.payload, &[]),
             selected: 0,
         };
         assert_eq!(screen.key(&Key::Enter, true), ActionKey::Stay);

@@ -157,6 +157,43 @@ fn search_answers_come_first_and_the_catalogue_fills_the_rest() {
     assert_eq!(titles_of(&provider, ""), ["Alpha docs", "Beta docs"]);
 }
 
+#[test]
+fn an_items_file_gets_none_of_the_file_kinds_actions() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        "",
+        &[(
+            "main.js",
+            r#"export function items() { return [
+                 { id: 'a', title: 'Open me', file: '/bin/sh', text: 'x', url: 'https://example.com/' },
+                 { id: 'b', title: 'Bare', file: '/etc/hosts' },
+               ]; }"#,
+        )],
+    );
+    let provider = ExtensionProvider::new(extension);
+    let rows: Vec<_> = batches(&provider, "")
+        .into_iter()
+        .flat_map(|batch| batch.items)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(
+        rows[0].actions,
+        [
+            ItemAction::new("open", "Open URL", Action::OpenUrl("https://example.com/".into())),
+            ItemAction::new("copy", "Copy", Action::Copy("x".into())),
+        ]
+    );
+    assert_eq!(rows[0].primary.as_deref(), Some("open"));
+    assert!(rows[1].actions.is_empty());
+    assert!(rows.iter().all(|row| row.payload.paths.is_empty()));
+    let sent = dupin_mac::kinds::native().send_to(&rows[0].payload);
+    assert_eq!(
+        sent.iter().map(|action| action.id.as_str()).collect::<Vec<_>>(),
+        ["copy-text"],
+        "Send to offers nothing for the file the row named"
+    );
+}
+
 fn titles_of(provider: &ExtensionProvider, query: &str) -> Vec<String> {
     titles(&batches(provider, query))
         .into_iter()

@@ -1,13 +1,20 @@
 use dupin_core::{CommandError, CommandSpec, Config};
 
-use super::Feature;
+use super::{Feature, Source};
 use crate::commands::{Configure, Providers, id, presentation};
 
 pub(crate) const APPS: &str = "apps.search";
+/// The installed apps, which the main search matches on every key.
+pub(crate) const SOURCE: &str = "apps";
 
 pub(super) const FEATURE: Feature = Feature {
     configure,
     start,
+    sources: &[Source {
+        name: SOURCE,
+        command: APPS,
+        matcher: Some(dupin_core::filter::FUZZY),
+    }],
     ..Feature::EMPTY
 };
 
@@ -23,5 +30,5 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
 }
 
 fn start(providers: &mut Providers) {
-    providers.add(APPS, providers.apps.clone());
+    providers.add_source(SOURCE, providers.apps.clone());
 }
