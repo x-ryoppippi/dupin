@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -39,6 +39,8 @@ enum Action {
     ExtDev(String, dupin_ext_sdk::BuildOptions),
     /// Copy a bundled extension into the extensions folder.
     ExtEject(String),
+    /// List the GitHub repositories tagged `dupin-extension` that match the words.
+    ExtSearch(Option<String>),
     Mcp(Option<String>),
 }
 
@@ -159,6 +161,9 @@ fn parse(args: &[String]) -> Result<Action, String> {
         }
         ["ext", "install", source] if !source.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Install(source.to_string())))
+        }
+        ["ext", "search", words @ ..] if words.iter().all(|word| !word.starts_with('-')) => {
+            Ok(Action::ExtSearch((!words.is_empty()).then(|| words.join(" "))))
         }
         ["ext", "list"] => Ok(Action::ExtPackages(Packages::List)),
         ["ext", "sync"] => Ok(Action::ExtPackages(Packages::Sync)),
@@ -493,6 +498,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
+        Action::ExtSearch(query) => Ok(crate::extension_install::search(query.as_deref(), json)?),
         Action::ExtEject(name) => {
             let copy = crate::extension_install::eject(&name)?;
             let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
@@ -1179,6 +1185,12 @@ mod tests {
             Action::ExtEject("dupin".into())
         );
         assert!(parse(&args(&["ext", "eject"])).is_err());
+        assert_eq!(parse(&args(&["ext", "search"])).unwrap(), Action::ExtSearch(None));
+        assert_eq!(
+            parse(&args(&["ext", "search", "clip", "board", "--json"])).unwrap(),
+            Action::ExtSearch(Some("clip board".into()))
+        );
+        assert!(parse(&args(&["ext", "search", "--limit"])).is_err());
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp(None));
         assert_eq!(
             parse(&args(&["mcp", "--workspace", "packages"])).unwrap(),

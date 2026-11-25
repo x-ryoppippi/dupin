@@ -1,10 +1,12 @@
-//! `dupin ext install|list|update|remove|sync`: `dupin-extension-install` pointed at Dupin's
-//! directories and at the keywords the launcher already routes.
+//! `dupin ext search|install|list|update|remove|sync`: `dupin-extension-install` pointed at
+//! Dupin's directories and at the keywords the launcher already routes.
 
 use std::path::{Path, PathBuf};
 
 use dupin_broker::{Base, Broker, ConsentState, Local, PackageId};
-use dupin_extension_install::{Change, Error, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State};
+use dupin_extension_install::{
+    Change, Error, Found, Git, GitHub, Installer, LOCK_FILE, Listed, Outcomes, State, TOPIC,
+};
 use dupin_js_runtime::Diagnostic;
 use dupin_storage::Storage;
 use serde_json::{Value, json};
@@ -412,4 +414,188 @@ fn diagnostic(error: Error) -> Diagnostic {
 
 fn short(commit: &str) -> &str {
     commit.get(..12).unwrap_or(commit)
+}
+
+/// What `dupin ext search` says before any listing: nobody has looked at these packages.
+const UNREVIEWED: &str = "Unreviewed: anyone can tag a GitHub repository `dupin-extension`, and nobody \
+                          checks these before they are listed. Read a package before you install it; \
+                          nothing it requests is granted until you agree.";
+
+/// How many scopes a listing names before it counts the rest.
+const SHOWN_SCOPES: usize = 8;
+
+/// `dupin ext search [QUERY]`: lists, and never installs, the repositories tagged
+/// `dupin-extension` that match `query`.
+pub fn search(query: Option<&str>, json: bool) -> Result<Value, Diagnostic> {
+    let found = GitHub::default().search(query).map_err(diagnostic)?;
+    if json {
+        return Ok(found_json(&found));
+    }
+    for line in found_lines(&found) {
+        println!("{line}");
+    }
+    Ok(Value::Null)
+}
+
+fn found_lines(found: &Found) -> Vec<String> {
+    let mut lines = vec![UNREVIEWED.to_owned()];
+    if found.repositories.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("No repositories tagged `{TOPIC}` match."));
+    }
+    for repository in &found.repositories {
+        lines.push(String::new());
+        let pushed = repository
+            .pushed
+            .as_deref()
+            .map(|day| format!(", last push {day}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "{}/{} ({} stars{pushed})",
+            repository.owner, repository.repo, repository.stars
+        ));
+        if let Some(description) = &repository.description {
+            lines.push(format!("  {description}"));
+        }
+        lines.push(match &repository.package {
+            Ok(package) => {
+                let scopes = &package.capabilities;
+                let requests = if scopes.is_empty() {
+                    "requests nothing".to_owned()
+                } else {
+                    let mut named = scopes[..scopes.len().min(SHOWN_SCOPES)].join(", ");
+                    if scopes.len() > SHOWN_SCOPES {
+                        named.push_str(&format!(" and {} more", scopes.len() - SHOWN_SCOPES));
+                    }
+                    format!("requests {named}")
+                };
+                format!(
+                    "  {} {} (`{}`, keyword `{}`); on `{}` it {requests}",
+                    package.title, package.version, package.name, package.keyword, repository.default_branch
+                )
+            }
+            Err(problem) => format!("  Can't be read as a package: {problem}"),
+        });
+        lines.push(format!("  {}", repository.install_command()));
+    }
+    let listed = found.repositories.len() as u64;
+    if found.total > listed {
+        lines.push(String::new());
+        lines.push(format!(
+            "GitHub found {} repositories; these are the {listed} with the most stars. Add words to narrow the search.",
+            found.total
+        ));
+    }
+    if found.incomplete {
+        lines.push("GitHub stopped searching early, so some repositories may be missing.".to_owned());
+    }
+    lines
+}
+
+fn found_json(found: &Found) -> Value {
+    let repositories: Vec<_> = found
+        .repositories
+        .iter()
+        .map(|repository| {
+            let (package, problem) = match &repository.package {
+                Ok(package) => (
+                    json!({
+                        "name": package.name,
+                        "version": package.version,
+                        "title": package.title,
+                        "keyword": package.keyword,
+                        "requested": package.capabilities,
+                    }),
+                    None,
+                ),
+                Err(problem) => (Value::Null, Some(problem)),
+            };
+            json!({
+                "owner": repository.owner,
+                "repo": repository.repo,
+                "source": repository.source(),
+                "install": repository.install_command(),
+                "description": repository.description,
+                "stars": repository.stars,
+                "pushed": repository.pushed,
+                "default_branch": repository.default_branch,
+                "package": package,
+                "problem": problem,
+            })
+        })
+        .collect();
+    json!({
+        "reviewed": false,
+        "topic": TOPIC,
+        "total": found.total,
+        "incomplete": found.incomplete,
+        "repositories": repositories,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dupin_extension_install::{Manifest, Repository};
+
+    fn repository(package: Result<Manifest, String>) -> Repository {
+        Repository {
+            owner: "someone".into(),
+            repo: "dupin-word-count".into(),
+            description: Some("Counts words".into()),
+            stars: 42,
+            pushed: Some("2026-10-01".into()),
+            default_branch: "main".into(),
+            package,
+        }
+    }
+
+    #[test]
+    fn search_results_say_they_are_unreviewed_and_how_to_install_each() {
+        let found = Found {
+            total: 31,
+            incomplete: false,
+            repositories: vec![
+                repository(Ok(Manifest {
+                    name: "word-count".into(),
+                    version: "1.2.0".into(),
+                    title: "Word Count".into(),
+                    keyword: "wc".into(),
+                    capabilities: (0..10).map(|n| format!("files:notes-{n}")).collect(),
+                })),
+                repository(Err("no package.json on `main`".into())),
+            ],
+        };
+        let lines = found_lines(&found);
+        assert!(lines[0].starts_with("Unreviewed:"), "{lines:#?}");
+        assert_eq!(
+            lines[2],
+            "someone/dupin-word-count (42 stars, last push 2026-10-01)"
+        );
+        assert!(lines[4].starts_with(
+            "  Word Count 1.2.0 (`word-count`, keyword `wc`); on `main` it requests files:notes-0,"
+        ));
+        assert!(lines[4].ends_with("files:notes-7 and 2 more"), "{}", lines[4]);
+        assert_eq!(lines[5], "  dupin ext install github:someone/dupin-word-count");
+        assert_eq!(
+            lines[9],
+            "  Can't be read as a package: no package.json on `main`"
+        );
+        assert!(lines.last().unwrap().starts_with("GitHub found 31 repositories"));
+
+        let value = found_json(&found);
+        assert_eq!(value["reviewed"], false);
+        assert_eq!(
+            value["repositories"][0]["install"],
+            "dupin ext install github:someone/dupin-word-count"
+        );
+        assert_eq!(
+            value["repositories"][0]["package"]["requested"]
+                .as_array()
+                .unwrap()
+                .len(),
+            10
+        );
+        assert_eq!(value["repositories"][1]["problem"], "no package.json on `main`");
+    }
 }
