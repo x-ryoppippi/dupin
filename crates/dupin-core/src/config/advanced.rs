@@ -24,7 +24,7 @@ pub struct Advanced {
 }
 
 impl Advanced {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         *self == Self::default()
     }
 }
@@ -81,7 +81,7 @@ pub struct KindActions {
 }
 
 impl KindActions {
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         *self == Self::default()
     }
 
@@ -116,9 +116,9 @@ pub struct KindAction {
     pub title: String,
     /// The file name of a script in the scripts folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub script: Option<String>,
+    pub(crate) script: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
+    pub(crate) url: Option<String>,
 }
 
 #[derive(Default, Deserialize)]

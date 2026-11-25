@@ -11,7 +11,7 @@ use crate::fuzzy::{self, Match};
 /// The matcher every native source that takes one starts with.
 pub const FUZZY: &str = "builtin.fuzzy";
 /// Matches a text, or a word in it, that starts with the query.
-pub const PREFIX: &str = "builtin.prefix";
+const PREFIX: &str = "builtin.prefix";
 
 /// Decides whether a query finds a text, how well, and which characters it matched.
 pub trait Matcher: Send + Sync + 'static {
