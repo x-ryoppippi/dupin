@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::filter::Filters;
 use dupin_core::kind::Kinds;
 use dupin_core::{
     CommandError, CommandId, CommandRegistry, Config, History, Provider, QueryPresentation, Session,
@@ -94,6 +93,7 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
     commands
         .registry
         .set_default_providers(std::mem::take(&mut commands.defaults), commands.pinned.take())?;
+    append_sources(config, &mut commands);
     for feature in MANIFEST {
         (feature.prepare)(config, &mut commands);
     }
@@ -105,11 +105,31 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
     })
 }
 
+/// Search the sources `[advanced.commands.default]` appends after the main search's own. One
+/// whose feature is off answers no command, so it is left out with a notice.
+fn append_sources(config: &Config, commands: &mut Configure) {
+    let mut after = commands
+        .registry
+        .default_providers()
+        .last()
+        .cloned()
+        .unwrap_or_else(|| id(APPS));
+    for name in &config.advanced.commands.default.append_sources {
+        let command = id(crate::features::source_command(name));
+        match commands.registry.add_default_provider(command.clone(), &after) {
+            Ok(()) => after = command,
+            Err(_) => commands.notices.push(format!(
+                "advanced.commands.default.append_sources names `{name}`, whose feature is off, so the main search leaves it out."
+            )),
+        }
+    }
+}
+
 pub(super) struct Providers<'a> {
     pub registration: &'a mut Registration,
     pub apps: Arc<AppsProvider>,
     pub kinds: Kinds,
-    filters: Filters,
+    composition: &'a crate::composition::Composition,
     /// `None` in a headless run, which reads fixture events.
     pub calendar_access: Option<CalendarAccess>,
     pub calculator: Arc<crate::calculator::Calculator>,
@@ -127,7 +147,7 @@ impl Providers<'_> {
 
     /// What the native source `name` is composed with.
     pub fn rows(&self, name: &str) -> dupin_mac::kinds::Rows {
-        crate::features::source_rows(name, &self.kinds, &self.filters)
+        self.composition.rows(name)
     }
 
     /// Where the bundled extension that ports `command` is handed in once it loads.
@@ -139,7 +159,7 @@ impl Providers<'_> {
 pub fn register(
     config: &Config,
     apps: Arc<AppsProvider>,
-    kinds: Kinds,
+    composition: &crate::composition::Composition,
     history: History,
     calendar_access: Option<CalendarAccess>,
     calculator: crate::calculator::Calculator,
@@ -151,6 +171,7 @@ pub fn register(
         snippets,
     } = configured(config)?;
     let session = Session::new(history, registry)?;
+    crate::extensions::hand_over_kinds(composition.kinds().clone());
     crate::extensions::preferences::set(crate::web::WEB_SEARCH_PACKAGE, web.preferences);
     let web = Arc::new(RwLock::new(crate::web::WebSearches::default()));
     crate::features::snippets::hand_over(snippets);
@@ -170,8 +191,8 @@ pub fn register(
     let mut providers = Providers {
         registration: &mut registration,
         apps,
-        kinds,
-        filters: Filters::native(),
+        kinds: composition.kinds().clone(),
+        composition,
         calendar_access,
         calculator: Arc::new(calculator),
     };
@@ -296,7 +317,7 @@ mod tests {
         };
         let ConfiguredCommands { registry, .. } = configured(&config).unwrap();
         let ids = registry.ids();
-        let (kinds, filters) = (dupin_mac::kinds::native(), Filters::native());
+        let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
         let mut sources = Vec::new();
         for source in MANIFEST.iter().flat_map(|feature| feature.sources) {
             assert!(
@@ -306,8 +327,8 @@ mod tests {
             );
             assert_eq!(crate::features::source_command(source.name), source.command);
             if let Some(matcher) = source.matcher {
-                let rows = crate::features::source_rows(source.name, &kinds, &filters);
-                assert_eq!(rows.matcher.name(), matcher);
+                let rows = composition.rows(source.name);
+                assert_eq!(rows.filters.current().matcher.name(), matcher);
             }
             sources.push((source.name, source.command, source.matcher));
         }

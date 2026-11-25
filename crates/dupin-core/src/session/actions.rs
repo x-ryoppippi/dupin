@@ -76,7 +76,11 @@ impl Session {
             }];
         }
         let dismiss = action.disposition == ActionDisposition::Dismiss;
-        let picked = dismiss || matches!(action.action, Action::RunScript(_));
+        let picked = dismiss
+            || matches!(
+                action.action,
+                Action::RunScript(_) | Action::ConfiguredScript { .. }
+            );
         let mut effects = vec![Effect::Run(action.action)];
         if picked {
             if item.record_usage {

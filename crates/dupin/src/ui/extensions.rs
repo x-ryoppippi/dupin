@@ -51,6 +51,14 @@ impl Extensions {
         }
     }
 
+    /// Build every present package's catalogue rows again on next use, as after the kinds
+    /// their text and URLs resolve through changed.
+    pub(super) fn forget_catalogues(&self) {
+        for (_, extension) in self.packages.present() {
+            extension.forget_catalogue();
+        }
+    }
+
     /// The package that answers `command`, if an extension does.
     pub(super) fn package(&self, command: &CommandId) -> Option<&str> {
         self.registered

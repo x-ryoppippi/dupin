@@ -613,6 +613,7 @@ fn action_bytes(action: &Action) -> usize {
         Action::RunScript(run) => {
             path(&run.path) + run.title.len() + run.args.iter().map(String::len).sum::<usize>()
         }
+        Action::ConfiguredScript { script, argument } => script.len() + argument.len(),
         Action::Extension { extension, request } => {
             extension.len()
                 + match request {

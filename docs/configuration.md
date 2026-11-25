@@ -47,6 +47,7 @@ With `settings` set, `config.toml` links into the Nix store. Settings marks thos
 
 ## Feature configuration
 
+- [Advanced composition](./features/advanced.md): `[advanced]`, recomposing sources, filters and kinds
 - [Appearance](./features/appearance.md)
 - [Calculator](./features/calculator.md#configuration)
 - [Calendar](./features/calendar.md#configuration)

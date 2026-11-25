@@ -114,6 +114,7 @@ pub fn check(source: &str) -> Result<Config, String> {
         }
         None => error.message().to_owned(),
     })?;
+    crate::composition::check(&config.advanced)?;
     crate::hotkey::parse(&config.hotkey).map_err(|_| format!("the hotkey {:?} is invalid", config.hotkey))?;
     crate::hotkey::parse(&config.selection_hotkey)
         .map_err(|_| format!("the selection hotkey {:?} is invalid", config.selection_hotkey))?;
@@ -200,6 +201,32 @@ script = "missing.sh"
         });
         assert_eq!(config, Config::parse(source).unwrap());
         assert_eq!(problem, None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_composition_naming_what_dupin_lacks_is_invalid_where_it_is_read() {
+        let dir = scratch("invalid-composition");
+        let path = dir.join("config.toml");
+        let source = "file_limit = 37\n[advanced.sources.apps]\nmatcher = \"builtin.prefx\"\n";
+        std::fs::write(&path, source).unwrap();
+        let (config, _, problem) = load(&Paths {
+            base: Some(path),
+            overlay: None,
+        });
+        assert_eq!(config, Config::default());
+        let problem = problem.unwrap();
+        assert!(
+            problem.starts_with(
+                "config.toml is invalid: [advanced.sources.apps]: `builtin.prefx` isn't a matcher Dupin has"
+            ),
+            "{problem}"
+        );
+        assert!(
+            check(source)
+                .unwrap_err()
+                .contains("`builtin.prefx` isn't a matcher")
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -8,6 +8,7 @@ mod catalog_watch;
 mod cli;
 mod clipboard;
 mod commands;
+mod composition;
 mod control;
 mod extension_install;
 mod extensions;

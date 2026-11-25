@@ -126,6 +126,28 @@ impl Ui {
         self.show_script_output(start.id);
     }
 
+    /// Run the script a kind's configured action names on the row's value. The panel stays for
+    /// an inline card and closes otherwise, as when the script is run from its own row.
+    pub(super) fn run_configured_script(&mut self, name: &str, argument: String, tx: &mut Tx) {
+        let args = vec![argument];
+        let command = self
+            .scripts
+            .read()
+            .unwrap()
+            .bound_script(name, &args)
+            .map(|script| script.run(args));
+        match command {
+            Ok(command) => {
+                let inline = command.mode == dupin_core::script::OutputMode::Inline;
+                self.start_script(command, tx);
+                if !inline {
+                    self.dismiss(tx);
+                }
+            }
+            Err(problem) => self.show_notice(format!("Couldn't run {name:?}. {problem}."), tx),
+        }
+    }
+
     pub(super) fn start_script(&mut self, command: dupin_core::script::ScriptRun, tx: &mut Tx) {
         let mode = command.mode;
         let start = self.launch_script(command);

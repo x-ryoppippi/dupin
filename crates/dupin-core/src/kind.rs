@@ -4,8 +4,9 @@
 //! them everywhere at once.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 
+use crate::config::{KindAction, KindActions};
 use crate::item::Transfer;
 use crate::{Action, Item, ItemAction, Payload, ShareTarget};
 
@@ -23,6 +24,15 @@ enum KindName {
 
 impl KindName {
     const ALL: [Self; 4] = [Self::Text, Self::Url, Self::File, Self::App];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::File => "file",
+            Self::App => "app",
+        }
+    }
 }
 
 /// What a row stands for, typed by its kind.
@@ -80,6 +90,8 @@ pub struct Kinds {
     url: Arc<dyn Kind>,
     file: Arc<dyn Kind>,
     app: Arc<dyn Kind>,
+    /// What `[advanced.kinds]` adds, shared by every clone so a reload reaches each source.
+    configured: Arc<RwLock<KindActions>>,
 }
 
 impl Kinds {
@@ -90,7 +102,17 @@ impl Kinds {
             url: Arc::new(UrlKind),
             file: Arc::new(FileKind { share }),
             app: Arc::new(AppKind),
+            configured: Arc::default(),
         }
+    }
+
+    /// Give each kind the actions `actions` lists for it after its own, for rows resolved from
+    /// now on. Whether they differ from the ones it had.
+    pub fn configure(&self, actions: &KindActions) -> bool {
+        let mut configured = self.configured.write().unwrap_or_else(PoisonError::into_inner);
+        let changed = *configured != *actions;
+        configured.clone_from(actions);
+        changed
     }
 
     fn get(&self, name: KindName) -> &Arc<dyn Kind> {
@@ -103,7 +125,28 @@ impl Kinds {
     }
 
     pub fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
-        self.get(subject.kind()).actions(subject, title)
+        let mut resolved = self.get(subject.kind()).actions(subject, title);
+        resolved.actions.extend(self.configured(subject));
+        resolved
+    }
+
+    /// The actions config.toml adds for `subject`, which follow its kind's own.
+    pub fn configured(&self, subject: &Subject) -> Vec<ItemAction> {
+        let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
+        let kind = subject.kind();
+        let actions = match kind {
+            KindName::Text => &configured.text.actions,
+            KindName::Url => &configured.url.actions,
+            KindName::File => &configured.file.actions,
+            KindName::App => &configured.app.actions,
+        };
+        actions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, action)| {
+                configured_action(action, &configured_id(kind.as_str(), index), subject)
+            })
+            .collect()
     }
 
     /// A file or folder row, as every native file source shows one.
@@ -132,6 +175,52 @@ impl Kinds {
             .flat_map(|name| self.get(name).send_to(payload))
             .collect()
     }
+}
+
+/// The ID of the `index`th action config.toml adds to `kind`, which no source's own action
+/// takes, so a row with both text and a URL tells their configured actions apart.
+pub fn configured_id(kind: &str, index: usize) -> String {
+    format!("configured-{kind}-{index}")
+}
+
+/// `action` for `subject`, or none when the subject has no value the action can take: a path
+/// that isn't UTF-8 would reach a script or a URL as some other path.
+fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option<ItemAction> {
+    let (value, name) = match subject {
+        Subject::Text(text) => (text.as_str(), None),
+        Subject::Url(url) => (url.as_str(), None),
+        Subject::File { path, .. } | Subject::App(path) => (
+            path.to_str()?,
+            Some(path.file_name().and_then(|name| name.to_str())?),
+        ),
+    };
+    let run = match (&action.script, &action.url) {
+        (Some(script), _) => Action::ConfiguredScript {
+            script: script.clone(),
+            argument: value.to_owned(),
+        },
+        (None, Some(template)) => {
+            let encode = dupin_plugin_protocol::web_search::percent_encode;
+            let placeholder = match subject.kind() {
+                KindName::Text => "{text}",
+                KindName::Url => "{url}",
+                KindName::File | KindName::App => "{path}",
+            };
+            let mut url = template.replace(placeholder, &encode(value));
+            if let Some(name) = name {
+                url = url.replace("{name}", &encode(name));
+            }
+            Action::OpenUrl(url)
+        }
+        (None, None) => return None,
+    };
+    let configured = ItemAction::new(id, &action.title, run);
+    // The UI decides whether a script's run closes the panel, by the script's output mode.
+    Some(if action.script.is_some() {
+        configured.keep_open()
+    } else {
+        configured
+    })
 }
 
 /// A service Send to… offers for files: its action ID, title and target.
@@ -517,6 +606,81 @@ mod tests {
             )]
         );
         assert_eq!(url.primary.as_deref(), Some("open"));
+    }
+
+    fn configured(source: &str) -> KindActions {
+        crate::Config::parse(source).unwrap().advanced.kinds
+    }
+
+    #[test]
+    fn configured_actions_follow_their_kinds_own_and_reach_every_clone() {
+        let kinds = kinds();
+        let source = kinds.clone();
+        let path = PathBuf::from("/Users/test/a b.txt");
+        let before = source.file(path.clone(), "a b.txt".into(), vec![], false);
+        assert!(!kinds.configure(&KindActions::default()));
+        assert!(kinds.configure(&configured(
+            r#"
+[[advanced.kinds.file.actions]]
+title = "Open in Zed"
+script = "open-in-zed"
+
+[[advanced.kinds.file.actions]]
+title = "Search the name"
+url = "https://search.example/?q={name}&in={path}"
+
+[[advanced.kinds.url.actions]]
+title = "Archive"
+url = "https://web.archive.org/save/{url}"
+"#
+        )));
+        let after = source.file(path.clone(), "a b.txt".into(), vec![], false);
+        assert_eq!(after.actions[..before.actions.len()], before.actions[..]);
+        assert_eq!(
+            (&after.primary, &after.alternate),
+            (&before.primary, &before.alternate)
+        );
+        let zed = after.item_action(&configured_id("file", 0)).unwrap();
+        assert_eq!(zed.title, "Open in Zed");
+        assert_eq!(
+            zed.action,
+            Action::ConfiguredScript {
+                script: "open-in-zed".into(),
+                argument: "/Users/test/a b.txt".into()
+            }
+        );
+        assert_eq!(zed.disposition, crate::ActionDisposition::KeepOpen);
+        assert_eq!(
+            after.action(&configured_id("file", 1)),
+            Some(&Action::OpenUrl(
+                "https://search.example/?q=a%20b.txt&in=%2FUsers%2Ftest%2Fa%20b.txt".into()
+            ))
+        );
+        assert_eq!(after.actions.len(), before.actions.len() + 2);
+
+        let url = source.resolve(&Subject::Url("https://example.com/?a=1".into()), "Example");
+        assert_eq!(
+            url.actions[1].action,
+            Action::OpenUrl("https://web.archive.org/save/https%3A%2F%2Fexample.com%2F%3Fa%3D1".into())
+        );
+        let app = source.app("/Applications/Safari.app".into(), "Safari".into(), vec![]);
+        assert_eq!(ids(&app.actions), ["open", "reveal", QUICK_LOOK]);
+        let text = source.resolve(&Subject::Text("x".into()), "x");
+        assert_eq!(ids(&text.actions), ["copy"]);
+
+        assert!(kinds.configure(&KindActions::default()));
+        assert_eq!(source.file(path, "a b.txt".into(), vec![], false), before);
+    }
+
+    #[test]
+    fn a_configured_action_skips_a_path_it_would_misname() {
+        let kinds = kinds();
+        kinds.configure(&configured(
+            "[[advanced.kinds.file.actions]]\ntitle = \"Run\"\nscript = \"run\"",
+        ));
+        let path = PathBuf::from(OsStr::from_bytes(b"/fixture/file-\xff.txt"));
+        let item = kinds.file(path, "Example".into(), vec![], false);
+        assert!(item.item_action(&configured_id("file", 0)).is_none());
     }
 
     #[test]

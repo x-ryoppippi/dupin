@@ -46,6 +46,9 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     Action::RunScript(command) => self.start_script(command, tx),
+                    Action::ConfiguredScript { script, argument } => {
+                        self.run_configured_script(&script, argument, tx)
+                    }
                     Action::ScriptArguments(path) => self.open_script_arguments(path, tx),
                     Action::Copy(text) => tx.copy(text),
                     Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),

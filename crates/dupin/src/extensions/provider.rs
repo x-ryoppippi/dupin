@@ -1,4 +1,4 @@
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
@@ -367,14 +367,27 @@ fn file_actions(row: &Row) -> Vec<String> {
         .collect()
 }
 
-/// The kinds a guest's row resolves through. A row's `text` and `url` are text and URLs as any
-/// source's are, but its `file` is a path the guest named, which Dupin hasn't checked is one
-/// the guest may act on, so it is no file-kind row: it shows the file's icon and nothing more.
-static GUEST_KINDS: LazyLock<Kinds> = LazyLock::new(|| Kinds::native(Vec::new()));
+/// The app's kinds, which a guest's row resolves through once the app has handed them over.
+/// A row's `text` and `url` are text and URLs as any source's are, so they take the actions
+/// config.toml adds to those kinds as well, which only the user runs. Its `file` is a path the
+/// guest named, which Dupin hasn't checked is one the guest may act on, so it is no file-kind
+/// row: it shows the file's icon and nothing more.
+static KINDS: OnceLock<Kinds> = OnceLock::new();
+/// Outside the app, as `dupin ext run` and fixtures run a package, nothing is configured.
+static UNCONFIGURED: LazyLock<Kinds> = LazyLock::new(|| Kinds::native(Vec::new()));
+
+/// Resolve every guest row's text and URLs through `kinds` from now on.
+pub(crate) fn hand_over_kinds(kinds: Kinds) {
+    let _ = KINDS.set(kinds);
+}
+
+fn kinds() -> &'static Kinds {
+    KINDS.get().unwrap_or(&UNCONFIGURED)
+}
 
 /// The action `subject`'s kind runs first, under the ID and title the row gives it.
-fn kind_action(subject: &Subject, id: String, title: &str) -> ItemAction {
-    let mut action = GUEST_KINDS
+fn kind_action(kinds: &Kinds, subject: &Subject, id: String, title: &str) -> ItemAction {
+    let mut action = kinds
         .resolve(subject, title)
         .actions
         .into_iter()
@@ -394,6 +407,10 @@ pub(super) struct Shown {
 }
 
 pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Shown {
+    row_item_with(kinds(), extension, row, catalogue)
+}
+
+fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool) -> Shown {
     let Row {
         id,
         title,
@@ -447,7 +464,16 @@ pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Show
         .unwrap_or_default();
     let (mut copy, mut paste, mut open) = (false, false, false);
     let mut alternate = None;
-    let actions: Vec<ItemAction> = offered
+    // The first text a row copies as written and the first URL it opens are what the kinds'
+    // configured actions take, once each.
+    let mut configured = Vec::new();
+    let mut configure = |subject: Subject, done: &mut bool| {
+        if !std::mem::replace(done, true) {
+            configured.extend(kinds.configured(&subject));
+        }
+    };
+    let (mut texts, mut urls) = (false, false);
+    let mut actions: Vec<ItemAction> = offered
         .into_iter()
         .enumerate()
         .map(|(index, action)| {
@@ -466,7 +492,13 @@ pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Show
                     Action::Snippet { text, paste: false },
                 ),
                 RowEffect::Copy { text } => {
-                    kind_action(&Subject::Text(text), name(&mut copy, "copy"), &action.title)
+                    configure(Subject::Text(text.clone()), &mut texts);
+                    kind_action(
+                        kinds,
+                        &Subject::Text(text),
+                        name(&mut copy, "copy"),
+                        &action.title,
+                    )
                 }
                 RowEffect::Paste { text } => ItemAction::new(
                     &name(&mut paste, "paste"),
@@ -477,7 +509,8 @@ pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Show
                     },
                 ),
                 RowEffect::OpenUrl { url } => {
-                    kind_action(&Subject::Url(url), name(&mut open, "open"), &action.title)
+                    configure(Subject::Url(url.clone()), &mut urls);
+                    kind_action(kinds, &Subject::Url(url), name(&mut open, "open"), &action.title)
                 }
                 RowEffect::Reveal { path } => ItemAction::new(
                     &format!("action-{index}"),
@@ -518,6 +551,7 @@ pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Show
             }
         })
         .collect();
+    actions.extend(configured);
     let view = match answer {
         Some(result) => View::Pair {
             source: title,
@@ -967,6 +1001,100 @@ mod tests {
         assert_eq!(rows[0].action("copy"), Some(&Action::Copy("2".into())));
         assert_eq!(rows[0].payload, Payload::text("2"));
         assert!(!rows[0].record_usage);
+    }
+
+    #[test]
+    fn configured_kind_actions_take_a_guest_rows_text_and_url_but_never_its_file() {
+        use dupin_js_runtime::row::RowAction;
+
+        let kinds = dupin_mac::kinds::native();
+        kinds.configure(
+            &dupin_core::Config::parse(
+                r#"
+[[advanced.kinds.text.actions]]
+title = "Translate"
+url = "https://translate.example/?q={text}"
+
+[[advanced.kinds.url.actions]]
+title = "Archive"
+script = "archive"
+
+[[advanced.kinds.file.actions]]
+title = "Open in Zed"
+script = "open-in-zed"
+
+[[advanced.kinds.app.actions]]
+title = "App"
+script = "app"
+"#,
+            )
+            .unwrap()
+            .advanced
+            .kinds,
+        );
+        let extension = super::super::tests::extension("Guest", "g");
+        let mut row: Row = serde_json::from_value(serde_json::json!({
+            "id": "configured-file-0",
+            "title": "configured-text-0",
+            "file": "/Applications/Safari.app"
+        }))
+        .unwrap();
+        row.actions = vec![
+            RowAction::new("Copy", RowEffect::Copy { text: "one".into() }),
+            RowAction::new("Copy again", RowEffect::Copy { text: "two".into() }),
+            RowAction::new(
+                "Open",
+                RowEffect::OpenUrl {
+                    url: "https://example.com/a b".into(),
+                },
+            ),
+            RowAction::new(
+                "Reveal",
+                RowEffect::Reveal {
+                    path: "/Applications/Safari.app".into(),
+                },
+            ),
+        ];
+        let item = row_item_with(&kinds, &extension, row, false).item;
+        let ids: Vec<_> = item.actions.iter().map(|action| action.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "copy",
+                "action-1",
+                "open",
+                "action-3",
+                "configured-text-0",
+                "configured-url-0"
+            ]
+        );
+        assert_eq!(item.primary.as_deref(), Some("copy"));
+        assert_eq!(
+            item.action("configured-text-0"),
+            Some(&Action::OpenUrl("https://translate.example/?q=one".into()))
+        );
+        assert_eq!(
+            item.action("configured-url-0"),
+            Some(&Action::ConfiguredScript {
+                script: "archive".into(),
+                argument: "https://example.com/a b".into()
+            })
+        );
+        for id in ["configured-file-0", "configured-app-0", "configured-text-1"] {
+            assert_eq!(
+                item.action(id),
+                None,
+                "a guest's file or app path, or second text, reaches no configured action"
+            );
+        }
+
+        let unconfigured = row_item_with(
+            &dupin_mac::kinds::native(),
+            &extension,
+            serde_json::from_value(serde_json::json!({"id": "plain", "title": "Plain"})).unwrap(),
+            false,
+        );
+        assert!(unconfigured.item.actions.is_empty());
     }
 
     #[test]

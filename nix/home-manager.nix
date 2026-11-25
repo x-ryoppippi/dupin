@@ -209,14 +209,18 @@
               position = "top";
               input_source = "ascii";
               file_limit = 100;
+              advanced.kinds.file.actions = [
+                { title = "Open in Zed"; script = "open-in-zed"; }
+              ];
             }
           '';
           description = ''
             Written to {file}`$XDG_CONFIG_HOME/dupin/config.toml`. Leave it empty to keep the
             file out of Nix, so Dupin's Settings window can change it. When set, the keys it
             contains are locked in Settings and other edits are saved to `settings.toml` in
-            Dupin's data directory. See
-            <https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md>.
+            Dupin's data directory. `advanced` recomposes the built-in sources, filters and
+            kinds; see <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/advanced.md>.
+            See <https://github.com/x-ryoppippi/dupin/blob/main/docs/configuration.md>.
           '';
         };
 

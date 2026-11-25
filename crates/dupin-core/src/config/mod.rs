@@ -1,5 +1,6 @@
 //! `config.toml`: user settings. Every key is optional; a missing file is the defaults.
 
+mod advanced;
 mod calculator;
 mod calendar;
 mod clipboard;
@@ -17,6 +18,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use advanced::{Advanced, KindAction, KindActions, Route, Routes, SourceStages};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::HotkeyTarget;
@@ -77,6 +79,9 @@ pub struct Config {
     pub theme: Theme,
     pub calendar: Calendar,
     pub clipboard: Clipboard,
+    /// Recomposition of the built-in sources, filters and kinds.
+    #[serde(skip_serializing_if = "Advanced::is_empty")]
+    pub advanced: Advanced,
 }
 
 impl Default for Config {
@@ -107,6 +112,7 @@ impl Default for Config {
             theme: Theme::default(),
             calendar: Calendar::default(),
             clipboard: Clipboard::default(),
+            advanced: Advanced::default(),
         }
     }
 }

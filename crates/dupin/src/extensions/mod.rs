@@ -39,7 +39,7 @@ use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
 pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
-pub(crate) use provider::{is_answered_consent_row, stands_in};
+pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 

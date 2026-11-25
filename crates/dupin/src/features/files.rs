@@ -9,7 +9,7 @@ use crate::ui::Ui;
 
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
-const BROWSE: &str = "files.browse";
+pub(crate) const BROWSE: &str = "files.browse";
 pub(crate) const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub(super) const FEATURE: Feature = Feature {

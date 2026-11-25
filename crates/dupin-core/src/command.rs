@@ -251,6 +251,11 @@ impl CommandRegistry {
         Ok(())
     }
 
+    /// The commands the default search runs, in order.
+    pub fn default_providers(&self) -> &[CommandId] {
+        &self.defaults
+    }
+
     pub(crate) fn providers(&self, command: &CommandId) -> Vec<CommandId> {
         if command == &self.default {
             self.defaults.clone()

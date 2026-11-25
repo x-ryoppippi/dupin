@@ -33,7 +33,28 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             .as_deref()
             .map(|notice| scripts_notice(k, notice)),
     );
+    let composed = crate::composition::summary(&s.config.advanced);
+    if !composed.is_empty() {
+        body.push(advanced_composition(k, &composed));
+    }
     body
+}
+
+/// What `[advanced]` composes, shown and not edited here: it is written in config.toml.
+fn advanced_composition(k: &Kit, lines: &[String]) -> El {
+    let mut block = col().key("advanced-composition").mx(ROW_PX).gap(4.0).child(
+        text("Advanced composition")
+            .font(k.ty.body_medium)
+            .color(k.c.text_base),
+    );
+    for line in lines {
+        block = block.child(text(line).w_full().font(DESCRIPTION).color(k.c.text_muted).wrap());
+    }
+    block.child(
+        text("Edit [advanced] in config.toml to change it.")
+            .font(DESCRIPTION)
+            .color(k.c.text_muted),
+    )
 }
 
 fn calculator_setting(s: &Prefs, k: &Kit) -> El {

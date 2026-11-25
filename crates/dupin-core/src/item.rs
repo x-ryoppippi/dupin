@@ -64,6 +64,12 @@ pub enum Action {
     Push(Page),
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
+    /// Run the script config.toml names, by its file name in the scripts folder, with the
+    /// row's value as its one argument. Dupin finds the script only when the action runs.
+    ConfiguredScript {
+        script: String,
+        argument: String,
+    },
     /// Something only the extension `extension` (its package ID) offered on its own row.
     Extension {
         extension: String,

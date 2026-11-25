@@ -63,6 +63,19 @@ let
   fixture = ./hm-extension;
   notes = ./hm-extension-notes;
   plain = evaluate { settings.hotkey = "alt+space"; };
+  # `[advanced]` is part of `settings`, with arrays of tables for a kind's actions.
+  advanced = evaluate {
+    settings.advanced = {
+      sources.apps.matcher = "builtin.prefix";
+      commands.default.append_sources = [ "files" ];
+      kinds.file.actions = [
+        {
+          title = "Open in Zed";
+          script = "open-in-zed";
+        }
+      ];
+    };
+  };
   declared = evaluate {
     launchd.enable = true;
     extensions = [
@@ -170,6 +183,7 @@ pkgs.runCommand "dupin-home-manager-module"
       pkgs.jq
     ];
     grants = declared.xdg.configFile."dupin/extension-grants.toml".source;
+    advanced = advanced.xdg.configFile."dupin/config.toml".source;
     clash = pkgs.testers.testBuildFailure clashing.xdg.configFile."dupin/extension-grants.toml".source;
     expected = builtins.toJSON {
       version = 1;
@@ -201,6 +215,11 @@ pkgs.runCommand "dupin-home-manager-module"
     };
   }
   ''
+    toml2json "$advanced" | jq -e '.advanced == {
+      sources: { apps: { matcher: "builtin.prefix" } },
+      commands: { default: { append_sources: ["files"] } },
+      kinds: { file: { actions: [{ title: "Open in Zed", script: "open-in-zed" }] } }
+    }'
     toml2json "$bundledGrants" | jq --sort-keys . > bundled-actual.json
     printf '%s' "$bundledExpected" | jq --sort-keys . > bundled-expected.json
     diff bundled-expected.json bundled-actual.json

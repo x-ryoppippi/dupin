@@ -12,7 +12,8 @@ use objc2_foundation::NSString;
 use crate::kinds::Rows;
 
 /// Lists `Request::folder`, folders first and then by name. The query filters the entries
-/// fuzzily; hidden entries appear only when it starts with a dot.
+/// with the source's matcher, best matches first unless it sorts by title; hidden entries
+/// appear only when it starts with a dot.
 pub struct FolderProvider {
     rows: Rows,
 }
@@ -37,6 +38,8 @@ impl Provider for FolderProvider {
             return Ok(());
         };
         let filter = request.query.trim();
+        let stages = self.rows.filters.current();
+        let by_title = stages.sorter == dupin_core::filter::Sorter::Title;
         let mut entries = Vec::new();
         for entry in std::fs::read_dir(folder).map_err(|_| ProviderError)? {
             if request.is_cancelled() {
@@ -50,10 +53,10 @@ impl Provider for FolderProvider {
             let (score, matched) = if filter.is_empty() {
                 (None, Vec::new())
             } else {
-                let Some(found) = self.rows.matcher.score(filter, &name) else {
+                let Some(found) = stages.matcher.score(filter, &name) else {
                     continue;
                 };
-                (Some(found.score), found.positions)
+                ((!by_title).then_some(found.score), found.positions)
             };
             entries.push(Entry {
                 folder: is_folder(&entry),

@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use dupin_core::filter::Sorter;
 use dupin_core::kind::Kinds;
 use dupin_core::{Item, Provider, ProviderError, Request, View};
 
@@ -180,10 +181,13 @@ impl App {
 /// A match on an alias ranks below the same match on the displayed name.
 const ALIAS_PENALTY: i32 = 8;
 
-/// Best matches first; equal scores keep the shorter, then alphabetical, name. An app matched
-/// through an alias shows the alias in its subtitle, since its title doesn't contain the query.
+/// Best matches first; equal scores keep the shorter, then alphabetical, name. Sorted by
+/// title instead, the rows carry no score, so the usage history keeps that order. An app
+/// matched through an alias shows the alias in its subtitle, since its title doesn't contain
+/// the query.
 fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
-    let matcher = &*rows.matcher;
+    let stages = rows.filters.current();
+    let matcher = &*stages.matcher;
     let mut hits: Vec<(i32, Option<&str>, Vec<usize>, &App)> = apps
         .iter()
         .filter_map(|app| {
@@ -212,7 +216,12 @@ fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
             Some((score, alias, positions, app))
         })
         .collect();
-    hits.sort_by(|(a, _, _, x), (b, _, _, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
+    let by_title = stages.sorter == Sorter::Title;
+    if by_title {
+        hits.sort_by_cached_key(|(.., app)| (app.name.to_lowercase(), app.name.clone()));
+    } else {
+        hits.sort_by(|(a, _, _, x), (b, _, _, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
+    }
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
@@ -221,7 +230,7 @@ fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
                 *subtitle = format!("{alias} · {subtitle}");
             }
             Item {
-                score: Some(score),
+                score: (!by_title).then_some(score),
                 completion: None,
                 ..item
             }
@@ -405,7 +414,10 @@ mod tests {
             app("Notes", &["Safe Notes"]),
         ];
         let rows = Rows {
-            matcher: Arc::new(Prefix),
+            filters: dupin_core::filter::SourceFilters::new(dupin_core::filter::Stages {
+                matcher: Arc::new(Prefix),
+                sorter: Sorter::Relevance,
+            }),
             kinds: crate::kinds::native(),
         };
         let items = super::rank(&apps, "saf", 10, &rows);
@@ -418,6 +430,26 @@ mod tests {
             3,
             "the fuzzy matcher finds all three"
         );
+    }
+
+    #[test]
+    fn sorted_by_title_matches_keep_alphabetical_order_without_scores() {
+        let apps = [app("Safari", &[]), app("Hush Safe", &[]), app("safety", &[])];
+        let rows = Rows::native();
+        let relevance: Vec<_> = super::rank(&apps, "saf", 2, &rows)
+            .iter()
+            .map(|item| (item.display_title().to_owned(), item.score.is_some()))
+            .collect();
+        assert_eq!(relevance, [("Safari".into(), true), ("safety".into(), true)]);
+        rows.filters.set(dupin_core::filter::Stages {
+            matcher: dupin_core::filter::fuzzy(),
+            sorter: Sorter::Title,
+        });
+        let titled: Vec<_> = super::rank(&apps, "saf", 2, &rows)
+            .iter()
+            .map(|item| (item.display_title().to_owned(), item.score))
+            .collect();
+        assert_eq!(titled, [("Hush Safe".into(), None), ("Safari".into(), None)]);
     }
 
     #[test]
