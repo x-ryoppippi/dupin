@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use dupin_core::Config;
 use toml::Table;
@@ -10,24 +11,24 @@ pub type LockedKeys = BTreeSet<String>;
 #[derive(Clone, Default)]
 pub struct Paths {
     pub base: Option<PathBuf>,
-    pub overlay: Option<PathBuf>,
+    /// Where Settings saves over a read-only base.
+    pub overlay: Option<Arc<super::overlay::Overlay>>,
 }
 
 impl Paths {
     pub fn discover() -> Self {
         Self {
             base: super::path(),
-            overlay: crate::store::data_dir().map(|dir| dir.join("settings.toml")),
+            overlay: super::overlay::shared(),
         }
     }
 
     pub(super) fn read(&self) -> Result<Layers, String> {
         let base_read_only = self.base.as_ref().is_some_and(|path| !super::writable(path));
         let base = read_layer(self.base.as_deref(), "config.toml")?;
-        let overlay = if base_read_only {
-            read_layer(self.overlay.as_deref(), "settings.toml")?
-        } else {
-            None
+        let overlay = match &self.overlay {
+            Some(overlay) if base_read_only => read_overlay(overlay)?,
+            _ => None,
         };
         Ok(Layers {
             base_read_only,
@@ -60,11 +61,13 @@ impl Layers {
             let base = top_level(base, "config.toml")?;
             locked_keys.extend(base.keys().cloned());
             if let Some(source) = &self.overlay {
-                Config::parse(source).map_err(|e| parse_problem("settings.toml", source, &e))?;
-                overlay = top_level(source, "settings.toml")?;
+                Config::parse(source).map_err(|e| parse_problem("the stored settings", source, &e))?;
+                overlay = top_level(source, "the stored settings")?;
                 let mut merged = overlay.clone();
                 merged.extend(base);
-                config = merged.try_into().map_err(|_| "could not merge settings.toml")?;
+                config = merged
+                    .try_into()
+                    .map_err(|_| "could not merge the stored settings")?;
             }
         }
         crate::composition::check(&config.advanced)
@@ -85,6 +88,20 @@ pub fn load(paths: &Paths) -> (Config, LockedKeys, Option<String>) {
             crate::log::warn(&problem);
             (Config::default(), LockedKeys::new(), Some(problem))
         }
+    }
+}
+
+/// The stored overlay as TOML, from the running launcher when it holds the overlay, as it does
+/// whenever this is another process, such as `dupin ext install`.
+pub fn read_overlay(overlay: &super::overlay::Overlay) -> Result<Option<String>, String> {
+    match overlay.read() {
+        Ok(source) => Ok(source),
+        Err(dupin_storage::Error::Busy) => {
+            crate::control::exchange(crate::control::Command::ConfigOverlay {})
+                .and_then(|source| serde_json::from_value(source).map_err(|error| error.to_string()))
+                .map_err(|error| format!("could not read the stored settings Dupin holds ({error})"))
+        }
+        Err(error) => Err(format!("could not read the stored settings ({error})")),
     }
 }
 

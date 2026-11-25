@@ -52,7 +52,7 @@ Settings → Appearance shows light and dark previews at the configured width (s
 to see wide panels), with a menu for colors, font and geometry presets. Edit TOML
 for precise values. Changes use the usual settings save/conflict handling; the theme
 section is one setting for conflict detection. The menu is locked only when a read-only
-`config.toml` sets `[theme]`; otherwise edits are saved to `settings.toml`.
+`config.toml` sets `[theme]`; otherwise edits are saved in Dupin's encrypted storage.
 Width, rows, colors and typography apply live without clearing the search. Corner
 radius requires relaunch because pinned Rune only sets native corners at window creation;
 the running panel keeps both its native and drawn corners at the launch radius.

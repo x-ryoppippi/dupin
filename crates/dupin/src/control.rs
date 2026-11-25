@@ -44,6 +44,9 @@ pub enum Command {
     ExtensionDataDelete {
         package: String,
     },
+    /// What Settings saved over a read-only config.toml, as TOML, which the running launcher
+    /// holds open.
+    ConfigOverlay {},
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,6 +86,7 @@ impl Call {
             Command::SnapshotsOpen { .. } => "snapshots open",
             Command::SnapshotsClose {} => "snapshots close",
             Command::ExtensionDataDelete { .. } => "extension data delete",
+            Command::ConfigOverlay {} => "config overlay",
         };
         crate::trace::control(kind, result.is_ok());
         let _ = self.reply.try_send(Reply {

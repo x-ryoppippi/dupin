@@ -258,7 +258,7 @@ where
     }
 
     fn refresh_watcher(&mut self, rebuild: bool) {
-        let files = self.paths.base.iter().chain(&self.paths.overlay);
+        let files = self.paths.base.iter();
         if files.clone().next().is_none() {
             self.watcher.take();
             self.watcher_roots = None;
@@ -369,8 +369,11 @@ fn save_to_disk(
             &effective.locked_keys,
         )?;
     }
-    let (path, source, notice) = if layers.base_read_only {
-        let path = paths.overlay.as_deref().ok_or("settings.toml has no path")?;
+    if layers.base_read_only {
+        let stored = paths
+            .overlay
+            .as_deref()
+            .ok_or("Dupin's storage needs XDG_DATA_HOME or HOME")?;
         let mut overlay = effective.overlay;
         let mut dropped = Vec::new();
         for key in &effective.locked_keys {
@@ -378,9 +381,8 @@ fn save_to_disk(
                 dropped.push(key.as_str());
             }
         }
-        let before =
-            toml::Table::try_from(&effective.config).map_err(|_| "could not encode settings.toml")?;
-        let after = toml::Table::try_from(&current).map_err(|_| "could not encode settings.toml")?;
+        let before = toml::Table::try_from(&effective.config).map_err(|_| "could not encode the settings")?;
+        let after = toml::Table::try_from(&current).map_err(|_| "could not encode the settings")?;
         overlay.extend(
             after
                 .into_iter()
@@ -389,24 +391,30 @@ fn save_to_disk(
         if overlay.is_empty() && dropped.is_empty() {
             return Ok(None);
         }
-        let source = toml::to_string(&overlay).map_err(|_| "could not encode settings.toml")?;
-        let notice = (!dropped.is_empty()).then(|| {
+        unchanged_since(paths, &layers)?;
+        stored
+            .write(&overlay)
+            .map_err(|error| format!("could not save the settings: {error}"))?;
+        Ok((!dropped.is_empty()).then(|| {
             format!(
-                "Removed keys from settings.toml that are set in config.toml: {}.",
+                "Removed saved settings that config.toml now sets: {}.",
                 dropped.join(", ")
             )
-        });
-        (path, source, notice)
+        }))
     } else {
         let path = paths.base.as_deref().ok_or("config.toml has no path")?;
         let source = toml::to_string(&current).map_err(|_| "could not encode config.toml")?;
-        (path, source, None)
-    };
-    if paths.read().as_ref() != Ok(&layers) {
+        unchanged_since(paths, &layers)?;
+        write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
+        Ok(None)
+    }
+}
+
+fn unchanged_since(paths: &Paths, layers: &Layers) -> Result<(), String> {
+    if paths.read().as_ref() != Ok(layers) {
         return Err("configuration changed on disk while saving; no changes were written".into());
     }
-    write(path, &source).map_err(|error| format!("could not save {}: {error}", path.display()))?;
-    Ok(notice)
+    Ok(())
 }
 
 pub fn check_locked(base: &Config, desired: &Config, locked: &LockedKeys) -> Result<(), String> {
@@ -492,6 +500,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::settings::overlay::Overlay;
 
     static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
 
@@ -529,13 +538,17 @@ mod tests {
         }
     }
 
-    fn linked_base(temp: &TempDir, source: &str) -> (Paths, PathBuf, PathBuf) {
+    fn linked_base(temp: &TempDir, source: &str) -> (Paths, PathBuf, std::sync::Arc<Overlay>) {
         let target = temp.path().join("managed.toml");
         fs::write(&target, source).unwrap();
         fs::set_permissions(&target, fs::Permissions::from_mode(0o444)).unwrap();
         let base = temp.path().join("config.toml");
         symlink(&target, &base).unwrap();
-        let overlay = temp.path().join("data/settings.toml");
+        let storage = dupin_storage::Storage::new(
+            temp.path().join("data/storage"),
+            dupin_storage::MemoryKey::random(),
+        );
+        let overlay = std::sync::Arc::new(Overlay::new(std::sync::Arc::new(storage)));
         (
             Paths {
                 base: Some(base),
@@ -544,6 +557,10 @@ mod tests {
             target,
             overlay,
         )
+    }
+
+    fn stored(overlay: &Overlay) -> Option<toml::Table> {
+        overlay.read().unwrap().map(|source| source.parse().unwrap())
     }
 
     #[test]
@@ -567,10 +584,13 @@ mod tests {
         let saved = receive_revision(&receiver, service.save(&base, &edit).unwrap());
         assert_eq!(saved.result.unwrap(), edit);
         assert!(saved.save_problem.is_none());
-        assert_eq!(fs::read_to_string(&overlay).unwrap(), "file_limit = 123\n");
+        assert_eq!(stored(&overlay), Some("file_limit = 123".parse().unwrap()));
+        assert!(!temp.path().join("data/settings.toml").exists());
 
-        let overlay_source = "file_limit = 123\nhotkey = \"ctrl+alt+k\"\n[theme]\npanel_width = 900\n";
-        fs::write(&overlay, overlay_source).unwrap();
+        let shadowed: toml::Table = "file_limit = 123\nhotkey = \"ctrl+alt+k\"\n[theme]\npanel_width = 900\n"
+            .parse()
+            .unwrap();
+        overlay.write(&shadowed).unwrap();
         let attempt = Config {
             hotkey: "ctrl+alt+k".into(),
             show_recent: false,
@@ -584,7 +604,7 @@ mod tests {
                 .unwrap()
                 .contains("'hotkey' is set in read-only config.toml")
         );
-        assert_eq!(fs::read_to_string(&overlay).unwrap(), overlay_source);
+        assert_eq!(stored(&overlay), Some(shadowed));
 
         let next = Config {
             show_recent: false,
@@ -594,10 +614,8 @@ mod tests {
         assert_eq!(saved.result.unwrap(), next);
         assert!(saved.save_problem.is_none());
         assert!(saved.save_notice.unwrap().contains("hotkey, theme"));
-        let source = fs::read_to_string(overlay).unwrap();
-        let table = source.parse::<toml::Table>().unwrap();
         assert_eq!(
-            table.keys().collect::<Vec<_>>(),
+            stored(&overlay).unwrap().keys().collect::<Vec<_>>(),
             vec!["file_limit", "show_recent"]
         );
         assert_eq!(fs::read_to_string(target).unwrap(), base_source);
@@ -605,13 +623,12 @@ mod tests {
     }
 
     #[test]
-    fn overlay_saves_merge_unrelated_external_changes_and_reject_conflicts() {
+    fn overlay_saves_merge_what_another_writer_stored_and_reject_conflicts() {
         let temp = TempDir::new();
         let (paths, _, overlay) = linked_base(&temp, "position = \"top\"");
-        fs::create_dir(overlay.parent().unwrap()).unwrap();
         let (base, _, _) = super::super::load(&paths);
-        let external = "file_limit = 71";
-        fs::write(&overlay, external).unwrap();
+        let elsewhere: toml::Table = "file_limit = 71".parse().unwrap();
+        overlay.write(&elsewhere).unwrap();
         let (updates, receiver) = mpsc::channel();
         let service = Service::new(paths, move |update| updates.send(update).unwrap());
 
@@ -621,7 +638,7 @@ mod tests {
         };
         let rejected = receive_revision(&receiver, service.save(&base, &conflicting).unwrap());
         assert!(rejected.save_problem.unwrap().contains("conflicting setting"));
-        assert_eq!(fs::read_to_string(&overlay).unwrap(), external);
+        assert_eq!(stored(&overlay), Some(elsewhere));
 
         let desired = Config {
             show_recent: false,
@@ -657,37 +674,42 @@ mod tests {
             Config::parse(&fs::read_to_string(target).unwrap()).unwrap(),
             desired
         );
-        assert!(!overlay.exists());
+        assert_eq!(stored(&overlay), None);
+        assert!(!temp.path().join("data/storage").exists(), "no key read");
     }
 
     #[test]
-    fn watcher_follows_overlay_edits_and_symlink_retargets() {
+    fn an_overlay_that_cant_be_read_refuses_saves_and_keeps_what_it_holds() {
         let temp = TempDir::new();
         let (paths, _, overlay) = linked_base(&temp, "position = \"top\"");
-        fs::create_dir(overlay.parent().unwrap()).unwrap();
-        let first = temp.path().join("first.toml");
-        fs::write(&first, "file_limit = 71").unwrap();
-        symlink(&first, &overlay).unwrap();
+        overlay.write(&"file_limit = 71".parse().unwrap()).unwrap();
+        drop(paths);
+        drop(overlay);
+        let locked = Paths {
+            base: Some(temp.path().join("config.toml")),
+            overlay: Some(std::sync::Arc::new(Overlay::new(std::sync::Arc::new(
+                dupin_storage::Storage::new(
+                    temp.path().join("data/storage"),
+                    dupin_storage::MemoryKey::random(),
+                ),
+            )))),
+        };
+        let (_, _, problem) = super::super::load(&locked);
+        assert!(problem.unwrap().contains("could not read the stored settings"));
         let (updates, receiver) = mpsc::channel();
-        let service = Service::new(paths, move |update| updates.send(update).unwrap());
-        service.activate();
-        let next = || receiver.recv_timeout(Duration::from_secs(10)).unwrap().result;
-        assert_eq!(next().unwrap().file_limit, 71);
-
-        fs::write(first, "file_limit = 72").unwrap();
-        assert_eq!(next().unwrap().file_limit, 72);
-
-        let second = temp.path().join("second.toml");
-        fs::write(&second, "file_limit = \"private\"").unwrap();
-        let replacement = overlay.with_extension("next");
-        symlink(&second, &replacement).unwrap();
-        fs::rename(replacement, overlay).unwrap();
-        let error = next().unwrap_err();
-        assert!(error.contains("settings.toml is invalid"));
-        assert!(!error.contains("private"));
-
-        fs::write(second, "file_limit = 73").unwrap();
-        assert_eq!(next().unwrap().file_limit, 73);
+        let service = Service::new(locked, move |update| updates.send(update).unwrap());
+        let desired = Config {
+            show_recent: false,
+            ..Config::default()
+        };
+        let refused = receive_revision(&receiver, service.save(&Config::default(), &desired).unwrap());
+        assert!(refused.result.is_err());
+        assert!(
+            refused
+                .save_problem
+                .unwrap()
+                .contains("could not read the stored settings")
+        );
     }
 
     fn send_changed(service: &Service) {
