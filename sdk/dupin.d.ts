@@ -47,8 +47,8 @@ declare module 'dupin' {
 		/** Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label. */
 		accessories?: Accessory[];
 		/**
-		 * From `search` or a view: the row shows its title and this, one line of up to 512 bytes,
-		 * as two values, as a calculation does.
+		 * From `search` or a view: the row shows its title and this, one or two lines of up to
+		 * 512 bytes together, as two values, as a calculation does.
 		 */
 		answer?: string;
 	}
@@ -544,6 +544,7 @@ declare module 'dupin' {
 		/** `paste` lets a row's `paste` action paste into the front app; without it, Dupin copies. */
 		clipboard?: ('read' | 'write' | 'watch' | 'paste')[];
 		dictionary?: ['lookup'];
+		calculator?: ['evaluate'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
 		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
@@ -558,7 +559,10 @@ declare module 'dupin' {
 			file?: ('title' | 'name' | 'path')[];
 			app?: ('title' | 'name' | 'path')[];
 		};
-		/** What is typed in the searches a matcher is composed into. */
+		/**
+		 * What is typed beyond the package's keyword: in the searches a matcher is composed into,
+		 * and in the main search for the built-in the package Dupin ships answers there.
+		 */
 		query?: ['read'];
 	}
 
@@ -774,6 +778,42 @@ declare module 'dupin' {
 	/** `dictionary` capability. */
 	export const dictionary: {
 		lookup(word: string): Promise<DictionaryEntry[]>;
+	};
+
+	/** One part of a calculation's answer, in order. */
+	export interface CalculationPart {
+		/** `ident` is a unit or currency, such as ` mi` or `€`, with any space beside it. */
+		kind: 'number' | 'ident' | 'other';
+		text: string;
+	}
+
+	/** What a calculation came to, as Dupin's calculator writes it. */
+	export interface Calculation {
+		/** Such as `approx. 3.1068559612 mi`, up to 256 bytes. */
+		result: string;
+		/** Its first number alone, such as `3.1068559612`. */
+		number: string;
+		parts: CalculationPart[];
+		/**
+		 * Present when it converted a currency, which it does only while currency conversion is
+		 * on: the European Central Bank's reference rates it used, their date (`YYYY-MM-DD`) and
+		 * whether Dupin couldn't refresh them in the past 12 hours; or that it had no rates, or
+		 * none for one currency, so `result` is not to be shown.
+		 */
+		exchange?:
+			| { status: 'ok'; date: string; stale: boolean; currencies: string[] }
+			| { status: 'unavailable' }
+			| { status: 'missing'; currency: string };
+	}
+
+	/** `calculator` capability. */
+	export const calculator: {
+		/**
+		 * Works out arithmetic, units and currencies, up to 512 bytes on one line, within 50 ms.
+		 * `null` when it isn't something the calculator answers: unbalanced or deeply nested
+		 * brackets, characters it doesn't take, an error or an answer longer than 256 bytes.
+		 */
+		evaluate(expression: string): Promise<Calculation | null>;
 	};
 
 	export interface CalendarEvent {

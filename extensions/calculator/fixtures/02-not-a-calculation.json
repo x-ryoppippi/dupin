@@ -1,0 +1,130 @@
+{
+	"fixture": 1,
+	"description": "Names, bare numbers and half-typed sums are left to apps, so the calculator never asks for them; an amount fend reads as a unit is a calculation only with an operator or a conversion, and what fend can't answer shows nothing.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"calculator": {
+			"5 min": {
+				"number": "5",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "5"
+					},
+					{
+						"kind": "ident",
+						"text": " mins"
+					}
+				],
+				"result": "5 mins"
+			},
+			"1/0": null,
+			"2^1000": null,
+			"12*": null,
+			"C++17": null,
+			"5 km to": null
+		}
+	},
+	"steps": [
+		{
+			"query": "Calculator",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "42",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "-42",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "1e-3",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "1Password",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "C++17",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "12*",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "(1+2",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "(1+2))",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "5 km to",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "x=1; x+2",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "5 min",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "1/0",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "2^1000",
+			"expect": {
+				"rows": []
+			}
+		},
+		{
+			"query": "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111+1",
+			"expect": {
+				"rows": []
+			}
+		}
+	]
+}

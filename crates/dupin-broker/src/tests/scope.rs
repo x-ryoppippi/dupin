@@ -38,6 +38,7 @@ fn scope_keys_round_trip_through_their_written_form() {
         "clipboard:watch",
         "clipboard:paste",
         "dictionary",
+        "calculator",
         "calendar",
         "windows:read",
         "windows:arrange",

@@ -1,0 +1,197 @@
+{
+	"fixture": 1,
+	"description": "Arithmetic, units and temperatures answer beside what was typed, and Copy number copies the number alone. A lowercase f or c becomes a temperature only in an explicit conversion.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"calculator": {
+			"12*3": {
+				"number": "36",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "36"
+					},
+					{
+						"kind": "ident",
+						"text": ""
+					}
+				],
+				"result": "36"
+			},
+			"5 km to mi": {
+				"number": "3.1068559612",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "3.1068559612"
+					},
+					{
+						"kind": "ident",
+						"text": " mi"
+					}
+				],
+				"result": "approx. 3.1068559612 mi"
+			},
+			"100 F to C": {
+				"number": "37.7777777778",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "37.7777777778"
+					},
+					{
+						"kind": "ident",
+						"text": " °C"
+					}
+				],
+				"result": "approx. 37.7777777778 °C"
+			},
+			"1 GiB in MB": {
+				"number": "1073.741824",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "1073.741824"
+					},
+					{
+						"kind": "ident",
+						"text": " MB"
+					}
+				],
+				"result": "1073.741824 MB"
+			},
+			"5 miles to feet": {
+				"number": "26400",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "26400"
+					},
+					{
+						"kind": "ident",
+						"text": " feet"
+					}
+				],
+				"result": "26400 feet"
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "12*3",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "12*3",
+						"answer": "36",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "36"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"activate": "Copy number",
+			"expect": {
+				"effect": {
+					"copy": "36"
+				}
+			}
+		},
+		{
+			"query": "5 km to mi",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "5 km to mi",
+						"answer": "approx. 3.1068559612 mi",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "3.1068559612"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "100 f to c",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 f to c",
+						"answer": "approx. 37.7777777778 °C",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "37.7777777778"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "  1 GiB in MB ",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "1 GiB in MB",
+						"answer": "1073.741824 MB",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "1073.741824"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "5 miles to feet",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "5 miles to feet",
+						"answer": "26400 feet",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "26400"
+							}
+						]
+					}
+				]
+			}
+		}
+	]
+}

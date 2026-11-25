@@ -27,7 +27,8 @@ use crate::commands::ConfiguredCommands;
 use crate::features::extensions::Port;
 use crate::ui::Extensions;
 
-const QUERY: &str = "override";
+/// Something each package works on: the calculator only ever sees a calculation.
+const QUERY: &str = "1+1 override";
 const EDITED: &str = "export function search(query: string) { return [{ title: `edited: ${query}` }]; }\n";
 const EDITED_AGAIN: &str = "export function search() { return [{ title: 'another copy' }]; }\n";
 /// The keyword an edited copy's `package.json` asks for.
@@ -47,6 +48,12 @@ fn case(name: &str) -> Option<Override> {
             Config::parse("[clipboard]\nenabled = true").unwrap(),
             Some(Config::default()),
             Some(Use::Effect(Request::Clipboard(ClipboardAccess::Paste))),
+        ),
+        "calculator" => Override::built_in(
+            "calculator",
+            Config::default(),
+            Some(Config::parse("calculator = false").unwrap()),
+            Some(Use::Search),
         ),
         "dictionary" => Override::built_in("dictionary", Config::default(), None, Some(Use::Search)),
         "dupin" => Override::extension("dupin", None),
@@ -288,9 +295,12 @@ impl Override {
                 None,
                 "a built-in copy's own keyword is ignored"
             );
+            // A built-in in the main search has no keyword, and the copy takes none.
+            let keyword =
+                (crate::features::ported_role(self.name) == super::Role::Keyword).then_some(&self.command);
             assert_eq!(
                 configured.registry.keyword(&original.keyword),
-                Some(&self.command),
+                keyword,
                 "it answers the built-in's keyword"
             );
         } else {
@@ -303,14 +313,20 @@ impl Override {
             );
             bridge.set_enabled(&modified.package, true).unwrap();
             assert!(!may_use(&launcher, &modified.package), "not without consent");
-            let pending = bridge.pending(Some(&modified.package));
-            assert!(!pending.is_empty(), "it asks for consent");
-            for request in pending {
-                bridge
-                    .allow(&modified.package, &request.revision, &request.scope, None)
-                    .unwrap();
+            // Each scope is asked for when it is first needed: what is typed before what is
+            // worked out with it.
+            loop {
+                let pending = bridge.pending(Some(&modified.package));
+                assert!(!pending.is_empty(), "it asks for consent");
+                for request in pending {
+                    bridge
+                        .allow(&modified.package, &request.revision, &request.scope, None)
+                        .unwrap();
+                }
+                if may_use(&launcher, &modified.package) {
+                    break;
+                }
             }
-            assert!(may_use(&launcher, &modified.package), "consent lets it");
         } else {
             bridge.set_enabled(&modified.package, true).unwrap();
         }
@@ -414,10 +430,14 @@ impl Override {
                 .all(|(_, state)| *state == ConsentState::Undecided),
             "nothing allowed for the earlier copy passes to it"
         );
-        assert_eq!(
-            launcher.search(&self.command),
-            Some(vec!["another copy".to_owned()])
-        );
+        // A keyword's copy answers before it may use anything; one in the main search sees
+        // nothing typed there until it is turned on and allowed `query`.
+        let answer = if crate::features::ported_role(self.name) == super::Role::MainSearch {
+            Vec::new()
+        } else {
+            vec!["another copy".to_owned()]
+        };
+        assert_eq!(launcher.search(&self.command), Some(answer));
     }
 
     /// The bundled package answers as it did before it was ejected, with its grants.
@@ -535,6 +555,7 @@ fn scopes(bridge: &Bridge, listed: &Listed) -> Vec<(String, ConsentState)> {
 fn services(reached: Arc<AtomicUsize>) -> Services {
     Services {
         dictionary: Box::new(Counted(reached.clone())),
+        calculator: Box::new(Counted(reached.clone())),
         calendar: Box::new(Counted(reached)),
         ..Services::none()
     }
@@ -558,6 +579,17 @@ impl services::Calendar for Counted {
     ) -> Result<Value, Failure> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(Value::Array(Vec::new()))
+    }
+}
+
+impl services::Calculator for Counted {
+    fn evaluate(
+        &self,
+        _expression: &str,
+        _cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<Value, Failure> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(Value::Null)
     }
 }
 

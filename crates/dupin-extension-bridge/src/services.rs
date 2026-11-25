@@ -145,6 +145,12 @@ pub trait Dictionary: Send + Sync {
     fn lookup(&self, word: &str) -> Result<Value, Failure>;
 }
 
+pub trait Calculator: Send + Sync {
+    /// `expression` worked out, as a JSON object, or `null` when it isn't a calculation the
+    /// calculator answers in time. `cancelled` turns true once nobody waits for the answer.
+    fn evaluate(&self, expression: &str, cancelled: &AtomicBool) -> Result<Value, Failure>;
+}
+
 pub trait Calendar: Send + Sync {
     /// The whole local days before and after today that `[from, to)` (milliseconds since the
     /// epoch) reaches, which the broker checks against the declared window.
@@ -234,6 +240,12 @@ impl Dictionary for Unavailable {
     }
 }
 
+impl Calculator for Unavailable {
+    fn evaluate(&self, _expression: &str, _cancelled: &AtomicBool) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+}
+
 impl Calendar for Unavailable {
     fn window(&self, _from: i64, _to: i64) -> Result<(u32, u32), Failure> {
         Err(self.failure())
@@ -279,6 +291,7 @@ pub struct Services {
     pub storage: Box<dyn Storage>,
     pub clipboard: Box<dyn Clipboard>,
     pub dictionary: Box<dyn Dictionary>,
+    pub calculator: Box<dyn Calculator>,
     pub calendar: Box<dyn Calendar>,
     pub windows: Box<dyn Windows>,
 }
@@ -292,6 +305,7 @@ impl Services {
             storage: Box::new(Unavailable("storage isn't available")),
             clipboard: Box::new(Unavailable("the clipboard isn't available")),
             dictionary: Box::new(Unavailable("the dictionary isn't available")),
+            calculator: Box::new(Unavailable("the calculator isn't available")),
             calendar: Box::new(Unavailable("calendars aren't available")),
             windows: Box::new(Unavailable("windows aren't available")),
         }
@@ -455,6 +469,19 @@ pub(crate) mod fixture {
                 "sections": [],
                 "truncated": false,
             }]))
+        }
+    }
+
+    /// Answers `1+1`, and nothing else.
+    pub(crate) struct Calculator;
+
+    impl super::Calculator for Calculator {
+        fn evaluate(&self, expression: &str, _cancelled: &AtomicBool) -> Result<Value, Failure> {
+            Ok(if expression == "1+1" {
+                serde_json::json!({ "result": "2", "number": "2", "parts": [{ "kind": "number", "text": "2" }] })
+            } else {
+                Value::Null
+            })
         }
     }
 

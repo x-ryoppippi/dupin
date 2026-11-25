@@ -84,6 +84,8 @@ pub(super) struct Bundled {
     pub paste_notice: Option<&'static str>,
     /// Whether the feature is on, and so may the package watch on its behalf.
     pub enabled: fn(&Config) -> bool,
+    /// Whether the command answers the main search rather than a keyword of its own.
+    pub main_search: bool,
 }
 
 /// Whether the feature that ships as the extension called `package` is on, if one does.
@@ -115,6 +117,16 @@ fn bundled(package: &str) -> Option<Bundled> {
 /// The built-in command the extension called `package` answers, if a feature ships as it.
 pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
     bundled(package).map(|bundled| bundled.command)
+}
+
+/// How the extension called `package` answers the built-in command it ports.
+pub(crate) fn ported_role(package: &str) -> crate::extensions::Role {
+    match bundled(package) {
+        Some(Bundled {
+            main_search: true, ..
+        }) => crate::extensions::Role::MainSearch,
+        _ => crate::extensions::Role::Keyword,
+    }
 }
 
 /// The feature `package` ships, when it is the package Dupin shipped for a built-in rather

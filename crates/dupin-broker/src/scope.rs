@@ -403,6 +403,7 @@ pub enum Scope {
         access: ClipboardAccess,
     },
     Dictionary,
+    Calculator,
     Calendar {
         past_days: u32,
         future_days: u32,
@@ -416,7 +417,8 @@ pub enum Scope {
         kind: RowKind,
         fields: BTreeSet<RowField>,
     },
-    /// What the user types in the searches the package's matchers are composed into.
+    /// What the user types beyond the package's own keyword: in the searches its matchers are
+    /// composed into, and in the main search for the built-in it answers there.
     Query,
 }
 
@@ -430,6 +432,7 @@ impl Scope {
             Self::Storage { .. } => ScopeKey::Storage,
             Self::Clipboard { access } => ScopeKey::Clipboard(*access),
             Self::Dictionary => ScopeKey::Dictionary,
+            Self::Calculator => ScopeKey::Calculator,
             Self::Calendar { .. } => ScopeKey::Calendar,
             Self::Windows { access } => ScopeKey::Windows(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
@@ -485,7 +488,7 @@ impl Scope {
                     }
             }
             (Self::Clipboard { access }, Self::Clipboard { access: a }) => access == a,
-            (Self::Dictionary, Self::Dictionary) => true,
+            (Self::Dictionary, Self::Dictionary) | (Self::Calculator, Self::Calculator) => true,
             (
                 Self::Calendar {
                     past_days,
@@ -591,6 +594,7 @@ impl fmt::Display for Scope {
                 ClipboardAccess::Paste => f.write_str("paste into the app you were using"),
             },
             Self::Dictionary => f.write_str("look words up in the system dictionaries"),
+            Self::Calculator => f.write_str("work out calculations and conversions with Dupin's calculator"),
             Self::Calendar {
                 past_days,
                 future_days,
@@ -610,14 +614,14 @@ impl fmt::Display for Scope {
                 list(fields, |field| field.described()),
                 kind.plural()
             ),
-            Self::Query => f.write_str("see what you type in the searches you compose its matchers into"),
+            Self::Query => f.write_str("see what you type beyond its own keyword"),
         }
     }
 }
 
 /// The name of one grant: an HTTP origin, a named files or exec scope, a script target, or a
 /// single-valued capability. Written as `http:https://example.com`, `files:notes`,
-/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`,
+/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`,
 /// `calendar` or `windows:arrange` in grant files.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -629,6 +633,7 @@ pub enum ScopeKey {
     Storage,
     Clipboard(ClipboardAccess),
     Dictionary,
+    Calculator,
     Calendar,
     Windows(WindowsAccess),
     Rows(RowKind),
@@ -645,6 +650,7 @@ impl fmt::Display for ScopeKey {
             Self::Storage => f.write_str("storage"),
             Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
             Self::Dictionary => f.write_str("dictionary"),
+            Self::Calculator => f.write_str("calculator"),
             Self::Calendar => f.write_str("calendar"),
             Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
             Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
@@ -662,6 +668,7 @@ impl FromStr for ScopeKey {
             None => match value {
                 "storage" => Self::Storage,
                 "dictionary" => Self::Dictionary,
+                "calculator" => Self::Calculator,
                 "calendar" => Self::Calendar,
                 "query" => Self::Query,
                 _ => return Err(unknown()),

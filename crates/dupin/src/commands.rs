@@ -134,7 +134,6 @@ pub(super) struct Providers<'a> {
     composition: &'a crate::composition::Composition,
     /// `None` in a headless run, which reads fixture events.
     pub calendar_access: Option<CalendarAccess>,
-    pub calculator: Arc<crate::calculator::Calculator>,
 }
 
 impl Providers<'_> {
@@ -164,7 +163,6 @@ pub fn register(
     composition: &crate::composition::Composition,
     history: History,
     calendar_access: Option<CalendarAccess>,
-    calculator: crate::calculator::Calculator,
 ) -> Result<Registration, CommandError> {
     let ConfiguredCommands {
         registry,
@@ -196,7 +194,6 @@ pub fn register(
         kinds: composition.kinds().clone(),
         composition,
         calendar_access,
-        calculator: Arc::new(calculator),
     };
     for feature in MANIFEST {
         (feature.start)(&mut providers);
@@ -418,7 +415,7 @@ mod tests {
 
     #[test]
     fn calculator_precedes_apps_and_enter_copies_without_recording_usage() {
-        use dupin_core::{Action, Delivery, Effect, History, Intent, Item, Request, Session, View};
+        use dupin_core::{Action, Delivery, Effect, History, Intent, Item, ItemAction, Session, View};
 
         let registry = configured(&Config::default()).unwrap().registry;
         let mut session = Session::new(History::default(), registry).unwrap();
@@ -432,10 +429,18 @@ mod tests {
                 _ => None,
             })
             .unwrap();
-        let mut items = Vec::new();
-        crate::calculator::Calculator::default()
-            .search(&Request::detached("12*3", 1), &mut |batch| items.extend(batch))
-            .unwrap();
+        // The bundled calculator's row for it.
+        let mut answer = Item::path("/answer".into(), String::new(), Vec::new());
+        answer.id = "answer".into();
+        answer.view = View::Pair {
+            source: "12*3".into(),
+            result: "36".into(),
+        };
+        answer.icon = None;
+        answer.record_usage = false;
+        answer.actions = vec![ItemAction::new("copy", "Copy number", Action::Copy("36".into()))];
+        answer.primary = Some("copy".into());
+        let items = vec![answer];
         session.deliver_from(
             id(APPS),
             Delivery::Batch {
@@ -762,6 +767,29 @@ mod tests {
                 added.problems
             );
         }
+    }
+
+    #[test]
+    fn the_calculator_package_answers_the_main_search_and_no_keyword() {
+        use crate::extensions::Role;
+        use crate::extensions::tests::extension;
+
+        let calculator = Arc::new(extension("Calculator", "calc"));
+        assert_eq!(calculator.id, "calculator");
+        let mut on = configured(&Config::default()).unwrap();
+        let added = add_extensions(&mut on, std::slice::from_ref(&calculator));
+        let [(command, _, role)] = added.registered.as_slice() else {
+            panic!("{:?}", added.registered.len())
+        };
+        assert_eq!((command, *role), (&id(CALCULATOR), Role::MainSearch));
+        assert_eq!(on.registry.keyword("calc"), None);
+
+        let mut off = configured(&Config::parse("calculator = false").unwrap()).unwrap();
+        let added = add_extensions(&mut off, std::slice::from_ref(&calculator));
+        assert!(
+            added.registered.is_empty(),
+            "it answers only while Calculator is on"
+        );
     }
 
     #[test]

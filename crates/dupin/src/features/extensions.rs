@@ -111,7 +111,7 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             if configured.registry.ids().iter().any(|id| id == command) {
                 added
                     .registered
-                    .push((id(command), extension.clone(), Role::Keyword));
+                    .push((id(command), extension.clone(), super::ported_role(&extension.id)));
             }
             continue;
         }

@@ -33,6 +33,10 @@ pub enum Role {
     Keyword,
     /// The main search, from the catalogue alone, so no keystroke reaches the package.
     DefaultSearch,
+    /// The main search, through `search` alone, for the built-in the package answers there.
+    /// What is typed reaches it only while it holds the `query` scope, and the main search
+    /// shows only its rows: never a question, a failure or a catalogue.
+    MainSearch,
 }
 
 pub struct ExtensionProvider {
@@ -133,6 +137,25 @@ pub fn answer(
         }
     }
     Ok(batches)
+}
+
+/// What `search` computes for what is typed in the main search, for the built-in `extension`
+/// answers there.
+fn main_answer(
+    extension: &Extension,
+    query: &str,
+    limit: usize,
+    deadline: Instant,
+    is_cancelled: impl Fn() -> bool + 'static,
+    call: &Call,
+) -> Result<Vec<Batch>, RunError> {
+    if query.trim().is_empty() || !extension.check(deadline)?.search {
+        return Ok(Vec::new());
+    }
+    let rows = extension.query(query, limit, deadline, is_cancelled, &call.services)?;
+    Ok(sectioned(
+        rows.into_iter().map(|row| row_item(extension, row, false)),
+    ))
 }
 
 /// The catalogue's matches for the main search. The package never sees the query, but loading
@@ -624,6 +647,18 @@ impl Provider for ExtensionProvider {
         };
         let deadline = Instant::now() + QUERY_DEADLINE;
         let id = &self.extension.package;
+        // A main search the package may not see runs nothing, and asks nothing while typing.
+        let seen = if role == Role::MainSearch {
+            let Some(bridge) = &self.bridge else {
+                return Ok(());
+            };
+            match bridge.authorize(id, &dupin_extension_bridge::Request::Query, Trigger::Query) {
+                Ok(permit) => Some(permit),
+                Err(_) => return Ok(()),
+            }
+        } else {
+            None
+        };
         // Loading a catalogue is a query too, from either search, with no activation.
         let call = match &self.bridge {
             Some(bridge) => bridge.call(id, Trigger::Query),
@@ -645,7 +680,23 @@ impl Provider for ExtensionProvider {
             Role::DefaultSearch => {
                 default_answer(&self.extension, &request.query, request.limit, deadline, &call)
             }
+            Role::MainSearch => {
+                let cancellation = request.cancellation();
+                main_answer(
+                    &self.extension,
+                    &request.query,
+                    request.limit,
+                    deadline,
+                    move || cancellation.is_cancelled(),
+                    &call,
+                )
+            }
         };
+        if let (Some(bridge), Some(permit)) = (&self.bridge, &seen)
+            && !bridge.validate(permit)
+        {
+            return Ok(());
+        }
         if let Some(bridge) = &self.bridge
             && !bridge.is_current(id, call.generation)
         {
@@ -665,7 +716,7 @@ impl Provider for ExtensionProvider {
         // questions among its results.
         let access = match role {
             Role::Keyword => self.bridge.as_ref().map(|bridge| (bridge, id)),
-            Role::DefaultSearch => None,
+            Role::DefaultSearch | Role::MainSearch => None,
         };
         if let Some((bridge, id)) = access {
             let mut asking: Vec<_> = bridge

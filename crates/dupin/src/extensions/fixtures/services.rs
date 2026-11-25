@@ -142,6 +142,7 @@ impl Replier {
             storage: shared(),
             clipboard: shared(),
             dictionary: shared(),
+            calculator: shared(),
             calendar: shared(),
             windows: shared(),
         }
@@ -548,6 +549,17 @@ impl services::Dictionary for Shared {
             .get(word)
             .map(|entries| Value::from(entries.clone()))
             .ok_or_else(|| missing(format!("looking up {}", Value::from(word))))
+    }
+}
+
+impl services::Calculator for Shared {
+    fn evaluate(&self, expression: &str, _cancelled: &AtomicBool) -> Result<Value, Failure> {
+        self.0
+            .replies
+            .calculator
+            .get(expression)
+            .cloned()
+            .ok_or_else(|| missing(format!("working out {}", Value::from(expression))))
     }
 }
 

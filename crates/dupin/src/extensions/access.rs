@@ -54,6 +54,8 @@ pub struct Platform {
     pub clipboard: Arc<RwLock<dupin_core::config::Clipboard>>,
     /// The app the panel opened over, whose focused window the `windows` capability moves.
     pub front: Arc<dupin_mac::window_management::Front>,
+    /// What the `calculator` capability works out with, the exchange rates included.
+    pub calculator: crate::calculator::Calculator,
 }
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
@@ -80,6 +82,7 @@ pub fn open(platform: Platform) -> Bridge {
                 dupin_mac::EventStore::fixtures(),
             ))),
             dictionary: fixed_dictionary(),
+            calculator: Box::new(platform.calculator),
             storage: match crate::clipboard::headless_storage() {
                 Some(storage) => Box::new(storage),
                 None => Box::new(services::Unavailable(
@@ -120,6 +123,7 @@ pub fn open(platform: Platform) -> Bridge {
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
             dupin_mac::SystemDictionary::default(),
         ))),
+        calculator: Box::new(platform.calculator),
         calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
             platform.calendar_access,
         )))),

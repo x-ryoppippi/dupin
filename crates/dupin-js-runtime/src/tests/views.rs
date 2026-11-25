@@ -241,7 +241,12 @@ fn malformed_accessories_answers_and_pushes_are_refused() {
             "items[0].accessories[0].text",
         ),
         (
-            "{ title: 'a', answer: 'a\\nb' }",
+            "{ title: 'a', answer: 'a\\nb\\nc' }",
+            "invalid-field",
+            "items[0].answer",
+        ),
+        (
+            "{ title: 'a', answer: 'a\\n' }",
             "invalid-field",
             "items[0].answer",
         ),

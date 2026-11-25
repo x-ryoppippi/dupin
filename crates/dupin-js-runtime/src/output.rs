@@ -873,7 +873,7 @@ impl<'a> Reader<'a> {
                 .into());
         }
         let accessories = self.accessories(&item, &field("accessories"))?;
-        let answer = self.line(&item, &field("answer"), "answer", MAX_TITLE_BYTES)?;
+        let answer = self.answer(&item, &field("answer"))?;
         Ok(Row {
             accessories,
             answer,
@@ -1813,6 +1813,32 @@ impl<'a> Reader<'a> {
                 )
                 .hint("Shorten it to one line.")
             })?;
+        }
+        Ok(value)
+    }
+
+    /// An optional answer: one line, or two, such as an amount and where its rate came from.
+    fn answer(&mut self, object: &Object<'_>, field: &str) -> Result<Option<String>, Failure> {
+        let value = self.string(object, field, "answer", MAX_TITLE_BYTES)?;
+        if let Some(value) = &value {
+            let (first, second) = value.split_once('\n').unwrap_or((value, ""));
+            printable(first)
+                .and_then(|()| printable(second))
+                .and_then(|()| {
+                    if first.is_empty() || value.ends_with('\n') {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(|()| {
+                    self.invalid(
+                        "invalid-field",
+                        field,
+                        "must be one or two lines without other control characters",
+                    )
+                    .hint("Shorten it to two lines.")
+                })?;
         }
         Ok(value)
     }

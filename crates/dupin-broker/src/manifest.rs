@@ -50,6 +50,7 @@ impl Capabilities {
                     "storage" => parser.storage(value, &field),
                     "clipboard" => parser.clipboard(value, &field),
                     "dictionary" => parser.dictionary(value, &field),
+                    "calculator" => parser.calculator(value, &field),
                     "calendar" => parser.calendar(value, &field),
                     "windows" => parser.windows(value, &field),
                     "rows" => parser.rows(value, &field),
@@ -60,7 +61,7 @@ impl Capabilities {
                             field,
                             format!("`{name}` isn't a capability"),
                             Some(
-                                "Use http, files, exec, storage, clipboard, dictionary, calendar, windows, rows or query.",
+                                "Use http, files, exec, storage, clipboard, dictionary, calculator, calendar, windows, rows or query.",
                             ),
                         );
                         Vec::new()
@@ -623,6 +624,22 @@ impl Parser {
             })
         })
         .map(|_| vec![Scope::Dictionary])
+        .unwrap_or_default()
+    }
+
+    fn calculator(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| {
+            (text == "evaluate").then_some(()).or_else(|| {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't a calculator access"),
+                    Some("Use evaluate."),
+                );
+                None
+            })
+        })
+        .map(|_| vec![Scope::Calculator])
         .unwrap_or_default()
     }
 

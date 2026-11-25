@@ -152,9 +152,9 @@ impl Extensions {
         }
         let routed: Vec<_> = self.registered.values().cloned().collect();
         let listing = self.packages.listing(|extension| {
-            routed
-                .iter()
-                .any(|(routed, role)| *role == Role::Keyword && std::ptr::eq(&**routed, extension))
+            routed.iter().any(|(routed, role)| {
+                matches!(role, Role::Keyword | Role::MainSearch) && std::ptr::eq(&**routed, extension)
+            })
         });
         let problems = self
             .bundled
@@ -731,6 +731,8 @@ fn lists_catalogue_of<'a>(
             && match role {
                 Role::Keyword => command == current,
                 Role::DefaultSearch => main,
+                // It answers the main search with `search` alone, never a catalogue.
+                Role::MainSearch => false,
             }
     })
 }

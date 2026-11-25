@@ -37,10 +37,12 @@
 config = "scripts/headless/config/dupin/config.toml"
 provider = "apps.search"
 
-# The calculator answers the main search as the user types, natively until its port.
-[features.calculator.native]
+# The bundled extension `calculator` answers calculations in the main search as the user types,
+# held to the native calculator it replaced (scripts/latency/native-baseline.json).
+[features.calculator.extension]
 config = "scripts/headless/config/dupin/config.toml"
 provider = "calculator.evaluate"
+package = "bundled:calculator"
 
 # Calendar search is the bundled extension `calendar`, held to the native search it replaced
 # until the native one was removed.

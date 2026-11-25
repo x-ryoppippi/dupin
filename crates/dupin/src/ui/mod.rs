@@ -215,7 +215,6 @@ impl Ui {
             &composition,
             history,
             (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
-            currency.calculator(),
         )
         .expect("built-in command registration is valid");
         let runner = crate::scripts::runner::Runner::new(
@@ -235,6 +234,7 @@ impl Ui {
             calendar_access: calendar_access.clone(),
             clipboard: clipboard.settings(),
             front: front.clone(),
+            calculator: currency.calculator(),
         });
         composition.guests().set_bridge(bridge.clone());
         clipboard.start(&bridge);

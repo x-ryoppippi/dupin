@@ -232,6 +232,10 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
         ("invalid-type", "capabilities.dictionary".into())
     );
     assert_eq!(
+        problem(json!({ "calculator": ["convert"] })),
+        ("invalid-value", "capabilities.calculator[0]".into())
+    );
+    assert_eq!(
         problem(json!({ "calendar": { "access": ["write"], "pastDays": 0, "futureDays": 1 } })),
         ("invalid-value", "capabilities.calendar.access[0]".into())
     );

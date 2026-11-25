@@ -381,7 +381,13 @@ impl Row {
             if source == Source::Items {
                 return Err("`answer` belongs to search() and views".into());
             }
-            line("answer", answer, MAX_TITLE_BYTES)?;
+            let (first, second) = answer.split_once('\n').unwrap_or((answer, ""));
+            line("answer", first, MAX_TITLE_BYTES)?;
+            if !second.is_empty() {
+                line("answer", second, MAX_TITLE_BYTES - first.len()).map_err(|_| {
+                    format!("`answer` must be one or two lines of 1 to {MAX_TITLE_BYTES} bytes")
+                })?;
+            }
         }
         validate_actions(&self.actions, source)
     }

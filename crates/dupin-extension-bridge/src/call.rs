@@ -34,6 +34,7 @@ const MAX_PAGE: usize = 200;
 /// must fit in the guest's heap.
 const MAX_PAGE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WORD_CHARS: usize = 200;
+const MAX_EXPRESSION_BYTES: usize = 512;
 const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_INPUTS: usize = 32;
 const MAX_INPUT_BYTES: usize = 4 * 1024;
@@ -163,6 +164,12 @@ struct Nothing {}
 #[serde(deny_unknown_fields)]
 struct Word {
     word: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Expression {
+    expression: String,
 }
 
 #[derive(Deserialize)]
@@ -297,6 +304,21 @@ impl Session {
                 let entries = self.bridge.services.dictionary.lookup(word)?;
                 self.release(&permit, cancelled)?;
                 Ok(json!({ "entries": entries }))
+            }
+            "calculator.evaluate" => {
+                let Expression { expression } = decode(args)?;
+                if expression.trim().is_empty()
+                    || expression.len() > MAX_EXPRESSION_BYTES
+                    || expression.chars().any(char::is_control)
+                {
+                    return Err(Failure::invalid(format!(
+                        "an expression is 1–{MAX_EXPRESSION_BYTES} bytes on one line"
+                    )));
+                }
+                let permit = self.permit(&Request::CalculatorEvaluate)?;
+                let answer = self.bridge.services.calculator.evaluate(&expression, cancelled)?;
+                self.release(&permit, cancelled)?;
+                Ok(answer)
             }
             "calendar.events" => {
                 let Range {

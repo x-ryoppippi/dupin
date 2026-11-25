@@ -229,6 +229,12 @@ export const dictionary = Object.freeze({
 	},
 });
 
+export const calculator = Object.freeze({
+	async evaluate(expression) {
+		return await call('calculator.evaluate', { expression: String(expression) });
+	},
+});
+
 const time = (value) =>
 	value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : value;
 const iso = (time) => new Date(time).toISOString();

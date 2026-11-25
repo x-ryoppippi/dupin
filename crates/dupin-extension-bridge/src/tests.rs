@@ -105,6 +105,7 @@ fn world_with(
         storage: Box::new(storage.clone()),
         clipboard: Box::new(clipboard.clone()),
         dictionary: Box::new(fixture::Dictionary),
+        calculator: Box::new(fixture::Calculator),
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
     };
@@ -226,7 +227,7 @@ const report = async (run) => { try { return `ok ${JSON.stringify(await run())}`
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -866,6 +867,26 @@ fn dictionary_lookups_return_entries() {
     world.enable();
     world.grant("dictionary");
     assert_eq!(world.first("dupin"), "the word dupin");
+}
+
+#[test]
+fn calculations_need_the_grant_and_a_single_bounded_line() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "calculator": ["evaluate"] }),
+        &guest(
+            "export async function search(query) {
+               return [{ title: await report(() => calculator.evaluate(query === 'long' ? '1+'.repeat(300) : query).then((answer) => answer?.result ?? 'none')) }];
+             }",
+        ),
+    );
+    world.enable();
+    assert_eq!(world.first("1+1"), "needs-consent");
+    world.grant("calculator");
+    assert_eq!(world.first("1+1"), r#"ok "2""#);
+    assert_eq!(world.first("2+2"), r#"ok "none""#);
+    assert_eq!(world.first("long"), "invalid");
+    assert_eq!(world.first("1\n+1"), "invalid");
 }
 
 #[test]

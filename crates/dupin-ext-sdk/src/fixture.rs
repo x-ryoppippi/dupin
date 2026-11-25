@@ -226,6 +226,10 @@ pub struct Replies {
     /// Each term's entries, in the dictionary service's shape.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub dictionary: BTreeMap<String, Vec<Value>>,
+    /// Each expression's answer, in the calculator service's shape, or `null` for one it
+    /// doesn't answer.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub calculator: BTreeMap<String, Value>,
     /// The events a calendar read sees, in the calendar service's shape.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calendar: Vec<Value>,

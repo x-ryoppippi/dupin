@@ -32,6 +32,7 @@ pub enum Request {
     },
     Clipboard(ClipboardAccess),
     DictionaryLookup,
+    CalculatorEvaluate,
     /// The window, in whole days around today, the read covers.
     CalendarRead {
         past_days: u32,
@@ -70,6 +71,7 @@ impl Request {
             Self::Storage { .. } => ScopeKey::Storage,
             Self::Clipboard(access) => ScopeKey::Clipboard(*access),
             Self::DictionaryLookup => ScopeKey::Dictionary,
+            Self::CalculatorEvaluate => ScopeKey::Calculator,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
             Self::Windows(access) => ScopeKey::Windows(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
@@ -87,6 +89,7 @@ impl Request {
             Self::Files { .. }
             | Self::Storage { .. }
             | Self::DictionaryLookup
+            | Self::CalculatorEvaluate
             | Self::CalendarRead { .. }
             | Self::Rows { .. }
             | Self::Query => false,

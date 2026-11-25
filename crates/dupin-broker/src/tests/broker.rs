@@ -1524,3 +1524,35 @@ fn rows_and_the_query_need_their_own_grants_and_only_the_declared_fields_pass() 
         Denial::Revoked(_)
     ));
 }
+
+#[test]
+fn calculations_need_their_own_grant_and_stop_when_it_is_revoked() {
+    let (mut broker, package) = enabled(caps(json!({ "calculator": ["evaluate"] })));
+    assert!(matches!(
+        check(&broker, &package, &Request::CalculatorEvaluate, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        denial(check(&broker, &package, &Request::Query, Trigger::Query)),
+        Denial::Undeclared(ScopeKey::Query),
+        "evaluating what it is given never lets it see what is typed"
+    );
+    broker.approve(&package, &ScopeKey::Calculator, None).unwrap();
+    let held = permit(check(
+        &broker,
+        &package,
+        &Request::CalculatorEvaluate,
+        Trigger::Query,
+    ));
+    broker.revoke(&package, &ScopeKey::Calculator).unwrap();
+    assert!(!broker.validate(&held));
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &Request::CalculatorEvaluate,
+            Trigger::Query
+        )),
+        Denial::Revoked(ScopeKey::Calculator)
+    );
+}

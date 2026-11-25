@@ -1,0 +1,464 @@
+{
+	"fixture": 1,
+	"description": "With currency conversion on, an amount converts at the European Central Bank's reference rate, to the currency asked for or else to euros, quoted to its usual decimals and with the rates' date. Copy number copies the amount without grouping.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"calculator": {
+			"100 usd to jpy": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "14950",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "14950"
+					},
+					{
+						"kind": "ident",
+						"text": " JPY"
+					}
+				],
+				"result": "14950 JPY"
+			},
+			"(100 usd to jpy) to JPY to 0dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "14950",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "14950"
+					},
+					{
+						"kind": "ident",
+						"text": " JPY"
+					}
+				],
+				"result": "14950 JPY"
+			},
+			"EUR * 50 in gbp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "42.5",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "42.5"
+					},
+					{
+						"kind": "ident",
+						"text": " GBP"
+					}
+				],
+				"result": "42.5 GBP"
+			},
+			"(EUR * 50 in gbp) to GBP to 2dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "42.5",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "42.5"
+					},
+					{
+						"kind": "ident",
+						"text": " GBP"
+					}
+				],
+				"result": "42.5 GBP"
+			},
+			"10 GBP": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "10",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "10"
+					},
+					{
+						"kind": "ident",
+						"text": " GBP"
+					}
+				],
+				"result": "10 GBP"
+			},
+			"(10 GBP) to EUR to 2dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "11.76",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "11.76"
+					},
+					{
+						"kind": "ident",
+						"text": " EUR"
+					}
+				],
+				"result": "approx. 11.76 EUR"
+			},
+			"-10 GBP": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "-10",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "-10"
+					},
+					{
+						"kind": "ident",
+						"text": " GBP"
+					}
+				],
+				"result": "-10 GBP"
+			},
+			"(-10 GBP) to EUR to 2dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "-11.76",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "-11.76"
+					},
+					{
+						"kind": "ident",
+						"text": " EUR"
+					}
+				],
+				"result": "approx. -11.76 EUR"
+			},
+			"EUR * 1 to ISK": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "150.125",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "150.125"
+					},
+					{
+						"kind": "ident",
+						"text": " ISK"
+					}
+				],
+				"result": "150.125 ISK"
+			},
+			"(EUR * 1 to ISK) to ISK to 0dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "150",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "150"
+					},
+					{
+						"kind": "ident",
+						"text": " ISK"
+					}
+				],
+				"result": "approx. 150 ISK"
+			},
+			"100 usd to CAD": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "131.8181818182",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "131.8181818182"
+					},
+					{
+						"kind": "ident",
+						"text": " CAD"
+					}
+				],
+				"result": "approx. 131.8181818182 CAD"
+			},
+			"(100 usd to CAD) to CAD to 2dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "131.82",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "131.82"
+					},
+					{
+						"kind": "ident",
+						"text": " CAD"
+					}
+				],
+				"result": "approx. 131.82 CAD"
+			},
+			"100 usd to CHF": {
+				"exchange": {
+					"currency": "CHF",
+					"status": "missing"
+				},
+				"number": "90.909090910",
+				"parts": [
+					{
+						"kind": "ident",
+						"text": "approx. "
+					},
+					{
+						"kind": "number",
+						"text": "90.909090910"
+					},
+					{
+						"kind": "ident",
+						"text": " CHF"
+					}
+				],
+				"result": "approx. 90.909090910 CHF"
+			},
+			"1 gb to tb": {
+				"number": "0.001",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "0.001"
+					},
+					{
+						"kind": "ident",
+						"text": " Tb"
+					}
+				],
+				"result": "0.001 Tb"
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "100 usd to jpy",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 usd to jpy",
+						"answer": "≈ ¥14,950\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "14950"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "€50 in gbp",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "€50 in gbp",
+						"answer": "≈ £42.50\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "42.50"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"activate": "Copy number",
+			"expect": {
+				"effect": {
+					"copy": "42.50"
+				}
+			}
+		},
+		{
+			"query": "10 GBP",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "10 GBP",
+						"answer": "≈ €11.76\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "11.76"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "-10 GBP",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "-10 GBP",
+						"answer": "≈ €-11.76\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "-11.76"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "€1 to ISK",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "€1 to ISK",
+						"answer": "≈ 150 ISK\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "150"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "100 usd to CAD",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 usd to CAD",
+						"answer": "≈ 131.82 CAD\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "131.82"
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"query": "100 usd to CHF",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 usd to CHF",
+						"answer": "No ECB rate for CHF",
+						"actions": []
+					}
+				]
+			}
+		},
+		{
+			"query": "1 gb to tb",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "1 gb to tb",
+						"answer": "0.001 Tb",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "0.001"
+							}
+						]
+					}
+				]
+			}
+		}
+	]
+}
