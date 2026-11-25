@@ -45,10 +45,12 @@ impl Ui {
             {
                 self.action_screen = None;
             }
-            // Rows are keyed by item, so the list would otherwise keep its scroll offset, or
-            // the row that was at its top, from the results it replaces, leaving the selected
-            // row out of view.
-            self.reveal_selection(tx);
+            // The list keeps its offset when its rows change, so one scrolled for the results
+            // these replace would hide the selected row. Revealing it slows the frame that
+            // draws the results, so the first row of a list at its top asks for none.
+            if self.session.selected() != 0 || self.list_offset.get() > 0.0 {
+                self.reveal_selection(tx);
+            }
             self.sync_forms(tx);
             self.fetch_icons();
         }

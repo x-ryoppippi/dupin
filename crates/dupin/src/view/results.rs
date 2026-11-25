@@ -101,6 +101,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .key("rows")
             .w_full()
             .growth(GrowthSpec::default())
+            .no_scroll_anchor()
             .virtualize(s.theme.row_height as f32)
             .on_visible_rows(Ui::rows_in_view)
             .children(rows);
@@ -110,6 +111,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 .w_full()
                 .h(CARDS_MAX_H)
                 .scroll(ScrollSpec { stick_bottom: false })
+                .on_scroll_offset(report_offset(s))
                 .instant_changes()
                 .child(list),
         );
@@ -141,6 +143,7 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
                 .shrink()
                 .max_h(440.0)
                 .scroll(ScrollSpec { stick_bottom: false })
+                .on_scroll_offset(report_offset(s))
                 .child(content),
         );
     }
@@ -157,7 +160,13 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
     let headings = (0..items.len())
         .filter(|&index| s.session.section_start(index).is_some())
         .count();
-    let list = col().key("rows").w_full().growth(GrowthSpec::default());
+    // Rows are keyed by item, so a list anchored to its top row would follow that row down
+    // through the next query's results, past the first row, which is selected.
+    let list = col()
+        .key("rows")
+        .w_full()
+        .growth(GrowthSpec::default())
+        .no_scroll_anchor();
     let (height, list) = if layout == Layout::Windowed {
         let shown = items.len().min(visible_rows(row_height)) as f32;
         (
@@ -174,9 +183,17 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
             .w_full()
             .h(height)
             .scroll(ScrollSpec { stick_bottom: false })
+            .on_scroll_offset(report_offset(s))
             .instant_changes()
             .child(list.children(rows)),
     )
+}
+
+fn report_offset(s: &Ui) -> impl Fn(rune::ScrollPos) + 'static {
+    let offset = s.list_offset.clone();
+    move |at| {
+        offset.set(at.offset[1]);
+    }
 }
 
 /// `result` under its section's heading when it starts one. The heading shares the row's key,

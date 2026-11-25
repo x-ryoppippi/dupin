@@ -23,7 +23,7 @@ mod snapshots;
 mod snippets;
 mod thumbnails;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
@@ -120,6 +120,8 @@ pub struct Ui {
     pub(crate) thumbnails: thumbnails::Thumbnails,
     /// The rows the windowed result list last showed.
     visible_rows: std::ops::Range<usize>,
+    /// How far down the result list is scrolled, as it last drew.
+    pub(crate) list_offset: Rc<Cell<f32>>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -313,6 +315,7 @@ impl Ui {
             icons: HashMap::new(),
             thumbnails: thumbnails::Thumbnails::new(),
             visible_rows: 0..0,
+            list_offset: Rc::default(),
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
