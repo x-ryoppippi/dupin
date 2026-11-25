@@ -29,6 +29,11 @@ pub struct ConfiguredCommands {
     pub web: crate::web::Configured,
     /// What the bundled snippets package reads as `ctx.preferences`.
     pub snippets: dupin_js_runtime::Preferences,
+    /// `[aliases]` that name a command no built-in answers, by alias: an extension's, which
+    /// gets them once it registers.
+    pub package_aliases: Vec<(String, String)>,
+    /// Why each alias that reaches nothing was left out, by alias.
+    pub alias_problems: std::collections::BTreeMap<String, String>,
 }
 
 pub(super) fn id(value: &str) -> CommandId {
@@ -60,6 +65,10 @@ pub(super) struct Configure {
     pub notices: Vec<String>,
     pub web: crate::web::Configured,
     pub snippets: dupin_js_runtime::Preferences,
+    pub package_aliases: Vec<(String, String)>,
+    pub alias_problems: std::collections::BTreeMap<String, String>,
+    /// Where an app is installed, by bundle identifier, for `app:` aliases.
+    pub application: fn(&str) -> Option<std::path::PathBuf>,
 }
 
 impl Configure {
@@ -79,6 +88,14 @@ impl Configure {
 }
 
 pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
+    configured_with(config, dupin_mac::workspace::application_path)
+}
+
+/// [`configured`], finding apps for `app:` aliases with `application`.
+pub(crate) fn configured_with(
+    config: &Config,
+    application: fn(&str) -> Option<std::path::PathBuf>,
+) -> Result<ConfiguredCommands, CommandError> {
     let mut commands = Configure {
         registry: CommandRegistry::new(id(APPS), Some(id(FILES))),
         defaults: Vec::new(),
@@ -86,6 +103,9 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
         notices: Vec::new(),
         web: crate::web::Configured::default(),
         snippets: dupin_js_runtime::Preferences::new(),
+        package_aliases: Vec::new(),
+        alias_problems: std::collections::BTreeMap::new(),
+        application,
     };
     for feature in MANIFEST {
         (feature.configure)(config, &mut commands)?;
@@ -102,6 +122,8 @@ pub fn configured(config: &Config) -> Result<ConfiguredCommands, CommandError> {
         notice: (!commands.notices.is_empty()).then(|| commands.notices.join("\n")),
         web: commands.web,
         snippets: commands.snippets,
+        package_aliases: commands.package_aliases,
+        alias_problems: commands.alias_problems,
     })
 }
 
@@ -169,6 +191,7 @@ pub fn register(
         notice,
         web,
         snippets,
+        ..
     } = configured(config)?;
     let session = Session::new(history, registry)?;
     crate::extensions::hand_over_kinds(composition.kinds().clone());

@@ -122,6 +122,14 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
         let holder = configured.registry.holder(keyword).map(|holder| match holder {
             dupin_core::KeywordHolder::Web(_) => "a web search in config.toml",
             dupin_core::KeywordHolder::Command(_) => "another command",
+            dupin_core::KeywordHolder::Path(_) => "an alias in config.toml",
+        });
+        let holder = holder.or_else(|| {
+            configured
+                .package_aliases
+                .iter()
+                .any(|(alias, package)| alias == keyword && *package != extension.id)
+                .then_some("an alias in config.toml")
         });
         if let Some(holder) = holder {
             added.problems.push(format!(
@@ -158,6 +166,15 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             if configured.registry.register(spec).is_ok()
                 && configured.registry.add_keyword(&command, keyword.clone()).is_ok()
             {
+                for (alias, _) in configured
+                    .package_aliases
+                    .iter()
+                    .filter(|(_, package)| *package == extension.id)
+                {
+                    if let Err(error) = configured.registry.add_keyword(&command, alias.clone()) {
+                        added.problems.push(format!("alias `{alias}`: {error}"));
+                    }
+                }
                 added.registered.push((command, extension.clone(), Role::Keyword));
             }
         }
@@ -183,6 +200,17 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             added
                 .registered
                 .push((command, extension.clone(), Role::DefaultSearch));
+        }
+    }
+    for (alias, package) in &configured.package_aliases {
+        let reached = added
+            .registered
+            .iter()
+            .any(|(_, extension, role)| *role == Role::Keyword && extension.id == *package);
+        if !reached {
+            added.problems.push(format!(
+                "alias `{alias}` names `{package}`, which is neither a command nor an extension that is on"
+            ));
         }
     }
     added

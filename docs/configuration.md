@@ -56,6 +56,7 @@ With `settings` set, `config.toml` links into the Nix store. Settings marks thos
 - [Extensions](./features/extensions.md#turning-them-on)
 - [File ranking](./features/files.md#file-ranking)
 - [Hotkeys](./features/hotkeys.md#configuration)
+- [Keywords and aliases](./features/keywords.md#aliases)
 - [Launch at login](./features/settings.md#launch-at-login)
 - [Recent items](./features/recent-items.md#configuration)
 - [Script commands](./features/scripts.md#configuration)

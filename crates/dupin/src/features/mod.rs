@@ -1,3 +1,4 @@
+pub(crate) mod aliases;
 pub(super) mod apps;
 pub(super) mod calculator;
 pub(super) mod calendar;
@@ -184,6 +185,7 @@ pub(super) const MANIFEST: &[Feature] = &[
     scripts::FEATURE,
     settings::FEATURE,
     web::FEATURE,
+    aliases::FEATURE,
     snippets::FEATURE,
     snapshots::FEATURE,
     recent::FEATURE,

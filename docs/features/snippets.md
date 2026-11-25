@@ -8,7 +8,7 @@ Snippets you use often rank higher, as apps do.
 
 ## Configuration
 
-Each entry under `snippets` is keyed by a short keyword and holds the text to copy, with an optional display name. Type `snip`, then Space, to list and search them (see [usage](#snippets)); `snippet_keywords` sets other aliases under the same rules as [`dictionary_keywords`](./dictionary.md#configuration).
+Each entry under `snippets` is keyed by a short keyword and holds the text to copy, with an optional display name. Type `snip`, then Space, to list and search them (see [usage](#snippets)); `snippet_keywords` sets other aliases under the same rules as [`dictionary_keywords`](./dictionary.md#configuration), beside any in [`[aliases]`](./keywords.md#aliases).
 
 ```toml
 snippet_keywords = ["snip"] # type any keyword, then Space, to search snippets

@@ -7,6 +7,7 @@ mod appearance;
 mod controls;
 mod extensions;
 mod general;
+mod keywords;
 mod permissions;
 mod search;
 mod updates;
@@ -45,6 +46,7 @@ const GUTTER: f32 = 32.0;
 enum Page {
     General,
     Search,
+    Keywords,
     Appearance,
     Extensions,
     Permissions,
@@ -56,6 +58,7 @@ impl Page {
         match self {
             Page::General => "General",
             Page::Search => "Search",
+            Page::Keywords => "Keywords",
             Page::Appearance => "Appearance",
             Page::Extensions => "Extensions",
             Page::Permissions => "Permissions",
@@ -68,6 +71,7 @@ impl Page {
         match self {
             Page::General => "page-general",
             Page::Search => "page-search",
+            Page::Keywords => "page-keywords",
             Page::Appearance => "page-appearance",
             Page::Extensions => "page-extensions",
             Page::Permissions => "page-permissions",
@@ -79,6 +83,7 @@ impl Page {
         match self {
             Page::General => &icons::SLIDERS,
             Page::Search => &icons::SEARCH,
+            Page::Keywords => &icons::KEYBOARD,
             Page::Appearance => &icons::SPARKLES,
             Page::Extensions => &icons::PUZZLE,
             Page::Permissions => &icons::SHIELD,
@@ -116,6 +121,7 @@ pub struct Prefs {
     access: Option<dupin_extension_bridge::Bridge>,
     /// Why the last Allow, Revoke or switch on Extensions didn't apply.
     extension_problem: Option<String>,
+    keywords: keywords::Keywords,
 }
 
 impl Prefs {
@@ -141,6 +147,7 @@ impl Prefs {
         Prefs {
             preview_dark: None,
             active_radius,
+            keywords: keywords::Keywords::new(&config),
             config,
             current,
             page: Page::General,
@@ -222,6 +229,9 @@ impl Prefs {
             }
         }
         self.reflect_launch_hotkey();
+        if config != self.config {
+            self.keywords.reflect(&config, Some(&self.config));
+        }
         self.config = config;
     }
 
@@ -305,6 +315,7 @@ impl Prefs {
 
     /// Persist the settings and hand them to the panel.
     fn save(&mut self, base: &Config) {
+        self.refresh_keywords(base);
         *self.current.borrow_mut() = self.config.clone();
         // The panel must see this edit before the worker can echo its saved file back.
         self.publish();
@@ -339,6 +350,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         (Some(step), _) => welcome::page(s, k, hair, step),
         (None, Page::General) => general::page(s, k, hair),
         (None, Page::Search) => search::page(s, k, hair),
+        (None, Page::Keywords) => keywords::page(s, k, hair),
         (None, Page::Appearance) => appearance::page(s, k, cx.system_dark()),
         (None, Page::Extensions) => extensions::problem(s, k)
             .into_iter()
@@ -421,9 +433,15 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         .focus_follows()
         .gap(4.0);
     let permissions = permissions::available().then_some(Page::Permissions);
-    for page in [Page::General, Page::Search, Page::Appearance, Page::Extensions]
-        .into_iter()
-        .chain(permissions)
+    for page in [
+        Page::General,
+        Page::Search,
+        Page::Keywords,
+        Page::Appearance,
+        Page::Extensions,
+    ]
+    .into_iter()
+    .chain(permissions)
     {
         let on = s.welcome.is_none() && s.page == page;
         let mut item = row()
@@ -594,6 +612,62 @@ mod tests {
                 assert_eq!(control.is_disabled(), locked, "{label}");
             }
         }
+    }
+
+    #[test]
+    fn the_keywords_page_lists_commands_and_edits_aliases_unless_locked() {
+        use rune::accesskit::Role;
+
+        let config = Config::parse("[aliases]\nlookup = \"dictionary\"\nd = \"calendar\"").unwrap();
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        for locked in [false, true] {
+            runtime.update(|s, _| {
+                s.locked_keys = locked.then(|| "aliases".to_owned()).into_iter().collect();
+            });
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            let has_label = |label: &str| tree.nodes.iter().any(|(_, node)| node.label() == Some(label));
+            for label in ["Dictionary", "File Contents", "Search Google", "lookup", "d"] {
+                assert!(has_label(label), "missing {label}");
+            }
+            let removes: Vec<_> = tree
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == Role::Button && node.label() == Some("Remove"))
+                .map(|(_, node)| node.is_disabled())
+                .collect();
+            assert_eq!(removes, [locked, locked]);
+            assert_eq!(has_label("Add Alias"), !locked);
+        }
+        runtime.update(|s, _| {
+            assert_eq!(
+                s.keywords_problem("d"),
+                Some("is already a keyword of Dictionary")
+            );
+            s.locked_keys = Default::default();
+            s.set_alias_draft("ff", "notacommand!");
+            s.add_alias();
+            assert!(
+                s.keywords
+                    .problem
+                    .as_deref()
+                    .unwrap()
+                    .contains("a command is named")
+            );
+            s.set_alias_draft("c", "calendar");
+            s.add_alias();
+            assert_eq!(s.keywords.problem, None);
+            assert_eq!(
+                s.config.aliases.0.get("c"),
+                Some(&dupin_core::config::AliasTarget::Command("calendar".into()))
+            );
+            s.remove_alias("d");
+            assert!(!s.config.aliases.0.contains_key("d"));
+        });
     }
 
     #[test]
