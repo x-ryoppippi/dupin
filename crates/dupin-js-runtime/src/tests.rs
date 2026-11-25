@@ -149,7 +149,7 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
     let rows = package.search("a b", 7, timeout(DEADLINE)).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "docs");
-    assert_eq!(text(&rows[0]), ("Docs for a b", "v2, 7 rows"));
+    assert_eq!(text(&rows[0]), ("Docs for a b", "v3, 7 rows"));
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
     assert_eq!(
         effects,
@@ -425,7 +425,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
         "main.js",
         "import { apiVersion } from 'dupin'; export const search = () => [{ title: `${apiVersion}` }];",
     )]);
-    assert_eq!(search(&loaded.unwrap(), "").unwrap()[0].title, "2");
+    assert_eq!(search(&loaded.unwrap(), "").unwrap()[0].title, "3");
 }
 
 #[test]
@@ -481,9 +481,9 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             Some("items[0].keywords"),
         ),
         (
-            "export function search() { return [{ title: 'a', accessories: [] }]; }",
+            "export function search() { return [{ title: 'a', badges: [] }]; }",
             "unknown-field",
-            Some("items[0].accessories"),
+            Some("items[0].badges"),
         ),
         (
             "export function search() { return [{ title: 'a', detail: { markdown: 'x'.repeat(32769) } }]; }",
@@ -860,3 +860,4 @@ fn rows_open_web_urls_dictionary_words_and_calendar_event_links_only() {
 
 mod host;
 mod sdk;
+mod views;

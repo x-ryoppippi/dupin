@@ -26,12 +26,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
-use dupin_core::{Batch, Item, Page};
+use dupin_core::{Batch, Item};
 use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
 use dupin_extension_host::{Compiled, Host, Services, Trust};
 use dupin_js_runtime::web_search::WebSearch;
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Exports, Handled, Preferences, Reason, Row, RunError, Sources,
+    Acted, CataloguePage, Diagnostic, Exports, Handled, PageContext, Preferences, Reason, Row, RunError,
+    Sources, ViewAnswer,
 };
 
 use catalogue::Asking;
@@ -102,29 +103,46 @@ impl Extension {
         Ok(*self.exports.get_or_init(|| exports))
     }
 
-    /// Asks the guest for `query`, answering its host requests with `services`. Extensions
-    /// can't open views, so none can ask inside one.
+    /// Asks the guest for `query`, answering its host requests with `services`.
     pub fn query(
         &self,
         query: &str,
-        page: Option<&Page>,
         limit: usize,
         deadline: Instant,
         is_cancelled: impl Fn() -> bool + 'static,
         services: &Arc<dyn Services>,
     ) -> Result<Vec<Row>, RunError> {
-        if page.is_some() {
-            return Err(views_unsupported());
-        }
         host().search(&self.compiled, query, limit, deadline, &is_cancelled, services)
     }
 
-    /// Runs `actions[name](data)`, which the user chose from one of the package's rows, and
-    /// asks for the catalogue again if the handler invalidated it.
+    /// Asks the guest's `views[name]` for the page `page` describes, answering its host
+    /// requests with `services`.
+    pub fn view(
+        &self,
+        name: &str,
+        page: &PageContext,
+        deadline: Instant,
+        is_cancelled: impl Fn() -> bool + 'static,
+        services: &Arc<dyn Services>,
+    ) -> Result<ViewAnswer, RunError> {
+        host().view(
+            &self.compiled,
+            name,
+            page,
+            &self.preferences(),
+            deadline,
+            &is_cancelled,
+            services,
+        )
+    }
+
+    /// Runs `actions[name](data)`, which the user chose from one of the package's rows on
+    /// `page`, and asks for the catalogue again if the handler invalidated it.
     pub fn act(
         &self,
         name: &str,
         data: &serde_json::Value,
+        page: &PageContext,
         deadline: Instant,
         services: &Arc<dyn Services>,
     ) -> Result<Acted, RunError> {
@@ -132,6 +150,7 @@ impl Extension {
             &self.compiled,
             name,
             data,
+            page,
             &self.preferences(),
             deadline,
             &|| false,
@@ -314,13 +333,6 @@ impl Extension {
             error => error,
         }
     }
-}
-
-fn views_unsupported() -> RunError {
-    RunError::Failed(Diagnostic::new(
-        "unsupported-view",
-        "extensions can't open views yet",
-    ))
 }
 
 /// The one extension host every JavaScript extension shares, which starts a trust domain's
@@ -1286,7 +1298,6 @@ pub(crate) mod tests {
         let rows = updated.extensions[0]
             .query(
                 "",
-                None,
                 10,
                 Instant::now() + QUERY_DEADLINE,
                 || false,

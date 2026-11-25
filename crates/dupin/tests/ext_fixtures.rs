@@ -113,3 +113,39 @@ fn test_replays_fixtures_and_snap_renders_the_same_bytes_every_time() {
     assert_eq!(missing.status.code(), Some(1));
     assert_eq!(json(&missing)["diagnostic"]["code"], "invalid-step");
 }
+
+#[test]
+fn snap_opens_views_and_fills_forms_as_the_fixture_does() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/notes-js");
+    let fixture = package.join("fixtures/notes.json");
+    let root = tempfile::tempdir().unwrap();
+    let snap = |step: &str, run: usize| {
+        let png = root.path().join(format!("step-{step}-{run}.png"));
+        let output = dupin(&[
+            "ext".as_ref(),
+            "snap".as_ref(),
+            package.as_os_str(),
+            fixture.as_os_str(),
+            png.as_os_str(),
+            "--step".as_ref(),
+            step.as_ref(),
+            "--json".as_ref(),
+        ]);
+        assert!(output.status.success(), "{output:?}");
+        (
+            json(&output)["height"].as_u64().unwrap(),
+            std::fs::read(&png).unwrap(),
+        )
+    };
+    let (list, list_png) = snap("1", 0);
+    let (form, form_png) = snap("4", 0);
+    let (detail, _) = snap("12", 0);
+    assert!(
+        form > list,
+        "the filled form is taller than the list it opened from"
+    );
+    assert_ne!(detail, form, "the detail the note opened isn't the form");
+    assert!(list_png != form_png);
+    assert!(snap("4", 1).1 == form_png, "two renders of one form differ");
+}

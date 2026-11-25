@@ -203,6 +203,14 @@ impl ItemAction {
     }
 }
 
+/// One line a row shows at its end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Accessory {
+    Text(String),
+    /// Drawn as a label.
+    Tag(String),
+}
+
 /// What a row's icon shows.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {

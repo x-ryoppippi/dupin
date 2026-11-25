@@ -50,6 +50,15 @@ pub(super) struct Fixture {
     replier: Replier,
 }
 
+/// The fixture's clock, in milliseconds since the epoch, which never moves.
+struct FixtureClock(i64);
+
+impl dupin_storage::Clock for FixtureClock {
+    fn now(&self) -> std::time::SystemTime {
+        std::time::UNIX_EPOCH + std::time::Duration::from_millis(self.0.max(0) as u64)
+    }
+}
+
 /// The services a fixture's replies answer, and the scratch folder its `files` scopes and
 /// storage live in.
 struct Replier {
@@ -108,7 +117,10 @@ impl Replier {
         // A fixed key, so records stored under a key, as the fixture's own are, get the same IDs
         // on every run and a fixture can name them. The store is thrown away with the run.
         let key = dupin_storage::DataKey::from_slice(&[0x5a; 32]).expect("32 bytes make a key");
-        let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::new(key));
+        // Records are stamped with the fixture's clock, so the times a package shows of them are the
+        // same on every run.
+        let storage = dupin_storage::Storage::new(scratch.path().join(STORAGE_DIR), MemoryKey::new(key))
+            .with_clock(FixtureClock(now));
         let windows = replies.windows.as_ref().map(window_fixture).transpose()?;
         let state = Arc::new(State {
             replies: replies.clone(),

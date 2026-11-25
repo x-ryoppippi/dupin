@@ -1,0 +1,726 @@
+{
+	"fixture": 1,
+	"description": "Writes a note in a form, finds it, reads it, edits it and deletes it.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"title": ""
+									},
+									"view": "edit"
+								},
+								"title": "Write"
+							}
+						],
+						"id": "new",
+						"section": "New",
+						"title": "New note"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Write",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"title": ""
+						},
+						"view": "edit"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": ""
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": false
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "none"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"error": "Required",
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": ""
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": false
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "none"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"body": "Milk\nEggs",
+				"label": "errands",
+				"pinned": true,
+				"title": "Groceries"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": "Groceries"
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": "Milk\nEggs"
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": true
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "errands"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "Pinned"
+							},
+							{
+								"text": "Errands"
+							}
+						],
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "note"
+								},
+								"title": "Read"
+							},
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "edit"
+								},
+								"title": "Edit"
+							}
+						],
+						"id": "4876da7ecc346c612f365f3f3fa17ad1",
+						"section": "Notes",
+						"subtitle": "Milk",
+						"title": "Groceries"
+					},
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"title": ""
+									},
+									"view": "edit"
+								},
+								"title": "Write"
+							}
+						],
+						"id": "new",
+						"section": "New",
+						"title": "New note"
+					}
+				],
+				"selected": 1,
+				"storage": [
+					{
+						"body": "Milk\nEggs",
+						"key": "note-mjv7s800-0",
+						"label": "errands",
+						"pinned": true,
+						"title": "Groceries"
+					}
+				],
+				"toasts": ["Note added"]
+			}
+		},
+		{
+			"select": 1,
+			"expect": {
+				"selected": 1
+			}
+		},
+		{
+			"activate": "Write",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"title": ""
+						},
+						"view": "edit"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": ""
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": false
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "none"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"title": "groceries"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": "groceries"
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": ""
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": false
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "none"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"error": "Another note has this title",
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": "groceries"
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": ""
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": false
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "none"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"title": ""
+					},
+					"submit": "Save",
+					"title": "Write",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"back": true,
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "Pinned"
+							},
+							{
+								"text": "Errands"
+							}
+						],
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "note"
+								},
+								"title": "Read"
+							},
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "edit"
+								},
+								"title": "Edit"
+							}
+						],
+						"id": "4876da7ecc346c612f365f3f3fa17ad1",
+						"section": "Notes",
+						"subtitle": "Milk",
+						"title": "Groceries"
+					},
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"title": ""
+									},
+									"view": "edit"
+								},
+								"title": "Write"
+							}
+						],
+						"id": "new",
+						"section": "New",
+						"title": "New note"
+					}
+				],
+				"selected": 1
+			}
+		},
+		{
+			"select": 0,
+			"expect": {
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Read",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"id": "4876da7ecc346c612f365f3f3fa17ad1"
+						},
+						"view": "note"
+					}
+				},
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "edit"
+								},
+								"title": "Edit"
+							},
+							{
+								"copy": "Milk\nEggs",
+								"title": "Copy Text"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									}
+								},
+								"title": "Delete"
+							}
+						],
+						"detail": {
+							"markdown": "Milk\nEggs",
+							"metadata": [
+								{
+									"label": "Created",
+									"text": "2026-01-01"
+								},
+								{
+									"label": "Pinned",
+									"text": "Yes"
+								}
+							]
+						},
+						"id": "detail",
+						"title": "Groceries"
+					}
+				],
+				"selected": 0,
+				"view": {
+					"depth": 1,
+					"name": "note",
+					"state": {
+						"id": "4876da7ecc346c612f365f3f3fa17ad1"
+					},
+					"title": "Read",
+					"type": "detail"
+				}
+			}
+		},
+		{
+			"activate": "Edit",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"id": "4876da7ecc346c612f365f3f3fa17ad1"
+						},
+						"view": "edit"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 2,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": "Groceries"
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": "Milk\nEggs"
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": true
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "errands"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"id": "4876da7ecc346c612f365f3f3fa17ad1"
+					},
+					"submit": "Save",
+					"title": "Edit",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"title": "Shopping"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 2,
+					"fields": [
+						{
+							"id": "title",
+							"required": true,
+							"title": "Title",
+							"type": "text",
+							"value": "Shopping"
+						},
+						{
+							"id": "body",
+							"title": "Note",
+							"type": "textarea",
+							"value": "Milk\nEggs"
+						},
+						{
+							"id": "pinned",
+							"title": "Pinned",
+							"type": "checkbox",
+							"value": true
+						},
+						{
+							"id": "label",
+							"title": "Label",
+							"type": "select",
+							"value": "errands"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"id": "4876da7ecc346c612f365f3f3fa17ad1"
+					},
+					"submit": "Save",
+					"title": "Edit",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									},
+									"view": "edit"
+								},
+								"title": "Edit"
+							},
+							{
+								"copy": "Milk\nEggs",
+								"title": "Copy Text"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"id": "4876da7ecc346c612f365f3f3fa17ad1"
+									}
+								},
+								"title": "Delete"
+							}
+						],
+						"detail": {
+							"markdown": "Milk\nEggs",
+							"metadata": [
+								{
+									"label": "Created",
+									"text": "2026-01-01"
+								},
+								{
+									"label": "Pinned",
+									"text": "Yes"
+								}
+							]
+						},
+						"id": "detail",
+						"title": "Shopping"
+					}
+				],
+				"selected": 0,
+				"storage": [
+					{
+						"body": "Milk\nEggs",
+						"key": "note-mjv7s800-0",
+						"label": "errands",
+						"pinned": true,
+						"title": "Shopping"
+					}
+				],
+				"toasts": ["Saved"],
+				"view": {
+					"depth": 1,
+					"name": "note",
+					"state": {
+						"id": "4876da7ecc346c612f365f3f3fa17ad1"
+					},
+					"title": "Read",
+					"type": "detail"
+				}
+			}
+		},
+		{
+			"activate": "Delete",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "remove",
+						"data": {
+							"id": "4876da7ecc346c612f365f3f3fa17ad1"
+						}
+					}
+				},
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": {
+										"title": ""
+									},
+									"view": "edit"
+								},
+								"title": "Write"
+							}
+						],
+						"id": "new",
+						"section": "New",
+						"title": "New note"
+					}
+				],
+				"selected": 0,
+				"storage": [],
+				"toasts": ["Deleted"]
+			}
+		}
+	]
+}

@@ -23,8 +23,9 @@ let
     (root + /sdk)
     # The backdrop shader examples, which a test compiles.
     (root + /examples/shaders)
-    # The JavaScript word counter, which tests load and run.
+    # The JavaScript word counter and notes examples, which tests load and run.
     (root + /examples/extensions/word-count-js)
+    (root + /examples/extensions/notes-js)
     # The bundled extensions, which a test build finds in the source tree.
     (root + /extensions)
   ];

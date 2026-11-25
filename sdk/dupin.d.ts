@@ -1,4 +1,4 @@
-// Types for Dupin extensions, apiVersion 2. Dupin never reads this file; it is for editors and
+// Types for Dupin extensions, apiVersion 3. Dupin never reads this file; it is for editors and
 // `tsc --noEmit`. `dupin ext new` copies it into each package.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
@@ -9,7 +9,7 @@
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */
-	export const apiVersion: 2;
+	export const apiVersion: 3;
 
 	type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -44,7 +44,17 @@ declare module 'dupin' {
 		detail?: DetailPane;
 		/** Up to eight, counting the ones `url` and `text` add. */
 		actions?: Action[];
+		/** Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label. */
+		accessories?: Accessory[];
+		/**
+		 * From `search` or a view: the row shows its title and this, one line of up to 512 bytes,
+		 * as two values, as a calculation does.
+		 */
+		answer?: string;
 	}
+
+	/** One line of up to 64 bytes. */
+	export type Accessory = { text: string } | { tag: string };
 
 	/** Runs `actions[run](data, ctx)` when the user chooses it. */
 	export interface ItemAction {
@@ -63,7 +73,7 @@ declare module 'dupin' {
 	}
 
 	/** An item of an `items` catalogue, which may carry words that also find it. */
-	export interface CatalogueItem extends Item {
+	export interface CatalogueItem extends Omit<Item, 'answer'> {
 		/**
 		 * Required, and kept with the item as the list changes: Dupin applies updates and
 		 * remembers which items are picked by it.
@@ -149,7 +159,19 @@ declare module 'dupin' {
 		| { title: string; open: string }
 		/** Shows the file at the absolute path selected in Finder; it opens nothing. */
 		| { title: string; reveal: string }
+		| PushAction
 		| ItemAction;
+
+	/**
+	 * Opens `views[push.view](ctx)` on a page of its own above the list, titled with the
+	 * action's title. Dupin holds `push.state` for the page, at most 16 KiB of JSON nested at
+	 * most 16 deep, and hands it back as `ctx.state` to the view and to the actions chosen there.
+	 * Esc, or ⌫ in an empty field, closes the page; at most eight are open at once.
+	 */
+	export interface PushAction {
+		title: string;
+		push: { view: string; state?: Json };
+	}
 
 	export interface Section<T extends Item = Item> {
 		title: string;
@@ -160,6 +182,82 @@ declare module 'dupin' {
 
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
+
+	/** What `views` and the actions chosen on their pages receive. Dupin freezes it. */
+	export interface ViewContext {
+		/** What is typed on the page; Dupin asks the view again as it changes. */
+		readonly query: string;
+		/** What the page holds: the push's `state`, or the last `replaceState`, or `null`. */
+		readonly state: Json;
+		readonly preferences: Preferences;
+	}
+
+	/** A list, as `search` returns one, with what the page shows while it has no items. */
+	export type ListView = List & {
+		/** One line of up to 256 bytes. */
+		emptyText?: string;
+	};
+
+	/** A detail that fills the page, with its own actions, which Enter and ⌘K run. */
+	export interface DetailView extends DetailPane {
+		type: 'detail';
+		/** One line, up to 512 bytes. */
+		title: string;
+		/** Up to eight. */
+		actions?: Action[];
+	}
+
+	/**
+	 * A form. Dupin keeps what is typed while the page is open, moves between the fields with
+	 * Tab, checks that required fields hold more than spaces and, on ⌘Enter (or Enter outside a
+	 * multi-line field), calls `actions[submit](values, ctx)` with each field's value by its
+	 * `id`: a text field's text, a checkbox's boolean or a select's option `value`. Esc cancels.
+	 */
+	export interface Form {
+		type: 'form';
+		/** One line, up to 512 bytes. */
+		title: string;
+		/** 1 to 16, with different `id`s. */
+		fields: Field[];
+		/** A key of the module's `actions`. */
+		submit: string;
+		/** What the submit key says; `Submit` without it. Up to 128 bytes. */
+		submitTitle?: string;
+	}
+
+	/**
+	 * `id` is 1–64 letters, digits, `_` or `-`, and `title` one line of up to 128 bytes. A
+	 * `text` field holds one line of up to 1 KiB and a `textarea` up to 16 KiB; a select's
+	 * `default` is its first option's `value` without one.
+	 */
+	export type Field =
+		| {
+				type: 'text' | 'textarea';
+				id: string;
+				title: string;
+				required?: boolean;
+				default?: string;
+				placeholder?: string;
+		  }
+		| { type: 'checkbox'; id: string; title: string; default?: boolean }
+		| {
+				type: 'select';
+				id: string;
+				title: string;
+				/** 1 to 32, with different values, each one line of up to 128 bytes. */
+				options: { value: string; title: string }[];
+				default?: string;
+		  };
+
+	export type View = Item[] | ListView | DetailView | Form;
+
+	/**
+	 * The entry module's `views` export: the pages its `push` actions and effects open. A view
+	 * runs as `search` does, again whenever the page's query or state changes, so it may only
+	 * read, and write its own `storage`; each call starts with fresh module state, so keep what a
+	 * page needs in its state. Dupin stops it after 2 seconds.
+	 */
+	export type Views = Record<string, (ctx: ViewContext) => View | Promise<View>>;
 
 	/**
 	 * The entry module's `search` export: answers computed for each query. It runs as the user
@@ -238,22 +336,40 @@ declare module 'dupin' {
 	};
 
 	/**
-	 * What an action may ask Dupin to do once it has run: show one line, hide the panel as
-	 * copying does, or hide it and paste what the action put on the clipboard into the app in
-	 * front (which needs Accessibility; without it, Dupin says how to allow it).
+	 * What an action may ask Dupin to do once it has run: show one line; hide the panel as
+	 * copying does; hide it and paste what the action put on the clipboard into the app in
+	 * front (which needs Accessibility; without it, Dupin says how to allow it); open a view on
+	 * a page above the one the action was chosen on, titled `title` or the extension's title;
+	 * close that page; ask its view (or the search) again; give it new state, which asks its view
+	 * again; or, from a form's submit, show what is wrong with its fields. The ones that move or
+	 * change a page take a `toast` too, which Dupin shows once it has. An effect lands only while
+	 * the page it was chosen on is still the one on screen. Toasts are one line of up to 512
+	 * bytes, state at most 16 KiB of JSON and each field error one line of up to 256 bytes.
 	 */
-	export type ActionEffect = { type: 'toast'; text: string } | { type: 'hide' } | { type: 'paste' };
+	export type ActionEffect =
+		| { type: 'toast'; text: string }
+		| { type: 'hide' }
+		| { type: 'paste' }
+		| { type: 'push'; view: string; title?: string; state?: Json; toast?: string }
+		| { type: 'pop'; toast?: string }
+		| { type: 'refresh'; toast?: string }
+		| { type: 'replaceState'; state: Json; toast?: string }
+		| { type: 'fieldErrors'; errors: Record<string, string> };
+
+	/**
+	 * What an action receives beside its data. On one of the package's pages, `query` and
+	 * `state` are the page's; anywhere else they are `''` and `null`. Dupin freezes it.
+	 */
+	export type ActionContext = ViewContext;
 
 	/**
 	 * The entry module's `actions` export. A handler runs only because the user chose its item
-	 * action, so it may also write, send and run programs. Dupin stops it after 30 seconds.
+	 * action or submitted a form, so it may also write, send and run programs. Dupin stops it
+	 * after 30 seconds.
 	 */
 	export type Actions = Record<
 		string,
-		(
-			data: Json,
-			ctx: { readonly preferences: Preferences },
-		) => ActionEffect | void | Promise<ActionEffect | void>
+		(data: Json, ctx: ActionContext) => ActionEffect | void | Promise<ActionEffect | void>
 	>;
 
 	/**
@@ -671,85 +787,4 @@ declare module 'dupin' {
 		 */
 		setFrame(frame: WindowFrame): Promise<WindowFrame>;
 	};
-
-	/**
-	 * Drafts of what later API versions are planned to add, from docs/design/extension-platform.md.
-	 * apiVersion 2 hosts provide none of it: the `dupin` module exports no such values and an
-	 * item with these fields is rejected. Shapes may change before they ship.
-	 */
-	export namespace planned {
-		type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-		/** Up to three text or tag accessories beside an item. */
-		type Accessory = { text: string } | { tag: string };
-
-		interface List {
-			type: 'list';
-			items?: Item[];
-			sections?: Section[];
-			/** Shown when there are no items. */
-			emptyText?: string;
-		}
-
-		interface Detail extends DetailPane {
-			type: 'detail';
-			title: string;
-			actions?: Action[];
-		}
-
-		type Field =
-			| { type: 'text'; id: string; title: string; required?: boolean; default?: string }
-			| { type: 'textarea'; id: string; title: string; required?: boolean; default?: string }
-			| { type: 'checkbox'; id: string; title: string; default?: boolean }
-			| {
-					type: 'select';
-					id: string;
-					title: string;
-					options: { value: string; title: string }[];
-					default?: string;
-			  };
-
-		interface Form {
-			type: 'form';
-			title: string;
-			fields: Field[];
-			/** The named action that runs on submit with the field values. */
-			submit: string;
-		}
-
-		type View = List | Detail | Form;
-
-		interface ViewContext {
-			readonly query: string;
-			readonly preferences: Readonly<Record<string, string | boolean>>;
-			readonly state: Json;
-		}
-
-		/** `views`: named handlers a `push` action opens. */
-		type Views = Record<string, (ctx: ViewContext) => View | Promise<View>>;
-
-		type Action =
-			| { title: string; copy: string }
-			| { title: string; open: string }
-			| { title: string; push: { view: string; state?: Json } }
-			| { title: string; run: string; data?: Json; destructive?: boolean };
-
-		interface ItemsContext {
-			readonly preferences: Readonly<Record<string, string | boolean>>;
-		}
-
-		type Effect =
-			| { type: 'push'; view: string; state?: Json }
-			| { type: 'pop' }
-			| { type: 'refresh' }
-			| { type: 'replaceState'; state: Json }
-			| { type: 'toast'; text: string }
-			| { type: 'fieldErrors'; errors: Record<string, string> };
-
-		/** `actions` handlers that return an effect and see the view, including on form submit. */
-		type Actions = Record<
-			string,
-			(data: Json, ctx: ViewContext) => Effect | void | Promise<Effect | void>
-		>;
-	}
 }

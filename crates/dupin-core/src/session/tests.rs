@@ -4,7 +4,8 @@ use super::search::ProviderPhase;
 use super::*;
 use crate::searcher::Delivery;
 use crate::{
-    Action, CommandId, CommandRegistry, CommandSpec, ItemAction, QueryEligibility, QueryPresentation, View,
+    Action, Batch, CommandId, CommandRegistry, CommandSpec, ItemAction, QueryEligibility, QueryPresentation,
+    View,
 };
 
 fn trash_row() -> Item {
@@ -2762,4 +2763,127 @@ fn details_shown_while_selected_follow_the_selection() {
     s.intent(Intent::Down);
     assert!(s.detail(0).is_none());
     assert_eq!(s.detail(1).unwrap().title, "second");
+}
+
+#[test]
+fn an_actions_effects_land_only_on_the_view_it_was_chosen_on() {
+    let (mut s, _) = pushable_session("stats");
+    let root = s.anchor();
+    assert_eq!(
+        s.close_page(&root),
+        Navigated::NoPage,
+        "the keyword's own results are no page to close"
+    );
+    let Navigated::Done(effects) = s.open_page(&root, page("first")) else {
+        panic!()
+    };
+    assert_eq!(view_search(&effects).3, Some(page("first")));
+    assert_eq!(s.depth(), 1);
+    assert_eq!(
+        s.open_page(&root, page("again")),
+        Navigated::Stale,
+        "a second effect of the same view lands nowhere once the first moved on"
+    );
+
+    let first = s.anchor();
+    let Navigated::Done(effects) = s.replace_page_state(&first, serde_json::json!({"n": 2})) else {
+        panic!()
+    };
+    let (_, _, _, searched) = view_search(&effects);
+    assert_eq!(
+        searched.unwrap().context,
+        Some(serde_json::json!({"n": 2})),
+        "the view is asked again with its new state"
+    );
+    assert_eq!(s.page().unwrap().context, Some(serde_json::json!({"n": 2})));
+    assert_eq!(
+        s.refresh_page(&first),
+        Navigated::Stale,
+        "replacing the state moved the view on"
+    );
+
+    let changed = s.anchor();
+    s.set_query("typed");
+    assert!(s.is_current(&changed), "typing on a page keeps it the same page");
+    let Navigated::Done(effects) = s.close_page(&changed) else {
+        panic!()
+    };
+    assert_eq!(effects[0], Effect::ReplaceQuery("word".into()));
+    assert_eq!((s.page(), s.depth()), (None, 0));
+    assert_eq!(s.close_page(&changed), Navigated::Stale);
+}
+
+#[test]
+fn effects_open_no_more_views_than_the_session_keeps() {
+    let (mut s, _) = pushable_session("stats");
+    for depth in 1..=MAX_PAGE_DEPTH {
+        let anchor = s.anchor();
+        assert!(
+            matches!(
+                s.open_page(&anchor, page(&format!("v{depth}"))),
+                Navigated::Done(_)
+            ),
+            "depth {depth}"
+        );
+        assert_eq!(s.depth(), depth);
+    }
+    let anchor = s.anchor();
+    assert_eq!(s.open_page(&anchor, page("deeper")), Navigated::TooDeep);
+    assert_eq!(s.depth(), MAX_PAGE_DEPTH);
+    s.reset();
+    assert_eq!(s.depth(), 0);
+    assert!(!s.is_current(&anchor), "hiding the panel leaves every view");
+}
+
+#[test]
+fn a_page_shows_its_form_its_accessories_and_what_it_shows_while_empty() {
+    let (mut s, _) = pushable_session("stats");
+    let generation = view_search(&s.intent(Intent::Open).unwrap()).1;
+    let form = Arc::new(crate::form::Form {
+        title: "Edit".into(),
+        fields: Vec::new(),
+        submit_title: "Save".into(),
+        extension: "notes".into(),
+        submit: "save".into(),
+    });
+    assert!(s.deliver_from(
+        dictionary_command(),
+        Delivery::Presented {
+            generation,
+            batch: Batch {
+                form: Some(form.clone()),
+                ..Batch::from(vec![item("form")])
+            },
+        }
+    ));
+    assert!(Arc::ptr_eq(s.form().unwrap(), &form));
+
+    let generation = view_search(&s.set_query("x")).1;
+    let accessories = HashMap::from([("/x/a".to_owned(), vec![crate::Accessory::Tag("New".into())])]);
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Presented {
+            generation,
+            batch: Batch {
+                accessories,
+                ..Batch::from(vec![item("a")])
+            },
+        },
+    );
+    assert_eq!(s.form(), None, "a list replaced the form");
+    assert_eq!(s.accessories(0), [crate::Accessory::Tag("New".into())]);
+
+    let generation = view_search(&s.set_query("none")).1;
+    s.deliver_from(
+        dictionary_command(),
+        Delivery::Presented {
+            generation,
+            batch: Batch {
+                empty_text: Some("Nothing yet".into()),
+                ..Batch::default()
+            },
+        },
+    );
+    s.deliver_from(dictionary_command(), Delivery::Done { generation });
+    assert_eq!(s.empty_text(), Some("Nothing yet"));
 }

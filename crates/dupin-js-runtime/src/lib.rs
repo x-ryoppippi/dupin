@@ -15,6 +15,7 @@ mod output;
 mod package;
 pub mod row;
 mod typescript;
+pub mod view;
 
 pub use dupin_plugin_protocol::web_search;
 
@@ -35,9 +36,20 @@ pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Rep
 pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
 pub use row::{CataloguePage, Reason, Row};
+pub use view::ViewAnswer;
 
 /// What the user set for a package, which `items` reads as `ctx.preferences`.
 pub type Preferences = serde_json::Map<String, serde_json::Value>;
+
+/// The page a view or an action runs on: what is typed there and the state Dupin holds for it,
+/// which `ctx.query` and `ctx.state` hand the guest. An action chosen outside the package's
+/// pages has neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageContext {
+    pub query: String,
+    pub state: serde_json::Value,
+}
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
@@ -277,14 +289,38 @@ impl Package {
         })
     }
 
+    /// Calls `views[name](ctx)` in `engine` for the page `page` opened, carrying its host
+    /// requests through `bridge`, and reads the list, detail or form it answers with. A page is
+    /// searched as the package's keyword is, so Dupin answers its requests as it does a search's.
+    pub fn view(
+        &self,
+        engine: &Engine,
+        name: &str,
+        page: &PageContext,
+        preferences: &serde_json::Value,
+        control: Control,
+        bridge: &mut dyn Bridge,
+    ) -> Result<ViewAnswer, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::View)?;
+        sandbox.run(|ctx| {
+            let view = sandbox.handler(ctx, "views", name)?;
+            let context = page_context(ctx, page, preferences)?;
+            let answer = sandbox.call(ctx, view, (context,))?;
+            output::Reader::view(&self.entry).view_answer(answer)
+        })
+    }
+
     /// Calls `actions[name](data, ctx)` in `engine`, which runs because the user chose it, and
     /// reads the effect it returns and whether it invalidated the catalogue. `data` is the JSON
-    /// the item's action carried, and `preferences` the JSON object `ctx.preferences` holds.
+    /// the item's action carried, and `preferences` the JSON object `ctx.preferences` holds;
+    /// `page` is the page it was chosen on.
+    #[allow(clippy::too_many_arguments)]
     pub fn action(
         &self,
         engine: &Engine,
         name: &str,
         data: &str,
+        page: &PageContext,
         preferences: &serde_json::Value,
         control: Control,
         bridge: &mut dyn Bridge,
@@ -293,9 +329,7 @@ impl Package {
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "actions", name)?;
             let data = ctx.json_parse(data)?;
-            let context = Object::new(ctx.clone())?;
-            context.set("preferences", frozen_preferences(ctx, preferences)?)?;
-            let context = frozen(ctx, context)?;
+            let context = page_context(ctx, page, preferences)?;
             let answer = sandbox.call(ctx, handler, (data, context))?;
             Ok(Acted {
                 invalidated: sandbox.invalidation.called.get(),
@@ -363,6 +397,21 @@ fn missing_export(entry: &str) -> Diagnostic {
 fn frozen<'js>(ctx: &Ctx<'js>, value: impl rquickjs::IntoJs<'js>) -> rquickjs::Result<Value<'js>> {
     let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
     freeze.call((value,))
+}
+
+/// `ctx` for a view or an action: `preferences`, and the page's `query` and `state`, frozen
+/// through and through, so a guest changes a page's state only by returning an effect.
+fn page_context<'js>(
+    ctx: &Ctx<'js>,
+    page: &PageContext,
+    preferences: &serde_json::Value,
+) -> rquickjs::Result<Value<'js>> {
+    let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+    let context = Object::new(ctx.clone())?;
+    context.set("preferences", frozen_json(ctx, &freeze, preferences)?)?;
+    context.set("query", page.query.as_str())?;
+    context.set("state", frozen_json(ctx, &freeze, &page.state)?)?;
+    freeze.call((context,))
 }
 
 /// The JSON object `preferences` as `ctx.preferences`, with every object and array in it
@@ -667,6 +716,7 @@ impl Loader for PackageModules {
 enum Work {
     Search,
     Items,
+    View,
     Action,
     Event,
 }
@@ -676,6 +726,7 @@ impl Work {
         match self {
             Work::Search => "search",
             Work::Items => "items",
+            Work::View => "the view",
             Work::Action => "the action",
             Work::Event => "the event handler",
         }
@@ -789,6 +840,7 @@ impl<'a> Sandbox<'a> {
                     Work::Items => {
                         "Make items return sooner: Dupin stops loading a catalogue 2 seconds after it asks, counting every part."
                     }
+                    Work::View => "Make the view return sooner: Dupin stops it after 2 seconds, as it does a search.",
                     Work::Action | Work::Event => "Do less in one call: Dupin stops actions and event handlers at their deadline.",
                 }),
             ),
@@ -1009,6 +1061,11 @@ impl<'a> Sandbox<'a> {
                 "items-threw",
                 format!("items threw {}", thrown.message),
                 "Catch the error inside items, or return an item that explains the problem.",
+            ),
+            (Stage::Call, Work::View) => (
+                "view-threw",
+                format!("the view threw {}", thrown.message),
+                "Catch the error inside the view, or return a detail that explains the problem.",
             ),
             (Stage::Call, Work::Action) => (
                 "action-threw",

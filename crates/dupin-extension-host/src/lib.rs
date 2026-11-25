@@ -13,6 +13,7 @@ mod sandbox;
 mod wire;
 
 pub use dupin_js_runtime::ActionEffect;
+pub use dupin_js_runtime::{PageContext, ViewAnswer};
 pub use helper::serve;
 pub use host::{Compiled, Host, Launcher, NoServices, Services, Trust};
 pub use wire::Preferences;

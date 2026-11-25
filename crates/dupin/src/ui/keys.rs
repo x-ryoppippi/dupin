@@ -9,6 +9,10 @@ impl Ui {
         if self.picker.is_some() {
             return self.key(ev, tx);
         }
+        if self.form_draft().is_some() {
+            // A focused field had the key first and passed it on.
+            return tx.focused().is_none() && self.form_key(ev, tx);
+        }
         if self.action_screen.is_some() {
             return self.key(ev, tx);
         }

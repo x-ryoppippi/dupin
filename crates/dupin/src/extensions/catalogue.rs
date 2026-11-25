@@ -375,22 +375,7 @@ mod tests {
     use dupin_core::{Item, Payload, View};
 
     fn row(id: &str, title: &str) -> Row {
-        Row {
-            id: id.into(),
-            title: title.into(),
-            subtitle: String::new(),
-            aliases: Vec::new(),
-            keywords: Vec::new(),
-            match_text: None,
-            time: None,
-            file: None,
-            icon: None,
-            image: None,
-            section: None,
-            detail: None,
-            actions: Vec::new(),
-            web_search: None,
-        }
+        Row::new(id, title)
     }
 
     /// Prefixes IDs as the provider does, so an update that names rows by the package's IDs
@@ -425,6 +410,7 @@ mod tests {
                 time: None,
                 file: None,
                 file_actions: Vec::new(),
+                accessories: Vec::new(),
             }
         }
 

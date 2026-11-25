@@ -149,6 +149,7 @@ impl World {
             &self.package,
             name,
             &data,
+            &dupin_extension_host::PageContext::default(),
             &serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,

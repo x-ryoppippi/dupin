@@ -38,6 +38,8 @@ pub struct Entry {
     /// its icon, its detail's image and the actions in `file_actions`.
     pub file: Option<std::path::PathBuf>,
     pub file_actions: Vec<String>,
+    /// What the row shows at its end.
+    pub accessories: Vec<crate::Accessory>,
 }
 
 /// How a catalogue matches what is typed.
@@ -345,6 +347,10 @@ impl Catalogue {
             if let Some(detail) = detail {
                 batch.details.insert(item.id.clone(), detail);
             }
+            let accessories = &row.entry.accessories;
+            if !accessories.is_empty() {
+                batch.accessories.insert(item.id.clone(), accessories.clone());
+            }
             batch.items.push(Item {
                 score: Some(score),
                 matched: positions,
@@ -384,6 +390,10 @@ impl Catalogue {
             if let Some(detail) = detail {
                 batch.details.insert(item.id.clone(), detail);
             }
+            let accessories = &row.entry.accessories;
+            if !accessories.is_empty() {
+                batch.accessories.insert(item.id.clone(), accessories.clone());
+            }
             batch.items.push(Item {
                 score: None,
                 matched: highlights(row.entry.item.display_title(), &words),
@@ -416,6 +426,10 @@ impl Catalogue {
             let (item, detail) = shown(entry, now);
             if let Some(detail) = detail {
                 batch.details.insert(item.id.clone(), detail);
+            }
+            let accessories = &entry.accessories;
+            if !accessories.is_empty() {
+                batch.accessories.insert(item.id.clone(), accessories.clone());
             }
             batch.items.push(Item {
                 score: None,
@@ -544,6 +558,13 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.detail.as_ref().map_or(0, |detail| detail.text_bytes())
         + entry.web_search.as_ref().map_or(0, WebSearch::text_bytes)
         + entry.match_text.as_ref().map_or(0, String::len)
+        + entry
+            .accessories
+            .iter()
+            .map(|accessory| match accessory {
+                crate::Accessory::Text(text) | crate::Accessory::Tag(text) => text.len(),
+            })
+            .sum::<usize>()
         + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
         + match &item.icon {
             Some(crate::Icon::Host(image)) => image.text_bytes(),
@@ -642,6 +663,7 @@ mod tests {
             keywords: Vec::new(),
             section: None,
             detail: None,
+            accessories: Vec::new(),
             web_search: None,
             match_text: None,
             time: None,

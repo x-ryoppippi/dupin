@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
     Acted, Bridge, CataloguePage, Control, Diagnostic, Engine, Exports, Handled, Package, Reply, Row,
-    RunError, Sources,
+    RunError, Sources, ViewAnswer,
 };
 
 use crate::sandbox;
@@ -134,6 +134,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Ok(Outcome::Checked(exports)) => Answer::Checked { exports },
             Ok(Outcome::Rows(items)) => Answer::Rows { items },
             Ok(Outcome::Catalogue(page)) => Answer::Catalogue { page },
+            Ok(Outcome::View(view)) => Answer::View { view },
             Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
             Ok(Outcome::Handled(handled)) => Answer::Handled { handled },
             Err(RunError::Cancelled) => Answer::Cancelled,
@@ -256,6 +257,7 @@ enum Outcome {
     Checked(Exports),
     Rows(Vec<Row>),
     Catalogue(CataloguePage),
+    View(ViewAnswer),
     Acted(Acted),
     Handled(Handled),
 }
@@ -299,15 +301,24 @@ fn execute(
                 bridge,
             )
             .map(Outcome::Catalogue),
+        Call::View {
+            name,
+            page,
+            preferences,
+        } => package
+            .view(engine, &name, &page, &preferences.into_value(), control, bridge)
+            .map(Outcome::View),
         Call::Action {
             name,
             data,
+            page,
             preferences,
         } => package
             .action(
                 engine,
                 &name,
                 &data.to_string(),
+                &page,
                 &preferences.into_value(),
                 control,
                 bridge,

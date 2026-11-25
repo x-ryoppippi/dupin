@@ -14,9 +14,10 @@ use std::time::{Duration, Instant};
 
 use std::collections::{HashMap, HashSet};
 
-use dupin_js_runtime::row::{RowEffect, Source, is_dictionary_url};
+use dupin_js_runtime::row::{RowAction, RowEffect, Source, is_dictionary_url};
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row, RunError, Sources,
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, PageContext, Reason, Row, RunError,
+    Sources, ViewAnswer,
 };
 use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 
@@ -178,6 +179,7 @@ enum Work {
     Compile,
     Search,
     Items,
+    View,
     Action,
     Event,
 }
@@ -188,6 +190,7 @@ impl Work {
             Work::Compile => "compiling the package",
             Work::Search => "search",
             Work::Items => "items",
+            Work::View => "the view",
             Work::Action => "the action",
             Work::Event => "the event handler",
         }
@@ -198,6 +201,7 @@ impl Work {
             Work::Compile => "the compile's",
             Work::Search => "search's",
             Work::Items => "items'",
+            Work::View => "the view's",
             Work::Action => "the action's",
             Work::Event => "the event handler's",
         }
@@ -351,23 +355,69 @@ impl Host {
         )? {
             (Answer::Rows { items }, _) => {
                 validate(&items, limit as usize).map_err(|problem| unshowable(problem, package))?;
-                issued(&items, services.as_ref(), package)?;
+                issued(
+                    items.iter().flat_map(|item| &item.actions),
+                    services.as_ref(),
+                    package,
+                )?;
                 Ok(items)
             }
             _ => Err(mismatch()),
         }
     }
 
-    /// Calls `actions[name](data, { preferences })` in `package`, which the user chose,
-    /// answering its host requests with `services`. An action may wait on the network or a
-    /// program for far longer than a search may wait for the shared helper, so it runs in a
-    /// helper of its own.
+    /// Calls `views[name]({ query, state, preferences })` in `package` for a page the user
+    /// opened, answering its host requests with `services`. A page is searched as the keyword
+    /// is, so it runs in the resident helper as a search does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn view(
+        &self,
+        package: &Compiled,
+        name: &str,
+        page: &PageContext,
+        preferences: &serde_json::Value,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<ViewAnswer, RunError> {
+        let call = Call::View {
+            name: name.into(),
+            page: Box::new(page.clone()),
+            preferences: Preferences::encode(preferences),
+        };
+        match self.call(
+            package.domain,
+            Request::run(package, call, Work::View),
+            deadline,
+            is_cancelled,
+            services,
+        )? {
+            (Answer::View { view }, _) => {
+                view.validate().map_err(|problem| unshowable(problem, package))?;
+                let (rows, actions): (&[Row], &[RowAction]) = match &view {
+                    ViewAnswer::List { rows, .. } => (rows, &[]),
+                    ViewAnswer::Detail { actions, .. } => (&[], actions),
+                    ViewAnswer::Form(_) => (&[], &[]),
+                };
+                let offered = rows.iter().flat_map(|row| &row.actions).chain(actions);
+                issued(offered, services.as_ref(), package)?;
+                Ok(view)
+            }
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `actions[name](data, { query, state, preferences })` in `package`, which the user
+    /// chose on `page`, answering its host requests with `services`. An action may wait on the
+    /// network or a program for far longer than a search may wait for the shared helper, so it
+    /// runs in a helper of its own.
     #[allow(clippy::too_many_arguments)]
     pub fn action(
         &self,
         package: &Compiled,
         name: &str,
         data: &serde_json::Value,
+        page: &PageContext,
         preferences: &serde_json::Value,
         deadline: Instant,
         is_cancelled: &dyn Fn() -> bool,
@@ -376,6 +426,7 @@ impl Host {
         let call = Call::Action {
             name: name.into(),
             data: data.clone(),
+            page: Box::new(page.clone()),
             preferences: Preferences::encode(preferences),
         };
         match self.alone(
@@ -385,7 +436,19 @@ impl Host {
             is_cancelled,
             services,
         )? {
-            (Answer::Acted { acted }, _) => Ok(acted),
+            (Answer::Acted { acted }, _) => {
+                if let Some(effect) = &acted.effect {
+                    effect.validate().map_err(|problem| {
+                        RunError::Failed(
+                            host_error(format!(
+                                "the extension host returned an effect Dupin can't carry out: {problem}"
+                            ))
+                            .file(package.entry()),
+                        )
+                    })?;
+                }
+                Ok(acted)
+            }
             _ => Err(mismatch()),
         }
     }
@@ -1163,14 +1226,15 @@ fn validate(items: &[Row], limit: usize) -> Result<(), String> {
 /// Fails unless every link that `items` open, other than a web URL or a Dictionary word, came
 /// from one of the call's own replies, so only a package that read an event can show it in
 /// Calendar, and only that one.
-fn issued(items: &[Row], services: &dyn Services, package: &Compiled) -> Result<(), RunError> {
-    let stray = items
-        .iter()
-        .flat_map(|item| &item.actions)
-        .any(|action| match &action.effect {
-            RowEffect::OpenUrl { url } => !is_web_url(url) && !is_dictionary_url(url) && !services.opens(url),
-            _ => false,
-        });
+fn issued<'a>(
+    actions: impl IntoIterator<Item = &'a RowAction>,
+    services: &dyn Services,
+    package: &Compiled,
+) -> Result<(), RunError> {
+    let stray = actions.into_iter().any(|action| match &action.effect {
+        RowEffect::OpenUrl { url } => !is_web_url(url) && !is_dictionary_url(url) && !services.opens(url),
+        _ => false,
+    });
     if !stray {
         return Ok(());
     }
@@ -1226,6 +1290,7 @@ fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
         Work::Items => {
             "Make items return sooner: Dupin stops loading a catalogue 2 seconds after it asks, counting every part."
         }
+        Work::View => "Make the view return sooner: Dupin stops it after 2 seconds, as it does a search.",
         Work::Action | Work::Event => {
             "Do less in one call: Dupin stops actions and event handlers at their deadline."
         }

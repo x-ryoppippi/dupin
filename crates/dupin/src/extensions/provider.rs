@@ -2,14 +2,16 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
+use dupin_core::form::{FieldKind, Form};
 use dupin_core::kind::{Kinds, Subject};
 use dupin_core::{
-    Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page,
-    Payload, Provider, ProviderError, Request, View, snippets,
+    Accessory, Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction,
+    Page, Payload, Provider, ProviderError, Request, View, snippets,
 };
 use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
-use dupin_js_runtime::RunError;
-use dupin_js_runtime::row::{Row, RowEffect, RowImage};
+use dupin_js_runtime::row::{self, Row, RowEffect, RowImage};
+use dupin_js_runtime::view::{self, ViewAnswer};
+use dupin_js_runtime::{PageContext, RunError};
 
 use super::Extension;
 use super::catalogue::Convert;
@@ -97,8 +99,8 @@ pub fn answer(
     is_cancelled: impl Fn() -> bool + 'static,
     call: &Call,
 ) -> Result<Vec<Batch>, RunError> {
-    if page.is_some() {
-        return Err(super::views_unsupported());
+    if let Some(page) = page {
+        return page_answer(extension, page, query, deadline, is_cancelled, call);
     }
     let exports = extension.check(deadline)?;
     let mut batches = Vec::new();
@@ -106,13 +108,13 @@ pub fn answer(
     // the package has something to show before that.
     if exports.search && (extension.empty_query || !query.trim().is_empty()) {
         let scored = exports.items;
-        let rows = extension.query(query, None, limit, deadline, is_cancelled, &call.services)?;
+        let rows = extension.query(query, limit, deadline, is_cancelled, &call.services)?;
         let rows = rows.into_iter().enumerate().map(|(index, row)| {
-            let (mut item, detail, section) = row_item(extension, row, false);
+            let mut shown = row_item(extension, row, false);
             if scored {
-                item.score = Some(COMPUTED_SCORE - index as i32);
+                shown.item.score = Some(COMPUTED_SCORE - index as i32);
             }
-            (item, detail, section)
+            shown
         });
         batches.extend(sectioned(rows));
     }
@@ -148,10 +150,147 @@ pub fn default_answer(
     extension.catalogue(query, limit, deadline, call, Role::DefaultSearch)
 }
 
+/// What a page of the package's shows with `query` typed on it: what its view answered,
+/// with the state the page holds.
+fn page_answer(
+    extension: &Extension,
+    page: &Page,
+    query: &str,
+    deadline: Instant,
+    is_cancelled: impl Fn() -> bool + 'static,
+    call: &Call,
+) -> Result<Vec<Batch>, RunError> {
+    let context = PageContext {
+        query: query.to_owned(),
+        state: page.context.clone().unwrap_or_default(),
+    };
+    let answer = extension.view(&page.view, &context, deadline, is_cancelled, &call.services)?;
+    Ok(view_batches(extension, answer))
+}
+
+/// The row a detail view shows as, which carries the view's actions.
+pub(super) const DETAIL_ROW: &str = "detail";
+/// The row a form view shows as.
+pub(super) const FORM_ROW: &str = "form";
+
+/// A view's answer as the batches the session shows: a list's rows, a detail as one card that
+/// stays open, or a form as one row the page shows in its place.
+pub(super) fn view_batches(extension: &Extension, answer: ViewAnswer) -> Vec<Batch> {
+    match answer {
+        ViewAnswer::List { rows, empty_text } => {
+            let mut batches = sectioned(rows.into_iter().map(|row| row_item(extension, row, false)));
+            match batches.first_mut() {
+                Some(batch) => batch.empty_text = empty_text,
+                None => batches.push(Batch {
+                    empty_text,
+                    ..Batch::default()
+                }),
+            }
+            batches
+        }
+        ViewAnswer::Detail {
+            title,
+            detail,
+            actions,
+        } => {
+            let row = Row {
+                detail: Some(detail),
+                actions,
+                ..Row::new(DETAIL_ROW, title)
+            };
+            let shown = row_item(extension, row, false);
+            let mut batch = Batch::from(vec![shown.item]);
+            batch
+                .details
+                .extend(shown.detail.map(|detail| (DETAIL_ROW.to_owned(), detail)));
+            vec![batch]
+        }
+        ViewAnswer::Form(form) => {
+            let item = Item {
+                id: FORM_ROW.into(),
+                view: View::Text {
+                    title: form.title.clone(),
+                    subtitle: String::new(),
+                },
+                payload: Payload::default(),
+                record_usage: false,
+                icon: None,
+                matched: Vec::new(),
+                completion: None,
+                score: None,
+                primary: None,
+                alternate: None,
+                actions: Vec::new(),
+            };
+            vec![Batch {
+                form: Some(Arc::new(form_of(extension, form))),
+                ..Batch::from(vec![item])
+            }]
+        }
+    }
+}
+
+/// The form as the launcher draws it and holds its drafts.
+pub(super) fn form_of(extension: &Extension, form: view::Form) -> Form {
+    Form {
+        submit_title: form.submit_title.unwrap_or_else(|| "Submit".into()),
+        title: form.title,
+        extension: extension.id.clone(),
+        submit: form.submit,
+        fields: form
+            .fields
+            .into_iter()
+            .map(|field| {
+                let max_bytes = field.kind.max_text_bytes();
+                let kind = match field.kind {
+                    view::FieldKind::Text {
+                        required,
+                        default,
+                        placeholder,
+                    }
+                    | view::FieldKind::Textarea {
+                        required,
+                        default,
+                        placeholder,
+                    } => FieldKind::Text {
+                        multiline: max_bytes == Some(view::MAX_TEXTAREA_BYTES),
+                        required,
+                        default,
+                        placeholder,
+                        max_bytes: max_bytes.expect("a text field"),
+                    },
+                    view::FieldKind::Checkbox { default } => FieldKind::Checkbox { default },
+                    view::FieldKind::Select { options, default } => FieldKind::Select {
+                        default: options
+                            .iter()
+                            .position(|option| option.value == default)
+                            .unwrap_or_default(),
+                        options: options
+                            .into_iter()
+                            .map(|option| (option.value, option.title))
+                            .collect(),
+                    },
+                };
+                dupin_core::form::Field {
+                    id: field.id,
+                    title: field.title,
+                    kind,
+                }
+            })
+            .collect(),
+    }
+}
+
 /// Consecutive rows of one section in one batch, each with its detail shown while selected.
-fn sectioned(rows: impl Iterator<Item = (Item, Option<Arc<Detail>>, Option<String>)>) -> Vec<Batch> {
+fn sectioned(rows: impl Iterator<Item = Shown>) -> Vec<Batch> {
     let mut batches: Vec<Batch> = Vec::new();
-    for (item, detail, section) in rows {
+    for shown in rows {
+        let Shown {
+            item,
+            detail,
+            section,
+            accessories,
+        } = shown;
         let batch = match batches.last_mut() {
             Some(batch) if batch.section == section => batch,
             _ => {
@@ -165,6 +304,9 @@ fn sectioned(rows: impl Iterator<Item = (Item, Option<Arc<Detail>>, Option<Strin
         };
         if let Some(detail) = detail {
             batch.details.insert(item.id.clone(), detail);
+        }
+        if !accessories.is_empty() {
+            batch.accessories.insert(item.id.clone(), accessories);
         }
         batch.items.push(item);
     }
@@ -184,12 +326,18 @@ impl Convert for Extension {
         let time = row.time.map(|ms| ms / 1000);
         let file = row.file.clone().map(Into::into);
         let file_actions = file_actions(&row);
-        let (item, detail, section) = row_item(self, row, true);
+        let Shown {
+            item,
+            detail,
+            section,
+            accessories,
+        } = row_item(self, row, true);
         Entry {
             item,
             aliases,
             keywords,
             section: section.map(Into::into),
+            accessories,
             detail,
             web_search,
             match_text,
@@ -237,11 +385,15 @@ fn kind_action(subject: &Subject, id: String, title: &str) -> ItemAction {
     action
 }
 
-pub(super) fn row_item(
-    extension: &Extension,
-    row: Row,
-    catalogue: bool,
-) -> (Item, Option<Arc<Detail>>, Option<String>) {
+/// A row as the launcher shows it, with what it shows beside the item.
+pub(super) struct Shown {
+    pub item: Item,
+    pub detail: Option<Arc<Detail>>,
+    pub section: Option<String>,
+    pub accessories: Vec<Accessory>,
+}
+
+pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Shown {
     let Row {
         id,
         title,
@@ -257,7 +409,16 @@ pub(super) fn row_item(
         detail,
         actions: offered,
         web_search: _,
+        accessories,
+        answer,
     } = row;
+    let accessories = accessories
+        .into_iter()
+        .map(|accessory| match accessory {
+            row::Accessory::Text(text) => Accessory::Text(text),
+            row::Accessory::Tag(text) => Accessory::Tag(text),
+        })
+        .collect();
     let detail = detail.map(|detail| {
         let mut shown = Detail::new(title.clone(), &detail.markdown);
         if let Some(image) = detail.image {
@@ -345,12 +506,28 @@ pub(super) fn row_item(
                         None => run,
                     }
                 }
+                RowEffect::Push { view, state } => ItemAction::new(
+                    &format!("action-{index}"),
+                    &action.title,
+                    Action::Push(Page {
+                        view,
+                        title: action.title.clone(),
+                        context: state,
+                    }),
+                ),
             }
         })
         .collect();
+    let view = match answer {
+        Some(result) => View::Pair {
+            source: title,
+            result,
+        },
+        None => View::Text { title, subtitle },
+    };
     let item = Item {
         id: if catalogue { extension.entry_id(&id) } else { id },
-        view: View::Text { title, subtitle },
+        view,
         payload,
         // A catalogue matched by words keeps its own order, as a history does, so picks never
         // rank it.
@@ -373,7 +550,12 @@ pub(super) fn row_item(
         }),
         actions,
     };
-    (item, detail, section)
+    Shown {
+        item,
+        detail,
+        section,
+        accessories,
+    }
 }
 
 /// The image a row of the extension names, which Dupin resolves in that package's storage.
@@ -399,6 +581,13 @@ impl Provider for ExtensionProvider {
         if request.limit == 0 {
             return Ok(());
         }
+        // A page belongs to its package alone, wherever its row was chosen, so it answers as the
+        // keyword does, questions and failures included.
+        let role = if request.page.is_some() {
+            Role::Keyword
+        } else {
+            self.role
+        };
         let deadline = Instant::now() + QUERY_DEADLINE;
         let id = &self.extension.package;
         // Loading a catalogue is a query too, from either search, with no activation.
@@ -406,7 +595,7 @@ impl Provider for ExtensionProvider {
             Some(bridge) => bridge.call(id, Trigger::Query),
             None => Call::none(),
         };
-        let answer = match self.role {
+        let answer = match role {
             Role::Keyword => {
                 let cancellation = request.cancellation();
                 answer(
@@ -428,7 +617,7 @@ impl Provider for ExtensionProvider {
         {
             // The main search shows everyone's results; a package whose access changed only
             // drops its own.
-            if self.role == Role::Keyword {
+            if role == Role::Keyword {
                 emit(Batch::from(vec![self.problem(
                     "Its access changed while it ran, so its answer was dropped. Type again to retry.".into(),
                 )]));
@@ -440,7 +629,7 @@ impl Provider for ExtensionProvider {
         }
         // Only the keyword asks for consent; the main search never shows another package's
         // questions among its results.
-        let access = match self.role {
+        let access = match role {
             Role::Keyword => self.bridge.as_ref().map(|bridge| (bridge, id)),
             Role::DefaultSearch => None,
         };
@@ -463,7 +652,7 @@ impl Provider for ExtensionProvider {
             Err(RunError::Failed(diagnostic)) => {
                 crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
                 // The main search shows everyone's results; a failing extension only logs.
-                if self.role == Role::Keyword {
+                if role == Role::Keyword {
                     // A located problem starts with its file name, which keeps its case.
                     let subtitle = if diagnostic.file.is_some() {
                         diagnostic.to_string()
@@ -633,27 +822,116 @@ mod tests {
         rows
     }
 
-    #[test]
-    fn a_page_never_reaches_the_guest() {
-        let provider =
-            ExtensionProvider::new(Arc::new(crate::extensions::tests::extension("Word Count", "wc")));
+    fn page(provider: &ExtensionProvider, view: &str, query: &str, state: serde_json::Value) -> Vec<Batch> {
         let page = Page {
-            view: "stats".into(),
-            title: "Statistics".into(),
-            context: None,
+            view: view.into(),
+            title: "Page".into(),
+            context: Some(state),
         };
-        let mut rows = Vec::new();
+        let mut batches = Vec::new();
         provider
-            .search(&Request::detached_page("", page, 10), &mut |batch| {
-                rows.extend(batch)
+            .search_batches(&Request::detached_page(query, page, 10), &mut |batch| {
+                batches.push(batch)
             })
             .unwrap();
+        batches
+    }
+
+    const VIEWS: &str = r#"
+        export const search = () => [{ title: 'Note', accessories: [{ text: '2 KB' }, { tag: 'New' }], answer: '4',
+            actions: [{ title: 'Read', push: { view: 'note', state: { id: 7 } } }] }];
+        export const views = {
+            note: (ctx) => ({ type: 'detail', title: `Note ${ctx.state.id}`, markdown: ctx.query,
+                actions: [{ title: 'Edit', push: { view: 'edit', state: ctx.state } }, { title: 'Delete', run: 'remove', confirm: 'Delete it?' }] }),
+            empty: (ctx) => ({ type: 'list', sections: [], emptyText: `No ${ctx.query}` }),
+            edit: () => ({ type: 'form', title: 'Edit', submit: 'save', fields: [
+                { type: 'text', id: 'title', title: 'Title', required: true },
+                { type: 'select', id: 'label', title: 'Label', default: 'blue',
+                  options: [{ value: 'red', title: 'Red' }, { value: 'blue', title: 'Blue' }] }] }),
+            broken: () => ({ type: 'grid' }),
+        };
+    "#;
+
+    #[test]
+    fn rows_open_their_package_views_and_show_accessories_and_answers() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(VIEWS);
+        let mut batches = Vec::new();
+        provider
+            .search_batches(&Request::detached("x", 10), &mut |batch| batches.push(batch))
+            .unwrap();
+        let row = &batches[0].items[0];
         assert_eq!(
-            rows[0].view,
-            View::Text {
-                title: "Word Count failed".into(),
-                subtitle: "Extensions can't open views yet".into(),
+            row.view,
+            View::Pair {
+                source: "Note".into(),
+                result: "4".into()
             }
+        );
+        assert_eq!(
+            batches[0].accessories[&row.id],
+            [Accessory::Text("2 KB".into()), Accessory::Tag("New".into())]
+        );
+        assert_eq!(
+            row.action("action-0"),
+            Some(&Action::Push(Page {
+                view: "note".into(),
+                title: "Read".into(),
+                context: Some(serde_json::json!({"id": 7})),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_page_shows_its_view_with_the_state_it_holds() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(VIEWS);
+        let detail = page(&provider, "note", "typed", serde_json::json!({"id": 7}));
+        let row = &detail[0].items[0];
+        assert_eq!(row.id, DETAIL_ROW);
+        assert!(!detail[0].details_when_selected, "a detail page stays open");
+        assert_eq!(detail[0].details[DETAIL_ROW].title, "Note 7");
+        assert_eq!(row.primary.as_deref(), Some("action-0"));
+        assert!(row.item_action("action-1").unwrap().confirmation().is_some());
+
+        let empty = page(&provider, "empty", "tea", serde_json::Value::Null);
+        assert!(empty[0].items.is_empty());
+        assert_eq!(empty[0].empty_text.as_deref(), Some("No tea"));
+
+        let form = page(&provider, "edit", "", serde_json::Value::Null);
+        let form = form[0].form.as_ref().expect("a form");
+        assert_eq!(
+            (
+                form.extension.as_str(),
+                form.submit.as_str(),
+                form.submit_title.as_str()
+            ),
+            ("word-count", "save", "Submit")
+        );
+        assert!(form.fields[0].required());
+        assert!(matches!(
+            form.fields[1].kind,
+            FieldKind::Select { default: 1, .. }
+        ));
+
+        let broken = page(&provider, "broken", "", serde_json::Value::Null);
+        assert_eq!(broken[0].items[0].id, PROBLEM_ROW);
+        let missing = page(&provider, "absent", "", serde_json::Value::Null);
+        let View::Text { subtitle, .. } = &missing[0].items[0].view else {
+            panic!()
+        };
+        assert!(subtitle.contains("views.absent"), "{subtitle}");
+    }
+
+    #[test]
+    fn a_page_opened_from_the_main_search_answers_as_the_keyword_does() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, keyword) = javascript(VIEWS);
+        let main = ExtensionProvider::with_role(keyword.extension.clone(), Role::DefaultSearch);
+        let shown = page(&main, "broken", "", serde_json::Value::Null);
+        assert_eq!(
+            shown[0].items[0].id, PROBLEM_ROW,
+            "its failure shows on its own page"
         );
     }
 

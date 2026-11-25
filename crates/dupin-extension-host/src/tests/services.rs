@@ -153,6 +153,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
             &package,
             "show",
             &serde_json::json!({"key": "k"}),
+            &dupin_js_runtime::PageContext::default(),
             &serde_json::json!({}),
             Instant::now() + Duration::from_secs(5),
             &|| false,
@@ -183,6 +184,7 @@ fn actions_and_events_run_in_the_helper_with_their_data() {
         &package,
         "absent",
         &serde_json::Value::Null,
+        &dupin_js_runtime::PageContext::default(),
         &serde_json::json!({}),
         Instant::now() + Duration::from_secs(5),
         &|| false,
@@ -253,8 +255,17 @@ fn actions_and_events_waiting_on_a_service_never_hold_up_searches() {
                 let deadline = Instant::now() + Duration::from_secs(10);
                 let none = serde_json::Value::Null;
                 if action {
-                    host.action(&package, "wait", &none, &none, deadline, &|| false, &slow)
-                        .map(drop)
+                    host.action(
+                        &package,
+                        "wait",
+                        &none,
+                        &dupin_js_runtime::PageContext::default(),
+                        &none,
+                        deadline,
+                        &|| false,
+                        &slow,
+                    )
+                    .map(drop)
                 } else {
                     host.event(&package, "clipboard", &none, &none, deadline, &|| false, &slow)
                         .map(drop)

@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dupin_core::{Item, View};
+use dupin_core::{Accessory, Item, View};
 use rune::tok::type_;
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
@@ -373,13 +373,16 @@ fn result_row(
         s.theme.row_height as f32,
         on,
         icon,
-        title(
-            item,
-            if on { t.selected_text } else { t.text },
-            if on { t.selected_text } else { accent },
-            t,
-        ),
-        subtitle,
+        RowLabels {
+            title: title(
+                item,
+                if on { t.selected_text } else { t.text },
+                if on { t.selected_text } else { accent },
+                t,
+            ),
+            subtitle,
+            accessories: s.session.accessories(index),
+        },
     )
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
 }
@@ -401,15 +404,46 @@ pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool) -
     })
 }
 
+/// What a text row says: its title, its subtitle beneath and its accessories at its end.
+pub(super) struct RowLabels<'a> {
+    pub title: El,
+    pub subtitle: &'a str,
+    pub accessories: &'a [Accessory],
+}
+
 pub(super) fn text_row(
     t: &ResolvedTheme,
     accent: Color,
     height: f32,
     on: bool,
     icon: Option<El>,
-    title: El,
-    subtitle: &str,
+    labels: RowLabels<'_>,
 ) -> El {
+    let RowLabels {
+        title,
+        subtitle,
+        accessories,
+    } = labels;
+    let ink = if on { t.selected_text } else { t.text_secondary };
+    let accessories = accessories.iter().map(|accessory| match accessory {
+        Accessory::Text(text) => rune::text(text).font(t.font(type_::LABEL)).color(ink).truncate(),
+        Accessory::Tag(tag) => row()
+            .h(22.0)
+            .px(8.0)
+            .radius(6.0)
+            .center_y()
+            .fill(if on {
+                t.selected_text.alpha(0.2)
+            } else {
+                accent.alpha(0.16)
+            })
+            .child(
+                rune::text(tag)
+                    .font(t.font(type_::LABEL))
+                    .color(if on { t.selected_text } else { accent })
+                    .truncate(),
+            ),
+    });
     row().w_full().h(height).px(LIST_PAD).child(
         row()
             .w_full()
@@ -432,7 +466,8 @@ pub(super) fn text_row(
                         })
                         .truncate(),
                 ),
-            ),
+            )
+            .children(accessories),
     )
 }
 

@@ -35,6 +35,17 @@ pub(super) fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .on_edit(Ui::query_edit)
         .on_input_key(|s: &mut Ui, ev, tx| s.key(ev, tx))
         .on_input_change(|s: &mut Ui, tx| s.edited(tx));
+    // A form takes what is typed into its fields, so the field shows the form's title.
+    let field = match s.form_draft() {
+        Some(draft) => text(&draft.form.title)
+            .key("form-title")
+            .grow(1.0)
+            .min_w(0.0)
+            .font(t.font(TextStyle::new(22.0, 400.0).lh(30.0)))
+            .color(t.text)
+            .truncate(),
+        None => field,
+    };
     let mut bar = row()
         .key("header")
         .w_full()
@@ -136,7 +147,9 @@ fn hint(s: &Ui) -> Option<&str> {
     match s.session.results() {
         Results::Idle if empty => presentation.empty_hint.as_deref(),
         Results::Done if s.session.failures().next().is_none() => {
-            if empty {
+            if let Some(text) = s.session.empty_text() {
+                Some(text)
+            } else if empty {
                 presentation.empty_hint.as_deref()
             } else {
                 presentation.no_results_hint.as_deref()

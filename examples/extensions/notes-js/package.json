@@ -1,0 +1,19 @@
+{
+	"name": "notes",
+	"version": "0.1.0",
+	"private": true,
+	"keywords": [
+		"dupin-extension"
+	],
+	"type": "module",
+	"dupin": {
+		"title": "Notes",
+		"keyword": "note",
+		"emptyQuery": true,
+		"capabilities": {
+			"storage": {
+				"quotaBytes": 1048576
+			}
+		}
+	}
+}

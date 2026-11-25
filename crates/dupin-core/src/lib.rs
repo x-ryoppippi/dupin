@@ -10,6 +10,7 @@ pub mod file_name;
 pub mod file_query;
 pub mod file_rank;
 pub mod filter;
+pub mod form;
 pub mod fuzzy;
 pub mod history;
 pub mod item;
@@ -28,12 +29,12 @@ pub use detail::Detail;
 pub use history::History;
 pub(crate) use item::ActionDisposition;
 pub use item::{
-    Action, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page, Payload, ShareTarget,
-    SystemCommand, View,
+    Accessory, Action, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction, Page, Payload,
+    ShareTarget, SystemCommand, View,
 };
 pub use provider::{Batch, Cancellation, Provider, ProviderError, Request};
 pub use searcher::{Delivery, Searcher};
-pub use session::{Effect, Intent, Session};
+pub use session::{Anchor, Effect, Intent, Navigated, Session};
 
 #[cfg(test)]
 mod concurrent_tests;

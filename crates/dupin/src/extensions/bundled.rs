@@ -216,7 +216,6 @@ mod tests {
         let items = dupin
             .query(
                 "report",
-                None,
                 10,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,

@@ -18,7 +18,7 @@ impl Ui {
         s.icon_cache = Some(ImageCache::new(waker));
     }
 
-    fn deliver(&mut self, origin: CommandId, delivery: Delivery, sent: Instant) {
+    fn deliver(&mut self, origin: CommandId, delivery: Delivery, sent: Instant, tx: &mut Tx) {
         if self.session.deliver_from(origin.clone(), delivery) {
             crate::latency::delivered(&origin, sent, |generation| {
                 self.session.pending(&origin, generation)
@@ -43,6 +43,7 @@ impl Ui {
             {
                 self.action_screen = None;
             }
+            self.sync_forms(tx);
             self.fetch_icons();
         }
     }
@@ -239,7 +240,7 @@ pub(super) fn spawn_searcher(me: AppHandle<Ui>, origin: CommandId, provider: Arc
         let sent = Instant::now();
         me.update(move |s, tx| {
             s.poll(tx.clock(), tx);
-            s.deliver(origin, d, sent);
+            s.deliver(origin, d, sent, tx);
         });
     })
 }

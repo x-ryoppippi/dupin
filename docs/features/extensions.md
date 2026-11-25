@@ -116,20 +116,22 @@ A package with both lists what `search` computes for the query first, then the c
 
 `search` receives the text typed after the keyword and a frozen `ctx` whose `limit` is the number of rows Dupin will show. It returns an array of items, or a list: `{ type: "list", items: [...] }`, or `{ sections: [{ title, items }, ...] }` for items under headings (`type` may be left out). Return `[]` for no results. It isn't called before anything is typed, unless the manifest sets `emptyQuery`.
 
-| Item field | Value                                                                                                                                                |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `title`    | Required. One line, up to 512 bytes.                                                                                                                 |
-| `subtitle` | Optional, up to 2,048 bytes.                                                                                                                         |
-| `id`       | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                         |
-| `url`      | Optional. An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](#calendar), up to 2,048 bytes: **Open URL** opens it.            |
-| `text`     | Optional, up to 16 KiB: **Copy** copies it.                                                                                                          |
-| `icon`     | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file. |
-| `image`    | Optional. An image the package keeps, by its handle, drawn scaled down as the row's icon in place of `icon`. See [Images](#images).                  |
-| `section`  | Optional. The heading the item is listed under, one line up to 128 bytes. Items of a list's `sections` get their section's title.                    |
-| `detail`   | Optional. `{ image, markdown, metadata }`, shown in place of the row while it is selected. See [Details](#details).                                  |
-| `actions`  | Optional. More actions, after the ones `url` and `text` add; eight in all. See [Actions](#actions).                                                  |
+| Item field    | Value                                                                                                                                                         |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`       | Required. One line, up to 512 bytes.                                                                                                                          |
+| `subtitle`    | Optional, up to 2,048 bytes.                                                                                                                                  |
+| `id`          | Unique among the items, up to 128 bytes. Optional for `search`, where Dupin numbers items without one; required for `items`.                                  |
+| `url`         | Optional. An `http`, `https` or `dict://` URL, or from `search` an event's [`link`](#calendar), up to 2,048 bytes: **Open URL** opens it.                     |
+| `text`        | Optional, up to 16 KiB: **Copy** copies it.                                                                                                                   |
+| `icon`        | Optional. An image in the package, relative to `package.json`, such as `assets/repo.png`: a `.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns` file.          |
+| `image`       | Optional. An image the package keeps, by its handle, drawn scaled down as the row's icon in place of `icon`. See [Images](#images).                           |
+| `section`     | Optional. The heading the item is listed under, one line up to 128 bytes. Items of a list's `sections` get their section's title.                             |
+| `detail`      | Optional. `{ image, markdown, metadata }`, shown in place of the row while it is selected. See [Details](#details).                                           |
+| `actions`     | Optional. More actions, after the ones `url` and `text` add; eight in all. See [Actions](#actions).                                                           |
+| `accessories` | Optional. Up to three `{ text }` or `{ tag }`, each one line of up to 64 bytes, shown at the row's end: a `text` as it is, a `tag` as a label.                |
+| `answer`      | Optional, from `search` or a [view](#views-and-forms) only. One line of up to 512 bytes the row shows beside its `title`, as two values, as a calculation is. |
 
-Enter runs the first action: **Open URL** when the item has a `url`, then **Copy** when it has `text`, then its `actions` in order. → or ⌘K lists them all. An item without any shows but does nothing, and an item can't open a view of its own yet. Every value is checked; an unknown field, a value of the wrong type, an empty `text` or a URL with another scheme fails the whole answer with a row that says which item and field.
+Enter runs the first action: **Open URL** when the item has a `url`, then **Copy** when it has `text`, then its `actions` in order. → or ⌘K lists them all. An item without any shows but does nothing; a [`push`](#views-and-forms) action opens a view of the package's own. Every value is checked; an unknown field, a value of the wrong type, an empty `text` or a URL with another scheme fails the whole answer with a row that says which item and field.
 
 ### `items(ctx)`
 
@@ -269,6 +271,7 @@ An item's `actions` adds up to eight actions, counting the ones `url` and `text`
 | `open`   | Opens the `http`, `https` or `dict://` URL, or a [calendar event's `link`](#calendar).                                                                                                                                                                                                                                                                                                                                                    |
 | `reveal` | Shows the file at the absolute path selected in Finder; it opens nothing.                                                                                                                                                                                                                                                                                                                                                                 |
 | `run`    | Calls `actions[run](data, ctx)` in the package: `run` names one of its functions, up to 64 letters, digits, `_` or `$`, and `data` is up to 4 KiB of JSON, nested 16 levels deep. `alternate: true` makes ⌘Enter run it, for one action of an item; `confirm` is a question Dupin asks first, with the action's title as the button and Cancel selected; in a catalogue, `needsFile: true` leaves it out while the item's `file` is gone. |
+| `push`   | `{ view, state }`: opens `views[view](ctx)` on a [page](#views-and-forms) of its own, titled with the action's title, holding `state`, up to 16 KiB of JSON nested 16 levels deep, for it.                                                                                                                                                                                                                                                |
 
 ```js
 import { items as catalogue, storage } from 'dupin';
@@ -295,14 +298,108 @@ export const actions = {
 
 A `copy` or `paste` action with `template: true` from a [bundled extension](#bundled-extensions) that replaces a built-in is a template: when you choose it, Dupin fills `{date}` (`2026-01-31`), `{time}` (`09:05`, on a 24-hour clock), `{datetime}` (both) and `{clipboard}` (the clipboard's text, or nothing) as [snippets](./snippets.md#configuration) do, and leaves any other braces as written. Dupin reads the clipboard only for `{clipboard}`, and the package never sees it or the time. That read sees every copy, including those the [clipboard service](#clipboard) hides from packages, as the built-in always did, so any other package's `template` is ignored and its text is copied or pasted as written. A row whose first action pastes, and whose actions make none `alternate`, copies with ⌘Enter, through its first `copy` action.
 
-A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen, empty `ctx`, and may return nothing or `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
-A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen `ctx` holding `preferences`, and may return nothing, `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel, `{ type: "hide" }`, which hides the panel as copying does, or `{ type: "paste" }`, which hides it and pastes what the action put on the clipboard into the app in front, as a [`paste` action](#actions) does: only for a package allowed `clipboard:paste`, and with macOS Accessibility access. It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
+A `run` action keeps the launcher open. The function receives `data`, `null` when the action has none, and a frozen `ctx` holding `preferences` and, when the action was chosen on one of the package's [pages](#views-and-forms), that page's `query` and `state` (`""` and `null` anywhere else, so a package never sees what is typed in the main search). It may return nothing, `{ type: "toast", text }`, one line of up to 512 bytes that Dupin shows in the panel, `{ type: "hide" }`, which hides the panel as copying does, `{ type: "paste" }`, which hides it and pastes what the action put on the clipboard into the app in front, as a [`paste` action](#actions) does: only for a package allowed `clipboard:paste`, and with macOS Accessibility access, or one of the [effects on pages](#effects-on-pages). It runs in a fresh engine like a query, but for up to 30 seconds and in a host of its own, so a slow action never holds up typing, and only an action you chose may write, send, run a program or touch the clipboard; see [Asking for more](#asking-for-more). Only the extension whose row offered an action runs it, and only own properties of `actions` are handlers, so `toString` names nothing. Calling `items.invalidate()` from `dupin` there, or in an [event handler](#events), asks `items` again, with its cursor and `reason` `"invalidated"`; called from `search` or `items`, it throws. Dupin searches the current query again once an action ends, so the change shows at once. A handler that throws, or names an export the package doesn't have, shows its failure as a notice.
+
+### Views and forms
+
+A `push` action, or a `push` effect, opens a page of the package's own above the list: the module's `views` export names each page's function, which answers with a list, a detail or a form. The page's title, after the keyword's chip, is the action's title. Dupin holds each page's `state`, the JSON its push carried, and hands it back; Esc, or ⌫ in an empty field, closes the page and selects again the row it opened from. At most eight pages are open at once.
+
+```js
+import { storage } from 'dupin';
+
+export async function search() {
+	const { records } = await storage.list();
+	return records.map((note) => ({
+		id: note.id,
+		title: note.data.title,
+		accessories: note.data.pinned ? [{ tag: 'Pinned' }] : [],
+		actions: [{ title: 'Read', push: { view: 'note', state: { id: note.id } } }],
+	}));
+}
+
+export const views = {
+	async note(ctx) {
+		const note = await storage.get(ctx.state.id);
+		if (!note) return { type: 'list', items: [], emptyText: 'This note was deleted.' };
+		return {
+			type: 'detail',
+			title: note.data.title,
+			markdown: note.data.body,
+			actions: [
+				{ title: 'Edit', push: { view: 'edit', state: { id: note.id } } },
+				{ title: 'Delete', run: 'remove', data: { id: note.id }, confirm: 'Delete this note?' },
+			],
+		};
+	},
+	async edit(ctx) {
+		const note = await storage.get(ctx.state.id);
+		return {
+			type: 'form',
+			title: 'Edit Note',
+			submit: 'save',
+			fields: [
+				{ type: 'text', id: 'title', title: 'Title', required: true, default: note.data.title },
+				{ type: 'textarea', id: 'body', title: 'Note', default: note.data.body },
+				{ type: 'checkbox', id: 'pinned', title: 'Pinned', default: note.data.pinned },
+			],
+		};
+	},
+};
+
+export const actions = {
+	async save(values, ctx) {
+		if (values.title.trim() === 'Untitled')
+			return { type: 'fieldErrors', errors: { title: 'Name it' } };
+		const { data } = await storage.get(ctx.state.id);
+		// Storing under the same key replaces the note and keeps its ID.
+		await storage.put({ ...values, key: data.key }, { key: data.key });
+		return { type: 'pop', toast: 'Saved' };
+	},
+	async remove({ id }) {
+		await storage.delete(id);
+		return { type: 'pop', toast: 'Deleted' };
+	},
+};
+```
+
+[`examples/extensions/notes-js`](../../examples/extensions/notes-js) is a complete notes extension built this way, with fixtures that write, read, edit and delete a note.
+
+A view receives a frozen `ctx` holding `query`, what is typed on the page, `state` and `preferences`. It runs as `search` does, in the package's resident host, for at most 2 seconds and again whenever the page's query or state changes, so it may only read, and write its own `storage`, and it can't call `items.invalidate()`. Each call starts from fresh module state, so a page keeps what it needs in its `state`, never in a module variable. It returns one of:
+
+| View                                                            | Shows                                                                                                                                                                                                    |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An array of items, or `{ type: "list", … }`                     | A list, as `search` returns one, up to 50 items, which may push further pages. `emptyText`, one line of up to 256 bytes, shows while it has no items.                                                    |
+| `{ type: "detail", title, markdown, metadata, image, actions }` | The [detail](#details) filling the page under its `title`, one line of up to 512 bytes, with up to eight `actions`, the first of which Enter runs.                                                       |
+| `{ type: "form", title, fields, submit, submitTitle }`          | A form: 1 to 16 `fields`, each beside its `title`, and the key `submitTitle` (`Submit` without it) names. `submit` is a key of the module's `actions`. The query field shows the form's `title` instead. |
+
+| Field                                                         | Holds                                                                                                                   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `{ type: "text", id, title, required, default, placeholder }` | One line of up to 1 KiB.                                                                                                |
+| `{ type: "textarea", … }`                                     | The same, as several lines of up to 16 KiB in all.                                                                      |
+| `{ type: "checkbox", id, title, default }`                    | `true` or `false`, `false` without a `default`.                                                                         |
+| `{ type: "select", id, title, options, default }`             | The `value` of one of 1 to 32 `options`, each `{ value, title }` of up to 128 bytes; the first one without a `default`. |
+
+A field's `id` is 1 to 64 letters, digits, `_` or `-`, different for each field, and its `title` and `placeholder` one line of up to 128 bytes. Dupin keeps what is typed into a form while its page is open, including while a page above it is, and keeps it when the view answers again with the same fields. Tab and Shift-Tab move between the fields, Space toggles a checkbox, ← and → change a select, Enter in a multi-line field starts a line, and ⌘Enter, or Enter in any other field, submits; Esc cancels and drops the drafts. Before anything reaches the package, Dupin checks that each required field holds more than spaces and that each field fits, and shows what is wrong under the field. Then it calls `actions[submit](values, ctx)`, as choosing a `run` action would, with each field's value by its `id`, and keeps the form until the action answers; a second submit waits for it.
+
+#### Effects on pages
+
+An action, or a form's submit, may return one of these instead of a toast. Each lands only while the page the action was chosen on is still the one on screen, so an action that ends after you moved on, or a second action of the same page after the first moved it, changes nothing; a toast still shows.
+
+| Effect                                        | Does                                                                                                                                                            |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ type: "push", view, title, state, toast }` | Opens `views[view]` above the page the action was chosen on, titled `title`, or the extension's title without one.                                              |
+| `{ type: "pop", toast }`                      | Closes that page, as Esc does.                                                                                                                                  |
+| `{ type: "refresh", toast }`                  | Asks the page's view again, or searches again under the keyword.                                                                                                |
+| `{ type: "replaceState", state, toast }`      | Gives the page `state` and asks its view again.                                                                                                                 |
+| `{ type: "fieldErrors", errors }`             | From a form's submit only: shows each message, one line of up to 256 bytes, under the field whose `id` it is keyed by, for up to 16 fields, and keeps the form. |
+
+`toast` is optional, one line of up to 512 bytes shown once Dupin has done the rest, and `state` is at most 16 KiB of JSON nested 16 levels deep. An effect of any other shape, a ninth page, or `fieldErrors` anywhere but a submit, fails as a notice and changes nothing.
 
 ### What the module can reach
 
 The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`2`), `DupinError`, `items`, whose `invalidate()` an action or event handler calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calendar` and `windows`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
+There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`3`), `DupinError`, `items`, whose `invalidate()` an action or event handler calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calendar` and `windows`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, view, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
 ### Events
 
@@ -693,7 +790,7 @@ With `--ts`, `dupin.main` is `src/main.ts`, which Dupin runs as written. With `-
 
 The `--bundle` workflow installs exactly what `bun.lock` pins, with `--frozen-lockfile` and without install scripts, and runs Rolldown on Bun with the same `rolldown.config.ts`. It installs and bundles in a job that can only read the repository and keeps no Git credentials; a second job, which runs no dependency code, holds the write token and commits the bundle.
 
-`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 2 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, item actions, `actions` and `events`, the capabilities and `DupinError`. What the [design](../design/extension-platform.md) plans next, such as accessories and pushed Detail and Form views, is drafted as types in its `planned` namespace. Nothing in `planned` works yet: an item with those fields fails the answer.
+`dupin.d.ts` is a copy of [`sdk/dupin.d.ts`](../../sdk/dupin.d.ts) for the version of Dupin that made it. Its `apiVersion` matches the one the host's `dupin` module exports. Everything apiVersion 3 has is in the `dupin` module: `search`, `items(ctx)`, sections, details, accessories and answers, item actions, `views` with their lists, details and forms, `actions` with their effects on pages, `events`, the capabilities and `DupinError`.
 
 ### TypeScript without a build
 
@@ -745,7 +842,7 @@ FAIL fixtures/search.json
 
 Each difference names the path in the outcome and both values; something the outcome has that the expectation doesn't name is `unexpected`, and something it lacks is `got nothing`. A step that can't run, such as selecting a row the answer doesn't have, stops its fixture. `test` exits non-zero when any fixture fails or can't be read. `--json` prints `{ "package", "passed", "fixtures": [{ "file", "passed", "updated", "steps": [{ "step", "action", "passed", "outcome", "differences", "problem" }] }] }`, and a fixture that can't be read has a `diagnostic` instead of `steps`. `--update` rewrites each fixture whose steps all ran so every step expects what it produced, and passes it; a fixture is rewritten only when that changes it.
 
-`dupin ext snap <dir> <fixture> <output.png> [--step N] [--json]` renders the panel after step `N`, counting from 1, or after the last step. It starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. Activations and events aren't replayed, so the panel is the one the action was chosen from; to show what they would have stored, seed `replies.storage` with it. The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, so two renders of one fixture on one Mac are the same bytes. The render answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`.
+`dupin ext snap <dir> <fixture> <output.png> [--step N] [--json]` renders the panel after step `N`, counting from 1, or after the last step. It starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; Copy, Paste, Open URL and Reveal actions and events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it. The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, so two renders of one fixture on one Mac are the same bytes. The render answers host requests from the fixture's `replies`, through the broker and with the fixture's `consent`, exactly as `test` does, so `search` and `items` show what they would in the launcher. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`.
 
 ### Fixtures
 
@@ -781,7 +878,7 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                                                            |
 | `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                                                         |
 | `preferences` | Optional. What every call sees in [`ctx.preferences`](#preferences) over the declared defaults, such as a bundled port's config.toml settings. `{}` if left out. |
-| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate` and `event`, and `expect`.                                      |
+| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate`, `event`, `back`, `fill` and `submit`, and `expect`.            |
 
 | `environment` key | Default                        | Fixes                                                                                                      |
 | ----------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
@@ -792,14 +889,17 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 | `theme`           | `"dark"`                       | `snap`'s appearance, `dark` or `light`.                                                                    |
 | `window`          | `{ "width": 680, "scale": 2 }` | `snap`'s panel width (400–1200 points), scale (1–3) and, optionally, `height` (60–2000 points).            |
 
-| Step                                  | Does                                                                                                                                                                            | Its outcome                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `{ "query": "…" }`                    | Types the query after the keyword, replacing the last, and waits for the answer. The first row is selected.                                                                     | `rows`, `selected` when there are rows, and `error` when the search failed.       |
-| `{ "select": 2 }`                     | Selects a row, counting from 0.                                                                                                                                                 | `selected`                                                                        |
-| `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`.                                     |
-| `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                      | `invalidated` when the handler invalidated the catalogue, `error` when it failed. |
+| Step                                  | Does                                                                                                                                                                                                         | Its outcome                                                                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `{ "query": "…" }`                    | Types the query after the keyword, or on the page on top, replacing the last, and waits for the answer. The first row is selected.                                                                           | `rows`, `selected` when there are rows, `view` on a page, and `error` when the search or view failed.                                    |
+| `{ "select": 2 }`                     | Selects a row, counting from 0.                                                                                                                                                                              | `selected`                                                                                                                               |
+| `{ "activate": "Copy" }`              | Chooses the selected row's action with this title or id. A `run` action calls the package's `actions` handler as Enter does, and a `push` opens its view; Copy and Open URL are recorded, never carried out. | `effect`, and for `run`, `toasts` or `error`; for a `push`, or a `run` that moved or changed a page, also `rows`, `selected` and `view`. |
+| `{ "event": "clipboard", "data": … }` | Calls `events[event](data)`, as a watch Dupin keeps for the package would.                                                                                                                                   | `invalidated` when the handler invalidated the catalogue, `error` when it failed.                                                        |
+| `{ "back": true }`                    | Closes the page on top, as Esc does.                                                                                                                                                                         | `rows`, `selected` and, still on a page, `view`.                                                                                         |
+| `{ "fill": { "title": "Tea" } }`      | Fills in the form on screen by field ID: a field's text, a checkbox's `true` or `false`, or the `value` of a select's option.                                                                                | `rows` and `view`.                                                                                                                       |
+| `{ "submit": true }`                  | Submits the form on screen, as ⌘Enter does: Dupin's own checks first, then the form's `submit` action.                                                                                                       | `view` with each field's `error`, or what the action did, as for `activate`.                                                             |
 
-Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, `windows`, each frame it moved the focused window to, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel), `clipboard`, `windows`, `storage`, `invalidated`, `error`, `sections` and `detail`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. Nothing produces `sections` or `detail` until views do. A row is `{ "id", "title", "subtitle", "aliases", "keywords", "icon", "image", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "image", "markdown", "metadata" }` and each action is `{ "title", "copy" | "paste" | "url" | "run" }`, with `"template": true` for a template, whose text the outcome shows unfilled; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy`, `paste` and `open` for a row's first Copy, Paste and Open URL, and `action-<index>` for the others. A query step answers as the keyword does: `search`'s rows for a query that isn't blank, then the `items()` catalogue's matches, ranked by Dupin's own matcher (without usage history, which a fixture doesn't have) and losing their `section` once the query ranks them, then its web searches filled with the query. The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
+Any step's outcome also has `clipboard`, the texts the package wrote to the clipboard during it, `windows`, each frame it moved the focused window to, and `storage`, the whole store as each record's `data`, oldest first and without blobs, when the step changed it. `expect` names any of `rows`, `selected`, `effect`, `toasts`, `panel` (`"hide"` or `"paste"` when an action hides the panel), `clipboard`, `windows`, `storage`, `invalidated`, `error` and `view`; only the keys it names are compared, each as canonical JSON, and a key the outcome lacks compares as `null`. `view` is the page on top: `{ "name", "title", "depth", "state", "type", "emptyText" }`, where `type` is `list`, `detail` or `form` and `state` and `emptyText` show only when the page has them; a form's also has `submit`, its submit key's title, and `fields`, each `{ "id", "type", "title", "value", "required", "error" }`, with `required` and `error` only when they apply. A detail page's one row, `detail`, carries its title, detail and actions. A row is `{ "id", "title", "subtitle", "answer", "accessories", "aliases", "keywords", "icon", "image", "section", "detail", "actions" }`, each optional field only when the row has it, where `detail` is `{ "image", "markdown", "metadata" }` and each action is `{ "title", "copy" | "paste" | "url" | "run" | "push" }`, with `"template": true` for a template, whose text the outcome shows unfilled; `id` is the item's own or `#0`, `#1` and so on. A step's `activate` may name an action by the ID the launcher gives it: `copy`, `paste` and `open` for a row's first Copy, Paste and Open URL, and `action-<index>` for the others. A query step answers as the keyword does: `search`'s rows for a query that isn't blank, then the `items()` catalogue's matches, ranked by Dupin's own matcher (without usage history, which a fixture doesn't have) and losing their `section` once the query ranks them, then its web searches filled with the query. The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers. An `error` is the diagnostic: `code`, `message`, `file`, `field`, `line`, `column` and `hint`, as `dupin ext run --json` reports it.
 
 `replies` answers host requests in place of this Mac. Every request still goes through the broker, against the scopes `package.json` declares, so an undeclared origin, a method or path out of scope, or a clipboard read while typing fails exactly as in the launcher, before any reply is looked up. A request the fixture has no reply for fails rather than reaching the network, a program or a file of yours.
 

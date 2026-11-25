@@ -13,8 +13,7 @@ const DECLARATIONS: &str = include_str!("../../../../sdk/dupin.d.ts");
 /// Each export's name, with the methods of an object export.
 type Exports = BTreeMap<String, BTreeSet<String>>;
 
-/// The value exports `declare module 'dupin'` declares, leaving out types and the type-only
-/// `planned` namespace.
+/// The value exports `declare module 'dupin'` declares, leaving out types.
 fn declared() -> Exports {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, DECLARATIONS, SourceType::d_ts()).parse();

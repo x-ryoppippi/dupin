@@ -120,6 +120,7 @@ fn the_catalogue_lists_its_sections_and_typing_ranks_it_natively() {
         .act(
             "forget",
             &serde_json::json!({"id": "dupin"}),
+            &dupin_js_runtime::PageContext::default(),
             Instant::now() + QUERY_DEADLINE,
             &no_services(),
         )
@@ -285,6 +286,7 @@ fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
         .act(
             "forget",
             &serde_json::Value::Null,
+            &dupin_js_runtime::PageContext::default(),
             Instant::now() + QUERY_DEADLINE,
             &no_services(),
         )
@@ -512,6 +514,7 @@ fn a_port_answers_like_the_native_catalogue_it_replaces() {
                 time: None,
                 file: None,
                 file_actions: Vec::new(),
+                accessories: Vec::new(),
             }
         })
         .collect();
