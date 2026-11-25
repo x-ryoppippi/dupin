@@ -10,10 +10,14 @@ use headless-config.nu scenario-env
 # docs/development.md. The driver's charge scales with the Mac's GPU, so the default `--budget`
 # fits the M5 Max it was measured on; pass it elsewhere. Every scenario pays the same charge, so
 # `--share`, measured against the `empty` scenario, leaves it out.
+#
+# The runs take no `--snap`: its readback is a blit, which the driver charges for on top of the
+# render pass. Without it a run encodes what a window's frames encode, so `--budget` fails when
+# anything brings a blit back to the frame path.
 def main [
     --bin: path = "target/debug/dupin" # Any build of Dupin, or the app's Contents/MacOS/dupin
-    --budget: filesize = 405MB # The highest peak footprint a scenario may reach
-    --share: filesize = 45MB # How far a scenario's peak may rise above the empty panel's
+    --budget: filesize = 270MB # The highest peak footprint a scenario may reach
+    --share: filesize = 30MB # How far a scenario's peak may rise above the empty panel's
 ]: nothing -> table {
     let root = $env.FILE_PWD | path dirname
     cd $root
@@ -21,9 +25,8 @@ def main [
     let tmp = mktemp --directory
     let runs = glob scripts/headless/*.json | sort | each {|script|
         let name = $script | path parse | get stem
-        let png = $tmp | path join $"($name).png"
         let peak = with-env (scenario-env $script $tmp) {
-            peak-footprint $bin --script $script --realtime --snap $png --at mark:end
+            peak-footprint $bin --script $script --realtime
         }
         {name: $name, peak: $peak}
     }
