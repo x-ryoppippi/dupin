@@ -133,7 +133,7 @@ impl Config {
 /// (docs/design/sync.md#settings). Any other key is device-local: hotkeys, display choices, keys
 /// whose enabling asks for access on this Mac, updates, snippets (kept apart from settings) and
 /// any key added later, so a new key never syncs by accident.
-pub const SHARED_KEYS: &[&str] = &[
+const SHARED_KEYS: &[&str] = &[
     "show_recent",
     "file_limit",
     "file_demotions",
