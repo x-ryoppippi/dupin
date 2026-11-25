@@ -1,5 +1,8 @@
-use dupin_core::snapshots::{Snapshot, Store};
+mod store;
+
+use dupin_core::snapshots::Snapshot;
 use rune::{AppHandle, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, row, text, text_input};
+use store::Store;
 
 pub struct Snapshots {
     me: AppHandle<Self>,
@@ -29,9 +32,8 @@ impl Snapshots {
         std::thread::Builder::new()
             .name("dupin-snapshots".into())
             .spawn(move || {
-                let mut store = open_store();
                 let mut cache = std::collections::HashMap::new();
-                write_requests(&mut store, rx, |store, result| {
+                write_requests(store::shared(), rx, |store, result| {
                     publish(store, &me, result, &mut cache)
                 });
             })
@@ -277,7 +279,7 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
     if count == 0 {
         list = list.child(
             text(if s.archive_problem.as_deref().is_some() {
-                "Saved snapshots are unavailable until the archive problem is resolved."
+                "Saved snapshots are unavailable until their encrypted storage can be opened."
             } else {
                 if s.query.text.is_empty() {
                     "No snapshots yet. Save a settled search with ⌘⇧S."
@@ -560,14 +562,21 @@ impl Listing {
         self.entries = Some(summaries(saved, None, usize::MAX).entries);
     }
 
-    /// The saved snapshots, read from the archive the first time they are asked for if the
-    /// Snapshots window hasn't read them yet.
-    pub fn entries(&mut self) -> &[crate::control::SnapshotSummary] {
-        if self.entries.is_none() {
-            self.list(open_store().list());
-        }
+    /// The saved snapshots, as [`read_listing`] or the Snapshots window last left them.
+    pub fn entries(&self) -> &[crate::control::SnapshotSummary] {
         self.entries.as_deref().unwrap_or_default()
     }
+}
+
+/// Reads the saved snapshots' metadata from the store if the Snapshots window hasn't yet. It
+/// takes the store's lock and the listing's one after the other, never together, since the
+/// writer takes them in the other order.
+pub fn read_listing() {
+    if listing().entries.is_some() {
+        return;
+    }
+    let saved = summaries(store::lock(store::shared()).list(), None, usize::MAX).entries;
+    listing().entries.get_or_insert(saved);
 }
 
 pub fn listing() -> std::sync::MutexGuard<'static, Listing> {
@@ -576,21 +585,6 @@ pub fn listing() -> std::sync::MutexGuard<'static, Listing> {
         sources: Vec::new(),
     });
     LISTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-/// The snapshot archive in Dupin's data folder.
-fn open_store() -> Store {
-    match std::env::var_os("XDG_DATA_HOME").or_else(|| std::env::var_os("HOME")) {
-        Some(base) => Store::from_base(
-            base.into(),
-            std::path::Path::new(if std::env::var_os("XDG_DATA_HOME").is_some() {
-                "dupin/snapshots"
-            } else {
-                "Library/Application Support/Dupin/snapshots"
-            }),
-        ),
-        None => Store::from_base(std::path::PathBuf::new(), std::path::Path::new("")),
-    }
 }
 
 pub fn source_name(mode: &str) -> &str {
@@ -637,18 +631,19 @@ pub fn saved_date(seconds: u64) -> String {
 }
 
 fn write_requests(
-    store: &mut Store,
+    store: &std::sync::Mutex<Store>,
     rx: std::sync::mpsc::Receiver<Request>,
     mut emit: impl FnMut(&Store, Option<Result<Option<String>, String>>),
 ) {
-    emit(store, None);
+    emit(&store::lock(store), None);
     while let Ok(request) = rx.recv() {
+        let mut store = store::lock(store);
         let (result, busy) = match request {
             Request::Save(saved, busy) => (store.save(saved).map(Some), busy),
             Request::Delete(id, busy) => (store.delete(&id).map(|_| None), busy),
         };
         drop(busy);
-        emit(store, Some(result));
+        emit(&store, Some(result));
     }
 }
 
@@ -911,26 +906,23 @@ mod tests {
     }
 
     #[test]
-    fn writer_reports_success_failure_and_preserves_archive() {
-        let dir = std::env::temp_dir().join(format!(
-            "dupin-writer-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir(&dir).unwrap();
-        let dir = dir.canonicalize().unwrap();
+    fn writer_reports_success_failure_and_preserves_saved_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = dupin_storage::DataKey::generate().unwrap();
+        let storage = |key: Box<dyn dupin_storage::KeyProvider>| {
+            let storage = dupin_storage::Storage::new(dir.path(), BoxedKey(key));
+            Some(std::sync::Arc::new(storage))
+        };
         let (send, rx) = std::sync::mpsc::channel();
         let (reply, results) = std::sync::mpsc::channel();
         let running = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
         let worker_ready = ready.clone();
-        let path = dir.clone();
+        let store = std::sync::Mutex::new(Store::open(storage(Box::new(dupin_storage::MemoryKey::new(
+            key.clone(),
+        )))));
         let thread = std::thread::spawn(move || {
-            let mut store = Store::load(path);
-            write_requests(&mut store, rx, |store, result| {
+            write_requests(&store, rx, |store, result| {
                 let loading = result.is_none();
                 reply.send((store.list().to_vec(), result)).unwrap();
                 if loading {
@@ -973,19 +965,51 @@ mod tests {
         assert!(entries.is_empty());
         assert_eq!(result.unwrap().unwrap(), None);
         assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
-        std::fs::write(dir.join("archive.json"), b"external corruption").unwrap();
+        send.send(Request::Save(
+            saved.clone(),
+            crate::ui::Busy::new(running.clone()),
+        ))
+        .ok()
+        .unwrap();
+        let (kept, _) = results.recv().unwrap();
+        drop(send);
+        thread.join().unwrap();
+
+        // The Keychain refuses the key: the save fails, its work is released and what was saved
+        // stays sealed as it was.
+        let (send, rx) = std::sync::mpsc::channel();
         send.send(Request::Save(saved, crate::ui::Busy::new(running.clone())))
             .ok()
             .unwrap();
-        assert!(results.recv().unwrap().1.unwrap().is_err());
-        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
-        assert_eq!(
-            std::fs::read(dir.join("archive.json")).unwrap(),
-            b"external corruption"
-        );
         drop(send);
-        thread.join().unwrap();
-        std::fs::remove_dir_all(dir).unwrap();
+        let failing = std::sync::Mutex::new(Store::open(storage(Box::new(NoKey))));
+        let mut outcomes = Vec::new();
+        write_requests(&failing, rx, |store, result| {
+            outcomes.push((store.list().len(), store.problem().is_some(), result));
+        });
+        assert!(matches!(
+            outcomes.as_slice(),
+            [(0, true, None), (0, true, Some(Err(_)))]
+        ));
+        assert_eq!(running.load(std::sync::atomic::Ordering::Acquire), 0);
+        let reopened = Store::open(storage(Box::new(dupin_storage::MemoryKey::new(key))));
+        assert_eq!(reopened.list(), kept.as_slice());
+    }
+
+    struct BoxedKey(Box<dyn dupin_storage::KeyProvider>);
+
+    impl dupin_storage::KeyProvider for BoxedKey {
+        fn data_key(&self) -> Result<dupin_storage::DataKey, dupin_storage::Error> {
+            self.0.data_key()
+        }
+    }
+
+    struct NoKey;
+
+    impl dupin_storage::KeyProvider for NoKey {
+        fn data_key(&self) -> Result<dupin_storage::DataKey, dupin_storage::Error> {
+            Err(dupin_storage::Error::Key("the Keychain is locked".into()))
+        }
     }
 
     #[test]

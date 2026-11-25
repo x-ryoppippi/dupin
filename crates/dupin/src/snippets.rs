@@ -220,7 +220,9 @@ impl Library {
     /// a Keychain that was locked may have been unlocked since.
     fn open<'a>(&self, opened: &'a mut Opened) -> Result<&'a Store, String> {
         if !matches!(opened, Opened::Open(_)) {
-            *opened = match self.read_all() {
+            let read = self.read_all();
+            crate::stored::report("Stored snippets", read.as_ref().err().map(String::as_str));
+            *opened = match read {
                 Ok((store, snippets)) => {
                     *write(&self.stored) = Arc::new(snippets);
                     Opened::Open(Box::new(store))

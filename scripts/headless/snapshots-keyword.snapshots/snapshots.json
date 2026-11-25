@@ -1,0 +1,36 @@
+[
+	{
+		"version": 1,
+		"id": "serendipity",
+		"saved_at": 1795600800,
+		"mode": "dictionary.lookup",
+		"explicit": true,
+		"query": "serendipity",
+		"title": "serendipity",
+		"views": [
+			{
+				"kind": "detail",
+				"title": "serendipity",
+				"body": "the occurrence of events by chance in a happy way"
+			}
+		],
+		"state": null
+	},
+	{
+		"version": 1,
+		"id": "lifetimes",
+		"saved_at": 1795687200,
+		"mode": "web.keywords",
+		"explicit": false,
+		"query": "g rust lifetimes",
+		"title": "Search Google for rust lifetimes",
+		"views": [
+			{
+				"kind": "text",
+				"title": "Search Google for rust lifetimes",
+				"subtitle": "g"
+			}
+		],
+		"state": null
+	}
+]

@@ -68,8 +68,10 @@ fn config_files(paths: &crate::settings::Paths) -> Result<Value, String> {
     } else {
         Some(LockedKeys::new())
     };
-    let overlay = paths.overlay.as_deref();
-    let overlay_source = read_layer(overlay, "settings.toml")?;
+    let overlay_source = match &paths.overlay {
+        Some(overlay) => crate::settings::read_overlay(overlay)?,
+        None => None,
+    };
     Ok(json!({
         "path": base.display().to_string(),
         "exists": source.is_some(),
@@ -77,9 +79,7 @@ fn config_files(paths: &crate::settings::Paths) -> Result<Value, String> {
         "source": source,
         "lockedKeys": locked_keys,
         "overlay": {
-            "path": overlay.map(|path| path.display().to_string()),
             "exists": overlay_source.is_some(),
-            "readOnly": overlay.is_some_and(|path| !writable(path)),
             "source": overlay_source,
             "active": read_only,
         }
@@ -371,7 +371,7 @@ fn tools(workspace: bool) -> Vec<Value> {
         json!({
             "name": "read_config",
             "title": "Read configuration",
-            "description": "Reports config.toml and the settings.toml overlay, their paths and TOML sources, and which top-level keys are locked. Works whether or not Dupin is running.",
+            "description": "Reports config.toml, its path and TOML source, the overlay Settings saves over a read-only one as TOML, and which top-level keys are locked. Works whether or not Dupin is running.",
             "inputSchema": none,
             "annotations": read_only,
         }),

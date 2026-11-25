@@ -29,6 +29,7 @@ mod shader;
 mod snapshots;
 mod snippets;
 mod store;
+mod stored;
 mod symbols;
 mod trace;
 mod ui;

@@ -113,6 +113,15 @@ impl Ui {
                     call.finish(result.map(|()| serde_json::Value::Null));
                 });
             }
+            Command::ConfigOverlay {} => {
+                std::thread::spawn(move || {
+                    let source = match crate::settings::overlay::shared() {
+                        Some(overlay) => overlay.read().map_err(|error| error.to_string()),
+                        None => Ok(None),
+                    };
+                    call.finish(source.map(serde_json::Value::from));
+                });
+            }
             Command::ConfigGet {} => call.finish(
                 serde_json::to_value(&*self.configuration.values.borrow())
                     .map_err(|_| "could not encode settings".into()),

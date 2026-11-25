@@ -91,6 +91,10 @@ pub(crate) fn run() {
     })
     .on_close(prefs::Prefs::closed);
     let prefs_handle = prefs.handle();
+    crate::stored::on_change({
+        let prefs = prefs_handle.clone();
+        move || prefs.update(|_, _| {})
+    });
     let calendar_access = dupin_mac::privacy::CalendarAccess::new({
         let panel = handle.clone();
         let prefs = prefs_handle.clone();
