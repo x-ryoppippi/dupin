@@ -252,19 +252,19 @@ pub fn run() -> bool {
             if json || !value.is_null() || picked {
                 if !json && picked {
                     if let Some(s) = value.as_str() {
-                        println!("{s}");
+                        crate::out::outln!("{s}");
                     } else {
-                        println!("{value}");
+                        crate::out::outln!("{value}");
                     }
                 } else {
-                    println!("{value}");
+                    crate::out::outln!("{value}");
                 }
             }
             true
         }
         Err(Failure::Message(error)) => {
             if json {
-                println!("{}", serde_json::json!({"error": error}));
+                crate::out::outln!("{}", serde_json::json!({"error": error}));
             } else {
                 eprintln!("dupin: {error}");
             }
@@ -272,15 +272,15 @@ pub fn run() -> bool {
         }
         Err(Failure::Report(report, text)) => {
             if json {
-                println!("{report}");
+                crate::out::outln!("{report}");
             } else {
-                print!("{text}");
+                crate::out::out!("{text}");
             }
             std::process::exit(1)
         }
         Err(Failure::Diagnostic(diagnostic)) => {
             if json {
-                println!(
+                crate::out::outln!(
                     "{}",
                     serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
                 );
@@ -343,7 +343,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({"help": HELP}));
             }
-            println!("{HELP}");
+            crate::out::outln!("{HELP}");
             Ok(Value::Null)
         }
         Action::ExtHelp => {
@@ -351,7 +351,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({"help": help}));
             }
-            println!("{help}");
+            crate::out::outln!("{help}");
             Ok(Value::Null)
         }
         Action::Version => {
@@ -359,7 +359,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 Ok(serde_json::json!({"version":version}))
             } else {
-                println!("dupin {version}");
+                crate::out::outln!("dupin {version}");
                 Ok(Value::Null)
             }
         }
@@ -368,8 +368,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 Ok(serde_json::json!({"path": path, "notices": notices}))
             } else {
-                // A reader such as `head` that stops early isn't a failure.
-                let _ = std::io::Write::write_all(&mut io::stdout().lock(), notices.as_bytes());
+                crate::out::out!("{notices}");
                 Ok(Value::Null)
             }
         }
@@ -438,7 +437,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "defaultSearch": extension.default_search,
                 }));
             }
-            println!(
+            crate::out::outln!(
                 "{} {} answers `{}` with {}{}",
                 extension.name,
                 extension.version,
@@ -466,7 +465,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "scopes": scopes,
                 }));
             }
-            println!("{revision}");
+            crate::out::outln!("{revision}");
             Ok(Value::Null)
         }
         Action::ExtRun(folder, query) => {
@@ -483,7 +482,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(answer_json(&batches));
             }
-            print!("{}", describe_answer(&batches));
+            crate::out::out!("{}", describe_answer(&batches));
             Ok(Value::Null)
         }
         Action::ExtTest(folder, update) => {
@@ -494,7 +493,7 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(report.json);
             }
-            print!("{}", report.text);
+            crate::out::out!("{}", report.text);
             Ok(Value::Null)
         }
         Action::ExtSnap(folder, fixture, output, step) => {
@@ -508,9 +507,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(snapped_json(&snapped));
             }
-            println!(
+            crate::out::outln!(
                 "Rendered step {} of {fixture} to {output}: {}×{} points at {}×",
-                snapped.step, snapped.width, snapped.height, snapped.scale
+                snapped.step,
+                snapped.width,
+                snapped.height,
+                snapped.scale
             );
             Ok(Value::Null)
         }
@@ -526,12 +528,12 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                     "extensions": config.extensions,
                 }));
             }
-            println!(
+            crate::out::outln!(
                 "Copied the bundled {name} to {}. It replaces the bundled one while the extensions folder is on, without the bundled grants once you change it; delete it to go back.",
                 copy.display()
             );
             if !config.extensions {
-                println!(
+                crate::out::outln!(
                     "The extensions folder is off: turn it on in Settings → Extensions to use your copy."
                 );
             }
@@ -543,9 +545,9 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 return Ok(serde_json::json!({ "created": files }));
             }
-            println!("Created {folder}:");
+            crate::out::outln!("Created {folder}:");
             for file in files {
-                println!("  {file}");
+                crate::out::outln!("  {file}");
             }
             Ok(Value::Null)
         }
@@ -570,8 +572,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 }));
             }
             match rolldown {
-                Some(rolldown) => println!("Built {} with {rolldown}", built.output),
-                None => println!(
+                Some(rolldown) => crate::out::outln!("Built {} with {rolldown}", built.output),
+                None => crate::out::outln!(
                     "{} runs as written, needs no build and passes the check",
                     built.output
                 ),
@@ -619,7 +621,7 @@ fn check_package(folder: &std::path::Path) -> Result<(), dupin_js_runtime::Diagn
 /// `--json`, otherwise a line on stdout or a diagnostic on stderr.
 fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::Diagnostic>, json: bool) {
     match (outcome, json) {
-        (Ok(published), true) => println!(
+        (Ok(published), true) => crate::out::outln!(
             "{}",
             serde_json::json!({
                 "published": published.name,
@@ -627,13 +629,13 @@ fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::D
                 "path": published.link,
             })
         ),
-        (Ok(published), false) => println!(
+        (Ok(published), false) => crate::out::outln!(
             "Published {} revision {} to {}",
             published.name,
             published.revision,
             published.link.display()
         ),
-        (Err(diagnostic), true) => println!(
+        (Err(diagnostic), true) => crate::out::outln!(
             "{}",
             serde_json::json!({"error": diagnostic.to_string(), "diagnostic": diagnostic})
         ),

@@ -20,6 +20,7 @@ mod latency;
 mod log;
 mod mcp;
 mod notices;
+mod out;
 mod prefs;
 mod receivers;
 mod scripts;
