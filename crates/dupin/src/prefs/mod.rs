@@ -502,6 +502,13 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
         )
         .child(config)
         .child(folder)
+        .children(crate::notices::path().map(|path| {
+            footer_link(k, "open-acknowledgements", "Acknowledgements")
+                .label("Acknowledgements: open the licences of the open-source software in Dupin")
+                .on_press(move |_: &mut Prefs| {
+                    std::thread::spawn(move || dupin_mac::workspace::open(path));
+                })
+        }))
         .children(s.updater.available().then(|| updates::footer(s, k)))
 }
 

@@ -69,10 +69,14 @@ pub fn directory() -> Option<PathBuf> {
 /// `Dupin.app/Contents/Resources/extensions` for `Dupin.app/Contents/MacOS/<executable>`. An
 /// app bundle never falls back to the source tree, even one without bundled extensions.
 fn in_app(executable: &Path) -> Option<PathBuf> {
+    resources(executable).map(|resources| resources.join("extensions"))
+}
+
+/// `Dupin.app/Contents/Resources` for `Dupin.app/Contents/MacOS/<executable>`.
+pub fn resources(executable: &Path) -> Option<PathBuf> {
     let macos = executable.parent()?;
     let contents = macos.parent()?;
-    (macos.file_name()? == "MacOS" && contents.file_name()? == "Contents")
-        .then(|| contents.join("Resources/extensions"))
+    (macos.file_name()? == "MacOS" && contents.file_name()? == "Contents").then(|| contents.join("Resources"))
 }
 
 /// Each bundled package's folder, with the `name` and keyword in its package.json.

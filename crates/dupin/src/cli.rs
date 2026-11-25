@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -14,6 +14,8 @@ enum Action {
     Help,
     ExtHelp,
     Version,
+    /// Print the third-party notices Dupin.app carries.
+    Licenses,
     Open(Option<String>),
     Pick(bool),
     Get,
@@ -142,6 +144,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["--help" | "-h"] => Ok(Action::Help),
         ["ext", "--help" | "-h" | "help"] => Ok(Action::ExtHelp),
         ["--version" | "-V"] => Ok(Action::Version),
+        ["--licenses"] => Ok(Action::Licenses),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
         ["pick"] => Ok(Action::Pick(false)),
@@ -294,7 +297,11 @@ pub fn run() -> bool {
 
 fn owns_arguments(args: &[String]) -> bool {
     args.first().is_some_and(|first| {
-        !first.starts_with('-') || matches!(first.as_str(), "--help" | "-h" | "--version" | "-V" | "--json")
+        !first.starts_with('-')
+            || matches!(
+                first.as_str(),
+                "--help" | "-h" | "--version" | "-V" | "--licenses" | "--json"
+            )
     })
 }
 fn isolated_render(args: &[String], output: &str) -> Result<Value, String> {
@@ -353,6 +360,15 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
                 Ok(serde_json::json!({"version":version}))
             } else {
                 println!("dupin {version}");
+                Ok(Value::Null)
+            }
+        }
+        Action::Licenses => {
+            let (path, notices) = crate::notices::read()?;
+            if json {
+                Ok(serde_json::json!({"path": path, "notices": notices}))
+            } else {
+                print!("{notices}");
                 Ok(Value::Null)
             }
         }
@@ -1114,6 +1130,8 @@ mod tests {
             assert!(!owns_arguments(&[flag.into()]));
         }
         assert!(owns_arguments(&["pick".into()]));
+        assert!(owns_arguments(&["--licenses".into()]));
+        assert_eq!(parse(&["--licenses".into()]).unwrap(), Action::Licenses);
         assert!(owns_arguments(&["invalid-subcommand".into()]));
         assert!(parse(&["open".into(), "--bad".into()]).is_err());
         let args = |args: &[&str]| args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();

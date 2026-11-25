@@ -81,7 +81,8 @@ edit a second copy, then run `dupin config set base.json desired.json --json`.
 The base enables conflict detection against external edits. Changes use the settings
 service, including managed/read-only files and native shortcut validation; a successful
 reply follows reconciliation. `--json` emits JSON values on success and an `error` object
-on failure. `dupin --help` and `dupin --version` perform no app or configuration work.
+on failure. `dupin --help`, `dupin --version` and `dupin --licenses` (the third-party
+notices Dupin.app carries) perform no app or configuration work.
 
 `dupin mcp` serves the same controls, with configuration reading and validation, to agents
 over the Model Context Protocol; see [MCP server](./docs/features/mcp.md).
