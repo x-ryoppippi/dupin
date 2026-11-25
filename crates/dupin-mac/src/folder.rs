@@ -39,7 +39,6 @@ impl Provider for FolderProvider {
         };
         let filter = request.query.trim();
         let stages = self.rows.filters.current();
-        let by_title = stages.sorter == dupin_core::filter::Sorter::Title;
         let mut entries = Vec::new();
         for entry in std::fs::read_dir(folder).map_err(|_| ProviderError)? {
             if request.is_cancelled() {
@@ -50,23 +49,56 @@ impl Provider for FolderProvider {
             if name.starts_with('.') && !filter.starts_with('.') {
                 continue;
             }
-            let (score, matched) = if filter.is_empty() {
-                (None, Vec::new())
-            } else {
-                let Some(found) = stages.matcher.score(filter, &name) else {
-                    continue;
-                };
-                ((!by_title).then_some(found.score), found.positions)
-            };
             entries.push(Entry {
                 folder: is_folder(&entry),
                 path: entry.path(),
                 name,
-                score,
-                matched,
+                score: None,
+                matched: Vec::new(),
             });
         }
-        entries.sort_by_cached_key(|entry| (Reverse(entry.score), !entry.folder, entry.name.to_lowercase()));
+        if !filter.is_empty() {
+            let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+            let found = stages.batch_matches(filter, &names).unwrap_or_else(|| {
+                names
+                    .iter()
+                    .map(|name| stages.matcher.score(filter, name))
+                    .collect()
+            });
+            entries = entries
+                .into_iter()
+                .zip(found)
+                .filter_map(|(entry, found)| {
+                    let found = found?;
+                    Some(Entry {
+                        score: Some(found.score),
+                        matched: found.positions,
+                        ..entry
+                    })
+                })
+                .collect();
+        }
+        let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
+        match stages.batch_order(&names) {
+            Some(order) => {
+                let mut slots: Vec<_> = entries.into_iter().map(Some).collect();
+                entries = order
+                    .into_iter()
+                    .filter_map(|index| slots[index].take())
+                    .collect();
+            }
+            None => {
+                if stages.sorter == dupin_core::filter::Sorter::Title {
+                    entries.iter_mut().for_each(|entry| entry.score = None);
+                }
+                entries.sort_by_cached_key(|entry| {
+                    (Reverse(entry.score), !entry.folder, entry.name.to_lowercase())
+                });
+            }
+        }
+        if stages.ordered() {
+            entries.iter_mut().for_each(|entry| entry.score = None);
+        }
         emit(
             entries
                 .into_iter()

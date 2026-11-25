@@ -98,6 +98,13 @@ pub enum ExtensionRequest {
     TurnOn,
     /// Show the extension in Settings, where the user picks what a scope may use.
     Review,
+    /// Run the package's kind action `action` on a row Dupin's own sources found, which stands
+    /// for `subject`. Dupin hands the package only the field its manifest names for the action,
+    /// and only once the user allows it to see that field.
+    Kind {
+        action: String,
+        subject: crate::kind::Subject,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

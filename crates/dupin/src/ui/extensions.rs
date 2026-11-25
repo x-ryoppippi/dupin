@@ -261,6 +261,9 @@ impl Ui {
     ) -> bool {
         let current = self.session.command_id().clone();
         let installed = self.extensions.install(registration, &current);
+        self.composition
+            .guests()
+            .set_extensions(self.extensions.active.clone());
         for id in &installed.dropped {
             self.searchers.remove(id);
             self.deadlines.remove(id);
@@ -433,6 +436,9 @@ impl Ui {
                 };
                 return self.run_paste(&extension, text, template, tx);
             }
+            ExtensionRequest::Kind { action, subject } => {
+                return self.run_kind_action(&extension, action, &subject, tx);
+            }
             request => {
                 let Some(extension) = self.registered_extension(&extension) else {
                     return;
@@ -441,6 +447,61 @@ impl Ui {
             }
         };
         self.run_extension_action(extension, action, data.unwrap_or_default());
+    }
+
+    /// Runs the kind action `action` that `package` provides on a row Dupin's own sources
+    /// found, handing the package only the one field its manifest names for it, and only once
+    /// the user lets it see that field.
+    fn run_kind_action(
+        &mut self,
+        package: &str,
+        action: String,
+        subject: &dupin_core::kind::Subject,
+        tx: &mut Tx,
+    ) {
+        let Some(extension) = self.registered_extension(package) else {
+            return self.show_notice(
+                format!("No extension called {package} runs now, so its action didn't run."),
+                tx,
+            );
+        };
+        let kind = crate::composition::row_kind(subject);
+        let Some(&field) = extension.provides.kinds.get(&(kind, action.clone())) else {
+            return self.show_notice(
+                format!(
+                    "{} provides no {} action called {action}.",
+                    extension.name,
+                    kind.as_str()
+                ),
+                tx,
+            );
+        };
+        let Some(value) = crate::composition::row_field(subject, field) else {
+            return self.show_notice(
+                format!(
+                    "{}'s action didn't run: the {} isn't text it can be handed.",
+                    extension.name,
+                    field.as_str()
+                ),
+                tx,
+            );
+        };
+        let bridge = &self.extensions.bridge;
+        let request = dupin_extension_bridge::Request::Rows { kind, field };
+        match bridge.authorize(&extension.package, &request, Trigger::Activation) {
+            Ok(permit) if bridge.validate(&permit) => {
+                let mut data = serde_json::Map::new();
+                data.insert(field.as_str().to_owned(), value.into());
+                self.run_extension_action(extension.id.clone(), action, data.into());
+            }
+            Ok(_) => self.show_notice(
+                format!("{}'s access changed, so its action didn't run.", extension.name),
+                tx,
+            ),
+            Err(refused) => {
+                self.show_notice(format!("{}'s action didn't run: {refused}", extension.name), tx)
+            }
+        }
     }
 
     /// What `ctx.query` and `ctx.state` hand an action of `extension` chosen now: those of
@@ -588,7 +649,9 @@ impl Ui {
                 .find(|request| request.key().to_string() == key)
         };
         let outcome = match request {
-            ExtensionRequest::Run { .. } | ExtensionRequest::Paste { .. } => return,
+            ExtensionRequest::Run { .. } | ExtensionRequest::Paste { .. } | ExtensionRequest::Kind { .. } => {
+                return;
+            }
             ExtensionRequest::Allow { scope, revision } => match pending(&scope) {
                 Some(request) if request.revision.as_str() == revision => bridge
                     .allow(&id, &request.revision, &request.scope, None)

@@ -455,3 +455,82 @@ fn event_handlers_receive_a_frozen_event() {
         "missing-handler"
     );
 }
+
+#[test]
+fn a_filter_sees_only_frozen_titles_and_reaches_no_host_service() {
+    let mut bridge = Fixture::default();
+    bridge.replies.insert(
+        "storage.put",
+        r#"{"ok":{"id":"r","createdAt":0,"data":null,"blobs":[]}}"#.into(),
+    );
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        r#"import { storage } from 'dupin';
+           export const filters = {
+             async romaji(input, ctx) {
+               let leaked = 'kept';
+               try { await storage.put(input.query); } catch (error) { leaked = error.code; }
+               const frozen = Object.isFrozen(input) && Object.isFrozen(input.candidates) && Object.isFrozen(input.candidates[0]);
+               return input.candidates
+                 .map((candidate, index) => ({ index, score: candidate.title.length, keys: Object.keys(candidate).join() }))
+                 .filter((found) => frozen && leaked === 'unavailable' && found.keys === 'title' && ctx.preferences.on)
+                 .map(({ index, score }) => ({ index, score, positions: [0] }));
+             },
+             reverse(input) { return input.candidates.map((_, index) => input.candidates.length - 1 - index); },
+             twice() { return [0, 0]; },
+             query(input) { return 'query' in input ? [] : [0, 1]; },
+           };"#,
+    )]);
+    let package = loaded.unwrap();
+    let mut run = |name: &str, stage| {
+        let input = FilterInput::new(stage, Some("sa".into()), ["Safari".into(), "Sa".into()]);
+        package.filter(
+            &engine(),
+            name,
+            &input,
+            &serde_json::json!({ "on": true }),
+            timeout(DEADLINE),
+            &mut bridge,
+        )
+    };
+    let hits = run("romaji", FilterStage::Matcher).unwrap();
+    assert_eq!(
+        hits.iter().map(|hit| (hit.index, hit.score)).collect::<Vec<_>>(),
+        [(0, Some(6)), (1, Some(2))]
+    );
+    let order: Vec<_> = run("reverse", FilterStage::Sorter)
+        .unwrap()
+        .iter()
+        .map(|hit| hit.index)
+        .collect();
+    assert_eq!(order, [1, 0]);
+    assert_eq!(
+        failure_of(run("twice", FilterStage::Sorter)).code,
+        "invalid-filter-answer"
+    );
+    assert_eq!(
+        run("query", FilterStage::Sorter).unwrap().len(),
+        2,
+        "a sorter is never handed the query"
+    );
+    assert_eq!(
+        failure_of(run("missing", FilterStage::Matcher)).code,
+        "missing-handler"
+    );
+    assert!(bridge.sent.is_empty(), "{:?}", bridge.sent);
+}
+
+#[test]
+fn a_filter_that_never_returns_is_stopped_at_its_deadline() {
+    let (_folder, loaded) = package(&[("main.js", "export const filters = { spin() { for (;;) {} } };")]);
+    let input = FilterInput::new(FilterStage::Sorter, None, ["a".into()]);
+    let diagnostic = failure_of(loaded.unwrap().filter(
+        &engine(),
+        "spin",
+        &input,
+        &serde_json::json!({}),
+        timeout(Duration::from_millis(50)),
+        &mut Fixture::default(),
+    ));
+    assert_eq!(diagnostic.code, "deadline");
+}

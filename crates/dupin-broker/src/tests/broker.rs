@@ -1467,3 +1467,60 @@ fn moving_a_window_needs_accessibility_and_an_activation() {
         Denial::OsDenied(OsPermission::Accessibility)
     );
 }
+
+#[test]
+fn rows_and_the_query_need_their_own_grants_and_only_the_declared_fields_pass() {
+    let (mut broker, package) = enabled(caps(json!({
+        "rows": { "app": ["title"], "file": ["title", "path"] },
+        "query": ["read"]
+    })));
+    let rows = |kind, field| Request::Rows { kind, field };
+    let app_titles = rows(RowKind::App, RowField::Title);
+    for request in [&app_titles, &Request::Query] {
+        assert!(matches!(
+            check(&broker, &package, request, Trigger::Query),
+            Decision::NeedsConsent(_)
+        ));
+    }
+    broker.approve(&package, &key("rows:app"), None).unwrap();
+    permit(check(&broker, &package, &app_titles, Trigger::Query));
+    assert!(matches!(
+        check(&broker, &package, &Request::Query, Trigger::Query),
+        Decision::NeedsConsent(_)
+    ));
+    assert!(matches!(
+        denial(check(
+            &broker,
+            &package,
+            &rows(RowKind::App, RowField::Path),
+            Trigger::Activation
+        )),
+        Denial::OutOfScope { .. }
+    ));
+    assert!(matches!(
+        check(
+            &broker,
+            &package,
+            &rows(RowKind::File, RowField::Path),
+            Trigger::Activation
+        ),
+        Decision::NeedsConsent(_)
+    ));
+    assert_eq!(
+        denial(check(
+            &broker,
+            &package,
+            &rows(RowKind::Url, RowField::Url),
+            Trigger::Activation
+        )),
+        Denial::Undeclared(key("rows:url"))
+    );
+    broker.approve(&package, &ScopeKey::Query, None).unwrap();
+    let held = permit(check(&broker, &package, &Request::Query, Trigger::Query));
+    broker.revoke(&package, &key("rows:app")).unwrap();
+    assert!(!broker.validate(&held), "revoking any grant moves the package on");
+    assert!(matches!(
+        denial(check(&broker, &package, &app_titles, Trigger::Query)),
+        Denial::Revoked(_)
+    ));
+}

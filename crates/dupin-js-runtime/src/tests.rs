@@ -149,7 +149,7 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
     let rows = package.search("a b", 7, timeout(DEADLINE)).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "docs");
-    assert_eq!(text(&rows[0]), ("Docs for a b", "v3, 7 rows"));
+    assert_eq!(text(&rows[0]), ("Docs for a b", "v4, 7 rows"));
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
     assert_eq!(
         effects,
@@ -425,7 +425,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
         "main.js",
         "import { apiVersion } from 'dupin'; export const search = () => [{ title: `${apiVersion}` }];",
     )]);
-    assert_eq!(search(&loaded.unwrap(), "").unwrap()[0].title, "3");
+    assert_eq!(search(&loaded.unwrap(), "").unwrap()[0].title, "4");
 }
 
 #[test]

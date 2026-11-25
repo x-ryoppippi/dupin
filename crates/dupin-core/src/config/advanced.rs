@@ -109,7 +109,8 @@ impl KindConfig {
 }
 
 /// An action the user adds to a kind: a script command that receives the row's value as its
-/// one argument, or an HTTP(S) URL template the value is percent-encoded into.
+/// one argument, an HTTP(S) URL template the value is percent-encoded into, or a kind action
+/// an extension provides.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct KindAction {
@@ -119,6 +120,24 @@ pub struct KindAction {
     pub(crate) script: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) url: Option<String>,
+    /// `<package>/<action>`: an action the package's manifest provides for this kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) extension: Option<String>,
+}
+
+/// The package and name of a contribution an extension provides, written `<package>/<name>`:
+/// its package.json `name`, and the name its manifest provides the filter or action under.
+pub fn contribution(reference: &str) -> Option<(&str, &str)> {
+    let (package, name) = reference.split_once('/')?;
+    let package_ok = (1..=64).contains(&package.len())
+        && package
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    let name_ok = (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+    (package_ok && name_ok).then_some((package, name))
 }
 
 #[derive(Default, Deserialize)]
@@ -181,10 +200,15 @@ impl KindAction {
                 "`title` must be one line of 1 to {MAX_TITLE_BYTES} bytes without outer whitespace"
             ));
         }
-        match (&self.script, &self.url) {
-            (Some(script), None) => check_script(script),
-            (None, Some(url)) => check_template(url, placeholders),
-            _ => Err("set exactly one of `script` and `url`".into()),
+        match (&self.script, &self.url, &self.extension) {
+            (Some(script), None, None) => check_script(script),
+            (None, Some(url), None) => check_template(url, placeholders),
+            (None, None, Some(extension)) => contribution(extension).map(drop).ok_or_else(|| {
+                format!(
+                    "`extension` must be `<package>/<action>`: the package's name and an action it provides, not {extension:?}"
+                )
+            }),
+            _ => Err("set exactly one of `script`, `url` and `extension`".into()),
         }
     }
 }
@@ -223,7 +247,11 @@ fn check_template(template: &str, placeholders: &[&str]) -> Result<(), String> {
         return invalid();
     }
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
-    if authority.is_empty() || authority.contains('@') || authority.contains('{') {
+    let host = authority
+        .rsplit_once(':')
+        .filter(|(_, port)| port.bytes().all(|byte| byte.is_ascii_digit()))
+        .map_or(authority, |(host, _)| host);
+    if host.is_empty() || authority.contains('@') || authority.contains('{') {
         return invalid();
     }
     let mut found = false;
@@ -329,11 +357,23 @@ url = "https://web.archive.org/web/{url}"
             ),
             (
                 "[[advanced.kinds.file.actions]]\ntitle = \"Both\"\nscript = \"x\"\nurl = \"https://e.example/{path}\"",
-                "advanced.kinds.file.actions[0]: set exactly one of `script` and `url`",
+                "advanced.kinds.file.actions[0]: set exactly one of `script`, `url` and `extension`",
             ),
             (
                 "[[advanced.kinds.file.actions]]\ntitle = \"Neither\"",
-                "set exactly one of `script` and `url`",
+                "set exactly one of `script`, `url` and `extension`",
+            ),
+            (
+                "[[advanced.kinds.file.actions]]\ntitle = \"x\"\nextension = \"Uploader/upload\"",
+                "`extension` must be `<package>/<action>`",
+            ),
+            (
+                "[[advanced.kinds.file.actions]]\ntitle = \"x\"\nextension = \"uploader\"",
+                "`extension` must be `<package>/<action>`",
+            ),
+            (
+                "[[advanced.kinds.file.actions]]\ntitle = \"x\"\nextension = \"uploader/up-load\"",
+                "`extension` must be `<package>/<action>`",
             ),
             (
                 "[[advanced.kinds.text.actions]]\ntitle = \" Padded\"\nscript = \"x\"",
@@ -365,6 +405,10 @@ url = "https://web.archive.org/web/{url}"
             ),
             (
                 "[[advanced.kinds.text.actions]]\ntitle = \"x\"\nurl = \"https://e.example/\"",
+                "must be an http or https URL",
+            ),
+            (
+                "[[advanced.kinds.text.actions]]\ntitle = \"x\"\nurl = \"https://:443/{text}\"",
                 "must be an http or https URL",
             ),
             (

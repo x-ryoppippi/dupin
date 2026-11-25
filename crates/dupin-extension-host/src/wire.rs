@@ -11,14 +11,15 @@ use std::sync::Arc;
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, PageContext, Reason, Row, ViewAnswer,
+    Acted, CataloguePage, Diagnostic, Environment, Exports, FilterHit, FilterInput, Handled, PageContext,
+    Reason, Row, ViewAnswer,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -95,6 +96,12 @@ pub enum Call {
     Event {
         name: String,
         event: serde_json::Value,
+        preferences: Preferences,
+    },
+    /// `filters[name](input)`, for one batch of a source Dupin composed it onto.
+    Filter {
+        name: String,
+        input: Box<FilterInput>,
         preferences: Preferences,
     },
 }
@@ -188,6 +195,9 @@ pub enum Answer {
     },
     Handled {
         handled: Handled,
+    },
+    Filtered {
+        hits: Vec<FilterHit>,
     },
     Cancelled,
     Failed {
@@ -534,6 +544,15 @@ mod tests {
                 event: serde_json::json!({}),
                 preferences: Preferences::encode(&serde_json::json!({})),
             },
+            Call::Filter {
+                name: "romaji".into(),
+                input: Box::new(FilterInput::new(
+                    dupin_js_runtime::FilterStage::Matcher,
+                    Some("q".into()),
+                    ["A".into()],
+                )),
+                preferences: Preferences::encode(&serde_json::json!({})),
+            },
         ];
         let mut shapes: Vec<String> = calls
             .into_iter()
@@ -642,6 +661,20 @@ mod tests {
             Answer::Handled {
                 handled: Handled { invalidated: true },
             },
+            Answer::Filtered {
+                hits: vec![
+                    FilterHit {
+                        index: 0,
+                        score: Some(1),
+                        positions: vec![0],
+                    },
+                    FilterHit {
+                        index: 1,
+                        score: None,
+                        positions: Vec::new(),
+                    },
+                ],
+            },
             Answer::Cancelled,
             Answer::Failed {
                 diagnostic: Diagnostic::new("code", "message"),
@@ -671,12 +704,12 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (10, SHAPES.map(str::to_owned).to_vec()),
+            (11, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
 
-    const SHAPES: [&str; 25] = [
+    const SHAPES: [&str; 27] = [
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
@@ -684,6 +717,7 @@ mod tests {
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"view","name":"note","page":{"query":"q","state":{"id":7}},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"page":{"query":"","state":null},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"filter","name":"romaji","input":{"stage":"matcher","query":"q","titles":["A"]},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
         r#"{"kind":"cancel","id":1}"#,
         r#"{"kind":"reply","id":1,"call":2}"#,
@@ -699,6 +733,7 @@ mod tests {
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":false,"effect":{"type":"push","view":"note","state":{"id":7},"toast":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"filtered","hits":[{"index":0,"score":1,"positions":[0]},{"index":1}]}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"missing"}}"#,

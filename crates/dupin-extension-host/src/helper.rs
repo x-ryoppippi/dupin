@@ -11,8 +11,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dupin_js_runtime::{
-    Acted, Bridge, CataloguePage, Control, Diagnostic, Engine, Exports, Handled, Package, Reply, Row,
-    RunError, Sources, ViewAnswer,
+    Acted, Bridge, CataloguePage, Control, Diagnostic, Engine, Exports, FilterHit, Handled, Package, Reply,
+    Row, RunError, Sources, ViewAnswer,
 };
 
 use crate::sandbox;
@@ -137,6 +137,7 @@ fn run(socket: UnixStream) -> io::Result<()> {
             Ok(Outcome::View(view)) => Answer::View { view },
             Ok(Outcome::Acted(acted)) => Answer::Acted { acted },
             Ok(Outcome::Handled(handled)) => Answer::Handled { handled },
+            Ok(Outcome::Filtered(hits)) => Answer::Filtered { hits },
             Err(RunError::Cancelled) => Answer::Cancelled,
             Err(RunError::Failed(diagnostic)) => Answer::Failed { diagnostic },
         };
@@ -260,6 +261,7 @@ enum Outcome {
     View(ViewAnswer),
     Acted(Acted),
     Handled(Handled),
+    Filtered(Vec<FilterHit>),
 }
 
 fn compile(entry: String, modules: Vec<(String, &[u8])>, control: Control) -> Result<Outcome, RunError> {
@@ -338,6 +340,13 @@ fn execute(
                 bridge,
             )
             .map(Outcome::Handled),
+        Call::Filter {
+            name,
+            input,
+            preferences,
+        } => package
+            .filter(engine, &name, &input, &preferences.into_value(), control, bridge)
+            .map(Outcome::Filtered),
     }
 }
 

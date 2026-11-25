@@ -51,7 +51,22 @@ pub enum Subject {
     App(PathBuf),
 }
 
+/// Who produced a row: one of Dupin's own sources, or an extension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Producer {
+    Dupin,
+    /// An extension's rows never reach another extension's kind actions.
+    Extension,
+}
+
 impl Subject {
+    pub(crate) fn value_bytes(&self) -> usize {
+        match self {
+            Self::Text(value) | Self::Url(value) => value.len(),
+            Self::File { path, .. } | Self::App(path) => path.as_os_str().len(),
+        }
+    }
+
     fn kind(&self) -> KindName {
         match self {
             Self::Text(_) => KindName::Text,
@@ -126,12 +141,13 @@ impl Kinds {
 
     pub fn resolve(&self, subject: &Subject, title: &str) -> Resolved {
         let mut resolved = self.get(subject.kind()).actions(subject, title);
-        resolved.actions.extend(self.configured(subject));
+        resolved.actions.extend(self.configured(subject, Producer::Dupin));
         resolved
     }
 
-    /// The actions config.toml adds for `subject`, which follow its kind's own.
-    pub fn configured(&self, subject: &Subject) -> Vec<ItemAction> {
+    /// The actions config.toml adds for `subject`, which follow its kind's own. A row
+    /// `producer` made takes an extension's kind action only when Dupin produced it.
+    pub fn configured(&self, subject: &Subject, producer: Producer) -> Vec<ItemAction> {
         let configured = self.configured.read().unwrap_or_else(PoisonError::into_inner);
         let kind = subject.kind();
         let actions = match kind {
@@ -143,6 +159,7 @@ impl Kinds {
         actions
             .iter()
             .enumerate()
+            .filter(|(_, action)| producer == Producer::Dupin || action.extension.is_none())
             .filter_map(|(index, action)| {
                 configured_action(action, &configured_id(kind.as_str(), index), subject)
             })
@@ -199,6 +216,23 @@ fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option
             script: script.clone(),
             argument: value.to_owned(),
         },
+        (None, None) => {
+            let (package, name) = crate::config::contribution(action.extension.as_deref()?)?;
+            return Some(
+                ItemAction::new(
+                    id,
+                    &action.title,
+                    Action::Extension {
+                        extension: package.to_owned(),
+                        request: crate::ExtensionRequest::Kind {
+                            action: name.to_owned(),
+                            subject: subject.clone(),
+                        },
+                    },
+                )
+                .keep_open(),
+            );
+        }
         (None, Some(template)) => {
             let encode = dupin_plugin_protocol::web_search::percent_encode;
             let placeholder = match subject.kind() {
@@ -212,7 +246,6 @@ fn configured_action(action: &KindAction, id: &str, subject: &Subject) -> Option
             }
             Action::OpenUrl(url)
         }
-        (None, None) => return None,
     };
     let configured = ItemAction::new(id, &action.title, run);
     // The UI decides whether a script's run closes the panel, by the script's output mode.

@@ -182,26 +182,32 @@ impl App {
 const ALIAS_PENALTY: i32 = 8;
 
 /// Best matches first; equal scores keep the shorter, then alphabetical, name. Sorted by
-/// title instead, the rows carry no score, so the usage history keeps that order. An app
-/// matched through an alias shows the alias in its subtitle, since its title doesn't contain
-/// the query.
+/// title or by a package's sorter instead, the rows carry no score, so the usage history keeps
+/// that order. An app matched through an alias shows the alias in its subtitle, since its
+/// title doesn't contain the query. A package's matcher sees every name and alias in one batch.
 fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
     let stages = rows.filters.current();
     let matcher = &*stages.matcher;
+    let batch = stages.batch_matcher.as_ref().and_then(|_| {
+        let texts: Vec<&str> = apps
+            .iter()
+            .flat_map(|app| std::iter::once(app.name.as_str()).chain(app.aliases.iter().map(String::as_str)))
+            .collect();
+        stages.batch_matches(query, &texts)
+    });
+    let mut batched = batch.into_iter().flatten();
+    let mut score = |text: &str| match batched.next() {
+        Some(found) => found,
+        None => matcher.score(query, text),
+    };
     let mut hits: Vec<(i32, Option<&str>, Vec<usize>, &App)> = apps
         .iter()
         .filter_map(|app| {
-            let on_name = matcher
-                .score(query, &app.name)
-                .map(|m| (m.score, None, m.positions));
+            let on_name = score(&app.name).map(|m| (m.score, None, m.positions));
             let on_alias = app
                 .aliases
                 .iter()
-                .filter_map(|a| {
-                    matcher
-                        .score(query, a)
-                        .map(|m| (m.score - ALIAS_PENALTY, Some(a.as_str()), Vec::new()))
-                })
+                .filter_map(|a| score(a).map(|m| (m.score - ALIAS_PENALTY, Some(a.as_str()), Vec::new())))
                 .max_by_key(|(score, ..)| *score);
             let (score, alias, positions) = match (on_name, on_alias) {
                 (Some(n), Some(a)) => {
@@ -216,12 +222,28 @@ fn rank(apps: &[App], query: &str, limit: usize, rows: &Rows) -> Vec<Item> {
             Some((score, alias, positions, app))
         })
         .collect();
-    let by_title = stages.sorter == Sorter::Title;
-    if by_title {
-        hits.sort_by_cached_key(|(.., app)| (app.name.to_lowercase(), app.name.clone()));
-    } else {
-        hits.sort_by(|(a, _, _, x), (b, _, _, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
-    }
+    let order = stages.batch_sorter.as_ref().and_then(|_| {
+        let titles: Vec<&str> = hits.iter().map(|(.., app)| app.name.as_str()).collect();
+        stages.batch_order(&titles)
+    });
+    let by_title = match order {
+        Some(order) => {
+            let mut slots: Vec<_> = hits.into_iter().map(Some).collect();
+            hits = order
+                .into_iter()
+                .filter_map(|index| slots[index].take())
+                .collect();
+            true
+        }
+        None if stages.sorter == Sorter::Title => {
+            hits.sort_by_cached_key(|(.., app)| (app.name.to_lowercase(), app.name.clone()));
+            true
+        }
+        None => {
+            hits.sort_by(|(a, _, _, x), (b, _, _, y)| b.cmp(a).then_with(|| x.name.cmp(&y.name)));
+            false
+        }
+    };
     hits.truncate(limit);
     hits.into_iter()
         .map(|(score, alias, positions, app)| {
@@ -414,10 +436,10 @@ mod tests {
             app("Notes", &["Safe Notes"]),
         ];
         let rows = Rows {
-            filters: dupin_core::filter::SourceFilters::new(dupin_core::filter::Stages {
-                matcher: Arc::new(Prefix),
-                sorter: Sorter::Relevance,
-            }),
+            filters: dupin_core::filter::SourceFilters::new(dupin_core::filter::Stages::native(
+                Arc::new(Prefix),
+                Sorter::Relevance,
+            )),
             kinds: crate::kinds::native(),
         };
         let items = super::rank(&apps, "saf", 10, &rows);
@@ -441,15 +463,75 @@ mod tests {
             .map(|item| (item.display_title().to_owned(), item.score.is_some()))
             .collect();
         assert_eq!(relevance, [("Safari".into(), true), ("safety".into(), true)]);
-        rows.filters.set(dupin_core::filter::Stages {
-            matcher: dupin_core::filter::fuzzy(),
-            sorter: Sorter::Title,
-        });
+        rows.filters.set(dupin_core::filter::Stages::native(
+            dupin_core::filter::fuzzy(),
+            Sorter::Title,
+        ));
         let titled: Vec<_> = super::rank(&apps, "saf", 2, &rows)
             .iter()
             .map(|item| (item.display_title().to_owned(), item.score))
             .collect();
         assert_eq!(titled, [("Hush Safe".into(), None), ("Safari".into(), None)]);
+    }
+
+    #[test]
+    fn a_batch_stage_matches_names_and_aliases_and_the_native_one_stands_in_when_it_cannot() {
+        use dupin_core::filter::{BatchStage, Hit, Stages};
+
+        /// Finds names ending in the query, and orders by length, longest first; `None` when
+        /// told to fail.
+        struct Suffix(bool);
+        impl BatchStage for Suffix {
+            fn name(&self) -> &str {
+                "test/suffix"
+            }
+            fn run(&self, query: &str, titles: &[&str]) -> Option<Vec<Hit>> {
+                if !self.0 {
+                    return None;
+                }
+                let mut hits: Vec<_> = titles
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, title)| query.is_empty() || title.to_lowercase().ends_with(query))
+                    .map(|(index, title)| Hit {
+                        index,
+                        score: Some(title.len() as i32),
+                        positions: Vec::new(),
+                    })
+                    .collect();
+                if query.is_empty() {
+                    hits.sort_by_key(|hit| std::cmp::Reverse(titles[hit.index].len()));
+                }
+                Some(hits)
+            }
+        }
+        let apps = [
+            app("Safari", &[]),
+            app("Notes", &["Memo Notes"]),
+            app("Calendar", &["iCal Notes"]),
+        ];
+        let rows = Rows::native();
+        let compose = |works: bool| {
+            let mut stages = Stages::native(dupin_core::filter::fuzzy(), Sorter::Relevance);
+            stages.batch_matcher = Some(Arc::new(Suffix(works)));
+            stages.batch_sorter = Some(Arc::new(Suffix(works)));
+            rows.filters.set(stages);
+        };
+        compose(true);
+        let found = super::rank(&apps, "notes", 10, &rows);
+        let titles: Vec<_> = found.iter().map(Item::display_title).collect();
+        assert_eq!(
+            titles,
+            ["Calendar", "Notes"],
+            "longest first, an alias finding Calendar"
+        );
+        assert_eq!(text_subtitle(&found[0]), "iCal Notes · /Applications");
+        assert!(found.iter().all(|item| item.score.is_none()));
+        compose(false);
+        let fallen_back = super::rank(&apps, "saf", 10, &rows);
+        assert_eq!(fallen_back.len(), 1);
+        assert_eq!(fallen_back[0].display_title(), "Safari");
+        assert!(fallen_back[0].score.is_some(), "the native stages rank as ever");
     }
 
     #[test]

@@ -236,6 +236,7 @@ impl Ui {
             clipboard: clipboard.settings(),
             front: front.clone(),
         });
+        composition.guests().set_bridge(bridge.clone());
         clipboard.start(&bridge);
         bridge.set_listener({
             let me = me.clone();

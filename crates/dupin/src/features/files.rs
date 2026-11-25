@@ -21,16 +21,19 @@ pub(super) const FEATURE: Feature = Feature {
             name: "files",
             command: FILES,
             matcher: None,
+            rows: None,
         },
         Source {
             name: "files.contents",
             command: CONTENTS,
             matcher: None,
+            rows: None,
         },
         Source {
             name: "folder",
             command: BROWSE,
             matcher: Some(dupin_core::filter::FUZZY),
+            rows: Some(dupin_broker::RowKind::File),
         },
     ],
     ..Feature::EMPTY

@@ -10,6 +10,7 @@
 
 mod diagnostic;
 mod environment;
+pub mod filter;
 mod host;
 mod output;
 mod package;
@@ -32,6 +33,7 @@ use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runti
 
 pub use diagnostic::Diagnostic;
 pub use environment::Environment;
+pub use filter::{FilterHit, FilterInput, FilterStage};
 pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Reply, Unavailable};
 pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
@@ -335,6 +337,41 @@ impl Package {
                 invalidated: sandbox.invalidation.called.get(),
                 effect: output::effect(&self.entry, &answer)?,
             })
+        })
+    }
+
+    /// Calls `filters[name](input, ctx)` in `engine` for one batch of another source's
+    /// candidates, and reads which it keeps and in what order. A filter has no external effects
+    /// or persistent state, so none of its host requests leaves the engine.
+    pub fn filter(
+        &self,
+        engine: &Engine,
+        name: &str,
+        input: &FilterInput,
+        preferences: &serde_json::Value,
+        control: Control,
+        bridge: &mut dyn Bridge,
+    ) -> Result<Vec<FilterHit>, RunError> {
+        if input.titles.len() > filter::MAX_CANDIDATES {
+            return Err(RunError::Failed(Diagnostic::new(
+                "too-many-candidates",
+                format!("a filter takes at most {} candidates", filter::MAX_CANDIDATES),
+            )));
+        }
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Filter)?;
+        sandbox.run(|ctx| {
+            let handler = sandbox.handler(ctx, "filters", name)?;
+            let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+            let batch = frozen_json(ctx, &freeze, &input.json())?;
+            let context = Object::new(ctx.clone())?;
+            context.set("preferences", frozen_preferences(ctx, preferences)?)?;
+            let context = frozen(ctx, context)?;
+            let answer = sandbox.call(ctx, handler, (batch, context))?;
+            let json = ctx
+                .json_stringify(answer)?
+                .map(|json| json.to_string())
+                .transpose()?;
+            filter::read(&self.entry, input, json.as_deref()).map_err(Failure::Report)
         })
     }
 
@@ -719,6 +756,7 @@ enum Work {
     View,
     Action,
     Event,
+    Filter,
 }
 
 impl Work {
@@ -729,6 +767,7 @@ impl Work {
             Work::View => "the view",
             Work::Action => "the action",
             Work::Event => "the event handler",
+            Work::Filter => "the filter",
         }
     }
 }
@@ -842,6 +881,7 @@ impl<'a> Sandbox<'a> {
                     }
                     Work::View => "Make the view return sooner: Dupin stops it after 2 seconds, as it does a search.",
                     Work::Action | Work::Event => "Do less in one call: Dupin stops actions and event handlers at their deadline.",
+                    Work::Filter => "Make the filter return sooner: it runs as the user types, and Dupin shows the source's own matches once it overruns.",
                 }),
             ),
         }
@@ -925,7 +965,12 @@ impl<'a> Sandbox<'a> {
         let outbox = self.calls.borrow_mut().take_outbox();
         let mut bridge = self.bridge.borrow_mut();
         for (call, op, args) in outbox {
-            if let Err(diagnostic) = bridge.send(call, &op, &args) {
+            let sent = if matches!(self.work, Work::Filter) {
+                Err(Diagnostic::new("unavailable", "a filter can't use host services"))
+            } else {
+                bridge.send(call, &op, &args)
+            };
+            if let Err(diagnostic) = sent {
                 drop(bridge);
                 let reply = Reply {
                     call,
@@ -1076,6 +1121,11 @@ impl<'a> Sandbox<'a> {
                 "event-threw",
                 format!("the event handler threw {}", thrown.message),
                 "Catch the error inside the handler.",
+            ),
+            (Stage::Call, Work::Filter) => (
+                "filter-threw",
+                format!("the filter threw {}", thrown.message),
+                "Catch the error inside the filter; Dupin shows the source's own matches while it fails.",
             ),
         };
         let mut diagnostic = Diagnostic::new(code, message).hint(hint);

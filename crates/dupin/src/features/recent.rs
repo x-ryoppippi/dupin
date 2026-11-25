@@ -15,6 +15,7 @@ pub(super) const FEATURE: Feature = Feature {
         name: "recent",
         command: RECENT,
         matcher: None,
+        rows: None,
     }],
     ..Feature::EMPTY
 };

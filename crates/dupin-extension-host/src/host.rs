@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use dupin_js_runtime::row::{RowAction, RowEffect, Source, is_dictionary_url};
 use dupin_js_runtime::{
-    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, PageContext, Reason, Row, RunError,
-    Sources, ViewAnswer,
+    Acted, CataloguePage, Diagnostic, Environment, Exports, FilterHit, FilterInput, Handled, PageContext,
+    Reason, Row, RunError, Sources, ViewAnswer,
 };
 use dupin_plugin_protocol::{MAX_RESPONSE_BYTES, is_web_url};
 
@@ -182,6 +182,7 @@ enum Work {
     View,
     Action,
     Event,
+    Filter,
 }
 
 impl Work {
@@ -193,6 +194,7 @@ impl Work {
             Work::View => "the view",
             Work::Action => "the action",
             Work::Event => "the event handler",
+            Work::Filter => "the filter",
         }
     }
 
@@ -204,6 +206,7 @@ impl Work {
             Work::View => "the view's",
             Work::Action => "the action's",
             Work::Event => "the event handler's",
+            Work::Filter => "the filter's",
         }
     }
 }
@@ -479,6 +482,37 @@ impl Host {
             services,
         )? {
             (Answer::Handled { handled }, _) => Ok(handled),
+            _ => Err(mismatch()),
+        }
+    }
+
+    /// Calls `filters[name](input)` in `package` for one batch of a source it is composed onto.
+    /// It runs as the user types, so in the resident helper as a search does, and with
+    /// `services` answering nothing: a filter has no external effects or persistent state.
+    #[allow(clippy::too_many_arguments)]
+    pub fn filter(
+        &self,
+        package: &Compiled,
+        name: &str,
+        input: &FilterInput,
+        preferences: &serde_json::Value,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<Vec<FilterHit>, RunError> {
+        let call = Call::Filter {
+            name: name.into(),
+            input: Box::new(input.clone()),
+            preferences: Preferences::encode(preferences),
+        };
+        match self.call(
+            package.domain,
+            Request::run(package, call, Work::Filter),
+            deadline,
+            is_cancelled,
+            services,
+        )? {
+            (Answer::Filtered { hits }, _) => Ok(hits),
             _ => Err(mismatch()),
         }
     }
@@ -1293,6 +1327,9 @@ fn deadline_passed(work: Work, entry: &str) -> Diagnostic {
         Work::View => "Make the view return sooner: Dupin stops it after 2 seconds, as it does a search.",
         Work::Action | Work::Event => {
             "Do less in one call: Dupin stops actions and event handlers at their deadline."
+        }
+        Work::Filter => {
+            "Make the filter return sooner: it runs as the user types, and Dupin shows the source's own matches once it overruns."
         }
     };
     Diagnostic::new(

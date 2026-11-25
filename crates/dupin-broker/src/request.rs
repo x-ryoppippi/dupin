@@ -1,7 +1,8 @@
 use std::path::{Component, Path};
 
 use crate::scope::{
-    ClipboardAccess, FilesAccess, Method, Origin, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess,
+    ClipboardAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope, ScopeKey, ScopeName, StorageOp,
+    WindowsAccess,
 };
 
 /// One operation a host service is about to perform for a package.
@@ -37,6 +38,13 @@ pub enum Request {
         future_days: u32,
     },
     Windows(WindowsAccess),
+    /// Handing the package `field` of rows of `kind` that Dupin's own sources found.
+    Rows {
+        kind: RowKind,
+        field: RowField,
+    },
+    /// Handing the package what the user typed.
+    Query,
 }
 
 pub(crate) enum Resolved {
@@ -64,6 +72,8 @@ impl Request {
             Self::DictionaryLookup => ScopeKey::Dictionary,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
             Self::Windows(access) => ScopeKey::Windows(*access),
+            Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
+            Self::Query => ScopeKey::Query,
         })
     }
 
@@ -77,7 +87,9 @@ impl Request {
             Self::Files { .. }
             | Self::Storage { .. }
             | Self::DictionaryLookup
-            | Self::CalendarRead { .. } => false,
+            | Self::CalendarRead { .. }
+            | Self::Rows { .. }
+            | Self::Query => false,
         }
     }
 
@@ -118,6 +130,8 @@ impl Request {
                 },
             ) => (past_days > past || future_days > future)
                 .then(|| format!("calendar reads are limited to {past} days back and {future} days ahead")),
+            (Self::Rows { field, .. }, Scope::Rows { kind, fields }) => (!fields.contains(field))
+                .then(|| format!("the {} of {} rows isn't declared", field.as_str(), kind.as_str())),
             _ => None,
         }
     }

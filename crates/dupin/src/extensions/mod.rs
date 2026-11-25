@@ -71,6 +71,8 @@ pub struct Extension {
     pub revision: Revision,
     /// The most the package may do, as the broker read it from package.json.
     pub capabilities: Capabilities,
+    /// The filters and kind actions it offers `[advanced]`.
+    pub provides: manifest::Provides,
     /// The bytecode the extension host compiled, which only the host ever loads.
     compiled: Compiled,
 }
@@ -113,6 +115,26 @@ impl Extension {
         services: &Arc<dyn Services>,
     ) -> Result<Vec<Row>, RunError> {
         host().search(&self.compiled, query, limit, deadline, &is_cancelled, services)
+    }
+
+    /// Runs `filters[name]` on one batch of a source it is composed onto. It reaches no host
+    /// service, so it has no external effects or persistent state.
+    pub fn filter(
+        &self,
+        name: &str,
+        input: &dupin_js_runtime::FilterInput,
+        deadline: Instant,
+    ) -> Result<Vec<dupin_js_runtime::FilterHit>, RunError> {
+        let services: Arc<dyn Services> = Arc::new(dupin_extension_host::NoServices);
+        host().filter(
+            &self.compiled,
+            name,
+            input,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            &services,
+        )
     }
 
     /// Asks the guest's `views[name]` for the page `page` describes, answering its host
@@ -601,6 +623,7 @@ fn load_with(
             package,
             revision,
             capabilities: manifest.capabilities,
+            provides: manifest.provides,
             compiled,
         }),
     })
@@ -794,6 +817,7 @@ pub(crate) mod tests {
             web_searches_noted: AtomicBool::new(false),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
+            provides: Default::default(),
             compiled: Compiled::empty(),
         }
     }

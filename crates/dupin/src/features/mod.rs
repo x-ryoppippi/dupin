@@ -43,6 +43,9 @@ pub(super) struct Source {
     /// The matcher it starts with, for a source that matches its own candidates; `None` for
     /// one that matches through an index of its own, such as Spotlight.
     pub matcher: Option<&'static str>,
+    /// The kind of row its matcher and sorter see, for a source that takes them; what a
+    /// package's filter composed onto it may be let see.
+    pub rows: Option<dupin_broker::RowKind>,
 }
 
 impl Feature {

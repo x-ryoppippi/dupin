@@ -626,6 +626,7 @@ fn action_bytes(action: &Action) -> usize {
                         scope.len()
                     }
                     ExtensionRequest::TurnOn | ExtensionRequest::Review => 0,
+                    ExtensionRequest::Kind { action, subject } => action.len() + subject.value_bytes(),
                 }
         }
         Action::System(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,

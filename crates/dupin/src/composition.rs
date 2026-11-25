@@ -1,21 +1,36 @@
 //! What `[advanced]` composes over the feature manifest: each native source's filter stages,
 //! the actions added to the kinds and the sources the main search appends. Every source and
 //! row is built from one composition, so a reload reaches them all at once.
+//!
+//! A package's filter composed onto a source runs on bounded batches of that source's titles,
+//! and only while the broker lets the package see them: Dupin's own source keeps answering
+//! whenever the package is missing, unconsented, slow or wrong.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, RwLock};
+use std::time::{Duration, Instant};
 
-use dupin_core::config::Advanced;
-use dupin_core::filter::{Filters, Sorter, SourceFilters, Stages};
-use dupin_core::kind::Kinds;
+use dupin_broker::{RowField, RowKind};
+use dupin_core::config::{Advanced, contribution};
+use dupin_core::filter::{BatchStage, Filters, Hit, Sorter, SourceFilters, Stages};
+use dupin_core::kind::{Kinds, Subject};
+use dupin_extension_bridge::{Bridge, Request, Trigger};
+use dupin_js_runtime::{FilterInput, FilterStage};
 use dupin_mac::kinds::Rows;
 
+use crate::extensions::Extension;
 use crate::features::{self, Source};
+
+/// How long a package's filter may take on one batch. It runs as the user types, so past
+/// this the source shows its own matches instead.
+const FILTER_DEADLINE: Duration = Duration::from_millis(250);
 
 pub struct Composition {
     kinds: Kinds,
     filters: Filters,
     /// The stages of each source that matches its own candidates.
     sources: BTreeMap<&'static str, SourceFilters>,
+    guests: Arc<Guests>,
 }
 
 impl Composition {
@@ -29,11 +44,17 @@ impl Composition {
             kinds,
             filters,
             sources,
+            guests: Arc::default(),
         }
     }
 
     pub fn kinds(&self) -> &Kinds {
         &self.kinds
+    }
+
+    /// Where the packages a composed filter runs in are handed over.
+    pub fn guests(&self) -> &Arc<Guests> {
+        &self.guests
     }
 
     /// What the source `name`, which matches its own candidates, builds its rows with.
@@ -62,15 +83,28 @@ impl Composition {
                 continue;
             };
             if let Some(configured) = advanced.sources.get(*name) {
-                if let Some(matcher) = configured
-                    .matcher
-                    .as_deref()
-                    .and_then(|name| self.filters.matcher(name))
-                {
-                    stages.matcher = matcher;
+                let guest = |reference: &str, stage| {
+                    let (package, filter) = contribution(reference)?;
+                    Some(Arc::new(GuestFilter {
+                        reference: reference.to_owned(),
+                        package: package.to_owned(),
+                        filter: filter.to_owned(),
+                        stage,
+                        rows: source.rows?,
+                        guests: self.guests.clone(),
+                    }) as Arc<dyn BatchStage>)
+                };
+                if let Some(matcher) = configured.matcher.as_deref() {
+                    match self.filters.matcher(matcher) {
+                        Some(native) => stages.matcher = native,
+                        None => stages.batch_matcher = guest(matcher, FilterStage::Matcher),
+                    }
                 }
-                if let Some(sorter) = configured.sorter.as_deref().and_then(Sorter::named) {
-                    stages.sorter = sorter;
+                if let Some(sorter) = configured.sorter.as_deref() {
+                    match Sorter::named(sorter) {
+                        Some(native) => stages.sorter = native,
+                        None => stages.batch_sorter = guest(sorter, FilterStage::Sorter),
+                    }
                 }
             }
             sources |= filters.set(stages);
@@ -95,10 +129,10 @@ impl Recomposed {
 }
 
 fn default_stages(filters: &Filters, source: &Source) -> Option<Stages> {
-    Some(Stages {
-        matcher: filters.matcher(source.matcher?)?,
-        sorter: Sorter::Relevance,
-    })
+    Some(Stages::native(
+        filters.matcher(source.matcher?)?,
+        Sorter::Relevance,
+    ))
 }
 
 /// Whether `advanced` names only what Dupin has, and composes each source with stages it
@@ -131,17 +165,19 @@ pub fn check(advanced: &Advanced) -> Result<(), String> {
         }
         if let Some(matcher) = &stages.matcher
             && filters.matcher(matcher).is_none()
+            && contribution(matcher).is_none()
         {
             return Err(format!(
-                "{table}: `{matcher}` isn't a matcher Dupin has ({})",
+                "{table}: `{matcher}` isn't a matcher Dupin has ({}) or a package's, written `<package>/<filter>`",
                 filters.matcher_names().collect::<Vec<_>>().join(", ")
             ));
         }
         if let Some(sorter) = &stages.sorter
             && Sorter::named(sorter).is_none()
+            && contribution(sorter).is_none()
         {
             return Err(format!(
-                "{table}: `{sorter}` isn't a sorter Dupin has ({})",
+                "{table}: `{sorter}` isn't a sorter Dupin has ({}) or a package's, written `<package>/<filter>`",
                 Sorter::ALL.map(Sorter::name).join(", ")
             ));
         }
@@ -161,6 +197,174 @@ pub fn check(advanced: &Advanced) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The packages composed filters run in and the broker that decides what they see, which the
+/// app hands over once it has them.
+#[derive(Default)]
+pub struct Guests {
+    bridge: OnceLock<Bridge>,
+    extensions: RwLock<Vec<Arc<Extension>>>,
+    /// Each problem is logged once, so a failing filter doesn't log on every key.
+    logged: Mutex<HashSet<String>>,
+}
+
+impl Guests {
+    pub fn set_bridge(&self, bridge: Bridge) {
+        let _ = self.bridge.set(bridge);
+    }
+
+    /// The packages that run now.
+    pub fn set_extensions(&self, extensions: Vec<Arc<Extension>>) {
+        *self.extensions.write().unwrap_or_else(PoisonError::into_inner) = extensions;
+    }
+
+    fn extension(&self, package: &str) -> Option<Arc<Extension>> {
+        self.extensions
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|extension| extension.id == package)
+            .cloned()
+    }
+
+    fn note(&self, problem: String) {
+        if self
+            .logged
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(problem.clone())
+        {
+            crate::log::warn(&problem);
+        }
+    }
+}
+
+/// A package's `filters[name]`, composed onto a source whose rows are `rows`.
+struct GuestFilter {
+    /// `<package>/<filter>`, as config.toml names it.
+    reference: String,
+    package: String,
+    filter: String,
+    stage: FilterStage,
+    rows: RowKind,
+    guests: Arc<Guests>,
+}
+
+impl GuestFilter {
+    /// What the broker must let the package see first: the titles of the source's rows, and
+    /// for a matcher what was typed.
+    fn requests(&self) -> Vec<Request> {
+        let mut requests = vec![Request::Rows {
+            kind: self.rows,
+            field: RowField::Title,
+        }];
+        if self.stage == FilterStage::Matcher {
+            requests.push(Request::Query);
+        }
+        requests
+    }
+}
+
+impl BatchStage for GuestFilter {
+    fn name(&self) -> &str {
+        &self.reference
+    }
+
+    fn run(&self, query: &str, titles: &[&str]) -> Option<Vec<Hit>> {
+        let reference = &self.reference;
+        if titles.len() > dupin_js_runtime::filter::MAX_CANDIDATES {
+            self.guests.note(format!(
+                "{reference} wasn't run: the source has more than {} candidates, more than a filter takes",
+                dupin_js_runtime::filter::MAX_CANDIDATES
+            ));
+            return None;
+        }
+        let Some(extension) = self.guests.extension(&self.package) else {
+            self.guests.note(format!(
+                "{reference} wasn't run: no package called {} runs now",
+                self.package
+            ));
+            return None;
+        };
+        if extension.provides.filters.get(&self.filter) != Some(&self.stage) {
+            self.guests.note(format!(
+                "{reference} wasn't run: {} provides no {} called {}",
+                self.package,
+                self.stage.as_str(),
+                self.filter
+            ));
+            return None;
+        }
+        let bridge = self.guests.bridge.get()?;
+        let mut permits = Vec::new();
+        for request in self.requests() {
+            match bridge.authorize(&extension.package, &request, Trigger::Query) {
+                Ok(permit) => permits.push(permit),
+                Err(refused) => {
+                    self.guests.note(format!("{reference} wasn't run: {refused}"));
+                    return None;
+                }
+            }
+        }
+        let input = FilterInput::new(
+            self.stage,
+            Some(query.to_owned()),
+            titles.iter().map(|title| (*title).to_owned()),
+        );
+        let hits = match extension.filter(&self.filter, &input, Instant::now() + FILTER_DEADLINE) {
+            Ok(hits) => hits,
+            Err(dupin_js_runtime::RunError::Failed(diagnostic)) => {
+                self.guests.note(format!(
+                    "{reference} failed: {} ({})",
+                    diagnostic.message, diagnostic.code
+                ));
+                return None;
+            }
+            Err(dupin_js_runtime::RunError::Cancelled) => return None,
+        };
+        // Access withdrawn while it ran drops what it answered.
+        if !permits.iter().all(|permit| bridge.validate(permit)) {
+            return None;
+        }
+        Some(
+            hits.into_iter()
+                .map(|hit| Hit {
+                    index: hit.index as usize,
+                    score: hit.score,
+                    positions: hit
+                        .positions
+                        .into_iter()
+                        .map(|position| position as usize)
+                        .collect(),
+                })
+                .collect(),
+        )
+    }
+}
+
+/// The kind of row `subject` stands for, as the broker names it.
+pub(crate) fn row_kind(subject: &Subject) -> RowKind {
+    match subject {
+        Subject::Text(_) => RowKind::Text,
+        Subject::Url(_) => RowKind::Url,
+        Subject::File { .. } => RowKind::File,
+        Subject::App(_) => RowKind::App,
+    }
+}
+
+/// `field` of the row `subject` stands for, as a kind action receives it; none for a field it
+/// lacks, or a path that isn't UTF-8, which would reach the package as some other path.
+pub(crate) fn row_field(subject: &Subject, field: RowField) -> Option<String> {
+    match (subject, field) {
+        (Subject::Text(text), RowField::Text) => Some(text.clone()),
+        (Subject::Url(url), RowField::Url) => Some(url.clone()),
+        (Subject::File { path, .. } | Subject::App(path), RowField::Path) => path.to_str().map(str::to_owned),
+        (Subject::File { path, .. } | Subject::App(path), RowField::Name) => {
+            path.file_name()?.to_str().map(str::to_owned)
+        }
+        _ => None,
+    }
 }
 
 /// One line for each part of `advanced`, as Settings shows it.
@@ -328,10 +532,198 @@ url = "https://translate.example/?q={text}"
         assert_eq!(after[before.len()..], ["files.contents", "files.names"]);
         let (shown, _) = defaults("[advanced.commands.default]\nappend_sources = [\"recent\"]");
         assert_eq!(shown, before, "recent items are already part of the main search");
+        let (around, _) = defaults(
+            "[advanced.commands.default]\nappend_sources = [\"files.contents\", \"recent\", \"files\"]",
+        );
+        assert_eq!(
+            around[before.len()..],
+            ["files.contents", "files.names"],
+            "a source the main search already has leaves the order alone"
+        );
         let (off, notice) =
             defaults("show_recent = false\n[advanced.commands.default]\nappend_sources = [\"recent\"]");
         assert!(!off.iter().any(|id| id == "recent.items"));
         assert!(notice.unwrap().contains("names `recent`, whose feature is off"));
+    }
+
+    const KANA: &str = r#"
+export function search() { return []; }
+export const filters = {
+  romaji(input) {
+    return input.candidates
+      .map((candidate, index) => ({ index, score: candidate.title.length, title: candidate.title.toLowerCase() }))
+      .filter((found) => found.title.includes(input.query))
+      .map(({ index, score }) => ({ index, score }));
+  },
+  longest(input) {
+    return input.candidates
+      .map((candidate, index) => [candidate.title.length, index])
+      .sort((a, b) => b[0] - a[0])
+      .map(([, index]) => index);
+  },
+  spin() { for (;;) {} },
+};
+"#;
+
+    fn kana(capabilities: &str, provides: &str) -> (tempfile::TempDir, Arc<Extension>) {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("package.json"),
+            format!(
+                r#"{{"name": "kana", "version": "0.1.0", "dupin": {{"title": "Kana", "keyword": "kana", "capabilities": {capabilities}, "provides": {provides}}}}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(folder.path().join("main.js"), KANA).unwrap();
+        let extension = crate::extensions::load_folder(folder.path()).unwrap();
+        (folder, extension)
+    }
+
+    fn allow(bridge: &Bridge, extension: &Extension, key: &str) {
+        let scope = extension.capabilities.get(&key.parse().unwrap()).unwrap().clone();
+        bridge
+            .allow(&extension.package, &extension.revision, &scope, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_packages_filter_sees_titles_and_the_query_only_with_consent_and_falls_back_without() {
+        use dupin_extension_bridge::{Base, Broker, Local, Services};
+
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, extension) = kana(
+            r#"{ "rows": { "app": ["title"] }, "query": ["read"] }"#,
+            r#"{ "filters": { "romaji": { "stage": "matcher" }, "longest": { "stage": "sorter" }, "spin": { "stage": "sorter" } } }"#,
+        );
+        let bridge = Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+        bridge.install(
+            &extension.package,
+            extension.revision.clone(),
+            extension.capabilities.clone(),
+        );
+        bridge.set_enabled(&extension.package, true).unwrap();
+        let composition = Composition::native(dupin_mac::kinds::native());
+        let apps = composition.rows("apps");
+        let stages = || apps.filters.current();
+        composition.apply(&advanced(
+            "[advanced.sources.apps]\nmatcher = \"kana/romaji\"\nsorter = \"kana/longest\"",
+        ));
+        let titles = ["Safari", "Notes", "Safari Technology Preview"];
+        assert_eq!(stages().batch_matches("saf", &titles), None, "no bridge yet");
+        composition.guests().set_bridge(bridge.clone());
+        assert_eq!(stages().batch_matches("saf", &titles), None, "not loaded yet");
+        composition.guests().set_extensions(vec![extension.clone()]);
+        assert_eq!(stages().batch_matches("saf", &titles), None, "nothing granted");
+        assert!(
+            bridge
+                .pending(Some(&extension.package))
+                .iter()
+                .any(|request| request.key().to_string() == "rows:app"),
+            "the refusal waits in Settings"
+        );
+        allow(&bridge, &extension, "rows:app");
+        assert_eq!(stages().batch_order(&titles), Some(vec![2, 0, 1]));
+        assert_eq!(
+            stages().batch_matches("saf", &titles),
+            None,
+            "a matcher also needs the query"
+        );
+        allow(&bridge, &extension, "query");
+        let scores: Vec<_> = stages()
+            .batch_matches("saf", &titles)
+            .unwrap()
+            .into_iter()
+            .map(|found| found.map(|found| found.score))
+            .collect();
+        assert_eq!(scores, [Some(6), None, Some(25)]);
+
+        composition.apply(&advanced("[advanced.sources.apps]\nsorter = \"kana/spin\""));
+        let started = Instant::now();
+        assert_eq!(stages().batch_order(&titles), None, "an overrun falls back");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+
+        composition.apply(&advanced("[advanced.sources.apps]\nmatcher = \"kana/longest\""));
+        assert_eq!(
+            stages().batch_matches("saf", &titles),
+            None,
+            "a sorter can't stand in for a matcher"
+        );
+        composition.apply(&advanced("[advanced.sources.apps]\nmatcher = \"kana/romaji\""));
+        bridge
+            .revoke(&extension.package, &"rows:app".parse().unwrap())
+            .unwrap();
+        assert_eq!(stages().batch_matches("saf", &titles), None, "revoked");
+        let many: Vec<String> = (0..=dupin_js_runtime::filter::MAX_CANDIDATES)
+            .map(|index| index.to_string())
+            .collect();
+        let many: Vec<&str> = many.iter().map(String::as_str).collect();
+        allow(&bridge, &extension, "rows:app");
+        assert_eq!(
+            stages().batch_matches("1", &many),
+            None,
+            "a source with more candidates than a batch takes keeps its own matcher"
+        );
+    }
+
+    #[test]
+    fn a_packages_kind_action_reaches_only_rows_dupin_found_and_hands_one_field() {
+        use dupin_core::kind::{Producer, Subject};
+        use dupin_core::{Action, ExtensionRequest};
+
+        let composition = Composition::native(dupin_mac::kinds::native());
+        composition.apply(&advanced(
+            "[[advanced.kinds.file.actions]]\ntitle = \"Upload\"\nextension = \"uploader/upload\"\n[[advanced.kinds.text.actions]]\ntitle = \"Send\"\nextension = \"uploader/send\"",
+        ));
+        let file = Subject::File {
+            path: "/Users/test/a.txt".into(),
+            folder: false,
+        };
+        let native = composition.kinds().configured(&file, Producer::Dupin);
+        assert_eq!(
+            native,
+            [dupin_core::ItemAction::new(
+                "configured-file-0",
+                "Upload",
+                Action::Extension {
+                    extension: "uploader".into(),
+                    request: ExtensionRequest::Kind {
+                        action: "upload".into(),
+                        subject: file.clone(),
+                    },
+                },
+            )
+            .keep_open()]
+        );
+        let text = Subject::Text("an extension's text".into());
+        assert!(
+            composition
+                .kinds()
+                .configured(&text, Producer::Extension)
+                .is_empty(),
+            "another extension's rows never reach a package's kind action"
+        );
+        assert_eq!(composition.kinds().configured(&text, Producer::Dupin).len(), 1);
+        assert_eq!(row_kind(&file), RowKind::File);
+        assert_eq!(row_field(&file, RowField::Name).as_deref(), Some("a.txt"));
+        assert_eq!(
+            row_field(&file, RowField::Path).as_deref(),
+            Some("/Users/test/a.txt")
+        );
+        assert_eq!(row_field(&file, RowField::Url), None);
+        let unnamed = Subject::App(std::path::PathBuf::from(
+            <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(
+                b"/Applications/\xff.app".to_vec(),
+            ),
+        ));
+        assert_eq!(row_field(&unnamed, RowField::Path), None);
     }
 
     #[test]

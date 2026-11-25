@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use dupin_core::catalogue::Entry;
 use dupin_core::form::{FieldKind, Form};
-use dupin_core::kind::{Kinds, Subject};
+use dupin_core::kind::{Kinds, Producer, Subject};
 use dupin_core::{
     Accessory, Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction,
     Page, Payload, Provider, ProviderError, Request, View, snippets,
@@ -469,7 +469,7 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
     let mut configured = Vec::new();
     let mut configure = |subject: Subject, done: &mut bool| {
         if !std::mem::replace(done, true) {
-            configured.extend(kinds.configured(&subject));
+            configured.extend(kinds.configured(&subject, Producer::Extension));
         }
     };
     let (mut texts, mut urls) = (false, false);

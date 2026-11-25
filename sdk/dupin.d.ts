@@ -1,4 +1,4 @@
-// Types for Dupin extensions, apiVersion 3. Dupin never reads this file; it is for editors and
+// Types for Dupin extensions, apiVersion 4. Dupin never reads this file; it is for editors and
 // `tsc --noEmit`. `dupin ext new` copies it into each package.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
@@ -9,7 +9,7 @@
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */
-	export const apiVersion: 3;
+	export const apiVersion: 4;
 
 	type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -418,6 +418,51 @@ declare module 'dupin' {
 	}
 
 	/**
+	 * What a filter receives: the titles of one batch of a source's candidates, up to 1,000 of
+	 * 512 bytes each, and for a matcher what was typed. Only a source `[advanced]` composes the
+	 * filter onto hands it a batch, and only while the user allows `rows` for that source's kind
+	 * (and `query`, for a matcher). Dupin freezes it.
+	 */
+	export interface FilterInput {
+		/** Present for a matcher only. */
+		readonly query?: string;
+		readonly candidates: readonly { readonly title: string }[];
+	}
+
+	/** A candidate a matcher finds: its index in `candidates`. */
+	export interface FilterMatch {
+		index: number;
+		/** Higher ranks first; a whole number from -1,000,000 to 1,000,000. Defaults to 0. */
+		score?: number;
+		/** The ascending character indices of its title that matched, which Dupin highlights. */
+		positions?: number[];
+	}
+
+	/**
+	 * The entry module's `filters` export, each declared in `dupin.provides.filters`. A matcher
+	 * returns the candidates the query finds; a sorter returns every index of `candidates` once,
+	 * in its order. A filter runs as the user types and reaches no host service: every request
+	 * fails with `unavailable`. Past 250 ms, or on any failure, the source runs its own stage.
+	 */
+	export type Filters = Record<
+		string,
+		(
+			input: FilterInput,
+			ctx: { readonly preferences: Preferences },
+		) => FilterMatch[] | number[] | Promise<FilterMatch[] | number[]>
+	>;
+
+	/**
+	 * What an `actions` handler declared in `dupin.provides.kinds` receives as its data when the
+	 * user chooses it on a row Dupin found: the one field it names, and only once they allow it.
+	 */
+	export type KindActionData =
+		| { text: string }
+		| { url: string }
+		| { name: string }
+		| { path: string };
+
+	/**
 	 * Why a host request failed. `code` is stable: `needs-consent` (the user hasn't allowed the
 	 * scope yet; Dupin shows them a request to allow it), `needs-activation` (only an action the
 	 * user chose may do this), `disabled`, `denied`, `revoked`, `os-denied`, `undeclared`,
@@ -457,6 +502,21 @@ declare module 'dupin' {
 		preferences?: Record<string, PreferenceDeclaration>;
 		/** The most the extension may do. The user allows each scope separately. */
 		capabilities?: Capabilities;
+		/** Filters and kind actions `[advanced]` in config.toml may compose onto Dupin's own sources and kinds. */
+		provides?: Provides;
+	}
+
+	/** Up to 8 filters, and 8 actions for each kind, named by 1–64 letters, digits or `_`. */
+	export interface Provides {
+		/** Each one an export of `filters`. A matcher also needs `capabilities.query`. */
+		filters?: Record<string, { stage: 'matcher' | 'sorter' }>;
+		/** Each one an export of `actions`, receiving the field it names, which `capabilities.rows` declares. */
+		kinds?: {
+			text?: Record<string, { field: 'text' }>;
+			url?: Record<string, { field: 'url' }>;
+			file?: Record<string, { field: 'name' | 'path' }>;
+			app?: Record<string, { field: 'name' | 'path' }>;
+		};
 	}
 
 	export type PreferenceDeclaration = { title: string } & (
@@ -488,6 +548,18 @@ declare module 'dupin' {
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
 		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
 		windows?: ('read' | 'arrange')[];
+		/**
+		 * The fields of each kind of row Dupin's own sources find that the package's filters and
+		 * kind actions may receive. Another extension's rows never reach them.
+		 */
+		rows?: {
+			text?: ('title' | 'text')[];
+			url?: ('title' | 'url')[];
+			file?: ('title' | 'name' | 'path')[];
+			app?: ('title' | 'name' | 'path')[];
+		};
+		/** What is typed in the searches a matcher is composed into. */
+		query?: ['read'];
 	}
 
 	export interface PackageJson {

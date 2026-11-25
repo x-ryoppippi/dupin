@@ -116,8 +116,10 @@ fn append_sources(config: &Config, commands: &mut Configure) {
         .unwrap_or_else(|| id(APPS));
     for name in &config.advanced.commands.default.append_sources {
         let command = id(crate::features::source_command(name));
+        let present = commands.registry.default_providers().contains(&command);
         match commands.registry.add_default_provider(command.clone(), &after) {
-            Ok(()) => after = command,
+            Ok(()) if !present => after = command,
+            Ok(()) => {}
             Err(_) => commands.notices.push(format!(
                 "advanced.commands.default.append_sources names `{name}`, whose feature is off, so the main search leaves it out."
             )),

@@ -349,6 +349,7 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Dictionary => &icons::LANGUAGES,
         Scope::Calendar { .. } => &icons::CALENDAR,
         Scope::Windows { .. } => &icons::PANEL,
+        Scope::Rows { .. } | Scope::Query => &icons::SEARCH,
     }
 }
 

@@ -172,6 +172,8 @@ assert
           "files:notes"
           "script:build.v2"
           "storage"
+          "rows:file"
+          "query"
         ];
       }
     ];

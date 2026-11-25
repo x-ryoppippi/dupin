@@ -14,6 +14,7 @@ pub(super) const FEATURE: Feature = Feature {
         name: SOURCE,
         command: APPS,
         matcher: Some(dupin_core::filter::FUZZY),
+        rows: Some(dupin_broker::RowKind::App),
     }],
     ..Feature::EMPTY
 };

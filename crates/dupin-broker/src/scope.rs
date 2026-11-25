@@ -263,6 +263,82 @@ impl WindowsAccess {
     }
 }
 
+/// A kind of row Dupin's own sources show, whose fields a package may be let see.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowKind {
+    Text,
+    Url,
+    File,
+    App,
+}
+
+impl RowKind {
+    pub const ALL: [Self; 4] = [Self::Text, Self::Url, Self::File, Self::App];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::File => "file",
+            Self::App => "app",
+        }
+    }
+
+    /// The fields a row of this kind has: its title, and the value it stands for.
+    pub fn fields(self) -> &'static [RowField] {
+        match self {
+            Self::Text => &[RowField::Title, RowField::Text],
+            Self::Url => &[RowField::Title, RowField::Url],
+            Self::File | Self::App => &[RowField::Title, RowField::Name, RowField::Path],
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Text => "text results",
+            Self::Url => "links",
+            Self::File => "files and folders",
+            Self::App => "apps",
+        }
+    }
+}
+
+/// One field of a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowField {
+    Title,
+    Text,
+    Url,
+    /// A file's or app's name in its folder.
+    Name,
+    /// A file's or app's full path.
+    Path,
+}
+
+impl RowField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::Name => "name",
+            Self::Path => "path",
+        }
+    }
+
+    fn described(self) -> &'static str {
+        match self {
+            Self::Title => "titles",
+            Self::Text => "text",
+            Self::Url => "addresses",
+            Self::Name => "names",
+            Self::Path => "full paths",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StorageOp {
     Read,
@@ -334,6 +410,14 @@ pub enum Scope {
     Windows {
         access: WindowsAccess,
     },
+    /// Fields of the rows of one kind that Dupin's own sources show, which the package's
+    /// filters and kind actions receive. Another package's rows never reach it.
+    Rows {
+        kind: RowKind,
+        fields: BTreeSet<RowField>,
+    },
+    /// What the user types in the searches the package's matchers are composed into.
+    Query,
 }
 
 impl Scope {
@@ -348,6 +432,8 @@ impl Scope {
             Self::Dictionary => ScopeKey::Dictionary,
             Self::Calendar { .. } => ScopeKey::Calendar,
             Self::Windows { access } => ScopeKey::Windows(*access),
+            Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
+            Self::Query => ScopeKey::Query,
         }
     }
 
@@ -411,6 +497,10 @@ impl Scope {
                 },
             ) => past_days >= p && future_days >= f,
             (Self::Windows { access }, Self::Windows { access: a }) => access == a,
+            (Self::Rows { kind, fields }, Self::Rows { kind: k, fields: f }) => {
+                kind == k && fields.is_superset(f)
+            }
+            (Self::Query, Self::Query) => true,
             _ => false,
         }
     }
@@ -514,6 +604,13 @@ impl fmt::Display for Scope {
                 WindowsAccess::Read => f.write_str("see your displays and the focused window"),
                 WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
             },
+            Self::Rows { kind, fields } => write!(
+                f,
+                "see the {} of {} Dupin finds, where you compose its filters or actions",
+                list(fields, |field| field.described()),
+                kind.plural()
+            ),
+            Self::Query => f.write_str("see what you type in the searches you compose its matchers into"),
         }
     }
 }
@@ -534,6 +631,8 @@ pub enum ScopeKey {
     Dictionary,
     Calendar,
     Windows(WindowsAccess),
+    Rows(RowKind),
+    Query,
 }
 
 impl fmt::Display for ScopeKey {
@@ -548,6 +647,8 @@ impl fmt::Display for ScopeKey {
             Self::Dictionary => f.write_str("dictionary"),
             Self::Calendar => f.write_str("calendar"),
             Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
+            Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
+            Self::Query => f.write_str("query"),
         }
     }
 }
@@ -562,6 +663,7 @@ impl FromStr for ScopeKey {
                 "storage" => Self::Storage,
                 "dictionary" => Self::Dictionary,
                 "calendar" => Self::Calendar,
+                "query" => Self::Query,
                 _ => return Err(unknown()),
             },
             Some(("http", origin)) => Self::Http(Origin::parse(origin)?),
@@ -574,6 +676,12 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
             Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
             Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
+            Some(("rows", kind)) => Self::Rows(
+                RowKind::ALL
+                    .into_iter()
+                    .find(|known| known.as_str() == kind)
+                    .ok_or_else(unknown)?,
+            ),
             Some(_) => return Err(unknown()),
         })
     }

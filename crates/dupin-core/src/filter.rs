@@ -51,19 +51,28 @@ impl Matcher for Prefix {
             return None;
         }
         let text: Vec<char> = text.chars().collect();
-        let lower: Vec<char> = text
+        // Lowercased as the query is, each lowered character remembering the one it came from,
+        // since lowering can turn one character into two.
+        let (lower, from): (Vec<char>, Vec<usize>) = text
             .iter()
-            .map(|ch| ch.to_lowercase().next().unwrap_or(*ch))
-            .collect();
+            .enumerate()
+            .flat_map(|(index, ch)| ch.to_lowercase().map(move |lowered| (lowered, index)))
+            .unzip();
         let length = i32::try_from(text.len()).unwrap_or(i32::MAX);
-        (0..text.len())
+        (0..lower.len())
             .filter(|&start| {
-                start == 0 || (!text[start - 1].is_alphanumeric() && text[start].is_alphanumeric())
+                let index = from[start];
+                (start == 0 || from[start - 1] != index)
+                    && (index == 0 || (!text[index - 1].is_alphanumeric() && text[index].is_alphanumeric()))
             })
             .find(|&start| lower[start..].starts_with(&query))
-            .map(|start| Match {
-                score: if start == 0 { WHOLE_PREFIX } else { 0 } - length.min(WHOLE_PREFIX - 1),
-                positions: (start..start + query.len()).collect(),
+            .map(|start| {
+                let mut positions: Vec<usize> = from[start..start + query.len()].to_vec();
+                positions.dedup();
+                Match {
+                    score: if from[start] == 0 { WHOLE_PREFIX } else { 0 } - length.min(WHOLE_PREFIX - 1),
+                    positions,
+                }
             })
     }
 }
@@ -94,16 +103,88 @@ impl Sorter {
     }
 }
 
+/// A candidate a batch stage kept, by its index in the batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hit {
+    pub index: usize,
+    pub score: Option<i32>,
+    /// Character indices in the candidate that matched.
+    pub positions: Vec<usize>,
+}
+
+/// A matcher or sorter that takes a whole batch of a source's candidates in one call, as a
+/// package's does.
+pub trait BatchStage: Send + Sync + 'static {
+    /// The name configuration addresses it by.
+    fn name(&self) -> &str;
+
+    /// For a matcher, the hits `query` finds among `titles`; for a sorter, every one of them
+    /// in its order. None when it can't run now, so the source runs its own stage instead.
+    fn run(&self, query: &str, titles: &[&str]) -> Option<Vec<Hit>>;
+}
+
 /// A source's filter stages.
 #[derive(Clone)]
 pub struct Stages {
     pub matcher: Arc<dyn Matcher>,
     pub sorter: Sorter,
+    /// A package's matcher composed over `matcher`, which still runs whenever it can't.
+    pub batch_matcher: Option<Arc<dyn BatchStage>>,
+    /// A package's sorter composed over `sorter`, which still runs whenever it can't.
+    pub batch_sorter: Option<Arc<dyn BatchStage>>,
 }
 
 impl Stages {
+    pub fn native(matcher: Arc<dyn Matcher>, sorter: Sorter) -> Self {
+        Self {
+            matcher,
+            sorter,
+            batch_matcher: None,
+            batch_sorter: None,
+        }
+    }
+
     fn same(&self, other: &Self) -> bool {
-        self.matcher.name() == other.matcher.name() && self.sorter == other.sorter
+        let name = |stage: &Option<Arc<dyn BatchStage>>| stage.as_ref().map(|stage| stage.name().to_owned());
+        self.matcher.name() == other.matcher.name()
+            && self.sorter == other.sorter
+            && name(&self.batch_matcher) == name(&other.batch_matcher)
+            && name(&self.batch_sorter) == name(&other.batch_sorter)
+    }
+
+    /// Each of `texts`' match for `query` by the package's matcher, or None without one or when
+    /// it can't run now.
+    pub fn batch_matches(&self, query: &str, texts: &[&str]) -> Option<Vec<Option<Match>>> {
+        let hits = self.batch_matcher.as_ref()?.run(query, texts)?;
+        let mut matches = vec![None; texts.len()];
+        for hit in hits {
+            let slot = matches.get_mut(hit.index)?;
+            *slot = Some(Match {
+                score: hit.score.unwrap_or_default(),
+                positions: hit.positions,
+            });
+        }
+        Some(matches)
+    }
+
+    /// The order the package's sorter puts `titles` in, as indices into them, or None without
+    /// one or when it can't run now.
+    pub fn batch_order(&self, titles: &[&str]) -> Option<Vec<usize>> {
+        let hits = self.batch_sorter.as_ref()?.run("", titles)?;
+        let mut seen = vec![false; titles.len()];
+        let order: Vec<usize> = hits.into_iter().map(|hit| hit.index).collect();
+        let complete = order.len() == titles.len()
+            && order.iter().all(|&index| {
+                seen.get_mut(index)
+                    .is_some_and(|seen| !std::mem::replace(seen, true))
+            });
+        complete.then_some(order)
+    }
+
+    /// Whether the source's rows keep the order the stages gave them, which usage history then
+    /// leaves alone.
+    pub fn ordered(&self) -> bool {
+        self.sorter == Sorter::Title || self.batch_sorter.is_some()
     }
 }
 
@@ -212,6 +293,9 @@ mod tests {
         }
         assert_eq!(found("set", "System Settings").unwrap().positions, [7, 8, 9]);
         assert_eq!(found("é", "Éclair").unwrap().positions, [0]);
+        assert_eq!(found("İ", "İstanbul").unwrap().positions, [0]);
+        assert_eq!(found("i̇s", "İstanbul").unwrap().positions, [0, 1]);
+        assert_eq!(found("sta", "İstanbul"), None);
     }
 
     #[test]
@@ -221,10 +305,7 @@ mod tests {
         }
         assert_eq!(Sorter::named("builtin.random"), None);
         let filters = Filters::native();
-        let stages = |matcher, sorter| Stages {
-            matcher: filters.matcher(matcher).unwrap(),
-            sorter,
-        };
+        let stages = |matcher, sorter| Stages::native(filters.matcher(matcher).unwrap(), sorter);
         let source = SourceFilters::new(stages(FUZZY, Sorter::Relevance));
         assert!(!source.set(stages(FUZZY, Sorter::Relevance)));
         assert!(source.set(stages(PREFIX, Sorter::Relevance)));

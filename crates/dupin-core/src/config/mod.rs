@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub use advanced::{Advanced, KindAction, KindActions, Route, Routes, SourceStages};
+pub use advanced::{Advanced, KindAction, KindActions, Route, Routes, SourceStages, contribution};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::HotkeyTarget;

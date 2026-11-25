@@ -30,10 +30,7 @@ impl Rows {
     /// app.
     pub fn native() -> Self {
         Self {
-            filters: SourceFilters::new(Stages {
-                matcher: dupin_core::filter::fuzzy(),
-                sorter: Sorter::Relevance,
-            }),
+            filters: SourceFilters::new(Stages::native(dupin_core::filter::fuzzy(), Sorter::Relevance)),
             kinds: native(),
         }
     }
