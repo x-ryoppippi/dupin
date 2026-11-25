@@ -194,9 +194,11 @@ impl Ui {
         let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
         composition.apply(&config.advanced);
         let kinds = composition.kinds().clone();
-        let apps_provider = Arc::new(AppsProvider::standard(
-            composition.rows(crate::features::apps::SOURCE),
-        ));
+        let app_rows = composition.rows(crate::features::apps::SOURCE);
+        let apps_provider = Arc::new(match crate::features::apps::headless_roots() {
+            Some(roots) => AppsProvider::with_roots(roots, app_rows),
+            None => AppsProvider::standard(app_rows),
+        });
         let currency = crate::calculator::Currency::start({
             let me = me.clone();
             move || {

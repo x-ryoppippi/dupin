@@ -533,6 +533,7 @@ pub fn snap(
             .env("XDG_CONFIG_HOME", root.join("config"))
             .env("XDG_DATA_HOME", root.join("data"))
             .env("PATH", "/usr/bin:/bin")
+            .env(crate::features::apps::HEADLESS_APPS, "")
             .env("TZ", &environment.time_zone)
             .env("LANG", &lang)
             .env("LC_ALL", &lang)

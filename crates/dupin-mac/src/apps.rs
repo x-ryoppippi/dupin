@@ -60,7 +60,8 @@ impl AppsProvider {
         Self::with_roots(roots, rows)
     }
 
-    fn with_roots(roots: Vec<PathBuf>, rows: Rows) -> Self {
+    /// The bundles in `roots` and their subfolders only.
+    pub fn with_roots(roots: Vec<PathBuf>, rows: Rows) -> Self {
         AppsProvider {
             rows,
             roots,
