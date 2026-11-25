@@ -13,4 +13,4 @@
 - [Encrypted storage](./features/storage.md): how Dupin keeps data on disk, its key and its threat model
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI
-- [The name](./name.md)
+- [The name](./name.md): why Dupin, and the Mac launchers it descends from

@@ -19,6 +19,7 @@ mod icons;
 mod latency;
 mod log;
 mod mcp;
+mod notices;
 mod prefs;
 mod receivers;
 mod scripts;
