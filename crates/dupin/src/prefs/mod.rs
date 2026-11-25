@@ -711,8 +711,8 @@ mod tests {
         crate::stored::report(STORE, Some("couldn't get the storage key: locked"));
         let mut runtime =
             rune::Runtime::new(state(current, settings, false), view, SIZE, rune::Env::default());
-        for page in [Page::General, Page::Extensions, Page::Updates] {
-            runtime.update(move |s, _| s.show(page));
+        for page in [Page::General, Page::Keywords, Page::Extensions] {
+            runtime.update(move |s, _| s.page = page);
             assert!(shown(&mut runtime), "{}", page.title());
         }
         crate::stored::report(STORE, None);
