@@ -97,7 +97,7 @@ impl AliasTarget {
                 Self::Web(keyword.into())
             }
             Some(("file", path)) => {
-                if !(path.starts_with('/') || path.starts_with("~/")) || path.len() < 2 {
+                if !(path.starts_with('/') || path.starts_with("~/")) {
                     return Err(format!(
                         "`file:` takes an absolute or `~/` path such as `file:~/Documents`, not {target:?}"
                     ));
@@ -165,6 +165,7 @@ c = "calendar"
 ff = "app:org.mozilla.firefox"
 goo = "web:g"
 dl = "file:~/Downloads"
+root = "file:/"
 wc = "word-count"
 "#,
         )
@@ -174,6 +175,7 @@ wc = "word-count"
         assert_eq!(aliases["ff"], AliasTarget::App("org.mozilla.firefox".into()));
         assert_eq!(aliases["goo"], AliasTarget::Web("g".into()));
         assert_eq!(aliases["dl"], AliasTarget::File("~/Downloads".into()));
+        assert_eq!(aliases["root"], AliasTarget::File("/".into()));
         assert_eq!(aliases["wc"], AliasTarget::Command("word-count".into()));
         assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
         assert!(Config::default().aliases.is_empty());

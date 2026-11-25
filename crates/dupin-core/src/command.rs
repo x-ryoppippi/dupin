@@ -528,11 +528,24 @@ impl CommandRegistry {
                 .sort_by_key(|alias| (*alias != search, alias.len(), alias.clone()));
             entries.push(entry);
         }
-        entries.extend(self.paths.iter().map(|(alias, (path, title))| KeywordEntry {
-            target: KeywordTarget::Path(path.clone()),
-            title: title.clone(),
-            subtitle: crate::item::tilde(&path.to_string_lossy()),
-            keywords: vec![alias.clone()],
+        let mut paths: BTreeMap<&Path, KeywordEntry> = BTreeMap::new();
+        for (alias, (path, title)) in &self.paths {
+            paths
+                .entry(path)
+                .or_insert_with(|| KeywordEntry {
+                    target: KeywordTarget::Path(path.clone()),
+                    title: title.clone(),
+                    subtitle: crate::item::tilde(&path.to_string_lossy()),
+                    keywords: Vec::new(),
+                })
+                .keywords
+                .push(alias.clone());
+        }
+        entries.extend(paths.into_values().map(|mut entry| {
+            entry
+                .keywords
+                .sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+            entry
         }));
         entries.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.target.cmp(&b.target)));
         entries

@@ -230,7 +230,7 @@ impl Prefs {
         }
         self.reflect_launch_hotkey();
         if config != self.config {
-            self.keywords.reflect(&config);
+            self.keywords.reflect(&config, Some(&self.config));
         }
         self.config = config;
     }
@@ -315,7 +315,7 @@ impl Prefs {
 
     /// Persist the settings and hand them to the panel.
     fn save(&mut self, base: &Config) {
-        self.refresh_keywords();
+        self.refresh_keywords(base);
         *self.current.borrow_mut() = self.config.clone();
         // The panel must see this edit before the worker can echo its saved file back.
         self.publish();

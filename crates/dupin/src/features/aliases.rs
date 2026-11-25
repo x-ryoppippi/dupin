@@ -270,4 +270,55 @@ mod tests {
             .unwrap();
         assert_eq!(dictionary.keywords, ["word", "lookup"]);
     }
+
+    #[test]
+    fn an_alias_for_an_extension_never_costs_it_its_own_keyword() {
+        use std::sync::Arc;
+
+        use crate::extensions::tests::extension;
+        use crate::features::extensions::add_extensions;
+
+        let config =
+            Config::parse("[aliases]\nwc = \"word-count\"\nwords = \"word-count\"\nwc2 = \"other\"").unwrap();
+        let mut configured = configured(&config).unwrap();
+        let added = add_extensions(&mut configured, &[Arc::new(extension("Word Count", "wc"))]);
+        let words = id("extension.word-count");
+        assert_eq!(configured.registry.keyword("wc"), Some(&words));
+        assert_eq!(configured.registry.keyword("words"), Some(&words));
+        assert_eq!(added.problems.len(), 1, "{:?}", added.problems);
+        assert!(
+            added
+                .problems
+                .iter()
+                .any(|problem| problem.contains("alias `wc2` names `other`"))
+        );
+
+        // Another package's keyword never takes an alias.
+        let config = Config::parse("[aliases]\nwc = \"calendar\"\n[calendar]\nenabled = true").unwrap();
+        let mut configured = configured(&config).unwrap();
+        let added = add_extensions(&mut configured, &[Arc::new(extension("Word Count", "wc"))]);
+        assert_eq!(
+            configured.registry.keyword("wc").map(CommandId::as_str),
+            Some("calendar.events")
+        );
+        assert_eq!(added.problems.len(), 1);
+    }
+
+    #[test]
+    fn two_aliases_for_one_folder_list_it_once() {
+        let folder = tempfile::tempdir().unwrap();
+        let config = config(&format!(
+            "doc = \"file:{0}\"\ndocs = \"file:{0}\"",
+            folder.path().display()
+        ));
+        let configured = configured(&config).unwrap();
+        let listed: Vec<_> = configured
+            .registry
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.target == dupin_core::KeywordTarget::Path(folder.path().to_path_buf()))
+            .collect();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].keywords, ["doc", "docs"]);
+    }
 }

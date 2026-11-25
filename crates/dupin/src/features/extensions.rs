@@ -125,7 +125,7 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             configured
                 .package_aliases
                 .iter()
-                .any(|(alias, _)| alias == keyword)
+                .any(|(alias, package)| alias == keyword && *package != extension.id)
                 .then_some("an alias in config.toml")
         });
         if let Some(holder) = holder {

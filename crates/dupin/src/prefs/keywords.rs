@@ -37,18 +37,23 @@ impl Keywords {
             snippets: TextEdit::new(""),
             problem: None,
         };
-        keywords.reflect(config);
+        keywords.reflect(config, None);
         keywords
     }
 
-    /// Lists `config`'s keywords again, and puts its keyword lists in their fields.
-    pub(super) fn reflect(&mut self, config: &Config) {
+    /// Lists `config`'s keywords again, and puts its keyword lists in their fields where
+    /// they differ from `previous`'s, so a draft survives an unrelated edit.
+    pub(super) fn reflect(&mut self, config: &Config, previous: Option<&Config>) {
         if let Ok(configured) = crate::commands::configured(config) {
             self.entries = configured.registry.entries();
             self.problems = configured.alias_problems;
         }
-        self.dictionary = TextEdit::new(config.dictionary_keywords.join(" "));
-        self.snippets = TextEdit::new(config.snippet_keywords.join(" "));
+        if previous.is_none_or(|previous| previous.dictionary_keywords != config.dictionary_keywords) {
+            self.dictionary = TextEdit::new(config.dictionary_keywords.join(" "));
+        }
+        if previous.is_none_or(|previous| previous.snippet_keywords != config.snippet_keywords) {
+            self.snippets = TextEdit::new(config.snippet_keywords.join(" "));
+        }
     }
 }
 
@@ -80,11 +85,12 @@ impl Prefs {
                 return;
             }
         };
-        if self.config.aliases.0.contains_key(&alias) {
+        let current = self.current.borrow().aliases.0.clone();
+        if current.contains_key(&alias) {
             self.keywords.problem = Some(format!("`{alias}` is already an alias; remove it first"));
             return;
         }
-        if self.config.aliases.0.len() >= dupin_core::config::MAX_ALIASES {
+        if current.len() >= dupin_core::config::MAX_ALIASES {
             self.keywords.problem = Some(format!(
                 "config.toml takes at most {} aliases",
                 dupin_core::config::MAX_ALIASES
@@ -121,8 +127,8 @@ impl Prefs {
         }
     }
 
-    pub(super) fn refresh_keywords(&mut self) {
-        self.keywords.reflect(&self.config);
+    pub(super) fn refresh_keywords(&mut self, base: &Config) {
+        self.keywords.reflect(&self.config, Some(base));
     }
 
     #[cfg(test)]

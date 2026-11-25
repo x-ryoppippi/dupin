@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -347,11 +347,20 @@ impl Session {
             }
             return true;
         }
-        // An alias's app or file is shown once, where the alias puts it.
+        // An alias's app or file is shown once, where the alias puts it, as the row a provider
+        // found for it when one did, so it keeps that row's actions.
+        let mut found = HashMap::new();
         let (kept_items, kept_origins): (Vec<_>, Vec<_>) = items
             .into_iter()
             .zip(origins)
-            .filter(|(item, _)| !self.search.suggestions.iter().any(|row| row.id == item.id))
+            .filter_map(|(item, origin)| {
+                if self.search.suggestions.iter().any(|row| row.id == item.id) {
+                    found.insert(item.id.clone(), item);
+                    None
+                } else {
+                    Some((item, origin))
+                }
+            })
             .unzip();
         let (mut items, mut origins) = (kept_items, kept_origins);
         let after = self.search.leading + usize::from(!items.is_empty());
@@ -361,7 +370,8 @@ impl Session {
             } else {
                 after + index - self.search.leading
             };
-            items.insert(at.min(items.len()), item.clone());
+            let item = found.remove(&item.id).unwrap_or_else(|| item.clone());
+            items.insert(at.min(items.len()), item);
             origins.insert(at.min(origins.len()), keywords::origin());
         }
         items.truncate(self.search.active_limit);
