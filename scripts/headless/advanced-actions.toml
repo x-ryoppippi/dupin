@@ -1,0 +1,12 @@
+auto_update = false
+
+[advanced.sources.apps]
+matcher = "builtin.prefix"
+
+[[advanced.kinds.app.actions]]
+title = "Show in App Store"
+url = "https://apps.apple.com/search?term={name}"
+
+[[advanced.kinds.app.actions]]
+title = "Inspect bundle"
+script = "inspect-bundle"

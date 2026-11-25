@@ -1,0 +1,7 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "saf" },
+		{ "t": 3.0, "type": "key", "name": "k", "cmd": true },
+		{ "t": 3.8, "type": "mark", "name": "end" }
+	]
+}
