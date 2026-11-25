@@ -3,6 +3,8 @@
 
 use std::ffi::c_void;
 
+use objc2::rc::autoreleasepool;
+
 use objc2_app_kit::{NSFontWeightRegular, NSImage, NSImageSymbolConfiguration};
 use objc2_core_graphics::{
     CGBitmapContextCreate, CGColorSpace, CGContext, CGImageAlphaInfo, CGInterpolationQuality,
@@ -17,6 +19,11 @@ const MAX_PIXELS: u32 = 1024;
 /// straight-alpha sRGB RGBA pixels, rows top first. `None` when the system has no symbol of
 /// that name or the sizes are out of range.
 pub fn rgba(name: &str, canvas: u32, glyph: u32, ink: [u8; 4]) -> Option<Vec<u8>> {
+    // The worker that calls this lives as long as Dupin, and no pool of AppKit's drains on it.
+    autoreleasepool(|_| draw(name, canvas, glyph, ink))
+}
+
+fn draw(name: &str, canvas: u32, glyph: u32, ink: [u8; 4]) -> Option<Vec<u8>> {
     if !dupin_core::item::is_symbol_name(name)
         || canvas == 0
         || canvas > MAX_PIXELS

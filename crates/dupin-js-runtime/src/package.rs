@@ -106,6 +106,30 @@ fn display_prefix(prefix: &str) -> String {
     }
 }
 
+/// The regular file `name` names in the package in `root`, by its canonical path. A path that
+/// leads out of the folder, as through a symlink, or to anything but a file is an error, as a
+/// module's would be, so a file the manifest names never brings in anything from outside.
+pub fn package_file(root: &Path, name: &str) -> Result<PathBuf, Diagnostic> {
+    let unreadable = |error: std::io::Error| {
+        Diagnostic::new("package-unreadable", format!("`{name}` can't be read: {error}"))
+    };
+    let canonical_root = root.canonicalize().map_err(unreadable)?;
+    let file = root.join(name).canonicalize().map_err(unreadable)?;
+    if !file.starts_with(&canonical_root) {
+        return Err(Diagnostic::new(
+            "symlink-escape",
+            format!("`{name}` is a symlink to something outside the package folder"),
+        ));
+    }
+    if !std::fs::metadata(&file).map_err(unreadable)?.is_file() {
+        return Err(Diagnostic::new(
+            "package-unreadable",
+            format!("`{name}` isn't a file"),
+        ));
+    }
+    Ok(file)
+}
+
 /// Whether the loader reads a file of this name as part of the package's code, whatever its
 /// entry. TypeScript files are read too when the entry is TypeScript.
 pub fn is_source_name(name: &str) -> bool {

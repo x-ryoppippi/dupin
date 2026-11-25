@@ -144,8 +144,8 @@ fn ensure_development_link(link: &Path, name: &str) -> Result<(), Diagnostic> {
     }
 }
 
-/// Copies what the launcher loads into `staging`: `package.json` and either the fresh bundle or
-/// the package's JavaScript files.
+/// Copies what the launcher loads into `staging`: `package.json`, either the fresh bundle or
+/// the package's JavaScript files, and the image `dupin.icon` names.
 fn fill(
     package_dir: &Path,
     staging: &Path,
@@ -155,6 +155,11 @@ fn fill(
 ) -> Result<(), Diagnostic> {
     std::fs::create_dir_all(staging).map_err(|error| unwritable(staging, &error))?;
     copy(&package_dir.join(MANIFEST_FILE), &staging.join(MANIFEST_FILE))?;
+    if let Some(icon) = &package.icon {
+        let image = dupin_js_runtime::package_file(package_dir, icon)
+            .map_err(|diagnostic| diagnostic.file(MANIFEST_FILE).field("dupin.icon"))?;
+        copy(&image, &staging.join(icon))?;
+    }
     if package.needs_build() {
         let rolldown = rolldown.ok_or_else(missing_rolldown)?;
         return bundle(

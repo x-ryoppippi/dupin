@@ -581,6 +581,13 @@ pub(crate) fn validate_actions(actions: &[RowAction], source: Source) -> Result<
     Ok(())
 }
 
+/// The path inside the package `icon` names, when [`check_icon`] accepts it and it names an image
+/// file rather than a symbol.
+pub fn image_path(icon: &str) -> Option<&str> {
+    (!icon.starts_with(dupin_plugin_protocol::symbol::SYMBOL_PREFIX) && check_icon(icon).is_ok())
+        .then_some(icon)
+}
+
 /// `sf:` and an SF Symbol's name, or a path inside the package to an image format the launcher
 /// draws.
 pub fn check_icon(icon: &str) -> Result<(), String> {

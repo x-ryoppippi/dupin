@@ -37,7 +37,8 @@ declare module 'dupin' {
 		/**
 		 * An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to
 		 * `package.json`, or an SF Symbol: `sf:` and its name, drawn in the colour of the row's
-		 * text. Without one, the row shows the package's own `icon`.
+		 * text. Without one, a row in the main search shows the package's own `icon`; under the
+		 * package's keyword it shows none, as the keyword's chip shows the package's.
 		 */
 		icon?: Icon;
 		/** An image the package keeps, drawn scaled down as the row's icon in place of `icon`. */
@@ -505,9 +506,9 @@ declare module 'dupin' {
 		/** Typed before a space to reach the extension. Up to 32 bytes, no spaces. */
 		keyword: string;
 		/**
-		 * The package's own icon, on its keyword chip, in Settings and on each of its rows that
-		 * names none: an image file inside the package, as an item's `icon`, or `sf:` and an SF
-		 * Symbol's name, such as `sf:puzzlepiece`.
+		 * The package's own icon, on its keyword chip, in Settings and on each of its rows in the
+		 * main search that names none (not under its keyword): an image file inside the package,
+		 * as an item's `icon`, or `sf:` and an SF Symbol's name, such as `sf:puzzlepiece`.
 		 */
 		icon?: Icon;
 		/** The module that exports `search` or `items`, inside the package. Defaults to `main.js`. */

@@ -555,6 +555,52 @@ fn development_copy_swaps_atomically_and_keeps_the_last_good_revision() {
 }
 
 #[test]
+fn development_copy_carries_the_package_icon_and_refuses_one_from_outside() {
+    let package = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let extensions = tempfile::tempdir().unwrap();
+    let (package, extensions) = (package.path(), extensions.path());
+    let with_icon = |icon: &str| {
+        let mut manifest: Value = serde_json::from_str(&manifest("pictured", json!({}))).unwrap();
+        manifest["dupin"]["icon"] = json!(icon);
+        manifest.to_string()
+    };
+    write(
+        &package.join("main.js"),
+        "export function search() { return []; }\n",
+    );
+    write(&package.join("assets/icon.png"), "png");
+    write(&package.join("package.json"), &with_icon("assets/icon.png"));
+    let copy = DevCopy {
+        package_dir: package,
+        extensions,
+        rolldown: None,
+        options: BuildOptions::default(),
+        validate: &validate,
+    };
+    copy.publish().unwrap();
+    let link = extensions.join("pictured");
+    assert_eq!(
+        std::fs::read_to_string(link.join("assets/icon.png")).unwrap(),
+        "png"
+    );
+
+    write(&package.join("package.json"), &with_icon("sf:star.fill"));
+    copy.publish().unwrap();
+    assert!(!link.join("assets").exists());
+
+    write(&outside.path().join("secret.png"), "secret");
+    std::os::unix::fs::symlink(outside.path().join("secret.png"), package.join("escape.png")).unwrap();
+    write(&package.join("package.json"), &with_icon("escape.png"));
+    let error = copy.publish().unwrap_err();
+    assert_eq!(
+        (error.code.as_ref(), error.field.as_deref()),
+        ("symlink-escape", Some("dupin.icon"))
+    );
+    assert!(!link.join("escape.png").exists());
+}
+
+#[test]
 fn development_copy_never_replaces_an_installed_extension() {
     let package = tempfile::tempdir().unwrap();
     let extensions = tempfile::tempdir().unwrap();

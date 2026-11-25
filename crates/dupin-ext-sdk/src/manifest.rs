@@ -18,6 +18,9 @@ pub struct PackageInfo {
     pub(crate) main: String,
     /// `source`: what `dupin ext build` bundles into `main`. `None` means `main` is the source.
     pub(crate) source: Option<String>,
+    /// The image file `dupin.icon` names, which the launcher loads with the package. A symbol,
+    /// or a value the launcher refuses, names none; the launcher's check reports the latter.
+    pub(crate) icon: Option<String>,
 }
 
 impl PackageInfo {
@@ -88,7 +91,18 @@ pub(crate) fn read_package(dir: &Path) -> Result<PackageInfo, Diagnostic> {
             "source",
         )?),
     };
-    Ok(PackageInfo { name, main, source })
+    let icon = root
+        .get("dupin")
+        .and_then(|dupin| dupin.get("icon"))
+        .and_then(Value::as_str)
+        .and_then(dupin_js_runtime::row::image_path)
+        .map(str::to_owned);
+    Ok(PackageInfo {
+        name,
+        main,
+        source,
+        icon,
+    })
 }
 
 fn string(object: &Map<String, Value>, key: &str, field: &str, hint: &str) -> Result<String, Diagnostic> {

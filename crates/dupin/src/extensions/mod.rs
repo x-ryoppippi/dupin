@@ -524,7 +524,40 @@ struct LoadedExtension {
     files: Vec<FileStamp>,
     /// What the bytecode was compiled from, so a revision whose files are unchanged reuses it.
     content: blake3::Hash,
+    /// The image file `dupin.icon` names, so a replaced or retargeted image loads again.
+    icon: Option<IconStamp>,
     extension: Arc<Extension>,
+}
+
+struct IconStamp {
+    /// As the manifest names it.
+    name: String,
+    stamp: FileStamp,
+}
+
+impl IconStamp {
+    fn read(folder: &Path, name: &str) -> Result<Self, Diagnostic> {
+        let unreadable = |diagnostic: Diagnostic| {
+            diagnostic.file(manifest::PACKAGE_JSON).field("dupin.icon").hint(
+                "Ship the image inside the package folder, or name an SF Symbol, such as `sf:puzzlepiece`.",
+            )
+        };
+        let image = dupin_js_runtime::package_file(folder, name).map_err(unreadable)?;
+        let stamp = FileStamp::read(image).map_err(|error| {
+            unreadable(Diagnostic::new(
+                "package-unreadable",
+                format!("`{name}` can't be read: {error}"),
+            ))
+        })?;
+        Ok(Self {
+            name: name.to_owned(),
+            stamp,
+        })
+    }
+
+    fn is_current(&self, folder: &Path) -> bool {
+        Self::read(folder, &self.name).is_ok_and(|now| now.stamp == self.stamp)
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -592,7 +625,8 @@ fn load_with(
     let previous = match previous {
         Some(previous)
             if previous.manifests == manifests
-                && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files) =>
+                && revision(folder, &previous.entry).is_ok_and(|files| files == previous.files)
+                && previous.icon.as_ref().is_none_or(|icon| icon.is_current(folder)) =>
         {
             return Ok(previous);
         }
@@ -600,7 +634,7 @@ fn load_with(
     };
 
     let manifest = manifest::read(&manifests)?;
-    let icon = package_icon(folder, manifest.icon.as_ref())?;
+    let (icon, icon_stamp) = package_icon(folder, manifest.icon.as_ref())?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
     let package = package_id(&manifest, bundled)?;
@@ -610,6 +644,7 @@ fn load_with(
         entry: manifest.entry,
         files,
         content,
+        icon: icon_stamp,
         extension: Arc::new(Extension {
             id: manifest.id,
             folder_name: folder_name(folder).into_owned(),
@@ -634,45 +669,24 @@ fn load_with(
     })
 }
 
-/// The icon `declared` names, with an image file found inside the package folder: a path that
-/// leads out of it, as through a symlink, or to anything but a file, fails the package, as a
-/// module would.
+/// The icon `declared` names, and for an image file its stamp: the file must be inside the
+/// package folder, as [`dupin_js_runtime::package_file`] checks, or the package fails to load,
+/// as it would for a module.
 fn package_icon(
     folder: &Path,
     declared: Option<&manifest::PackageIcon>,
-) -> Result<Option<dupin_core::Icon>, Diagnostic> {
-    let file = match declared {
-        None => return Ok(None),
-        Some(manifest::PackageIcon::Symbol(name)) => return Ok(Some(dupin_core::Icon::Symbol(name.clone()))),
-        Some(manifest::PackageIcon::File(file)) => file,
-    };
-    let problem = |code: &'static str, message: String| {
-        Diagnostic::new(code, message)
-            .file(manifest::PACKAGE_JSON)
-            .field("dupin.icon")
-            .hint("Ship the image inside the package folder, or name an SF Symbol, such as `sf:puzzlepiece`.")
-    };
-    let unreadable = |error: std::io::Error| {
-        problem(
-            "invalid-manifest",
-            format!("names `{file}`, which can't be read: {error}"),
-        )
-    };
-    let root = folder.canonicalize().map_err(unreadable)?;
-    let image = folder.join(file).canonicalize().map_err(unreadable)?;
-    if !image.starts_with(&root) {
-        return Err(problem(
-            "symlink-escape",
-            format!("names `{file}`, a symlink to something outside the package folder"),
-        ));
+) -> Result<(Option<dupin_core::Icon>, Option<IconStamp>), Diagnostic> {
+    match declared {
+        None => Ok((None, None)),
+        Some(manifest::PackageIcon::Symbol(name)) => Ok((Some(dupin_core::Icon::Symbol(name.clone())), None)),
+        Some(manifest::PackageIcon::File(name)) => {
+            let stamp = IconStamp::read(folder, name)?;
+            Ok((
+                Some(dupin_core::Icon::Image(stamp.stamp.path.clone())),
+                Some(stamp),
+            ))
+        }
     }
-    if !std::fs::metadata(&image).map_err(unreadable)?.is_file() {
-        return Err(problem(
-            "invalid-manifest",
-            format!("names `{file}`, which isn't a file"),
-        ));
-    }
-    Ok(Some(dupin_core::Icon::Image(image)))
 }
 
 /// The revision grants are for: package.json and every module Dupin runs (`content`), so a
@@ -846,7 +860,8 @@ pub(crate) mod tests {
         symlink(root.join("assets/icon.png"), root.join("inside.png")).unwrap();
         symlink(outside.path().join("secret.png"), root.join("escape.png")).unwrap();
         symlink(outside.path(), root.join("linked")).unwrap();
-        let file = |name: &str| package_icon(root, Some(&PackageIcon::File(name.into())));
+        let file =
+            |name: &str| package_icon(root, Some(&PackageIcon::File(name.into()))).map(|(icon, _)| icon);
 
         let canonical = root.canonicalize().unwrap().join("assets/icon.png");
         assert_eq!(
@@ -858,15 +873,17 @@ pub(crate) mod tests {
             Some(dupin_core::Icon::Image(canonical))
         );
         assert_eq!(
-            package_icon(root, Some(&PackageIcon::Symbol("star".into()))).unwrap(),
+            package_icon(root, Some(&PackageIcon::Symbol("star".into())))
+                .unwrap()
+                .0,
             Some(dupin_core::Icon::Symbol("star".into()))
         );
-        assert_eq!(package_icon(root, None).unwrap(), None);
+        assert!(package_icon(root, None).unwrap().0.is_none());
         for (name, code) in [
             ("escape.png", "symlink-escape"),
             ("linked/secret.png", "symlink-escape"),
-            ("missing.png", "invalid-manifest"),
-            ("assets/folder.png", "invalid-manifest"),
+            ("missing.png", "package-unreadable"),
+            ("assets/folder.png", "package-unreadable"),
         ] {
             let diagnostic = file(name).unwrap_err();
             assert_eq!(
@@ -1474,5 +1491,41 @@ pub(crate) mod tests {
         let current = Arc::clone(&reloaded.extension);
         let unchanged = load(&folder, Some(reloaded), false).unwrap();
         assert!(Arc::ptr_eq(&current, &unchanged.extension));
+    }
+
+    #[test]
+    fn a_retargeted_or_replaced_package_icon_loads_the_package_again() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let folder = fixture.path().join("marks");
+        fs::create_dir_all(folder.join("assets")).unwrap();
+        fs::write(
+            folder.join(PACKAGE_JSON),
+            r#"{"name": "marks", "version": "0.1.0", "dupin": {"title": "Marks", "keyword": "bm", "icon": "icon.png"}}"#,
+        )
+        .unwrap();
+        fs::write(folder.join("main.js"), SEARCH).unwrap();
+        fs::write(folder.join("assets/a.png"), b"a").unwrap();
+        fs::write(folder.join("assets/b.png"), b"bb").unwrap();
+        symlink("assets/a.png", folder.join("icon.png")).unwrap();
+        let image = |name: &str| dupin_core::Icon::Image(folder.canonicalize().unwrap().join(name));
+
+        let loaded = load(&folder, None, false).unwrap();
+        assert_eq!(loaded.extension.icon, Some(image("assets/a.png")));
+        let first = Arc::clone(&loaded.extension);
+        let unchanged = load(&folder, Some(loaded), false).unwrap();
+        assert!(Arc::ptr_eq(&first, &unchanged.extension));
+
+        fs::remove_file(folder.join("icon.png")).unwrap();
+        symlink("assets/b.png", folder.join("icon.png")).unwrap();
+        let retargeted = load(&folder, Some(unchanged), false).unwrap();
+        assert_eq!(retargeted.extension.icon, Some(image("assets/b.png")));
+
+        fs::remove_file(folder.join("icon.png")).unwrap();
+        let gone = load(&folder, Some(retargeted), false).unwrap_err();
+        assert_eq!(
+            (gone.code.as_ref(), gone.field.as_deref()),
+            ("package-unreadable", Some("dupin.icon"))
+        );
     }
 }

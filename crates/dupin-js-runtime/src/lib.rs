@@ -36,7 +36,7 @@ pub use environment::Environment;
 pub use filter::{FilterHit, FilterInput, FilterStage};
 pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Reply, Unavailable};
 pub use output::ActionEffect;
-pub use package::{Sources, is_module, is_source_name, source_files};
+pub use package::{Sources, is_module, is_source_name, package_file, source_files};
 pub use row::{CataloguePage, Reason, Row};
 pub use view::ViewAnswer;
 

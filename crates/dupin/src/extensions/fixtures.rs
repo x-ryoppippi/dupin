@@ -604,10 +604,9 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
         }
         std::fs::copy(path, target).map_err(unwritable)?;
     }
-    if let (Some(manifest::PackageIcon::File(name)), Some(dupin_core::Icon::Image(image))) = (
-        &manifest.icon,
-        super::package_icon(folder, manifest.icon.as_ref())?,
-    ) {
+    if let Some(manifest::PackageIcon::File(name)) = &manifest.icon {
+        let image = dupin_js_runtime::package_file(folder, name)
+            .map_err(|diagnostic| diagnostic.file(manifest::PACKAGE_JSON).field("dupin.icon"))?;
         let target = into.join(name);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(unwritable)?;
