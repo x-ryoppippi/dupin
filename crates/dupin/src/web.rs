@@ -291,7 +291,10 @@ pub(crate) fn item(shown: &Item, search: &WebSearch, query: &str, complete: bool
         payload: Payload::text(query),
         view: View::Text { title, subtitle },
         record_usage: false,
-        icon: shown.icon.clone(),
+        icon: shown
+            .icon
+            .clone()
+            .or_else(|| dupin_core::Icon::symbol(dupin_core::command::WEB_SEARCH_SYMBOL)),
         matched: Vec::new(),
         completion: (complete && query.is_empty()).then(|| format!("{} ", search.alias)),
         score: None,

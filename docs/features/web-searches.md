@@ -1,6 +1,6 @@
 # Web searches
 
-Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too, and each web search row shows its keyword as a tag. Select it and press Tab to add a space before typing the query. While you type the start of a keyword, such as `y`, the search it reaches shows as a row too ([Keywords](./keywords.md)). Type `web` and Space, then a query, to list every web search for it.
+Type `g rust lifetimes`, `gh dupin` or `yt piano` to search Google, GitHub or YouTube. The search appears as the first result alongside any matching apps; Enter opens it in the default browser. Typing just the keyword shows the search too, and each web search row shows a globe and its keyword as a tag. Select it and press Tab to add a space before typing the query. While you type the start of a keyword, such as `y`, the search it reaches shows as a row too ([Keywords](./keywords.md)). Type `web` and Space, then a query, to list every web search for it.
 
 Typing a query sends no network request. Dupin encodes the query into the URL when it builds the result and opens the browser or Maps only on activation. Web results do not count towards usage ranking. Query recall behaves as it does for other app-mode searches. Send to… offers each web search for selected text.
 

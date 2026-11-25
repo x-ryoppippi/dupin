@@ -260,8 +260,8 @@ fn checked(keyword: String) -> Result<String, CommandError> {
     }
 }
 
-/// What a web search's row shows.
-const WEB_SEARCH_SYMBOL: &str = "globe";
+/// What a web search's rows show: its keyword's row and the row that searches for the query.
+pub const WEB_SEARCH_SYMBOL: &str = "globe";
 
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
