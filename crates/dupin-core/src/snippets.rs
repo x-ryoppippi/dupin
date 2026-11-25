@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Snippet as ConfigSnippet;
 
-pub const MAX_KEYWORD_BYTES: usize = 32;
-pub const MAX_NAME_CHARS: usize = 80;
-pub const MAX_TEXT_BYTES: usize = 64 * 1024;
+const MAX_KEYWORD_BYTES: usize = 32;
+const MAX_NAME_CHARS: usize = 80;
+const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// As many rows as one extension's catalogue holds.
 pub const MAX_SNIPPETS: usize = 10_000;
 /// Every snippet's keyword, name and text together: the package gets them all with each
@@ -147,16 +147,6 @@ pub struct Problems {
 impl Problems {
     pub fn is_empty(&self) -> bool {
         self.keyword.is_none() && self.name.is_none() && self.text.is_none()
-    }
-
-    /// Every problem on one line, keyword first.
-    pub fn summary(&self) -> String {
-        [&self.keyword, &self.name, &self.text]
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("; ")
     }
 }
 
@@ -597,7 +587,11 @@ mod tests {
                 .is_some()
         );
         let problems = check(stored("two words", None, ""));
-        assert_eq!(problems.summary(), "A keyword has no spaces; Enter the text");
+        assert_eq!(
+            serde_json::to_value(problems).unwrap(),
+            serde_json::json!({ "keyword": "A keyword has no spaces", "text": "Enter the text" }),
+            "each field's problem, as a form shows it, and no field without one"
+        );
     }
 
     #[test]
