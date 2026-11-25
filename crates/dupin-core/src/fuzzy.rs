@@ -23,7 +23,7 @@ const LENGTH: i32 = 1;
 /// "FaceTime"): more than [`crate::history::MAX_BOOST`] plus the widest gap between two
 /// matches' other scores, so usage orders such matches among themselves but never lifts a
 /// scattered one ("ar" in "Calendar", or "Apple Radio" by its initials) above them.
-pub const RUN_FROM_WORD_START: i32 = 2048;
+pub(crate) const RUN_FROM_WORD_START: i32 = 2048;
 
 /// Matches `query` against `name`, ignoring case and whitespace in the query.
 /// None when the query's characters don't all appear in order.
