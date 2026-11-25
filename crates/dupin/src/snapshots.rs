@@ -29,17 +29,7 @@ impl Snapshots {
         std::thread::Builder::new()
             .name("dupin-snapshots".into())
             .spawn(move || {
-                let mut store = match std::env::var_os("XDG_DATA_HOME").or_else(|| std::env::var_os("HOME")) {
-                    Some(base) => Store::from_base(
-                        base.into(),
-                        std::path::Path::new(if std::env::var_os("XDG_DATA_HOME").is_some() {
-                            "dupin/snapshots"
-                        } else {
-                            "Library/Application Support/Dupin/snapshots"
-                        }),
-                    ),
-                    None => Store::from_base(std::path::PathBuf::new(), std::path::Path::new("")),
-                };
+                let mut store = open_store();
                 let mut cache = std::collections::HashMap::new();
                 write_requests(&mut store, rx, |store, result| {
                     publish(store, &me, result, &mut cache)
@@ -67,6 +57,7 @@ impl Snapshots {
     }
 
     pub fn set_sources(&mut self, sources: Vec<String>) {
+        listing().sources.clone_from(&sources);
         self.sources = sources;
     }
 
@@ -103,17 +94,27 @@ impl Snapshots {
     }
 
     pub fn accept_open(&mut self, call: crate::control::Call) {
-        if let crate::control::Command::SnapshotsOpen { id: Some(id) } = &call.request.command
-            && !self.open(id)
-        {
+        let id = match &call.request.command {
+            crate::control::Command::SnapshotsOpen { id } => id.as_deref(),
+            _ => None,
+        };
+        if id.is_some_and(|id| !self.entries.iter().any(|s| s.id == id)) {
             call.finish(Err("NotFound: snapshot".into()));
             return;
         }
+        self.reveal(id);
+        call.finish(Ok(serde_json::Value::Null));
+    }
+
+    /// Clears the search, as opening the window does, and selects the snapshot `id`, if any.
+    pub fn reveal(&mut self, id: Option<&str>) {
         self.query = TextEdit::new("");
         self.query.focused = true;
         self.pending_delete = None;
         self.filter();
-        call.finish(Ok(serde_json::Value::Null));
+        if let Some(id) = id {
+            self.open(id);
+        }
     }
 
     pub fn show(&self) {
@@ -178,12 +179,14 @@ impl Snapshots {
     }
 
     fn resume(&mut self) {
-        if let Some(saved) = self
-            .selected
-            .as_deref()
-            .and_then(|id| self.entries.iter().find(|s| s.id == id))
-            .cloned()
-        {
+        if let Some(id) = self.selected.clone() {
+            self.resume_id(&id);
+        }
+    }
+
+    /// Runs the search the snapshot `id` saved again, if its command is still available.
+    pub fn resume_id(&mut self, id: &str) {
+        if let Some(saved) = self.entries.iter().find(|s| s.id == id).cloned() {
             if !self.sources.contains(&saved.mode) {
                 self.report("The source command is unavailable. Saved content remains readable.".into());
                 return;
@@ -486,6 +489,7 @@ fn publish(
         })
         .collect();
     let problem = store.problem().map(str::to_owned);
+    listing().list(&entries);
     me.update(move |s, _| {
         s.loaded = true;
         s.entries = entries;
@@ -510,6 +514,7 @@ fn publish(
             }
         }
         s.filter();
+        s.panel.update(crate::ui::Ui::refresh_snapshots);
     });
 }
 
@@ -542,7 +547,53 @@ fn summaries(entries: &[Snapshot], problem: Option<String>, budget: usize) -> cr
     list
 }
 
-fn source_name(mode: &str) -> &str {
+/// What the `snap` keyword lists: each saved snapshot's metadata, newest first, as the
+/// window last loaded it, and the commands a snapshot may resume. Only the metadata the
+/// window's own list shows is kept here, never saved content.
+pub struct Listing {
+    entries: Option<Vec<crate::control::SnapshotSummary>>,
+    pub sources: Vec<String>,
+}
+
+impl Listing {
+    fn list(&mut self, saved: &[Snapshot]) {
+        self.entries = Some(summaries(saved, None, usize::MAX).entries);
+    }
+
+    /// The saved snapshots, read from the archive the first time they are asked for if the
+    /// Snapshots window hasn't read them yet.
+    pub fn entries(&mut self) -> &[crate::control::SnapshotSummary] {
+        if self.entries.is_none() {
+            self.list(open_store().list());
+        }
+        self.entries.as_deref().unwrap_or_default()
+    }
+}
+
+pub fn listing() -> std::sync::MutexGuard<'static, Listing> {
+    static LISTING: std::sync::Mutex<Listing> = std::sync::Mutex::new(Listing {
+        entries: None,
+        sources: Vec::new(),
+    });
+    LISTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The snapshot archive in Dupin's data folder.
+fn open_store() -> Store {
+    match std::env::var_os("XDG_DATA_HOME").or_else(|| std::env::var_os("HOME")) {
+        Some(base) => Store::from_base(
+            base.into(),
+            std::path::Path::new(if std::env::var_os("XDG_DATA_HOME").is_some() {
+                "dupin/snapshots"
+            } else {
+                "Library/Application Support/Dupin/snapshots"
+            }),
+        ),
+        None => Store::from_base(std::path::PathBuf::new(), std::path::Path::new("")),
+    }
+}
+
+pub fn source_name(mode: &str) -> &str {
     match mode {
         "apps.search" => "Applications",
         "files.names" => "Files",
@@ -565,7 +616,7 @@ fn button(label: &str, k: &rune_kit::Kit) -> El {
         .key(label)
 }
 
-fn saved_date(seconds: u64) -> String {
+pub fn saved_date(seconds: u64) -> String {
     let Ok(seconds) = libc::time_t::try_from(seconds) else {
         return "unknown date".into();
     };

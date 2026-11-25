@@ -631,6 +631,8 @@ fn action_bytes(action: &Action) -> usize {
                     ExtensionRequest::Kind { action, subject } => action.len() + subject.value_bytes(),
                 }
         }
+        Action::OpenSnapshots(id) => id.as_ref().map_or(0, String::len),
+        Action::ResumeSnapshot(id) => id.len(),
         Action::System(_) | Action::RequestClipboardAccess | Action::OpenPreferences => 0,
     }
 }

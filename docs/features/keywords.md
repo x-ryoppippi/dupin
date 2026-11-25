@@ -1,6 +1,6 @@
 # Keywords
 
-A keyword typed at the start of the main search, then Space, enters a command's own search: `cal` for [Calendar](./calendar.md), `define` or `d` for [Dictionary](./dictionary.md), `in` for [file contents](./files.md), `clip` for [clipboard history](./clipboard.md), `snip` for [snippets](./snippets.md), `emoji` for [Emoji & Symbols](./emoji.md), `help` for Dupin's own links, and an [extension's](./extensions.md) keyword for that extension. A [web search's](./web-searches.md) alias, such as `g` or `gh`, takes the query that follows it, and Space on an empty query searches [files](./files.md).
+A keyword typed at the start of the main search, then Space, enters a command's own search: `cal` for [Calendar](./calendar.md), `define` or `d` for [Dictionary](./dictionary.md), `in` for [file contents](./files.md), `clip` for [clipboard history](./clipboard.md), `snip` for [snippets](./snippets.md), `emoji` for [Emoji & Symbols](./emoji.md), `snap` for [snapshots](./snapshots.md), `help` for Dupin's own links, and an [extension's](./extensions.md) keyword for that extension. A [web search's](./web-searches.md) alias, such as `g` or `gh`, takes the query that follows it, and Space on an empty query searches [files](./files.md).
 
 ## Finding them as you type
 
@@ -23,7 +23,8 @@ Every keyword reaches one command or web search. Dupin registers them in this or
 
 1. Built-in commands: `in`, and `cal` and `clip` while Calendar search and clipboard history are on.
 2. `dictionary_keywords` and `snippet_keywords` in config.toml.
-3. Web search aliases, from `web_searches` or the defaults `g`, `gh`, `maps` and `yt`.
-4. Extension keywords, bundled extensions first, then the extensions folder in order.
+3. `snap` for snapshots.
+4. Web search aliases, from `web_searches` or the defaults `g`, `gh`, `maps` and `yt`.
+5. Extension keywords, bundled extensions first, then the extensions folder in order.
 
 `dupin ext install` refuses a package whose keyword one of these already holds.

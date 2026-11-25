@@ -255,6 +255,7 @@ mod tests {
                 "recent.items",
                 "scripts.search",
                 "settings.search",
+                "snapshots.list",
                 "snippets.search",
                 "system.commands",
                 "web.fallbacks",

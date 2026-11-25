@@ -45,7 +45,7 @@ pub enum Command {
         package: String,
     },
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SnapshotSummary {
     pub id: String,

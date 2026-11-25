@@ -9,6 +9,7 @@ mod launcher;
 pub(super) mod recent;
 mod scripts;
 mod settings;
+pub(crate) mod snapshots;
 pub(super) mod snippets;
 pub(super) mod system;
 pub(super) mod web;
@@ -184,6 +185,7 @@ pub(super) const MANIFEST: &[Feature] = &[
     settings::FEATURE,
     web::FEATURE,
     snippets::FEATURE,
+    snapshots::FEATURE,
     recent::FEATURE,
 ];
 

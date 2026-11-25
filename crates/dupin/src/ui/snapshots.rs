@@ -18,6 +18,21 @@ impl Ui {
         }
     }
 
+    /// Lists the saved snapshots again under their keyword, once a save or delete changed them.
+    pub fn refresh_snapshots(&mut self, tx: &mut Tx) {
+        if self.session.command_id().as_str() == crate::features::snapshots::SNAPSHOTS {
+            let effects = self.session.refresh();
+            self.apply(effects, tx);
+        }
+    }
+
+    /// Opens the Snapshots window, at `id` when given, once the panel has closed for the row
+    /// that asked.
+    pub(super) fn prepare_snapshots(&mut self, id: Option<String>) {
+        self.snapshots.update(move |s, _| s.reveal(id.as_deref()));
+        self.snapshots_after_close = true;
+    }
+
     pub fn control_snapshots_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
         if call.cancelled.load(Ordering::Relaxed) {
             return;

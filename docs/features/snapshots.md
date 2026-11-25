@@ -1,10 +1,19 @@
 # Snapshots
 
 Press ⌘⇧S in the launcher to save a finished calculation, search or extension view.
-Open **Snapshots** from Settings, or press ⌘⇧O in the launcher. Its separate,
+Open **Snapshots** from Settings, press ⌘⇧O in the launcher, or type `Snapshots`
+in the launcher and choose the Snapshots row. Its separate,
 resizable window searches titles and saved content. Click a title or use ↑/↓ to
 read it. Delete opens a confirmation before removing the selected snapshot;
 ⌘W closes the window. Editing the search field never deletes saved content.
+
+Type `snap`, then Space, to list saved snapshots in the launcher by title, with
+when each was saved, its mode and its query, newest first; typing filters them by
+title. Enter opens the selected snapshot in the Snapshots window, and ⌘Enter
+resumes its search, as ⌘R does, when its command is still available. The list
+uses the metadata the Snapshots window reads, and reads the archive only when the
+keyword is entered before the window has; the main search never reads it. See
+[Keywords](./keywords.md) for `snap` and the other keywords.
 
 Snapshots show historical content, including the visible result list, without
 running saved actions. **Resume search** (⌘R) explicitly runs the original mode

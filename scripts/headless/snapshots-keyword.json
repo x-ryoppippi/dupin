@@ -1,0 +1,6 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "snap " },
+		{ "t": 1.5, "type": "mark", "name": "end" }
+	]
+}

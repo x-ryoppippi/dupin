@@ -60,6 +60,10 @@ pub enum Action {
     Preview(PathBuf),
     /// Open the host application's preferences.
     OpenPreferences,
+    /// Open the Snapshots window, showing the saved snapshot with this ID if there is one.
+    OpenSnapshots(Option<String>),
+    /// Run the search the saved snapshot with this ID was taken of again.
+    ResumeSnapshot(String),
     /// Show another view of the same command inside the panel.
     Push(Page),
     /// Type the keyword and Space in the main search, as a row the keyword reaches offers;

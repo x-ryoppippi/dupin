@@ -13,6 +13,7 @@ Dupin lives in the background with no Dock icon or menu bar. Its hotkey (⌘Spac
 | `define` or `d`, then Space             | Look up a word in macOS dictionaries                                              |
 | `clip` then Space                       | Search the clipboard history, when it is on                                       |
 | `emoji` then Space                      | Pick an emoji or symbol                                                           |
+| `snap` then Space                       | List saved [snapshots](./features/snapshots.md)                                   |
 | `?`                                     | List every command and its keyword ([Keywords](./features/keywords.md))           |
 | ⌫ on an empty query                     | Leave a folder or the current search mode                                         |
 | ↑ ↓                                     | Move the selection                                                                |

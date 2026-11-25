@@ -113,6 +113,16 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
             found,
         ));
     }
+    if let Some(found) = fuzzy::score(query, "Snapshots") {
+        items.push(item(
+            "settings:snapshots".into(),
+            "Snapshots",
+            "Dupin",
+            None,
+            Action::OpenSnapshots(None),
+            found,
+        ));
+    }
     items.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
     items.truncate(limit);
     items
@@ -194,6 +204,14 @@ mod tests {
         let items = rank(&[], "dupin settings", 10);
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].action("open"), Some(&Action::OpenPreferences));
+    }
+
+    #[test]
+    fn the_snapshots_window_is_a_host_action() {
+        let items = rank(&[], "snapsh", 10);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].display_title(), "Snapshots");
+        assert_eq!(items[0].action("open"), Some(&Action::OpenSnapshots(None)));
     }
 
     #[test]

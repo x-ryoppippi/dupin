@@ -60,6 +60,8 @@ impl Ui {
                         }
                     }
                     Action::OpenPreferences => self.prepare_settings(),
+                    Action::OpenSnapshots(id) => self.prepare_snapshots(id),
+                    Action::ResumeSnapshot(id) => self.snapshots.update(move |s, _| s.resume_id(&id)),
                     Action::System(command) => {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;
