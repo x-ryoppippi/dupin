@@ -29,7 +29,7 @@ impl Ui {
     /// Opens the Snapshots window, at `id` when given, once the panel has closed for the row
     /// that asked.
     pub(super) fn prepare_snapshots(&mut self, id: Option<String>) {
-        self.snapshots.update(move |s, _| s.reveal(id.as_deref()));
+        self.snapshots.update(move |s, tx| s.reveal(id.as_deref(), tx));
         self.snapshots_after_close = true;
     }
 
@@ -40,7 +40,7 @@ impl Ui {
         if self.picker.is_some() {
             call.finish(Err("Busy: picker active".into()));
         } else {
-            self.snapshots.update(move |s, _| s.accept_open(call));
+            self.snapshots.update(move |s, tx| s.accept_open(call, tx));
             self.show_snapshots(tx);
         }
     }

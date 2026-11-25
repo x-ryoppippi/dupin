@@ -115,19 +115,21 @@ impl Ui {
                 } => self.answer_extension_consent(id, extension, request, tx),
                 Effect::RunConsuming { .. } => crate::log::warn("unsupported consuming action"),
                 Effect::Hide => self.hide(tx),
-                Effect::RevealSelection => {
-                    if self.session.selected_item().is_some() {
-                        tx.scroll_into_view(crate::view::row_key(
-                            &self.session.layout_key(self.session.selected()),
-                        ));
-                    }
-                }
+                Effect::RevealSelection => self.reveal_selection(tx),
             }
         }
         self.sync_forms(tx);
         // The selected row may have changed, and with it the preview its detail shows.
         self.fetch_icons();
         mark_session_query(&mut self.query, &self.session);
+    }
+
+    pub(super) fn reveal_selection(&self, tx: &mut Tx) {
+        if self.session.selected_item().is_some() {
+            tx.scroll_into_view(crate::view::row_key(
+                &self.session.layout_key(self.session.selected()),
+            ));
+        }
     }
 
     pub(super) fn run_workspace_action(&self, action: dupin_mac::workspace::Action) {

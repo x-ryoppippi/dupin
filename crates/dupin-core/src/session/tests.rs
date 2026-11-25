@@ -1441,6 +1441,34 @@ fn opening_a_result_teaches_the_history_and_asks_to_save_it() {
 }
 
 #[test]
+fn a_new_query_selects_its_first_row_though_the_last_selection_is_still_a_result() {
+    let mut history = History::default();
+    history.record("/x/Ardia", "a", 1_800_000_000);
+    let mut s = session_with_clock(history, || 1_800_000_000);
+    let others = |score| (0..7).map(move |i| ranked(&format!("Other {i}"), score - i));
+    let g = searched(&s.set_query("a")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: others(100).chain([ranked("Ardia", 50)]).collect(),
+    });
+    assert_eq!(s.selected_item().unwrap().display_title(), "Ardia");
+    let g = searched(&s.set_query("ar")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: others(140).chain([ranked("Ardia", 20)]).collect(),
+    });
+    assert_eq!(s.items()[7].display_title(), "Ardia");
+    assert_eq!(s.selected(), 0);
+    s.intent(Intent::Down);
+    let g = searched(&s.set_query("ard")).1;
+    s.deliver(Delivery::Batch {
+        generation: g,
+        items: others(140).chain([ranked("Ardia", 20)]).collect(),
+    });
+    assert_eq!(s.selected(), 0, "a selection moved by hand is the old query's");
+}
+
+#[test]
 fn reordering_on_a_later_batch_keeps_the_selected_item() {
     let mut history = History::default();
     history.record("/x/C", "a", 1_800_000_000);

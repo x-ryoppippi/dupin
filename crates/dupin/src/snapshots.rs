@@ -93,7 +93,7 @@ impl Snapshots {
         call.finish(result);
     }
 
-    pub fn accept_open(&mut self, call: crate::control::Call) {
+    pub fn accept_open(&mut self, call: crate::control::Call, tx: &mut Tx) {
         let id = match &call.request.command {
             crate::control::Command::SnapshotsOpen { id } => id.as_deref(),
             _ => None,
@@ -102,19 +102,19 @@ impl Snapshots {
             call.finish(Err("NotFound: snapshot".into()));
             return;
         }
-        self.reveal(id);
+        self.reveal(id, tx);
         call.finish(Ok(serde_json::Value::Null));
     }
 
     /// Clears the search, as opening the window does, and selects the snapshot `id`, if any.
-    pub fn reveal(&mut self, id: Option<&str>) {
+    pub fn reveal(&mut self, id: Option<&str>, tx: &mut Tx) {
         self.query = TextEdit::new("");
         self.query.focused = true;
         self.pending_delete = None;
-        self.filter();
         if let Some(id) = id {
             self.open(id);
         }
+        self.filter(tx);
     }
 
     pub fn show(&self) {
@@ -127,7 +127,9 @@ impl Snapshots {
         call.finish(Ok(serde_json::Value::Null));
     }
 
-    fn filter(&mut self) {
+    /// Narrow the list to the query, keeping the selection when it still matches, and scroll to
+    /// the selected snapshot: the list would otherwise keep the offset it had before.
+    fn filter(&mut self, tx: &mut Tx) {
         let query = dupin_core::snapshots::normalize(&self.query.text);
         self.filtered = self
             .search
@@ -141,6 +143,9 @@ impl Snapshots {
             .any(|&i| self.selected.as_ref() == Some(&self.entries[i].id))
         {
             self.selected = self.filtered.first().map(|&i| self.entries[i].id.clone());
+        }
+        if let Some(id) = &self.selected {
+            tx.scroll_into_view(format!("snapshot-{id}"));
         }
     }
 
@@ -206,7 +211,7 @@ impl Snapshots {
             Key::Escape if !self.query.text.is_empty() => {
                 self.query = TextEdit::new("");
                 self.query.focused = true;
-                self.filter();
+                self.filter(tx);
             }
             Key::Escape => tx.close_window(),
             Key::Command('r') => self.resume(),
@@ -446,9 +451,7 @@ pub fn view(s: &Snapshots, cx: &mut Cx<Snapshots>) -> El {
                 .placeholder("Search titles and saved content", k.c.text_muted)
                 .color(k.c.text_base)
                 .on_edit(|s: &mut Snapshots| &mut s.query)
-                .on_input_change(|s: &mut Snapshots, _| {
-                    s.filter();
-                })
+                .on_input_change(Snapshots::filter)
                 .on_input_key(Snapshots::key),
         )
         .children(
@@ -490,7 +493,7 @@ fn publish(
         .collect();
     let problem = store.problem().map(str::to_owned);
     listing().list(&entries);
-    me.update(move |s, _| {
+    me.update(move |s, tx| {
         s.loaded = true;
         s.entries = entries;
         s.search = search;
@@ -513,7 +516,7 @@ fn publish(
                 }
             }
         }
-        s.filter();
+        s.filter(tx);
         s.panel.update(crate::ui::Ui::refresh_snapshots);
     });
 }
@@ -794,9 +797,10 @@ mod tests {
 
         let removed = s.entries.pop().unwrap();
         let search = s.search.pop().unwrap();
-        s.filter();
+        let mut tx = Tx::default();
+        s.filter(&mut tx);
         let (call, reply) = open();
-        s.accept_open(call);
+        s.accept_open(call, &mut tx);
         assert_eq!(reply.recv().unwrap().result.unwrap_err(), "NotFound: snapshot");
         assert_eq!(s.selected.as_deref(), Some("other"));
         assert_eq!(s.query.text, "query");
@@ -805,7 +809,7 @@ mod tests {
         s.search.push(search);
 
         let (call, reply) = open();
-        s.accept_open(call);
+        s.accept_open(call, &mut tx);
         assert_eq!(reply.recv().unwrap().result.unwrap(), serde_json::Value::Null);
         assert_eq!(s.selected.as_deref(), Some("saved"));
         assert!(s.query.text.is_empty());
