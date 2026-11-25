@@ -23,7 +23,7 @@ mod version;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-pub use discover::{Found, MAX_LISTED, Manifest, Repository, TOPIC};
+pub use discover::{Found, Manifest, Repository, TOPIC};
 pub use error::Error;
 pub use git::Git;
 pub use github::GitHub;

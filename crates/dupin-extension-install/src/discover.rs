@@ -13,7 +13,7 @@ use crate::tree::Stage;
 /// The topic a repository carries to be listed.
 pub const TOPIC: &str = "dupin-extension";
 /// The most repositories one search lists; each costs a package.json download.
-pub const MAX_LISTED: usize = 20;
+const MAX_LISTED: usize = 20;
 /// The longest query GitHub accepts, less the topic qualifier Dupin adds.
 const MAX_QUERY_BYTES: usize = 200;
 const MAX_SEARCH_BYTES: u64 = 1024 * 1024;
@@ -260,7 +260,7 @@ impl GitHub {
 
 /// `text` as one line a terminal shows literally: control and invisible formatting characters
 /// dropped, each run of whitespace one space, and at most `max` characters before an ellipsis.
-pub(crate) fn plain(text: &str, max: usize) -> String {
+fn plain(text: &str, max: usize) -> String {
     let mut out = String::new();
     let mut count = 0;
     let mut space = false;
