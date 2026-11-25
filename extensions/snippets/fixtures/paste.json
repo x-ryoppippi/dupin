@@ -1,12 +1,33 @@
 {
 	"fixture": 1,
 	"description": "With pasting turned on, Enter pastes the snippet into the front app and the other action copies it; both leave the placeholders for Dupin to fill.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
 	"preferences": {
+		"paste": true,
 		"snippets": [
-			{ "keyword": "sig", "name": "Email signature", "text": "Best wishes,\nSherlock" },
-			{ "keyword": "stamp", "name": "Checked stamp", "text": "Checked on {datetime}" }
-		],
-		"paste": true
+			{
+				"keyword": "sig",
+				"name": "Email signature",
+				"source": "config",
+				"text": "Best wishes,\nSherlock"
+			},
+			{
+				"keyword": "stamp",
+				"name": "Checked stamp",
+				"source": "config",
+				"text": "Checked on {datetime}"
+			}
+		]
 	},
 	"steps": [
 		{
@@ -14,18 +35,34 @@
 			"expect": {
 				"rows": [
 					{
-						"id": "snippet:stamp",
-						"title": "Checked stamp",
-						"subtitle": "stamp  ·  Checked on {datetime}",
-						"aliases": ["stamp"],
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
 						"actions": [
 							{
-								"title": "Paste into Front App",
 								"paste": "Checked on {datetime}",
-								"template": true
+								"template": true,
+								"title": "Paste into Front App"
 							},
-							{ "title": "Copy to Clipboard", "copy": "Checked on {datetime}", "template": true }
-						]
+							{
+								"copy": "Checked on {datetime}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["stamp"],
+						"id": "snippet:stamp",
+						"subtitle": "stamp  ·  Checked on {datetime}",
+						"title": "Checked stamp"
 					}
 				],
 				"selected": 0
@@ -34,13 +71,19 @@
 		{
 			"activate": "Paste into Front App",
 			"expect": {
-				"effect": { "paste": "Checked on {datetime}", "template": true }
+				"effect": {
+					"paste": "Checked on {datetime}",
+					"template": true
+				}
 			}
 		},
 		{
 			"activate": "Copy to Clipboard",
 			"expect": {
-				"effect": { "copy": "Checked on {datetime}", "template": true }
+				"effect": {
+					"copy": "Checked on {datetime}",
+					"template": true
+				}
 			}
 		}
 	]

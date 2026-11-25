@@ -235,6 +235,21 @@ export const calculator = Object.freeze({
 	},
 });
 
+export const snippets = Object.freeze({
+	async save(snippet, options = {}) {
+		const problems = await call('snippets.save', {
+			keyword: snippet?.keyword,
+			name: snippet?.name ?? null,
+			text: snippet?.text,
+			replaces: options.replaces ?? null,
+		});
+		return Object.freeze(problems);
+	},
+	async delete(keyword) {
+		return (await call('snippets.delete', { keyword })).deleted;
+	},
+});
+
 const time = (value) =>
 	value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : value;
 const iso = (time) => new Date(time).toISOString();

@@ -153,10 +153,11 @@ pub(crate) fn run() {
     let prefs = prefs.init({
         let calendar_access = calendar_access.clone();
         let locked_keys = locked_keys.clone();
-        let (config, binding, panel, updater, settings) = (
+        let (config, binding, panel, me, updater, settings) = (
             current_config.clone(),
             binding.clone(),
             handle.clone(),
+            prefs_handle.clone(),
             updater.clone(),
             settings.clone(),
         );
@@ -164,7 +165,7 @@ pub(crate) fn run() {
             prefs::Prefs::new(
                 (config, locked_keys),
                 binding,
-                panel,
+                (panel, me),
                 updater,
                 settings,
                 welcome,

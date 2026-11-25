@@ -60,6 +60,7 @@ struct World {
     clock: FakeClock,
     clipboard: Arc<fixture::Clipboard>,
     windows: Arc<fixture::Windows>,
+    snippets: fixture::Snippets,
     folder: tempfile::TempDir,
 }
 
@@ -99,6 +100,7 @@ fn world_with(
     ));
     let clipboard = Arc::new(fixture::Clipboard::default());
     let windows = Arc::new(fixture::Windows::default());
+    let snippets = fixture::Snippets::default();
     let services = Services {
         http: Box::new(http.clone()),
         exec: Box::new(exec.clone()),
@@ -106,6 +108,7 @@ fn world_with(
         clipboard: Box::new(clipboard.clone()),
         dictionary: Box::new(fixture::Dictionary),
         calculator: Box::new(fixture::Calculator),
+        snippets: Box::new(snippets.clone()),
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
     };
@@ -125,6 +128,7 @@ fn world_with(
         clock,
         clipboard,
         windows,
+        snippets,
         folder,
     };
     adjust(&mut world);
@@ -227,7 +231,7 @@ const report = async (run) => { try { return `ok ${JSON.stringify(await run())}`
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -996,6 +1000,78 @@ fn only_a_handle_the_watch_gave_puts_a_file_on_the_clipboard() {
         "ok undefined"
     );
     assert_eq!(*world.clipboard.text.lock().unwrap(), Some(path));
+}
+
+#[test]
+fn snippets_change_only_from_a_chosen_action_with_the_grant() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "snippets": ["write"] }),
+        &guest(
+            "export async function search(query) {
+               return [{ title: await report(() => snippets.save({ keyword: query, text: 'x' })) }];
+             }
+             export const actions = {
+               async save({ keyword, text, replaces }) {
+                 return { type: 'toast', text: await report(() => snippets.save({ keyword, name: 'N', text }, { replaces })) };
+               },
+               async remove({ keyword }) {
+                 return { type: 'toast', text: await report(() => snippets.delete(keyword)) };
+               },
+               async forge() {
+                 return { type: 'toast', text: await report(() => snippets.save({ keyword: 'k', text: 7 })) };
+               },
+             };",
+        ),
+    );
+    world.enable();
+    let toast = |name: &str, data: serde_json::Value| match world.act(name, data).unwrap().effect {
+        Some(ActionEffect::Toast { text }) => text,
+        other => panic!("{other:?}"),
+    };
+    let sig = serde_json::json!({ "keyword": "sig", "text": "Best wishes" });
+    assert_eq!(toast("save", sig.clone()), "needs-consent");
+    world.grant("snippets");
+    assert_eq!(world.first("typed"), "needs-activation", "a search never writes");
+    assert!(world.snippets.0.lock().unwrap().is_empty());
+    assert_eq!(toast("save", sig), "ok {}");
+    assert_eq!(
+        toast("save", serde_json::json!({ "keyword": "two words", "text": "x" })),
+        r#"ok {"keyword":"A keyword has no spaces"}"#
+    );
+    assert_eq!(
+        toast(
+            "save",
+            serde_json::json!({ "keyword": "sign", "text": "Cheers", "replaces": "sig" })
+        ),
+        "ok {}"
+    );
+    assert_eq!(
+        world.snippets.0.lock().unwrap().keys().collect::<Vec<_>>(),
+        ["sign"]
+    );
+    assert_eq!(
+        toast(
+            "save",
+            serde_json::json!({ "keyword": "k", "text": "x".repeat(200 * 1024) })
+        ),
+        "invalid"
+    );
+    assert_eq!(toast("forge", serde_json::Value::Null), "invalid");
+    assert_eq!(
+        toast("remove", serde_json::json!({ "keyword": "sign" })),
+        "ok true"
+    );
+    assert_eq!(
+        toast("remove", serde_json::json!({ "keyword": "sign" })),
+        "ok false"
+    );
+    world.bridge.revoke(&world.id, &ScopeKey::Snippets).unwrap();
+    assert_eq!(
+        toast("save", serde_json::json!({ "keyword": "late", "text": "x" })),
+        "revoked"
+    );
+    assert!(world.snippets.0.lock().unwrap().is_empty());
 }
 
 fn wait_for(done: impl Fn() -> bool) {

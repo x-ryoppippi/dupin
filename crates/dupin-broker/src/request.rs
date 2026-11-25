@@ -33,6 +33,8 @@ pub enum Request {
     Clipboard(ClipboardAccess),
     DictionaryLookup,
     CalculatorEvaluate,
+    /// Adding, changing or deleting one of the snippets the user stores in Dupin.
+    SnippetsWrite,
     /// The window, in whole days around today, the read covers.
     CalendarRead {
         past_days: u32,
@@ -72,6 +74,7 @@ impl Request {
             Self::Clipboard(access) => ScopeKey::Clipboard(*access),
             Self::DictionaryLookup => ScopeKey::Dictionary,
             Self::CalculatorEvaluate => ScopeKey::Calculator,
+            Self::SnippetsWrite => ScopeKey::Snippets,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
             Self::Windows(access) => ScopeKey::Windows(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
@@ -83,7 +86,7 @@ impl Request {
     pub(crate) fn needs_activation(&self) -> bool {
         match self {
             Self::Http { method, .. } => method.mutates(),
-            Self::Exec { .. } | Self::Script { .. } => true,
+            Self::Exec { .. } | Self::Script { .. } | Self::SnippetsWrite => true,
             Self::Clipboard(access) => *access != ClipboardAccess::Watch,
             Self::Windows(access) => *access == WindowsAccess::Arrange,
             Self::Files { .. }

@@ -97,6 +97,7 @@ pub fn open(platform: Platform) -> Bridge {
                     "a headless run couldn't make scratch storage",
                 )),
             },
+            snippets: Box::new(crate::snippets::library()),
             ..Services::none()
         };
         let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
@@ -132,6 +133,7 @@ pub fn open(platform: Platform) -> Bridge {
             dupin_mac::SystemDictionary::default(),
         ))),
         calculator: Box::new(platform.calculator),
+        snippets: Box::new(crate::snippets::library()),
         calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
             platform.calendar_access,
         )))),

@@ -42,6 +42,12 @@ Every call blocks on file I/O and must run on a worker thread, never the UI thre
 
 The broker bridge names an extension's namespace `ext-u-<hash>` for a package the user installed and `ext-b-<hash>` for one bundled with Dupin, where the hash is the first 160 bits of SHA-256 over the origin and the package ID. Native features use plain names without the `ext-` prefix, so the two never meet; neither do two packages, nor a user's copy of a bundled package and the bundled package itself, even when the copy is unmodified. The namespace opens with the quota and retention the package declares, bounded by Dupin's maxima (64 MiB, 10,000 records, 1 MiB per record, 3,650 days), stays open while Dupin runs, and a sweeper applies its retention hourly; every request also applies it first. Revoking `storage` keeps the namespace; `Bridge::delete_data`, which Settings' Delete Data, `dupin ext remove` and a fresh `dupin ext install` of the name call, discards it: it waits for requests already running, and a request that opened the namespace before then fails instead of writing into it.
 
+## Built-in namespaces
+
+A native feature opens its namespace by the name the [sync design](../design/sync.md#what-syncs) gives it, so sync can later carry its records without a migration. Each shares the launcher's one `Storage` with the extensions' namespaces, so all of them follow one device clock.
+
+- **`snippets`**: the [snippets](./snippets.md) you add in Dupin, one record per snippet upserted under its keyword, holding `{ keyword, name, text }`. A record whose keyword doesn't name it is left out. Its limits leave room for every snippet Dupin lists (10,000), and writes use `upsert_within_limits`, so storing one never evicts another. Dupin opens it on a worker thread at launch only when the directory exists, so the data key is first read when you store a snippet, and a failure to open it is reported in the panel and retried on the next edit, never answered by deleting anything. It doesn't sync yet.
+
 ## On disk
 
 The host roots the store at `storage/` in the writable data directory that also holds `settings.toml`: `~/Library/Application Support/Dupin/storage`, or `$XDG_DATA_HOME/dupin/storage` when that is set. Directories are created `0700` and files `0600`.
