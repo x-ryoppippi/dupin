@@ -46,7 +46,9 @@ let
           lib.elem kind [
             "storage"
             "dictionary"
+            "calculator"
             "calendar"
+            "query"
           ]
         then
           [ kind ]
