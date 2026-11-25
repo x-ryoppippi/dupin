@@ -245,6 +245,18 @@ impl Ui {
             move |notice| me.update(move |ui, tx| ui.extension_access_changed(notice, tx))
         });
         crate::extensions::access::refresh_os_access(&bridge, &calendar_access);
+        crate::snippets::library().on_change({
+            let (me, prefs) = (me.clone(), prefs.clone());
+            move || {
+                me.update(Ui::snippets_changed);
+                prefs.update(|prefs, _| prefs.reflect_snippets());
+            }
+        });
+        // Reading them opens the Keychain's data key, which the first one stored needs anyway.
+        std::thread::Builder::new()
+            .name("dupin-snippets".into())
+            .spawn(|| crate::snippets::library().load())
+            .expect("spawn the snippets reader");
         let apps_watcher = apps_provider.watch({
             let me = me.clone();
             move || me.update(|s, tx| s.refresh_default(tx))

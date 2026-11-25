@@ -51,6 +51,7 @@ impl Capabilities {
                     "clipboard" => parser.clipboard(value, &field),
                     "dictionary" => parser.dictionary(value, &field),
                     "calculator" => parser.calculator(value, &field),
+                    "snippets" => parser.snippets(value, &field),
                     "calendar" => parser.calendar(value, &field),
                     "windows" => parser.windows(value, &field),
                     "rows" => parser.rows(value, &field),
@@ -61,7 +62,7 @@ impl Capabilities {
                             field,
                             format!("`{name}` isn't a capability"),
                             Some(
-                                "Use http, files, exec, storage, clipboard, dictionary, calculator, calendar, windows, rows or query.",
+                                "Use http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, rows or query.",
                             ),
                         );
                         Vec::new()
@@ -640,6 +641,22 @@ impl Parser {
             })
         })
         .map(|_| vec![Scope::Calculator])
+        .unwrap_or_default()
+    }
+
+    fn snippets(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| {
+            (text == "write").then_some(()).or_else(|| {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't a snippets access"),
+                    Some("Use write."),
+                );
+                None
+            })
+        })
+        .map(|_| vec![Scope::Snippets])
         .unwrap_or_default()
     }
 

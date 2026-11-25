@@ -195,7 +195,7 @@ Precedence is unchanged on each Mac: explicit keys in `config.toml` (the Nix bas
 
 ### Snippets
 
-User snippets move out of the config files into the `snippets` namespace. The record key is the keyword, so the same keyword created on two Macs is one record and the later edit wins. Renaming a keyword deletes the old record and creates the new one. `[snippets]` in a read-only `config.toml` remains a base: it is never exported and wins over a synced snippet with the same keyword on that Mac. Turning on sync offers once to move snippets from a writable `config.toml` or `settings.toml` into the namespace; snippets left there are not synced.
+User snippets move out of the config files into the `snippets` namespace. The record key is the keyword, so the same keyword created on two Macs is one record and the later edit wins. Renaming a keyword deletes the old record and creates the new one. `[snippets]` in a read-only `config.toml` remains a base: it is never exported and wins over a synced snippet with the same keyword on that Mac. Turning on sync offers once to move snippets from a writable `config.toml` or `settings.toml` into the namespace; snippets left there are not synced. The namespace holds `{ keyword, name, text }` under the keyword, opened by the host with mode `off` until sync turns it to `lww`; only the bundled Snippets package reaches it, through the activation-gated `snippets: ["write"]` scope, and never reads it.
 
 ### Extensions
 
@@ -301,7 +301,7 @@ These change the format in #230. Landing them in #230, or right after it and bef
 ## Rollout
 
 1. Make the [format changes](#required-changes-to-dupin-storage) in #230 or straight after it, before a release stores data.
-2. Move `history.json` into the `usage` namespace and snippets into the `snippets` namespace, still local, and update the welcome check in `docs/features/settings.md`.
+2. Move `history.json` into the `usage` namespace and snippets into the `snippets` namespace, still local, and update the welcome check in `docs/features/settings.md`. Snippets done: the snippets the user adds in the launcher or Settings are stored in the local `snippets` namespace, one record per keyword, beside `config.toml`'s, which win a keyword both hold; Settings and the launcher never write `config.toml`'s, a read-only declared source, and the app being unreleased, there was no stored data to migrate. `history.json` and the welcome check are not moved yet.
 3. Add `dupin-sync` with the folder layout, the hybrid logical clock and its drift bound, import and export, tombstones and their acknowledgements, leaving and rejoining, retention and handling of sync-tool files. Test it with a deterministic simulation: several virtual devices over a fault-injecting folder that reorders, delays, duplicates and truncates files, makes conflicted copies and placeholders, skews clocks, switches namespaces off and on, retires devices and interrupts re-seals, and check that every device converges, nothing deleted comes back and nothing live is lost.
 4. Add the vault: the passphrase mode first, since it works in every build, then the synchronizable Keychain item in builds that carry the access group entitlement. Add `dupin sync init|join|status|remove-device|rotate` with `--json`.
 5. Sync settings with the shared/device-local classification and the layering changes.

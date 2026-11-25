@@ -761,7 +761,11 @@ impl Provider for ExtensionProvider {
                 .for_each(emit),
             Err(RunError::Cancelled) => {}
             Err(RunError::Failed(diagnostic)) => {
-                crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
+                crate::log::warn(&format!(
+                    "extension {}: {}",
+                    self.extension.id,
+                    diagnostic.for_log()
+                ));
                 // The main search shows everyone's results; a failing extension only logs.
                 if role == Role::Keyword {
                     // A located problem starts with its file name, which keeps its case.

@@ -33,12 +33,13 @@ A package declares the most it may do in `dupin.capabilities` of its `package.js
 | `clipboard`  | `read`, `write`, `watch` and `paste`, which lets Dupin carry out the package's `paste` row actions.                                                                                                              | access            |
 | `dictionary` | `lookup`.                                                                                                                                                                                                        | the capability    |
 | `calculator` | `evaluate`: arithmetic, units and, while currency conversion is on, currencies at the rates Dupin keeps.                                                                                                         | the capability    |
+| `snippets`   | `write`: adding, changing and deleting the snippets the user stores in Dupin, which needs an activation. Reading them is not a scope; only the package Dupin ships for Snippets is handed them.                  | the capability    |
 | `calendar`   | `read` within `pastDays` and `futureDays` of today, each 0–366.                                                                                                                                                  | the capability    |
 | `windows`    | `read`, the displays and the focused window, and `arrange`, moving and resizing it, which needs an activation.                                                                                                   | access            |
 | `rows`       | For each kind of row Dupin's own sources find (`text`, `url`, `file`, `app`), the fields the package's filters and kind actions may receive: `title`, and `text`, `url`, `name` or `path`.                       | kind              |
 | `query`      | `read`: what is typed beyond the package's keyword: in the searches its matchers are composed into, and the main search for the built-in it answers there (Calculator).                                          | the capability    |
 
-A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `calendar`, `windows:arrange`, `rows:file` or `query` in grant files.
+A scope is written as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `rows:file` or `query` in grant files.
 
 ## Checking an operation
 

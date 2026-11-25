@@ -40,6 +40,18 @@ export def settings-stage [out: path] {
     ) }
     poll $out settings-window $settings list-windows --app $DUPIN
     snap $out settings-created
+    (poll
+        $out
+        acknowledgements
+        $page
+        find
+        --app
+        $DUPIN
+        --name
+        Acknowledgements
+        --exact
+        --first
+    )
     let before_key = (ad
         $out
         settings-before-key

@@ -355,6 +355,21 @@ from closed-workspace visibility decisions. Those libraries define plugin and
 host contracts, including consumers in separate experiment workspaces, so this
 workspace's callers cannot establish their complete public API requirements.
 
+## Third-party code and data
+
+Dupin is GPL-3.0-or-later. The rule for anything from elsewhere:
+
+- Borrowing an idea is fine: an algorithm, a ranking scheme (the frecency buckets in `dupin-core`'s history follow Firefox's), a feature another launcher has. Write the code yourself.
+- Copying code or data (source, a ported shader, a word list, generated tables, fonts, icons) needs a licence compatible with GPL-3.0-or-later and attribution in the app's notices. Keep the original copyright and licence notice with the copy, and record it as below in the same pull request. Data under a licence `deny.toml` doesn't allow but `data-licences` in `packaging/third-party.toml` does (CC BY 3.0 and 4.0), which the app only reads, must ship as its own file in the app, never compiled into the binary. Without a licence, or under a non-commercial or no-derivatives one, don't copy it.
+
+The app build writes `Dupin.app/Contents/Resources/ThirdPartyNotices.txt` (`packaging/notices.nu`, run by `package.nix`): the licence texts and copyright lines of every crate the binary links, as cargo-about reads them from the vendored crates, then each entry of `packaging/third-party.toml`. Settings → Acknowledgements opens it and `dupin --licenses` prints it. It is never committed, so it can't fall behind `Cargo.lock`.
+
+- A new crate needs nothing unless CI says so. `checks.licences` runs `cargo deny check licenses` against the allow-list in `deny.toml`, and the notices build fails on the same list. A licence missing from it means checking that the licence is GPL-3.0-or-later compatible before adding it, or not taking the crate.
+- When a crate ships no licence text with its copyright holders, cargo-about falls back to the licence's template and the notices build fails until the holders, from the crate's repository, are recorded under `[[crate]]` in `packaging/third-party.toml`. It also fails when such an entry is no longer needed.
+- Anything else Dupin ships from elsewhere is a `[[material]]` entry in `packaging/third-party.toml`: what it is, where it came from, its licence, the licence text's path, and the files that hold it. `checks.licences` fails when a file under `crates/`, `extensions/`, `examples/shaders/` or `sdk/` names a copyright holder or a licence other than Dupin's and no entry lists it.
+
+Run them locally with `nix build .#checks.aarch64-darwin.licences .#checks.aarch64-darwin.third-party-notices`.
+
 ## Logo
 
 `assets/logo/dupin.svg` is the app icon and `assets/logo/dupin-mark.svg` a monochrome `currentColor` mark, for template images such as a menu-bar item. They are the only tracked logo sources: the Nix build draws every icon size from `dupin.svg` with resvg and packs them with icnsutil, so no generated PNG or icns is committed.

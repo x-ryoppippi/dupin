@@ -54,7 +54,7 @@ impl Session {
         let (suggestions, leading) = if query == LIST {
             let listed: Vec<_> = self
                 .commands
-                .entries()
+                .hinted_entries()
                 .into_iter()
                 .map(|entry| Suggestion {
                     keyword: entry.keywords.first().cloned().unwrap_or_default(),
@@ -65,7 +65,7 @@ impl Session {
             let leading = listed.len();
             (listed, leading)
         } else {
-            matching(self.commands.entries(), query)
+            matching(self.commands.hinted_entries(), query)
         };
         let mut rows = HashMap::new();
         for suggestion in suggestions {

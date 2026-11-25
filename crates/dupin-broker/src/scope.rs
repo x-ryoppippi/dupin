@@ -404,6 +404,8 @@ pub enum Scope {
     },
     Dictionary,
     Calculator,
+    /// Adding, changing and deleting the snippets the user stores in Dupin.
+    Snippets,
     Calendar {
         past_days: u32,
         future_days: u32,
@@ -433,6 +435,7 @@ impl Scope {
             Self::Clipboard { access } => ScopeKey::Clipboard(*access),
             Self::Dictionary => ScopeKey::Dictionary,
             Self::Calculator => ScopeKey::Calculator,
+            Self::Snippets => ScopeKey::Snippets,
             Self::Calendar { .. } => ScopeKey::Calendar,
             Self::Windows { access } => ScopeKey::Windows(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
@@ -488,7 +491,9 @@ impl Scope {
                     }
             }
             (Self::Clipboard { access }, Self::Clipboard { access: a }) => access == a,
-            (Self::Dictionary, Self::Dictionary) | (Self::Calculator, Self::Calculator) => true,
+            (Self::Dictionary, Self::Dictionary)
+            | (Self::Calculator, Self::Calculator)
+            | (Self::Snippets, Self::Snippets) => true,
             (
                 Self::Calendar {
                     past_days,
@@ -595,6 +600,7 @@ impl fmt::Display for Scope {
             },
             Self::Dictionary => f.write_str("look words up in the system dictionaries"),
             Self::Calculator => f.write_str("work out calculations and conversions with Dupin's calculator"),
+            Self::Snippets => f.write_str("add, change and delete the snippets you store in Dupin"),
             Self::Calendar {
                 past_days,
                 future_days,
@@ -621,7 +627,7 @@ impl fmt::Display for Scope {
 
 /// The name of one grant: an HTTP origin, a named files or exec scope, a script target, or a
 /// single-valued capability. Written as `http:https://example.com`, `files:notes`,
-/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`,
+/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`,
 /// `calendar` or `windows:arrange` in grant files.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -634,6 +640,8 @@ pub enum ScopeKey {
     Clipboard(ClipboardAccess),
     Dictionary,
     Calculator,
+    /// Adding, changing and deleting the snippets the user stores in Dupin.
+    Snippets,
     Calendar,
     Windows(WindowsAccess),
     Rows(RowKind),
@@ -651,6 +659,7 @@ impl fmt::Display for ScopeKey {
             Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
             Self::Dictionary => f.write_str("dictionary"),
             Self::Calculator => f.write_str("calculator"),
+            Self::Snippets => f.write_str("snippets"),
             Self::Calendar => f.write_str("calendar"),
             Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
             Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
@@ -669,6 +678,7 @@ impl FromStr for ScopeKey {
                 "storage" => Self::Storage,
                 "dictionary" => Self::Dictionary,
                 "calculator" => Self::Calculator,
+                "snippets" => Self::Snippets,
                 "calendar" => Self::Calendar,
                 "query" => Self::Query,
                 _ => return Err(unknown()),

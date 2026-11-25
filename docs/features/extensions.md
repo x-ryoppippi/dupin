@@ -417,7 +417,7 @@ An action, or a form's submit, may return one of these instead of a toast. Each 
 
 The module is plain modern JavaScript ([QuickJS-ng](https://quickjs-ng.github.io/quickjs/es_features/)): modules, `async`/`await`, regular expressions, `Date` and `JSON`, but no `Intl`. It can import other `.js` or `.mjs` files of its own folder with relative paths that include the extension (`import { rows } from "./lib/rows.js"`), also `.ts`, `.mts` and `.tsx` files when `dupin.main` is TypeScript, and the host module `dupin`. Nothing else resolves: no packages by name, no URLs, no absolute paths and no path or symlink that leads outside the folder.
 
-There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`4`), `DupinError`, `items`, whose `invalidate()` an action or event handler calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `calendar` and `windows`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, view, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
+There are no files, network, processes, clipboard, timers or console of the engine's own. The `dupin` module exports `apiVersion` (`4`), `DupinError`, `items`, whose `invalidate()` an action or event handler calls, and one object per capability, `http`, `files`, `exec`, `storage`, `clipboard`, `dictionary`, `calculator`, `snippets`, `calendar` and `windows`, whose functions return promises; each works only for what the package [declares](#asking-for-more) and you allow, from `search`, `items`, actions and events alike. Each query, `items` call, view, action and event runs in a fresh engine, so module-level variables never carry from one call to the next; `cursor` is how `items` knows where it left off, and `storage` keeps what else must last. The engine runs in a separate, sandboxed process; see [Security model](#security-model).
 
 ### Events
 
@@ -477,6 +477,7 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 	"clipboard": ["read", "write", "watch", "paste"],
 	"dictionary": ["lookup"],
 	"calculator": ["evaluate"],
+	"snippets": ["write"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 },
 	"windows": ["read", "arrange"],
 	"rows": { "app": ["title"], "file": ["path"] },
@@ -485,11 +486,11 @@ An extension asks for host services by declaring `capabilities` in the `dupin` k
 ```
 
 - A declaration is the most an extension can get. Anything malformed, unknown or out of range rejects the package with a diagnostic naming the field, such as `dupin.capabilities.http[0].origin`.
-- Each item is a scope you allow on its own: one origin, one named folder, one profile. A scope's name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `calendar`, `windows:arrange`, `rows:file` or `query`, is what errors, Settings and grant files call it. `rows` and `query` are what the package's [filters and kind actions](./advanced.md#extensions) may see of rows Dupin found and of what you type; `query` is also what the bundled Calculator sees of the main search.
+- Each item is a scope you allow on its own: one origin, one named folder, one profile. A scope's name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `rows:file` or `query`, is what errors, Settings and grant files call it. `rows` and `query` are what the package's [filters and kind actions](./advanced.md#extensions) may see of rows Dupin found and of what you type; `query` is also what the bundled Calculator sees of the main search.
 - An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer. Settings → Extensions lists the same requests, and every scope each extension declares with whether it is allowed, with **Allow**, **Revoke** and **Request Access**. A files or exec scope is allowed from Settings, where you pick the file, folder or program. Allowing runs nothing the extension asked for before; use it again. **Deny** revokes the scope until you allow it in Settings.
 - Your choices belong to the version you allowed: a change to `package.json` or any module is another revision. A revision that declares a scope no wider keeps your choice; one that widens it asks again; one that drops it forgets it.
-- While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard and moving a window need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+- While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard, moving a window and changing your snippets need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 - Revoking a scope or turning an extension off takes effect at once: a request in flight finishes, but its result is dropped, the query's rows are dropped with it, and allowing again doesn't bring them back.
 - Calendars, reading or watching the clipboard, pasting and windows also need macOS access. Dupin never asks macOS on its own: not at startup, on opening Settings, on reload or while an extension runs. Turning on a bundled extension that ships off, such as Window Management, is turning on its feature and asks for what its grants need; turning on any other extension never asks. A request that needs it fails with `needs-consent` and `permission` set, and **Request Access** in the panel or Settings asks macOS once.
 
@@ -666,6 +667,22 @@ const answer = await calculator.evaluate('5 km to mi');
 ```
 
 `parts` is the answer in order: numbers, `ident`s (units and currencies, with the space beside them) and anything else. While **Currency conversion** is on in Settings → Search, currencies are units too, at the European Central Bank's reference rates, which Dupin downloads itself, and an answer that used one has `exchange`: `{ status: 'ok', date, stale, currencies }` with the rates' date, whether Dupin couldn't refresh them in the past 12 hours, and the currencies it has; `{ status: 'unavailable' }` before Dupin has any rates; or `{ status: 'missing', currency }` for a currency the bank doesn't quote. With either of the last two, `result` was worked out with a placeholder rate and isn't to be shown.
+
+### Snippets
+
+`"snippets": ["write"]` lets an extension add, change and delete the [snippets](./snippets.md) you store in Dupin, and only from an action you chose or a form you submitted; a search, view or event handler that tries fails with `needs-activation`. It can't read them: the package Dupin ships for Snippets is handed them as its preferences, and no other package is. It can't touch `config.toml`'s snippets either. The shipped package holds the scope from the start; any other package, an edited copy of it included, asks, as the consent line **add, change and delete the snippets you store in Dupin** says.
+
+`snippets.save({ keyword, name, text }, { replaces })` stores a snippet in place of the stored one keyed `replaces`, or as a new one without it, and resolves to what is wrong with it by field, `{}` once it is stored. Dupin checks it exactly as [Snippets](./snippets.md#configuration) describes: a keyword no other snippet has, in storage or `config.toml`, a name or none, the text, and Dupin's limits. A `replaces` that names no stored snippet is refused on `keyword`, so a package can't edit a `config.toml` snippet as a stored one. Before any check, a keyword, name or `replaces` over 1 KiB, text over 128 KiB, or a field of the wrong type fails with `invalid`. `snippets.delete(keyword)` deletes a stored snippet and resolves to whether there was one.
+
+```js
+export const actions = {
+	async save(values, ctx) {
+		const problems = await snippets.save(values, { replaces: ctx.state?.keyword ?? null });
+		if (Object.keys(problems).length > 0) return { type: 'fieldErrors', errors: { ...problems } };
+		return { type: 'pop', toast: 'Saved' };
+	},
+};
+```
 
 ### Calendar
 
@@ -904,14 +921,14 @@ A fixture is one JSON file in `fixtures/`, read in name order. Symbolic links ar
 }
 ```
 
-| Key           | Value                                                                                                                                                            |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fixture`     | Required. The format version, `1`. A fixture of another version is reported, not guessed at.                                                                     |
-| `description` | Optional text for people.                                                                                                                                        |
-| `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                                                            |
-| `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                                                         |
-| `preferences` | Optional. What every call sees in [`ctx.preferences`](#preferences) over the declared defaults, such as a bundled port's config.toml settings. `{}` if left out. |
-| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate`, `event`, `back`, `fill` and `submit`, and `expect`.            |
+| Key           | Value                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fixture`     | Required. The format version, `1`. A fixture of another version is reported, not guessed at.                                                                                                                                                                                                                                                                                                      |
+| `description` | Optional text for people.                                                                                                                                                                                                                                                                                                                                                                         |
+| `environment` | Optional. What the run would otherwise take from this Mac; see below.                                                                                                                                                                                                                                                                                                                             |
+| `replies`     | Optional. What the host services answer; see below. Left out, every host request fails as `unavailable`.                                                                                                                                                                                                                                                                                          |
+| `preferences` | Optional. What every call sees in [`ctx.preferences`](#preferences) over the declared defaults, such as a bundled port's config.toml settings. `{}` if left out. Its `snippets`, each with a `source` of `config` or `stored`, are what the [`snippets`](#snippets) service checks and changes; a change is handed back as the next calls' preferences, as Dupin hands it to the shipped package. |
+| `steps`       | Required. 1–64 steps, the first a `query`. Each has exactly one of `query`, `select`, `activate`, `event`, `back`, `fill` and `submit`, and `expect`.                                                                                                                                                                                                                                             |
 
 | `environment` key | Default                        | Fixes                                                                                                      |
 | ----------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |

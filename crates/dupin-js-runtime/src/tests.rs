@@ -393,6 +393,21 @@ fn text_a_guest_chooses_stays_one_short_line_in_diagnostics() {
 }
 
 #[test]
+fn the_log_form_of_a_diagnostic_keeps_none_of_the_guests_text() {
+    for source in [
+        "export function search(query) { throw new Error(query); }",
+        "export function search(query) { return { [query]: 1 }; }",
+        "export function search(query) { const error = new Error(query); error.stack = '    at f (' + query + '.js:3:7)'; throw error; }",
+    ] {
+        let diagnostic = failure(run(source, "secret-query"));
+        assert!(diagnostic.to_string().contains("secret-query"), "{diagnostic:?}");
+        let logged = diagnostic.for_log().to_string();
+        assert!(!logged.contains("secret"), "{logged}");
+        assert!(logged.starts_with(diagnostic.code.as_ref()), "{logged}");
+    }
+}
+
+#[test]
 fn a_throwing_search_reports_the_error_and_where_it_was_thrown() {
     let package = load(&fixture("throwing-search")).unwrap();
     let diagnostic = failure(search(&package, "it"));

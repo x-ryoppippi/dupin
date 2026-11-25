@@ -97,6 +97,29 @@ in
           nu scripts/tests/docs-images.nu
           nu scripts/docs-images.nu check
         '';
+        # Every crate the app links under a licence on deny.toml's allow-list, and
+        # packaging/third-party.toml listing every other third-party file it ships. The notices
+        # themselves are built from both, so they can't fall behind either.
+        licences =
+          pkgs.runCommand "dupin-licences"
+            {
+              nativeBuildInputs = [
+                pkgs.rustPlatform.rust.cargo
+                pkgs.cargo-deny
+                pkgs.nushell
+                pkgs.ripgrep
+              ];
+            }
+            ''
+              export HOME=$TMPDIR CARGO_HOME=$TMPDIR/cargo
+              mkdir -p $CARGO_HOME
+              cp ${dupin.baseline.passthru.cargoVendorDir}/config.toml $CARGO_HOME/config.toml
+              cd ${root}
+              cargo-deny --manifest-path Cargo.toml --offline --locked check licenses
+              nu --no-config-file packaging/notices.nu check
+              touch $out
+            '';
+        third-party-notices = dupin.thirdPartyNotices;
         # The bundled extensions and the notes example against sdk/dupin.d.ts, as their authors'
         # editors see them.
         extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''
