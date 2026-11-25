@@ -27,6 +27,8 @@
             actionlint
             zizmor
             gitleaks
+            # Compresses the documentation images scripts/docs-images.nu renders.
+            oxipng
           ]
           ++ config.pre-commit.settings.enabledPackages;
         # Installs the pre-commit and pre-push hooks from nix/git-hooks.nix.

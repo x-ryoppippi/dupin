@@ -93,6 +93,10 @@ in
               touch $out
             '';
         renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
+        docs-images = repoCheck "dupin-docs-images" [ ] ''
+          nu scripts/tests/docs-images.nu
+          nu scripts/docs-images.nu check
+        '';
         # The bundled extensions and the notes example against sdk/dupin.d.ts, as their authors'
         # editors see them.
         extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''

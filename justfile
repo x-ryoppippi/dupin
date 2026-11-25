@@ -24,5 +24,8 @@ package channel="nightly" identity="-":
 snap: build-debug
     nu scripts/snap.nu
 
+docs-images *args: build-debug
+    nu scripts/docs-images.nu {{ args }}
+
 footprint: build-debug
     nu scripts/footprint.nu

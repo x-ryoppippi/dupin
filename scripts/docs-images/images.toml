@@ -1,0 +1,204 @@
+# The images in docs/images, which `nu scripts/docs-images.nu` (`just docs-images`) renders,
+# each in light and dark, to docs/images/<page>/<name>-<theme>.png.
+#
+# An image is either an `extension`'s fixture (`fixture`, in its fixtures folder, rendered after
+# `step` or its last step by `dupin ext snap`), or a headless launcher `scenario` with the
+# sidecar fixtures scripts/snap.nu reads beside it, an optional `config` in place of its own, the
+# documents below in ~/Documents and the `recent` history below. A scenario with a `window` draws
+# that window, `width` points wide, instead of the panel.
+#
+# Spotlight indexes nothing in the scratch home, and on some Macs not even a fresh disk image, so
+# no image shows a Spotlight search; the files scenarios start from Recent items instead. The
+# bundled extensions render through the launcher scenarios scripts/headless already has:
+# `dupin ext snap` of a bundled package shows its keyword with no results (calendar, window
+# management) or "isn't available" (dictionary), and only the steps of a long fixture render
+# reliably.
+
+# What the scratch home opened before, the first most often and most recently.
+recent = [
+	"~/Documents/Reports",
+	"/System/Applications/Notes.app",
+	"~/Documents/Budget 2026.numbers",
+	"/System/Applications/Calendar.app",
+	"~/Documents/Meeting notes.md",
+	"/System/Applications/Maps.app",
+]
+
+# Folders end with a slash.
+documents = [
+	"Budget 2026.numbers",
+	"Meeting notes.md",
+	"Travel plans.pages",
+	"Reports/",
+	"Reports/Quarterly report.pdf",
+	"Reports/Annual report 2026.pdf",
+	"Reports/Expense report.numbers",
+	"Reports/report-notes.md",
+	"Projects/",
+	"Projects/Launcher/",
+	"Projects/Launcher/README.md",
+	"Projects/Launcher/roadmap.md",
+	"Projects/Garden/",
+	"Projects/Garden/planting plan.txt",
+	"Projects/Website/",
+	"Projects/Website/index.html",
+	"Projects/notes.md",
+	"Recipes/",
+	"Recipes/Sourdough.md",
+]
+
+[[images]]
+page = "usage"
+name = "search"
+scenario = "scripts/docs-images/search.json"
+
+[[images]]
+page = "keywords"
+name = "list"
+scenario = "scripts/headless/keywords-list.json"
+
+[[images]]
+page = "keywords"
+name = "typing"
+scenario = "scripts/headless/keywords-ca.json"
+
+[[images]]
+page = "recent-items"
+name = "recent"
+scenario = "scripts/docs-images/recent-items.json"
+
+[[images]]
+page = "file-actions"
+name = "actions"
+scenario = "scripts/docs-images/file-actions.json"
+
+[[images]]
+page = "folder-browsing"
+name = "browse"
+scenario = "scripts/docs-images/folder-browsing.json"
+
+[[images]]
+page = "web-searches"
+name = "alias"
+scenario = "scripts/headless/web-search.json"
+
+[[images]]
+page = "web-searches"
+name = "every-search"
+scenario = "scripts/headless/web-keyword.json"
+
+[[images]]
+page = "calculator"
+name = "arithmetic"
+scenario = "scripts/headless/calculator-arithmetic.json"
+
+[[images]]
+page = "calculator"
+name = "units"
+scenario = "scripts/headless/calculator-conversion.json"
+
+[[images]]
+page = "calendar"
+name = "upcoming"
+scenario = "scripts/headless/calendar.json"
+
+[[images]]
+page = "clipboard"
+name = "history"
+scenario = "scripts/headless/clipboard-images.json"
+
+[[images]]
+page = "dictionary"
+name = "entry"
+scenario = "scripts/headless/dictionary.json"
+
+[[images]]
+page = "emoji"
+name = "browse"
+scenario = "scripts/headless/emoji.json"
+
+[[images]]
+page = "emoji"
+name = "search"
+scenario = "scripts/headless/emoji-search.json"
+
+[[images]]
+page = "snippets"
+name = "list"
+scenario = "scripts/headless/snippets.json"
+
+[[images]]
+page = "snapshots"
+name = "list"
+scenario = "scripts/headless/snapshots-keyword.json"
+
+[[images]]
+page = "window-management"
+name = "commands"
+scenario = "scripts/headless/window-management.json"
+
+[[images]]
+page = "extensions"
+name = "keyword"
+scenario = "scripts/headless/extension-js.json"
+
+[[images]]
+page = "extensions"
+name = "form"
+extension = "examples/extensions/notes-js"
+fixture = "notes.json"
+step = 4
+
+[[images]]
+page = "appearance"
+name = "ocean"
+scenario = "scripts/themes/preview.json"
+config = "scripts/themes/ocean.toml"
+
+[[images]]
+page = "appearance"
+name = "rose"
+scenario = "scripts/themes/preview.json"
+config = "scripts/themes/rose.toml"
+
+[[images]]
+page = "settings"
+name = "general"
+scenario = "scripts/docs-images/settings-general.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "search"
+scenario = "scripts/docs-images/settings-search.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "keywords"
+scenario = "scripts/docs-images/settings-keywords.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "appearance"
+scenario = "scripts/docs-images/settings-appearance.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "extensions"
+scenario = "scripts/docs-images/settings-extensions.json"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
+name = "permissions"
+scenario = "scripts/docs-images/settings-permissions.json"
+window = "prefs"
+width = 760
