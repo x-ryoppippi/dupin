@@ -184,6 +184,14 @@ width = 760
 
 [[images]]
 page = "settings"
+name = "snippets"
+scenario = "scripts/docs-images/settings-snippets.json"
+config = "scripts/headless/snippets.toml"
+window = "prefs"
+width = 760
+
+[[images]]
+page = "settings"
 name = "appearance"
 scenario = "scripts/docs-images/settings-appearance.json"
 window = "prefs"
