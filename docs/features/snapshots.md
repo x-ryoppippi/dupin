@@ -11,8 +11,8 @@ Type `snap`, then Space, to list saved snapshots in the launcher by title, with
 when each was saved, its mode and its query, newest first; typing filters them by
 title. Enter opens the selected snapshot in the Snapshots window, and ⌘Enter
 resumes its search, as ⌘R does, when its command is still available. The list
-uses the metadata the Snapshots window reads, and reads the archive only when the
-keyword is entered before the window has; the main search never reads it. See
+uses the metadata the Snapshots window reads, and reads the saved snapshots only when the
+keyword is entered before the window has; the main search never reads them. See
 [Keywords](./keywords.md) for `snap` and the other keywords.
 
 Snapshots show historical content, including the visible result list, without
@@ -21,16 +21,19 @@ and query again when its command is still available. Removed extensions leave
 their saved content readable. Extension-specific JSON state is reserved in the
 format; current commands resume through their query.
 
-Snapshots stay locally in Dupin's application-support directory (or
-`$XDG_DATA_HOME/dupin/snapshots` when set), with private permissions. There is no
-automatic capture or telemetry. Storage accepts up to 100 entries, 512 KiB per
-entry and 8 MiB in total; a save that exceeds a limit reports an error. Invalid
-or unsupported archives remain on disk and block edits, with the problem shown
-in the Snapshots window.
+Snapshots hold what you typed and the results shown, so they are kept only in
+[encrypted storage](./storage.md), in the `snapshots` namespace, one sealed record
+per snapshot, and stay on this Mac: they never sync. There is no automatic capture
+or telemetry. Storage accepts up to 100 entries, 512 KiB per entry and 8 MiB in
+total; a save that exceeds a limit reports an error and removes nothing. If the
+storage key can't be read, or the snapshots were sealed with another key, they stay
+on disk untouched, saving is refused, and the Snapshots window and every Settings
+page say why; nothing is ever written in the clear instead. A record that was
+tampered with is dropped.
 
 Use `dupin snapshots list --json` for saved Snapshot metadata, `dupin snapshots open
 [--id ID]` to show the separate window, and `dupin snapshots close` to hide it.
-The list returns the ID, saved time, mode, title and query, and flags archive
-problems or truncation. These commands leave the saved archive and usage-ranking
+The list returns the ID, saved time, mode, title and query, and flags storage
+problems or truncation. These commands leave the saved snapshots and usage-ranking
 history intact. Opening dismisses the launcher and may retain the completed query
 for in-memory recall. An active picker blocks opening.

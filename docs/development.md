@@ -168,7 +168,7 @@ nu scripts/snap.nu
 nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearance
 ```
 
-`--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots/archive.json` starts with those saved snapshots. Headless renders draw the panel's plain card where a window shows Liquid Glass.
+`--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. A scenario with a `<name>.snapshots.json`, a list of snapshots, starts with them saved in scratch storage. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
 ## Native E2E evidence
 

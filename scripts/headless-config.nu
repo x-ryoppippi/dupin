@@ -17,13 +17,13 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
     if ($grants | path exists) {
         cp $grants ($config_dir | path join dupin extension-grants.toml)
     }
-    # And saved snapshots of its own, as `<name>.snapshots/archive.json`, in a data folder of its own.
-    let snapshots = $script | path parse | update extension snapshots | path join
+    # And saved snapshots of its own, as `<name>.snapshots.json`, a list Dupin seeds into scratch
+    # storage as if they had been saved.
+    let snapshots = $script | path parse | update extension snapshots.json | path join
     let data = if ($snapshots | path exists) {
-        let data_dir = $tmp | path join $"($name)-data"
-        mkdir ($data_dir | path join dupin)
-        cp --recursive $snapshots ($data_dir | path join dupin snapshots)
-        {XDG_DATA_HOME: $data_dir}
+        {
+            DUPIN_HEADLESS_SNAPSHOTS: ($snapshots | path expand)
+        }
     } else {
         {}
     }

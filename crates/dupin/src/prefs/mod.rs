@@ -412,6 +412,19 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                             .wrap()
                     }),
                 )
+                .children(
+                    crate::stored::problems()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, problem)| {
+                            text(problem)
+                                .key(format!("storage-problem-{index}"))
+                                .w_full()
+                                .font(DESCRIPTION)
+                                .color(k.c.text_base)
+                                .wrap()
+                        }),
+                )
                 .children(rows),
         )
         .children(s.welcome.map(|step| welcome::footer(k, step)));

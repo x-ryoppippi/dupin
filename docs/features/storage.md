@@ -2,6 +2,31 @@
 
 `dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name, and an extension, such as the bundled clipboard history, through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
 
+## What Dupin keeps where
+
+Everything Dupin learns about its user lives in encrypted storage, in the namespace the [sync design](../design/sync.md#what-syncs) assigns it. A built-in store that can't be opened, because the key is missing or the data was sealed with another, keeps what it holds untouched, saves nothing until it opens and says why on every Settings page; it never falls back to a file in the clear.
+
+| What                                   | Where                                                                              | Form                                                   | Syncs                                                    |
+| -------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| Saved snapshots                        | `snapshots` namespace, one record per snapshot                                     | Encrypted                                              | Never                                                    |
+| Clipboard history                      | The bundled clipboard history package's namespace                                  | Encrypted                                              | Opt-in, when clipboard sync ships                        |
+| An extension's stored data             | `ext-u-…` or `ext-b-…`, its own namespace                                          | Encrypted                                              | Only with `storage.sync`, when it ships                  |
+| Usage history (picks and queries)      | `history.json` in `~/Library/Application Support/Dupin`, until it moves to `usage` | Plain JSON, `0600`                                     | `usage`, per device, when it moves                       |
+| Settings edits over a read-only base   | `settings.toml` beside `storage/`, until it moves to `settings`                    | Plain TOML                                             | `settings`, shared keys only, when it moves              |
+| Extension grants and switches          | `grants.toml` beside `storage/`, until it moves into storage                       | Plain TOML                                             | Never                                                    |
+| Installed packages                     | `extensions.lock` beside `storage/`, until it moves to `extensions`                | Plain TOML                                             | `extensions`, Git-installed packages only, when it moves |
+| `config.toml`, `extension-grants.toml` | Dupin's config folder                                                              | Plain TOML: the user's own files, often written by Nix | Never                                                    |
+| The data key                           | The Keychain (see [The data key](#the-data-key))                                   | Keychain item                                          | Never                                                    |
+| `storage.state`                        | Beside `storage/`                                                                  | Sealed under the data key                              | Never                                                    |
+
+Dupin also writes, in the clear, files that hold no user data:
+
+- `~/Library/Logs/Dupin/dupin.log`: startup problems, updates and failures by kind. It never holds what you typed, a result's title or path, clipboard contents or snippet text; an extension's failure is logged by its code and line only, since its message is the extension's own text.
+- `~/Library/Caches/Dupin/calculator` (or `$XDG_CACHE_HOME/dupin/calculator`): the European Central Bank's published exchange rates and when they were last fetched.
+- `welcomed`, an empty marker that the welcome was shown, and the example shaders Settings copies into the config folder.
+- `copy-staging/`, while a copy runs: links to the destination's staging folder, removed when the copy finishes or on the next launch. The copied file itself goes to its destination as it would without Dupin.
+- An update download in a hidden `.Dupin-update-` folder beside the app, the extensions folder's package code, and the control socket in the per-user temporary folder.
+
 ## What a namespace holds
 
 - **Records** are JSON values under a stable 128-bit ID. `put` stores a new record under a random ID; `upsert` stores the record for an owner's logical key, replacing the one stored before. The ID comes from the key through a keyed hash (`key_id`), so the key itself is never written. Every write is a new version stamped by the device's hybrid logical clock, and the record keeps the wall-clock time it was first stored, across replacements. `list` pages newest version first, with a `before` cursor (the last record's stamp and ID, which stays valid if that record is replaced or deleted), and returns at most 200 records a page.

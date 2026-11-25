@@ -49,14 +49,15 @@ fn start(providers: &mut Providers) {
 }
 
 /// The saved snapshots, by title, from the metadata the Snapshots window lists, which the
-/// keyword reads from the archive itself only if the window hasn't. It answers only its own
+/// keyword reads from the store itself only if the window hasn't. It answers only its own
 /// keyword, so the main search never reads it.
 struct SnapshotsProvider;
 
 impl Provider for SnapshotsProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        crate::snapshots::read_listing();
         let (entries, sources) = {
-            let mut listing = crate::snapshots::listing();
+            let listing = crate::snapshots::listing();
             let rows = rows(listing.entries(), &request.query, request.limit);
             (rows, listing.sources.clone())
         };

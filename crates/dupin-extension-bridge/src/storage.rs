@@ -85,7 +85,7 @@ impl Namespace {
 /// Packages' namespaces under one [`dupin_storage::Storage`], each opened on first use and kept
 /// open, with a sweeper applying its retention while nothing is written.
 pub struct PackageStorage {
-    storage: dupin_storage::Storage,
+    storage: Arc<dupin_storage::Storage>,
     open: Mutex<HashMap<String, Opened>>,
     on_error: ErrorSink,
 }
@@ -97,9 +97,9 @@ struct Opened {
 }
 
 impl PackageStorage {
-    pub fn new(storage: dupin_storage::Storage) -> Self {
+    pub fn new(storage: impl Into<Arc<dupin_storage::Storage>>) -> Self {
         Self {
-            storage,
+            storage: storage.into(),
             open: Mutex::default(),
             on_error: Arc::new(|_, _| {}),
         }

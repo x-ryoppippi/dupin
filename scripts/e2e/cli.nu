@@ -1,6 +1,7 @@
 use driver.nu [
     DUPIN
     ad
+    dir-proof
     file-proof
     log-count
     mentions
@@ -18,10 +19,10 @@ export def cli-stage [out: path, binary: path] {
         ((date now) - $started) / 1sec | to json | save --force ($recording | path join cli-start.json)
     }
     let log = $out | path join dupin.log
-    let archive = $out | path join data dupin snapshots archive.json
+    let archive = $out | path join data dupin storage snapshots
     let history = $env.HOME | path join 'Library/Application Support/Dupin/history.json'
     let before = file-proof $history
-    let archive_before = file-proof $archive
+    let archive_before = dir-proof $archive
     try {
         let opened = ^$binary open --query calculator --json | from json
         if $opened != null { error make {msg: 'CLI open returned unexpected data'} }
@@ -117,6 +118,9 @@ export def cli-stage [out: path, binary: path] {
         if ($listed.entries | length) != 1 or $listed.truncated {
             error make {msg: 'CLI Snapshot list did not return the saved fixture'}
         }
+        if $listed.entries.0.mode != 'apps.search' or $listed.entries.0.query != calculator {
+            error make {msg: 'Snapshot did not capture the settled Apps query'}
+        }
         if ($listed.entries.0 | columns | sort) != ([id mode query saved_at title] | sort) {
             error make {msg: 'CLI Snapshot list exposed unexpected fields'}
         }
@@ -177,12 +181,12 @@ export def cli-stage [out: path, binary: path] {
             --app
             $DUPIN
         ) | ignore
-        if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
+        if (dir-proof $archive) != $archive_before or (file-proof $history) != $before {
             error make {msg: 'CLI controls changed the Snapshot archive or launch history'}
         }
         {
             archive_before: $archive_before
-            archive_after: (file-proof $archive)
+            archive_after: (dir-proof $archive)
             history_before: $before
             history_after: (file-proof $history)
         } | to json | save ($out | path join cli-storage-proof.json)

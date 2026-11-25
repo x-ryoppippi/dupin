@@ -45,6 +45,14 @@ pub fn storage() -> Option<dupin_storage::Storage> {
     ))
 }
 
+/// The launcher's one [`storage`]: extensions' namespaces and the built-ins' own, such as
+/// stored snippets, share the device's clock and key, as a second root over the same folder
+/// would not.
+pub fn shared_storage() -> Option<Arc<dupin_storage::Storage>> {
+    static SHARED: OnceLock<Option<Arc<dupin_storage::Storage>>> = OnceLock::new();
+    SHARED.get_or_init(|| storage().map(Arc::new)).clone()
+}
+
 /// What the platform services need from the launcher.
 pub struct Platform {
     pub scripts: Arc<RwLock<Catalog>>,
@@ -108,7 +116,7 @@ pub fn open(platform: Platform) -> Bridge {
             scripts: platform.scripts,
             runner: platform.runner,
         }),
-        storage: match storage() {
+        storage: match shared_storage() {
             Some(storage) => Box::new(PackageStorage::new(storage).on_error(|namespace, error| {
                 crate::log::warn(&format!("extension storage {namespace}: {error}"));
             })),
