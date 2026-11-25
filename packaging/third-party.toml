@@ -12,7 +12,11 @@ use = "Emoji names, sections, skin tones and English and Japanese keywords in th
 source = "https://unicode.org/Public/emoji/15.1/ and https://github.com/unicode-org/cldr-json"
 licence = "Unicode-3.0"
 text = "extensions/emoji/LICENSE-UNICODE"
-files = ["extensions/emoji/catalogue.ts", "extensions/emoji/fixtures"]
+files = [
+	"extensions/emoji/catalogue.ts",
+	"extensions/emoji/fixtures",
+	"extensions/emoji/scripts/generate.nu",
+]
 
 [[material]]
 name = "aurora-shimmer.glsl and campfire-embers.glsl from snedea/ghostty-themes"

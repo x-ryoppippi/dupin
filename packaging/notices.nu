@@ -2,7 +2,7 @@
 
 const ROOT = path self ..
 const TREES = ["crates" "extensions" "examples/shaders" "sdk"]
-const MARKERS = '(?i)copyright|\(c\) [0-9]{4}|©|SPDX-License-Identifier'
+const MARKERS = '(?i)copyright\s+(\(c\)|©|[0-9]{4})|\(c\)\s+[0-9]{4}|SPDX-License-Identifier'
 const PLACEHOLDER = '^\s*Copyright.*<[a-z ]+>'
 
 # Third-party notices for Dupin.app. See "Third-party code and data" in docs/development.md.
