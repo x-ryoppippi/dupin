@@ -51,7 +51,7 @@ Keywords are case-sensitive, up to 32 bytes, without spaces. Names are up to 80 
 
 When `config.toml` and storage both have a snippet with the same keyword, `config.toml`'s is listed and used, and a notice names the keyword: the file is the declared base, which a stored snippet never silently replaces. Rename the stored one in Settings → Snippets. The [sync design](../design/sync.md#snippets) keeps the same rule once snippets sync: `config.toml`'s wins on its own Mac and is never synced.
 
-Settings → Snippets offers **Move to Encrypted Storage** while `config.toml`'s snippets can be written: it stores each valid one in place of a stored snippet with the same keyword, which it was already taking the place of, then removes the moved ones from `config.toml`, as any Settings change does, replacing the file's comments. An invalid one stays in `config.toml`. When `config.toml` is read-only, such as one Home Manager writes, Dupin never rewrites it: the page says its snippets stay there, and they keep working as a read-only source.
+Dupin never writes `config.toml`'s snippets, whether the file is writable or one Home Manager makes read-only: Settings → Snippets lists them as they are, and to store one in Dupin instead, add it there and delete it from the file.
 
 With `snippet_paste = true`, Enter also pastes the snippet into the app you were using by pressing ⌘V. If you enabled it through `config.toml`, Dupin requests Accessibility access on the first paste that needs it. While access is unavailable, Dupin copies the text. Later attempts also explain how to grant access. Settings → Search shows an Open button for System Settings → Privacy & Security → Accessibility.
 

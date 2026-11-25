@@ -1,6 +1,5 @@
 //! Snippets: the ones stored in Dupin, which are added, edited and deleted here, and
-//! config.toml's, which are listed read-only and can be moved into storage once when the file
-//! that holds them is writable.
+//! config.toml's, a read-only declared source that only its own file changes.
 
 use dupin_core::Config;
 use dupin_core::snippets::{Problems, Snippet, Source};
@@ -150,53 +149,6 @@ impl Prefs {
         });
     }
 
-    /// Stores config.toml's snippets, then removes the ones stored from config.toml, which
-    /// only a writable file allows: a locked `snippets` key is never offered the move.
-    pub(super) fn move_snippets(&mut self) {
-        if self.locked("snippets") || self.snippets.busy || self.config.snippets.is_empty() {
-            return;
-        }
-        let declared = self.config.snippets.clone();
-        self.snippets.busy = true;
-        let me = self.me.clone();
-        std::thread::spawn(move || {
-            let moved = crate::snippets::library().import(&declared);
-            me.update(move |s, _| s.snippets_moved(moved));
-        });
-    }
-
-    fn snippets_moved(&mut self, moved: Result<Vec<String>, String>) {
-        self.snippets.busy = false;
-        let moved = match moved {
-            Ok(moved) => moved,
-            Err(problem) => {
-                self.snippets.outcome = Some(problem);
-                return;
-            }
-        };
-        let count = moved.len();
-        self.set(|config| {
-            for keyword in &moved {
-                config.snippets.remove(keyword);
-            }
-        });
-        let left = self.config.snippets.len();
-        self.snippets.outcome = Some(match (count, left) {
-            (1, 0) => "Moved the snippet to encrypted storage.".into(),
-            (_, 0) => format!("Moved {count} snippets to encrypted storage."),
-            _ => format!(
-                "Moved {count} of {} snippets to encrypted storage; the others are invalid and stay in config.toml.",
-                count + left
-            ),
-        });
-        self.reflect_snippets();
-    }
-
-    #[cfg(test)]
-    pub(super) fn snippets_busy(&self) -> bool {
-        self.snippets.busy
-    }
-
     #[cfg(test)]
     pub(super) fn snippet_rows(&self) -> Vec<(String, Source)> {
         self.snippets
@@ -253,11 +205,8 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     }
     body.push(note(
         k,
-        "Snippets you add are stored in Dupin, encrypted. Type a snippet's keyword or name after snip, then Space, to find it; {date}, {time}, {datetime} and {clipboard} are filled in when it's used.",
+        "Snippets you add are stored in Dupin, encrypted. config.toml's are listed as they are, and only that file changes them; one takes the place of a stored snippet with the same keyword. Type a snippet's keyword or name after snip, then Space, to find it; {date}, {time}, {datetime} and {clipboard} are filled in when it's used.",
     ));
-    if !s.config.snippets.is_empty() {
-        body.push(card(k, hair, vec![move_row(s, k)]));
-    }
     body
 }
 
@@ -406,32 +355,4 @@ fn editor_keyword(s: &mut Prefs) -> &mut TextEdit {
 
 fn editor_text(s: &mut Prefs) -> &mut TextEdit {
     &mut s.snippets.editor.as_mut().expect("the editor is open").text
-}
-
-/// Moving config.toml's snippets into storage, offered only while the file holding them can
-/// be written; a read-only one, such as Nix's, keeps them and says so.
-fn move_row(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("snippets");
-    let control = if locked {
-        el()
-    } else {
-        Button::new("Move to Encrypted Storage")
-            .disabled(s.snippets.busy)
-            .on_press(Prefs::move_snippets)
-            .build(k)
-            .key("move-snippets")
-    };
-    let detail = if locked {
-        "config.toml is read-only, so its snippets stay there and take the place of a stored one with the same keyword."
-    } else {
-        "Stores config.toml's snippets in Dupin, encrypted, and removes them from config.toml, so they can be edited here and in the launcher."
-    };
-    setting_with_lock(
-        k,
-        &icons::QUOTE,
-        "config.toml's snippets",
-        Some(detail),
-        control,
-        s.lock_note(locked),
-    )
 }

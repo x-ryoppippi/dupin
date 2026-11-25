@@ -684,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn the_snippets_page_lists_config_toml_snippets_and_offers_the_move_only_when_writable() {
+    fn the_snippets_page_lists_config_toml_snippets_read_only_and_adds_stored_ones() {
         use rune::accesskit::Role;
 
         let config =
@@ -698,32 +698,22 @@ mod tests {
             [("sig".to_owned(), dupin_core::snippets::Source::Config)]
         );
         let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
-        for locked in [false, true] {
-            runtime.update(|s, _| {
-                s.locked_keys = locked.then(|| "snippets".to_owned()).into_iter().collect();
-            });
-            runtime.frame(0.0);
-            let tree = runtime.accessibility_tree();
-            let button = |label: &str| {
-                tree.nodes
-                    .iter()
-                    .any(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
-            };
-            assert!(button("Add Snippet"));
-            assert!(!button("Edit"), "config.toml's snippet is never edited here");
-            assert!(!button("Delete"));
-            assert_eq!(button("Move to Encrypted Storage"), !locked);
-            assert!(
-                tree.nodes
-                    .iter()
-                    .any(|(_, node)| node.label() == Some("Email signature"))
-            );
-        }
-        runtime.update(|s, _| {
-            s.move_snippets();
-            assert!(!s.snippets_busy(), "a locked key is never moved");
-            s.add_snippet();
-        });
+        runtime.frame(0.0);
+        let tree = runtime.accessibility_tree();
+        let button = |label: &str| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Button && node.label() == Some(label))
+        };
+        assert!(button("Add Snippet"));
+        assert!(!button("Edit"), "config.toml's snippet is never edited here");
+        assert!(!button("Delete"));
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Email signature"))
+        );
+        runtime.update(|s, _| s.add_snippet());
         runtime.frame(0.0);
         let tree = runtime.accessibility_tree();
         for label in ["Name", "Keyword", "Text", "Save Snippet"] {

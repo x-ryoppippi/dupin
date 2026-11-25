@@ -216,50 +216,6 @@ impl Library {
         Ok(deleted)
     }
 
-    /// Stores each of `snippets`, config.toml's, in place of a stored one with the same keyword,
-    /// which config.toml's already took the place of; the caller then removes them from
-    /// config.toml. An invalid one is left where it is. Returns the keywords stored.
-    pub fn import(&self, snippets: &BTreeMap<String, ConfigSnippet>) -> Result<Vec<String>, String> {
-        let mut moved = Vec::new();
-        {
-            let mut opened = lock(&self.store);
-            let store = self.open(&mut opened)?;
-            let mut stored: BTreeMap<String, Snippet> = self
-                .stored()
-                .iter()
-                .map(|snippet| (snippet.keyword.clone(), snippet.clone()))
-                .collect();
-            for (keyword, snippet) in snippets {
-                let draft = Snippet {
-                    keyword: keyword.clone(),
-                    name: snippet.name.clone(),
-                    text: snippet.text.clone(),
-                }
-                .normalized();
-                let others: Vec<Snippet> = stored
-                    .values()
-                    .filter(|other| other.keyword != draft.keyword)
-                    .cloned()
-                    .collect();
-                if !check_save(&BTreeMap::new(), &others, &draft, None).is_empty() {
-                    continue;
-                }
-                let written = store.upsert_within_limits(&draft.keyword, record(&draft)?);
-                if let Err(error) = written {
-                    *write(&self.stored) = Arc::new(stored.into_values().collect());
-                    drop(opened);
-                    self.changed();
-                    return Err(error.to_string());
-                }
-                moved.push(draft.keyword.clone());
-                stored.insert(draft.keyword.clone(), draft);
-            }
-            *write(&self.stored) = Arc::new(stored.into_values().collect());
-        }
-        self.changed();
-        Ok(moved)
-    }
-
     /// The open namespace, opening and reading it on first use, and again after it failed, as
     /// a Keychain that was locked may have been unlocked since.
     fn open<'a>(&self, opened: &'a mut Opened) -> Result<&'a Store, String> {
@@ -484,40 +440,6 @@ mod tests {
         assert!(
             reopened.stored().is_empty(),
             "the rename left nothing under the old keyword"
-        );
-    }
-
-    #[test]
-    fn moving_config_toml_snippets_stores_the_ones_it_can() {
-        let root = tempfile::tempdir().unwrap();
-        let library = library(root.path(), &dupin_storage::DataKey::generate().unwrap());
-        assert!(
-            library
-                .save(snippet("sig", None, "Stored"), None)
-                .unwrap()
-                .is_empty()
-        );
-        let declared = BTreeMap::from([
-            (
-                "sig".to_owned(),
-                ConfigSnippet {
-                    name: Some("Signature".into()),
-                    text: "From config.toml".into(),
-                },
-            ),
-            (
-                "two words".to_owned(),
-                ConfigSnippet {
-                    name: None,
-                    text: "x".into(),
-                },
-            ),
-        ]);
-        assert_eq!(library.import(&declared).unwrap(), ["sig"]);
-        assert_eq!(
-            *library.stored(),
-            [snippet("sig", Some("Signature"), "From config.toml")],
-            "config.toml's took the stored one's place, as it did while listed"
         );
     }
 
