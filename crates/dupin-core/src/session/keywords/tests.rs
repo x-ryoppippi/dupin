@@ -247,3 +247,30 @@ fn the_registry_reports_who_holds_a_keyword() {
     assert!(registry.add_web_alias("g", "Again").is_err());
     assert!(registry.keyword("g").is_none());
 }
+
+#[test]
+fn an_app_alias_leads_with_its_app_shown_once() {
+    let mut registry = registry();
+    registry
+        .add_path_alias("ff", PathBuf::from("/Applications/Firefox.app"), "Firefox")
+        .unwrap();
+    registry.add_web_shorthand("goo", "g").unwrap();
+    assert!(
+        registry.add_web_shorthand("x", "goo").is_err(),
+        "a shorthand of a shorthand"
+    );
+    let mut s = Session::new(History::default(), registry).unwrap();
+    let rows = shown(&mut s, "ff", &["Fluffy", "Firefox"]);
+    assert_eq!(titles(&rows), ["Firefox", "Fluffy"]);
+    assert_eq!(rows[0].1, ["ff"]);
+    assert_eq!(s.origins()[0].as_str(), KEYWORDS);
+    let firefox = s.selected_item().unwrap();
+    assert_eq!(
+        firefox.action(firefox.primary.as_deref().unwrap()),
+        Some(&Action::Open("/Applications/Firefox.app".into()))
+    );
+    // A shorthand for a web search is listed with it, and starting it shows the search.
+    let rows = shown(&mut s, "go", &["Grapher"]);
+    assert_eq!(titles(&rows), ["Grapher", "Search Google"]);
+    assert_eq!(rows[1].1, ["goo ␣", "g ␣"]);
+}

@@ -81,6 +81,15 @@ pub fn run(action: &Action) -> Result<(), String> {
     })
 }
 
+/// Where the app with `bundle_id` is installed, as Launch Services finds it.
+pub fn application_path(bundle_id: &str) -> Option<PathBuf> {
+    autoreleasepool(|_| {
+        let url = NSWorkspace::sharedWorkspace()
+            .URLForApplicationWithBundleIdentifier(&NSString::from_str(bundle_id))?;
+        Some(PathBuf::from(url.path()?.to_string()))
+    })
+}
+
 fn open_app(bundle_id: &str, hide_if_frontmost: bool) -> Result<(), String> {
     let workspace = NSWorkspace::sharedWorkspace();
     let identifier = NSString::from_str(bundle_id);

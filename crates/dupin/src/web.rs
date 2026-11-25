@@ -138,6 +138,8 @@ fn valid_name(name: &str) -> bool {
 pub struct WebSearches {
     sources: Vec<Arc<Extension>>,
     reserved: HashSet<String>,
+    /// `[aliases]` shorthands, with the alias of the search each takes a query for.
+    shorthands: std::collections::HashMap<String, String>,
     bridge: Option<Bridge>,
 }
 
@@ -153,6 +155,7 @@ impl std::fmt::Debug for WebSearches {
 impl PartialEq for WebSearches {
     fn eq(&self, other: &Self) -> bool {
         self.reserved == other.reserved
+            && self.shorthands == other.shorthands
             && self.sources.len() == other.sources.len()
             && self
                 .sources
@@ -168,7 +171,19 @@ impl WebSearches {
         Self {
             sources,
             reserved,
+            shorthands: std::collections::HashMap::new(),
             bridge: None,
+        }
+    }
+
+    /// Lets each shorthand take a query for the search whose alias it maps to.
+    pub fn with_shorthands<'a>(self, shorthands: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        Self {
+            shorthands: shorthands
+                .into_iter()
+                .map(|(shorthand, alias)| (shorthand.to_owned(), alias.to_owned()))
+                .collect(),
+            ..self
         }
     }
 
@@ -292,16 +307,23 @@ type Reached = (Item, String);
 fn alias_item(searches: &WebSearches, raw: &str, deadline: Instant) -> Option<Reached> {
     let raw = raw.trim_start();
     let boundary = raw.find(char::is_whitespace).unwrap_or(raw.len());
-    let alias = &raw[..boundary];
-    if alias.is_empty() {
+    let typed = &raw[..boundary];
+    if typed.is_empty() {
         return None;
     }
+    let alias = searches.shorthands.get(typed).map_or(typed, String::as_str);
     let query = raw[boundary..].trim();
     searches
         .searches(deadline)
         .into_iter()
         .find(|(_, search)| search.alias == alias)
-        .and_then(|(shown, search)| Some((item(&shown, &search, query, true)?, search.alias)))
+        .and_then(|(shown, search)| {
+            let mut row = item(&shown, &search, query, true)?;
+            if row.completion.is_some() {
+                row.completion = Some(format!("{typed} "));
+            }
+            Some((row, typed.to_owned()))
+        })
 }
 
 fn fallback_items(searches: &WebSearches, raw: &str, limit: usize, deadline: Instant) -> Vec<Reached> {

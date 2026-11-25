@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CommandId(String);
@@ -157,6 +158,7 @@ pub enum CommandError {
     UnknownCommand(CommandId),
     KeywordConflict { keyword: String, command: CommandId },
     WebAliasConflict(String),
+    UnknownWebSearch(String),
     MissingDefault(CommandId),
     MissingSpaceTarget(CommandId),
 }
@@ -177,12 +179,8 @@ impl fmt::Display for CommandError {
                 f,
                 "keyword `{keyword}` for `{command}` is already assigned to another command"
             ),
-            Self::WebAliasConflict(alias) => {
-                write!(
-                    f,
-                    "web search alias `{alias}` is already assigned to another command"
-                )
-            }
+            Self::WebAliasConflict(alias) => write!(f, "`{alias}` is already a keyword"),
+            Self::UnknownWebSearch(search) => write!(f, "no web search answers to `{search}`"),
             Self::MissingDefault(id) => write!(f, "default command `{id}` is not registered"),
             Self::MissingSpaceTarget(id) => write!(f, "Space target `{id}` is not registered"),
         }
@@ -197,14 +195,18 @@ pub enum KeywordHolder<'a> {
     Command(&'a CommandId),
     /// A web search, by its title.
     Web(&'a str),
+    /// An app, file or folder an alias shows, by its path.
+    Path(&'a Path),
 }
 
 /// What a keyword reaches: a command's own search, or a web search the main search answers.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum KeywordTarget {
+pub enum KeywordTarget {
     Command(CommandId),
-    /// A web search, by its alias.
+    /// A web search, by its own alias.
     Web(String),
+    /// An app, file or folder, which the row for the keyword opens.
+    Path(PathBuf),
 }
 
 impl fmt::Display for KeywordTarget {
@@ -212,6 +214,7 @@ impl fmt::Display for KeywordTarget {
         match self {
             Self::Command(id) => write!(f, "command:{id}"),
             Self::Web(alias) => write!(f, "web:{alias}"),
+            Self::Path(path) => write!(f, "path:{}", path.display()),
         }
     }
 }
@@ -219,11 +222,19 @@ impl fmt::Display for KeywordTarget {
 /// One command, or web search, and the keywords that reach it, shortest first. The files
 /// search that Space on an empty query enters has none.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct KeywordEntry {
-    pub(crate) target: KeywordTarget,
-    pub(crate) title: String,
-    pub(crate) subtitle: String,
-    pub(crate) keywords: Vec<String>,
+pub struct KeywordEntry {
+    pub target: KeywordTarget,
+    pub title: String,
+    pub subtitle: String,
+    pub keywords: Vec<String>,
+}
+
+/// A web search's alias, or a shorthand for one.
+#[derive(Clone, Debug)]
+struct WebAlias {
+    title: String,
+    /// The alias the search itself answers to.
+    search: String,
 }
 
 fn checked(keyword: String) -> Result<String, CommandError> {
@@ -241,8 +252,10 @@ pub struct CommandRegistry {
     destination_search: Option<CommandId>,
     commands: HashMap<CommandId, CommandSpec>,
     keywords: HashMap<String, CommandId>,
-    /// Web search aliases, by alias, with what a list of commands calls each.
-    web: BTreeMap<String, String>,
+    /// Web search aliases, and shorthands for them, by alias.
+    web: BTreeMap<String, WebAlias>,
+    /// Apps, files and folders aliases show, by alias, with their titles.
+    paths: BTreeMap<String, (PathBuf, String)>,
     defaults: Vec<CommandId>,
     pinned: Option<CommandId>,
     browser: Option<CommandId>,
@@ -260,6 +273,7 @@ impl CommandRegistry {
             commands: HashMap::new(),
             keywords: HashMap::new(),
             web: BTreeMap::new(),
+            paths: BTreeMap::new(),
         }
     }
 
@@ -367,7 +381,7 @@ impl CommandRegistry {
             return Err(CommandError::UnknownCommand(command.clone()));
         }
         let keyword = checked(keyword.into())?;
-        if self.web.contains_key(&keyword) {
+        if self.web.contains_key(&keyword) || self.paths.contains_key(&keyword) {
             return Err(CommandError::KeywordConflict {
                 keyword,
                 command: command.clone(),
@@ -394,24 +408,82 @@ impl CommandRegistry {
         title: impl Into<String>,
     ) -> Result<(), CommandError> {
         let alias = checked(alias.into())?;
-        if self.web.contains_key(&alias) || self.keywords.contains_key(&alias) {
-            return Err(CommandError::WebAliasConflict(alias));
-        }
-        self.web.insert(alias, title.into());
+        self.reserve(&alias)?;
+        let search = alias.clone();
+        self.web.insert(
+            alias,
+            WebAlias {
+                title: title.into(),
+                search,
+            },
+        );
         Ok(())
     }
 
-    /// What answers `keyword`, a command or a web search.
+    /// Reserve `alias` for the web search `search` already answers to, so that typing it takes
+    /// a query as `search` does.
+    pub fn add_web_shorthand(&mut self, alias: impl Into<String>, search: &str) -> Result<(), CommandError> {
+        let alias = checked(alias.into())?;
+        let Some(target) = self.web.get(search).filter(|target| target.search == search) else {
+            return Err(CommandError::UnknownWebSearch(search.to_owned()));
+        };
+        let title = target.title.clone();
+        self.reserve(&alias)?;
+        self.web.insert(
+            alias,
+            WebAlias {
+                title,
+                search: search.to_owned(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Reserve `alias` for the app, file or folder at `path`, called `title`.
+    pub fn add_path_alias(
+        &mut self,
+        alias: impl Into<String>,
+        path: PathBuf,
+        title: impl Into<String>,
+    ) -> Result<(), CommandError> {
+        let alias = checked(alias.into())?;
+        self.reserve(&alias)?;
+        self.paths.insert(alias, (path, title.into()));
+        Ok(())
+    }
+
+    fn reserve(&self, alias: &str) -> Result<(), CommandError> {
+        if self.holder(alias).is_some() {
+            return Err(CommandError::WebAliasConflict(alias.to_owned()));
+        }
+        Ok(())
+    }
+
+    /// What answers `keyword`: a command, a web search, or an app, file or folder.
     pub fn holder(&self, keyword: &str) -> Option<KeywordHolder<'_>> {
         self.keywords
             .get(keyword)
             .map(KeywordHolder::Command)
-            .or_else(|| self.web.get(keyword).map(|title| KeywordHolder::Web(title)))
+            .or_else(|| self.web.get(keyword).map(|web| KeywordHolder::Web(&web.title)))
+            .or_else(|| self.paths.get(keyword).map(|(path, _)| KeywordHolder::Path(path)))
+    }
+
+    /// The web search `alias` reaches: its own alias, for a shorthand.
+    pub fn web_search(&self, alias: &str) -> Option<&str> {
+        self.web.get(alias).map(|web| web.search.as_str())
+    }
+
+    /// Every web search shorthand, with the alias of the search it reaches.
+    pub fn web_shorthands(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.web
+            .iter()
+            .filter(|(alias, web)| **alias != web.search)
+            .map(|(alias, web)| (alias.as_str(), web.search.as_str()))
     }
 
     /// Every command a keyword reaches, the files search Space reaches and every web search,
     /// by title.
-    pub(crate) fn entries(&self) -> Vec<KeywordEntry> {
+    pub fn entries(&self) -> Vec<KeywordEntry> {
         let mut commands: BTreeMap<&CommandId, Vec<String>> = BTreeMap::new();
         for (keyword, command) in &self.keywords {
             commands.entry(command).or_default().push(keyword.clone());
@@ -431,13 +503,37 @@ impl CommandRegistry {
                     keywords,
                 })
             })
-            .chain(self.web.iter().map(|(alias, title)| KeywordEntry {
-                target: KeywordTarget::Web(alias.clone()),
-                title: title.clone(),
-                subtitle: "Web search".into(),
-                keywords: vec![alias.clone()],
-            }))
             .collect();
+        let mut searches: BTreeMap<&str, KeywordEntry> = BTreeMap::new();
+        for (alias, web) in &self.web {
+            searches
+                .entry(&web.search)
+                .or_insert_with(|| KeywordEntry {
+                    target: KeywordTarget::Web(web.search.clone()),
+                    title: web.title.clone(),
+                    subtitle: "Web search".into(),
+                    keywords: Vec::new(),
+                })
+                .keywords
+                .push(alias.clone());
+        }
+        for mut entry in searches.into_values() {
+            let search = match &entry.target {
+                KeywordTarget::Web(search) => search.clone(),
+                _ => unreachable!("grouped by web search"),
+            };
+            // The search's own alias first, then its shorthands.
+            entry
+                .keywords
+                .sort_by_key(|alias| (*alias != search, alias.len(), alias.clone()));
+            entries.push(entry);
+        }
+        entries.extend(self.paths.iter().map(|(alias, (path, title))| KeywordEntry {
+            target: KeywordTarget::Path(path.clone()),
+            title: title.clone(),
+            subtitle: crate::item::tilde(&path.to_string_lossy()),
+            keywords: vec![alias.clone()],
+        }));
         entries.sort_by(|a, b| a.title.cmp(&b.title).then_with(|| a.target.cmp(&b.target)));
         entries
     }

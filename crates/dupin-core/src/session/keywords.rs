@@ -130,9 +130,13 @@ fn matching(entries: Vec<KeywordEntry>, query: &str) -> (Vec<Suggestion>, usize)
             .then_with(|| a.entry.title.cmp(&b.entry.title))
     });
     suggestions.truncate(MAX_SUGGESTIONS);
-    let leads = suggestions
-        .first()
-        .is_some_and(|first| first.exact && (query.chars().count() >= LEADING_CHARS || reached == 1));
+    // An alias for an app or file is the user's own shorthand for it, so it always leads.
+    let leads = suggestions.first().is_some_and(|first| {
+        first.exact
+            && (query.chars().count() >= LEADING_CHARS
+                || reached == 1
+                || matches!(first.entry.target, KeywordTarget::Path(_)))
+    });
     (suggestions, usize::from(leads))
 }
 
@@ -141,6 +145,12 @@ fn row(suggestion: Suggestion) -> (Item, Vec<Accessory>) {
     let Suggestion { entry, keyword, .. } = suggestion;
     let mut keywords = vec![keyword.clone()];
     keywords.extend(entry.keywords.iter().filter(|other| **other != keyword).cloned());
+    if let KeywordTarget::Path(path) = entry.target {
+        // Typing its alias shows the app or file; Space after it does nothing more.
+        let mut item = Item::path(path, entry.title, Vec::new());
+        item.record_usage = false;
+        return (item, vec![Accessory::Tag(keyword)]);
+    }
     let tags = keywords
         .iter()
         .take(MAX_TAGS)

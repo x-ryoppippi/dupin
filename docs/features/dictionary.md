@@ -16,7 +16,7 @@ While the extensions folder is on, your copy answers Dictionary's keywords in pl
 
 ## Configuration
 
-Set `dictionary_keywords` to a list of aliases for Dictionary search. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
+Set `dictionary_keywords` to a list of aliases for Dictionary search, or add one in [`[aliases]`](./keywords.md#aliases) or Settings → Keywords. The defaults are `define` and `d`; add, remove or replace entries to suit your workflow. Valid edits take effect without relaunching.
 
 ```toml
 dictionary_keywords = ["define", "d"] # type any keyword, then Space, to look up a word

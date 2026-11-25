@@ -347,6 +347,13 @@ impl Session {
             }
             return true;
         }
+        // An alias's app or file is shown once, where the alias puts it.
+        let (kept_items, kept_origins): (Vec<_>, Vec<_>) = items
+            .into_iter()
+            .zip(origins)
+            .filter(|(item, _)| !self.search.suggestions.iter().any(|row| row.id == item.id))
+            .unzip();
+        let (mut items, mut origins) = (kept_items, kept_origins);
         let after = self.search.leading + usize::from(!items.is_empty());
         for (index, item) in self.search.suggestions.iter().enumerate() {
             let at = if index < self.search.leading {

@@ -63,8 +63,14 @@ let
   fixture = ./hm-extension;
   notes = ./hm-extension-notes;
   plain = evaluate { settings.hotkey = "alt+space"; };
-  # `[advanced]` is part of `settings`, with arrays of tables for a kind's actions.
+  # `[advanced]` is part of `settings`, with arrays of tables for a kind's actions, and so is
+  # `[aliases]`.
   advanced = evaluate {
+    settings.aliases = {
+      c = "calendar";
+      ff = "app:org.mozilla.firefox";
+      goo = "web:g";
+    };
     settings.advanced = {
       sources.apps.matcher = "builtin.prefix";
       commands.default.append_sources = [ "files" ];
@@ -224,6 +230,7 @@ pkgs.runCommand "dupin-home-manager-module"
       commands: { default: { append_sources: ["files"] } },
       kinds: { file: { actions: [{ title: "Open in Zed", script: "open-in-zed" }] } }
     }'
+    toml2json "$advanced" | jq -e '.aliases == { c: "calendar", ff: "app:org.mozilla.firefox", goo: "web:g" }'
     toml2json "$bundledGrants" | jq --sort-keys . > bundled-actual.json
     printf '%s' "$bundledExpected" | jq --sort-keys . > bundled-expected.json
     diff bundled-expected.json bundled-actual.json
