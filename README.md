@@ -13,6 +13,8 @@
 
 > A lightweight, resident launcher for Apple silicon Macs.
 
+Named after C. Auguste Dupin, Poe's detective: the source of the line of Mac launchers that runs Sherlock → Watson → Alfred ([why](./docs/name.md)).
+
 - Fuzzy-search and open apps, by any name macOS knows them by
 - Space on an empty query searches files with Spotlight; `in` and Space search inside them; `define` and Space looks up a word in macOS dictionaries
 - A hotkey (⌘Space by default) shows the panel at once, on Liquid Glass
