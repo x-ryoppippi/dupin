@@ -1,0 +1,13 @@
+{
+	"events": [
+		{ "t": 0.1, "type": "type", "text": "snip " },
+		{ "t": 1.0, "type": "key", "name": "Enter" },
+		{ "t": 1.5, "type": "type", "text": "Meeting note" },
+		{ "t": 3.0, "type": "key", "name": "Tab" },
+		{ "t": 3.2, "type": "type", "text": "note" },
+		{ "t": 4.0, "type": "key", "name": "Tab" },
+		{ "t": 4.2, "type": "type", "text": "Notes for {date}" },
+		{ "t": 6.0, "type": "key", "name": "Enter", "cmd": true },
+		{ "t": 7.5, "type": "mark", "name": "end" }
+	]
+}

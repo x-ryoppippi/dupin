@@ -45,7 +45,7 @@
           name = "[A-Za-z0-9][A-Za-z0-9._-]{0,63}";
         in
         lib.types.strMatching (
-          "storage|dictionary|calculator|calendar|query|clipboard:(read|write|watch|paste)|windows:(read|arrange)|rows:(text|url|file|app)"
+          "storage|dictionary|calculator|snippets|calendar|query|clipboard:(read|write|watch|paste)|windows:(read|arrange)|rows:(text|url|file|app)"
           + "|(files|exec|script):${name}|http:https://${host}(\\.${host})*(:[0-9]{1,5})?"
         );
       # The capability broker's declarative base. Dupin knows a package by `name` in its

@@ -13,7 +13,7 @@ The row never pushes the best match down for a short query:
 - The start of a keyword, such as `ca` or `e`, follows the first result, with up to three commands, exact and shortest keywords first.
 - A web search's own alias already shows its search first, so it adds no second row.
 
-Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extensions.md#a-javascript-extension). An empty query shows what it always did.
+Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extensions.md#a-javascript-extension). An empty query shows what it always did. Snippets, with no snippet at all, is neither suggested nor listed, though `snip` still enters it to add the first one ([Snippets](./snippets.md#adding-and-editing)).
 
 Keywords are case-sensitive when typed with Space; the rows match them in any case, and Enter or Tab types them as configured.
 
