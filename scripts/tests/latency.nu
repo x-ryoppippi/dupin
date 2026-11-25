@@ -226,7 +226,8 @@ def main [] {
     ]
     assert equal (stale (parity-pairs $other_control $controlled)) ["b [extension]"]
 
-    # `baseline` records the control from the same results, and refuses results without it.
+    # `baseline` records the control from the same results, and refuses results without it or
+    # without the feature, whose control would skew the recorded one.
     let tmp = mktemp --directory
     let report = {|results: list<record>|
         {schema: 1, commit: "abc1234", results: $results}
@@ -271,6 +272,11 @@ def main [] {
     $first | update results { where feature != $CONTROL } | to json | save ($tmp | path join bare.json)
     let bare = do { ^$nu.current-exe $script baseline b ($tmp | path join bare.json) --out $out } | complete
     assert not equal $bare.exit_code 0
+    $second | update results { where feature == $CONTROL } | to json | save ($tmp | path join controls.json)
+    let partial = do {
+        ^$nu.current-exe $script baseline b ($tmp | path join first.json) ($tmp | path join controls.json) --out $out
+    } | complete
+    assert not equal $partial.exit_code 0
     rm --recursive $tmp
 
     # Every keypress must search the feature's provider; only a pass's last must show its rows.

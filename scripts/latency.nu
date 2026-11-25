@@ -254,12 +254,17 @@ def "main baseline" [
             msg: $"the results come from more than one commit: ($commits | str join ', ')"
         }
     }
+    let without = $results | zip $reports | where {|pair|
+        $pair.1.results | where feature == $feature and implementation == "native" | is-empty
+    }
+    if ($without | is-not-empty) {
+        error make {
+            msg: $"($without | each { get 0 } | str join ', ') has no native ($feature); every result must measure it with the control it is scaled by"
+        }
+    }
     let measured = $reports
     | each {|report| $report.results | where feature == $feature and implementation == "native" }
     | flatten
-    if ($measured | is-empty) {
-        error make {msg: $"the results have no native ($feature)"}
-    }
     let median = {|rows: list<record>, get_value: closure|
         $rows | each $get_value | math median
     }
