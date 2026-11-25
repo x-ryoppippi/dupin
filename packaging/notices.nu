@@ -100,12 +100,13 @@ def "main generate" [output: path]: nothing -> nothing {
         | str join "\n"
     }
     [
-        "Third-party notices for Dupin"
-        ""
-        "Dupin is free software under the GNU General Public License, version 3 or later. It"
-        "includes the open-source code and data below, each under the licence shown with it."
-        "The source of Dupin and of everything listed here: https://github.com/x-ryoppippi/dupin"
-        ""
+        ([
+            "Third-party notices for Dupin"
+            ""
+            "Dupin is free software under the GNU General Public License, version 3 or later; its"
+            "source is at https://github.com/x-ryoppippi/dupin. It includes the open-source code"
+            "and data below, each under the licence shown with it."
+        ] | str join "\n")
         ...$crates
         ...$material
     ]

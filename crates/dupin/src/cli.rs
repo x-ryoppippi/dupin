@@ -368,7 +368,8 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             if json {
                 Ok(serde_json::json!({"path": path, "notices": notices}))
             } else {
-                print!("{notices}");
+                // A reader such as `head` that stops early isn't a failure.
+                let _ = std::io::Write::write_all(&mut io::stdout().lock(), notices.as_bytes());
                 Ok(Value::Null)
             }
         }
