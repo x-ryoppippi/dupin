@@ -17,7 +17,7 @@ const ITEMS_KEPT: usize = 500;
 
 const DAY: u64 = 24 * 60 * 60;
 
-/// How much a visit counts by its age, as Firefox's frecency buckets do.
+/// How much a visit or a pick counts by its age, as Firefox's frecency buckets do.
 fn weight(age_secs: u64) -> f64 {
     match age_secs / DAY {
         0..=3 => 100.0,
@@ -31,10 +31,11 @@ fn weight(age_secs: u64) -> f64 {
 /// The boost for frecency is logarithmic: it reorders results that match about equally well.
 /// A first visit adds about 55 and a hundred recent ones about 110.
 const FRECENCY_SCALE: f64 = 12.0;
-/// Picked before for exactly this query: Alfred's knowledge puts it first among matches as
-/// good as it.
+/// Picked in the last few days for exactly this query: Alfred's knowledge puts it first among
+/// matches as good as it. Older picks count less, by the weight of their age.
 const SAME_QUERY: i32 = 1000;
-/// Picked before for a longer query this one begins (picked for "safari", now "saf").
+/// Picked in the last few days for a longer query this one begins (picked for "safari", now
+/// "saf").
 const LONGER_QUERY: i32 = 200;
 /// The most the history adds to a score. The matcher keeps its classes of match further apart
 /// than this ([`crate::fuzzy::RUN_FROM_WORD_START`]), so picks and frecency never lift a
@@ -53,11 +54,23 @@ struct Entry {
     count: u32,
     /// Unix seconds of the latest visits, oldest first.
     visits: Vec<u64>,
-    /// How many times the item was opened for each query (trimmed and lowercased).
-    queries: HashMap<String, u32>,
+    /// Unix seconds of the latest time the item was opened for each query (trimmed and
+    /// lowercased).
+    queries: HashMap<String, u64>,
 }
 
 impl Entry {
+    /// What the latest pick for a query `matches` accepts is worth at `now`: `full` when
+    /// recent, less as it ages.
+    fn knowledge(&self, full: i32, now: u64, matches: impl Fn(&str) -> bool) -> i32 {
+        self.queries
+            .iter()
+            .filter(|(query, _)| matches(query))
+            .map(|(_, &at)| weight(now.saturating_sub(at)))
+            .max_by(f64::total_cmp)
+            .map_or(0, |weight| (f64::from(full) * weight / 100.0) as i32)
+    }
+
     fn frecency(&self, now: u64) -> f64 {
         if self.visits.is_empty() {
             return 0.0;
@@ -111,16 +124,16 @@ impl History {
         }
         let query = normalize(query);
         if !query.is_empty() {
-            *entry.queries.entry(query).or_default() += 1;
+            entry.queries.insert(query, now);
             if entry.queries.len() > QUERIES_KEPT {
-                // Forget the query picked least often (ties: the alphabetically last).
-                if let Some(rarest) = entry
+                // Forget the query picked longest ago (ties: the alphabetically last).
+                if let Some(stalest) = entry
                     .queries
                     .iter()
                     .min_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
                     .map(|(q, _)| q.clone())
                 {
-                    entry.queries.remove(&rarest);
+                    entry.queries.remove(&stalest);
                 }
             }
         }
@@ -140,14 +153,11 @@ impl History {
     pub(crate) fn boost(&self, id: &str, query: &str, now: u64) -> i32 {
         let Some(entry) = self.items.get(id) else { return 0 };
         let query = normalize(query);
-        let knowledge = if entry.queries.contains_key(&query) {
-            SAME_QUERY
-        } else if !query.is_empty() && entry.queries.keys().any(|q| q.starts_with(&query)) {
-            LONGER_QUERY
-        } else {
-            0
-        };
-        (knowledge + (entry.frecency(now).ln_1p() * FRECENCY_SCALE) as i32).min(MAX_BOOST)
+        let same = entry.knowledge(SAME_QUERY, now, |picked| picked == query);
+        let longer = entry.knowledge(LONGER_QUERY, now, |picked| {
+            !query.is_empty() && picked.len() > query.len() && picked.starts_with(&query)
+        });
+        (same.max(longer) + (entry.frecency(now).ln_1p() * FRECENCY_SCALE) as i32).min(MAX_BOOST)
     }
 
     /// Sort ranked items (all with a `score`) by score plus boost, keeping the providers'
@@ -203,6 +213,52 @@ mod tests {
             history.boost("/A/Terminal.app", "TER ", NOW) - history.boost("/A/Terminal.app", "x", NOW),
             LONGER_QUERY
         );
+    }
+
+    #[test]
+    fn a_pick_counts_less_as_it_ages() {
+        let knowledge = |query: &str, picked: &str, days: u64| {
+            let mut history = History::default();
+            history.record("/A/Safari.app", picked, NOW - days * DAY);
+            history.boost("/A/Safari.app", query, NOW) - history.boost("/A/Safari.app", "x", NOW)
+        };
+        assert_eq!(
+            [0, 10, 20, 60, 120].map(|days| knowledge("saf", "saf", days)),
+            [SAME_QUERY, 700, 500, 300, 100]
+        );
+        assert_eq!(
+            [0, 10, 20, 60, 120].map(|days| knowledge("saf", "safari", days)),
+            [LONGER_QUERY, 140, 100, 60, 20]
+        );
+    }
+
+    #[test]
+    fn a_recent_pick_counts_whatever_older_ones_said() {
+        let mut history = History::default();
+        history.record("/A/Safari.app", "s", NOW - 120 * DAY);
+        history.record("/A/Safari.app", "safari", NOW);
+        assert_eq!(
+            history.boost("/A/Safari.app", "s", NOW) - history.boost("/A/Safari.app", "x", NOW),
+            LONGER_QUERY,
+            "a fresh pick for a longer query outweighs a stale one for this query"
+        );
+        history.record("/A/Safari.app", "s", NOW);
+        assert_eq!(
+            history.boost("/A/Safari.app", "s", NOW) - history.boost("/A/Safari.app", "x", NOW),
+            SAME_QUERY
+        );
+    }
+
+    #[test]
+    fn an_old_wrong_pick_gives_way_to_a_recent_one() {
+        let mut history = History::default();
+        for _ in 0..10 {
+            history.record("/A/Spark.app", "ar", NOW - 120 * DAY);
+        }
+        history.record("/A/Arc.app", "ar", NOW);
+        let mut items = vec![app("Spark", 110), app("Arc", 100)];
+        history.rerank(&mut items, "ar", NOW);
+        assert_eq!(titles(&items), ["Arc", "Spark"]);
     }
 
     #[test]
@@ -355,7 +411,7 @@ mod tests {
             Entry {
                 count: u32::MAX,
                 visits: vec![NOW],
-                queries: HashMap::from([("q".into(), u32::MAX)]),
+                queries: HashMap::from([("q".into(), NOW)]),
             },
         );
         assert_eq!(history.boost("/A/Often.app", "q", NOW), MAX_BOOST);
@@ -411,6 +467,8 @@ mod tests {
         assert_eq!(entry.visits.len(), VISITS_KEPT);
         assert_eq!(entry.visits.first(), Some(&(NOW + 20)));
         assert_eq!(entry.queries.len(), QUERIES_KEPT);
+        assert!(!entry.queries.contains_key("q9"), "the stalest pick goes first");
+        assert!(entry.queries.contains_key("q10"));
     }
 
     #[test]
