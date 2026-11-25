@@ -46,12 +46,39 @@ pub struct Theme {
     pub dark: Colors,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+/// The family text draws in. In config.toml: `"system"`, `"monospace"`, or an installed
+/// family's name (`"JetBrains Mono"`); a comma-separated CSS family list tries each in order.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
 pub enum FontFamily {
+    /// The system UI font (San Francisco).
     #[default]
     System,
+    /// The platform's monospaced UI font (SF Mono).
     Monospace,
+    /// A font installed on the system, or a CSS family list. Falls back to the system font
+    /// when no named family is installed.
+    Named(String),
+}
+
+impl From<String> for FontFamily {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "system" => FontFamily::System,
+            "monospace" => FontFamily::Monospace,
+            _ => FontFamily::Named(value),
+        }
+    }
+}
+
+impl From<FontFamily> for String {
+    fn from(value: FontFamily) -> Self {
+        match value {
+            FontFamily::System => "system".into(),
+            FontFamily::Monospace => "monospace".into(),
+            FontFamily::Named(name) => name,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +141,11 @@ impl TryFrom<ThemeValues> for Theme {
             || v.row_height < v.font_size * 3 + 7
         {
             return Err("theme geometry out of range: width 400..1200, rows 52..100 and at least 3 * font_size + 7, radius 0..32, font 12..20".into());
+        }
+        if let FontFamily::Named(name) = &v.font_family
+            && name.trim().is_empty()
+        {
+            return Err("theme font_family must not be empty".into());
         }
         for c in [&v.light, &v.dark] {
             for value in [
@@ -181,12 +213,36 @@ mod tests {
             "panel_width = nan",
             "row_height = inf",
             "corner_radius = -1",
-            "font_family = \"unknown\"",
+            "font_family = \"\"",
+            "font_family = \"   \"",
             "light.accent = \"#GG0000\"",
             "dark.text = \"red\"",
         ] {
             assert!(Config::parse(&format!("[theme]\n{field}")).is_err(), "{field}");
         }
         assert_eq!(Config::parse("").unwrap().theme, Theme::default());
+    }
+
+    #[test]
+    fn font_family_names_installed_fonts() {
+        use super::FontFamily;
+        let family = |v: &str| {
+            Config::parse(&format!("[theme]\nfont_family = \"{v}\""))
+                .unwrap()
+                .theme
+                .font_family
+        };
+        assert_eq!(family("system"), FontFamily::System);
+        assert_eq!(family("monospace"), FontFamily::Monospace);
+        assert_eq!(
+            family("JetBrains Mono"),
+            FontFamily::Named("JetBrains Mono".into())
+        );
+        assert_eq!(
+            family("Iosevka, JetBrains Mono"),
+            FontFamily::Named("Iosevka, JetBrains Mono".into())
+        );
+        let config = Config::parse("[theme]\nfont_family = \"JetBrains Mono\"").unwrap();
+        assert_eq!(Config::parse(&toml::to_string(&config).unwrap()).unwrap(), config);
     }
 }

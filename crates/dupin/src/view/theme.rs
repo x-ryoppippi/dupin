@@ -41,9 +41,10 @@ impl ResolvedTheme {
             selected_text: color(&c.selected_text, Color::WHITE),
             destructive: rune::color::hex(if dark { "#FF453A" } else { "#FF3B30" }).unwrap(),
             scale: theme.font_size as f32 / 15.0,
-            family: match theme.font_family {
+            family: match &theme.font_family {
                 dupin_core::config::FontFamily::System => tok::Family::Sans,
                 dupin_core::config::FontFamily::Monospace => tok::Family::SystemMono,
+                dupin_core::config::FontFamily::Named(name) => tok::Family::Named(intern(name)),
             },
         }
     }
@@ -53,6 +54,18 @@ impl ResolvedTheme {
         style.family = self.family;
         style
     }
+}
+
+/// `tok::Family::Named` holds a `&'static str`: leak each distinct configured name once.
+fn intern(name: &str) -> &'static str {
+    static NAMES: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut names = NAMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(n) = names.iter().find(|n| **n == name) {
+        return n;
+    }
+    let n: &'static str = Box::leak(name.into());
+    names.push(n);
+    n
 }
 
 fn preview_geometry(theme: &dupin_core::config::Theme, avail_w: f32) -> (f32, f32, f32, usize) {
@@ -168,5 +181,8 @@ mod tests {
         assert_eq!(font.size, 18.0);
         assert_eq!(font.line_height, 24.0);
         assert_eq!(font.family, tok::Family::SystemMono);
+        theme.font_family = dupin_core::config::FontFamily::Named("Menlo".into());
+        let font = ResolvedTheme::new(&theme, false).font(TextStyle::new(15.0, 400.0).lh(20.0));
+        assert_eq!(font.family, tok::Family::Named("Menlo"));
     }
 }

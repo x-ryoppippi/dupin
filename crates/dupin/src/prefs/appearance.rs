@@ -15,6 +15,9 @@ const FLOW: &str = "flow";
 const OFF: &str = "off";
 const EXAMPLE: &str = "example:";
 const FILE: &str = "file:";
+const SYS: &str = "system";
+const MONO: &str = "monospace";
+const FAMILY: &str = "family:";
 
 pub(super) fn page(s: &Prefs, k: &Kit, dark: bool) -> Vec<El> {
     // The menu lists the shaders folder as it stands when it opens, so the trigger shows only
@@ -161,6 +164,61 @@ fn backdrop_title(backdrop: &Backdrop) -> String {
             }
         },
     }
+}
+
+fn family_title(family: &FontFamily) -> String {
+    match family {
+        FontFamily::System => "System".to_owned(),
+        FontFamily::Monospace => "Monospace".to_owned(),
+        FontFamily::Named(name) => name.clone(),
+    }
+}
+
+/// The font menu: the two built-ins, then every installed family, Font Book's order. A
+/// configured name the system no longer has — or a CSS list — stays, checked.
+fn pick_family(s: &mut Prefs, tx: &mut Tx) {
+    let current = &s.config.theme.font_family;
+    let id = |f: &FontFamily| match f {
+        FontFamily::System => SYS.to_owned(),
+        FontFamily::Monospace => MONO.to_owned(),
+        FontFamily::Named(name) => format!("{FAMILY}{name}"),
+    };
+    let selected = id(current);
+    let item = |f: FontFamily, title: String| {
+        let id = id(&f);
+        PopupItem::new(id.clone(), title).checked(id == selected)
+    };
+    let families = dupin_mac::font::installed_families();
+    let mut menu = PopupMenu::new()
+        .item(item(FontFamily::System, "System".to_owned()))
+        .item(item(FontFamily::Monospace, "Monospace".to_owned()))
+        .separator()
+        .items(
+            families
+                .iter()
+                .map(|f| item(FontFamily::Named(f.clone()), f.clone())),
+        );
+    if let FontFamily::Named(name) = current
+        && !families.contains(name)
+    {
+        menu = menu.separator().item(item(current.clone(), name.clone()));
+    }
+    tx.popup_menu(
+        menu.selected(selected),
+        anchor("theme-font"),
+        |s: &mut Prefs, picked, _| {
+            let Some(picked) = picked else { return };
+            let next = match picked {
+                SYS => FontFamily::System,
+                MONO => FontFamily::Monospace,
+                _ => match picked.strip_prefix(FAMILY) {
+                    Some(name) => FontFamily::Named(name.to_owned()),
+                    None => return,
+                },
+            };
+            s.set(move |c| c.theme.font_family = next);
+        },
+    );
 }
 
 type Palette = (&'static str, &'static str, &'static str);
@@ -397,14 +455,13 @@ fn theme_card(s: &Prefs, k: &Kit, dark: bool) -> El {
                 "Font",
                 row()
                     .gap(8.0)
-                    .child(segments(
+                    .child(menu_value(
                         locked,
                         k,
                         "theme-font",
                         "Font",
-                        &["System", "Mono"],
-                        Some(usize::from(t.font_family == FontFamily::Monospace)),
-                        |t, i| t.font_family = [FontFamily::System, FontFamily::Monospace][i],
+                        &family_title(&t.font_family),
+                        pick_family,
                     ))
                     .child(segments(
                         locked,
