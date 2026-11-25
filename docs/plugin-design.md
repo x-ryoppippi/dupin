@@ -87,9 +87,10 @@ the [capability broker](capability-broker.md) grants and checks their host acces
 ## Views, actions and saved state
 
 The launcher renders the shared Text, Detail and Pair data model per item. A
-`push` action would open a guest-described list or detail view; the session keeps
-the stack and its context, and Esc or Backspace returns. Pushed views and Forms
-are planned; see the extension platform design's rollout. Plugins supply content and stable action IDs, not native UI objects or
+`push` action opens a guest-described list, detail or form on a page of its own;
+the session keeps the stack and each page's state, and Esc or Backspace returns.
+A form's drafts, focus order and required-field checks belong to the host, which
+hands the guest its values only on submit. Plugins supply content and stable action IDs, not native UI objects or
 arbitrary code inside the view. Text selection and keyboard focus belong to the
 host renderer.
 
