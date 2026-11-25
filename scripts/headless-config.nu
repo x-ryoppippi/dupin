@@ -17,9 +17,9 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
     if ($grants | path exists) {
         cp $grants ($config_dir | path join dupin extension-grants.toml)
     }
-    # And saved snapshots of its own, as `<name>.snapshots.json`, a list Dupin seeds into scratch
-    # storage as if they had been saved.
-    let snapshots = $script | path parse | update extension snapshots.json | path join
+    # And saved snapshots of its own, as `<name>.snapshots/snapshots.json`, a list Dupin seeds into
+    # scratch storage as if they had been saved.
+    let snapshots = $script | path parse | update extension snapshots | path join | path join snapshots.json
     let data = if ($snapshots | path exists) {
         {
             DUPIN_HEADLESS_SNAPSHOTS: ($snapshots | path expand)
