@@ -14,7 +14,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use dupin_core::CommandId;
+use dupin_core::session::{Results, Session};
+use dupin_core::{CommandId, Item};
 
 struct Probe {
     out: BufWriter<File>,
@@ -29,6 +30,10 @@ struct Sample {
     edited: Instant,
     dispatched: Option<Instant>,
     pending: BTreeMap<CommandId, u64>,
+    /// The extension package behind each searched provider an extension answers, or whose
+    /// rows came from a package's catalogue, since a built-in's command ID stays the same
+    /// whether its port answers it or the feature says the port hasn't loaded.
+    packages: BTreeMap<String, String>,
     providers: BTreeMap<String, f64>,
     last_provider: Option<Instant>,
     done: Option<Instant>,
@@ -80,6 +85,7 @@ pub fn edit_started(t: f64, query: &str) {
             edited: Instant::now(),
             dispatched: None,
             pending: BTreeMap::new(),
+            packages: BTreeMap::new(),
             providers: BTreeMap::new(),
             last_provider: None,
             done: None,
@@ -88,26 +94,36 @@ pub fn edit_started(t: f64, query: &str) {
     });
 }
 
-/// The session took the edit and its searches have started. `settled` is true when nothing
-/// is left to wait for, and `origins` are then the providers of the rows it shows.
-pub fn edit_applied(command: &CommandId, settled: bool, origins: &[CommandId]) {
+/// The extension package a provider's row came from, for a provider that shows rows from
+/// packages' catalogues without a package answering it.
+pub type RowPackage<'a> = &'a dyn Fn(&CommandId, &Item) -> Option<String>;
+
+/// The session took the edit and its searches have started.
+pub fn edit_applied(session: &Session, row_package: RowPackage<'_>) {
     with(|probe| {
         let Some(sample) = &mut probe.sample else { return };
         let now = Instant::now();
-        sample.command = command.as_str().to_owned();
+        sample.command = session.command_id().as_str().to_owned();
         sample.dispatched = Some(now);
+        let settled = !matches!(session.results(), Results::Searching { .. });
         if settled || sample.pending.is_empty() {
-            sample.finish(now, origins);
+            sample.finish(now, session, row_package);
         }
     });
 }
 
-pub fn search_started(provider: &CommandId, generation: u64) {
+/// `package` is the extension package that answers `provider`, if one does.
+pub fn search_started(provider: &CommandId, generation: u64, package: Option<&str>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_none()
         {
             sample.pending.insert(provider.clone(), generation);
+            if let Some(package) = package {
+                sample
+                    .packages
+                    .insert(provider.as_str().to_owned(), package.to_owned());
+            }
         }
     });
 }
@@ -133,25 +149,33 @@ pub fn delivered(provider: &CommandId, sent: Instant, pending: impl Fn(u64) -> b
     });
 }
 
-/// Every provider for the current query has finished and the session has merged them into
-/// rows from `origins`.
-pub fn results_done(origins: &[CommandId]) {
+/// Every provider for the current query has finished and the session has merged them.
+pub fn results_done(session: &Session, row_package: RowPackage<'_>) {
     with(|probe| {
         if let Some(sample) = &mut probe.sample
             && sample.dispatched.is_some()
             && sample.done.is_none()
         {
-            sample.finish(Instant::now(), origins);
+            sample.finish(Instant::now(), session, row_package);
         }
     });
 }
 
 impl Sample {
-    fn finish(&mut self, at: Instant, origins: &[CommandId]) {
+    fn finish(&mut self, at: Instant, session: &Session, row_package: RowPackage<'_>) {
         self.done = Some(at);
         self.shown.clear();
-        for origin in origins {
-            *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
+        // A row Dupin shows in place of a ported feature's package is cheap enough to pass any
+        // budget, so a scenario whose package is off, missing or failing must not count it.
+        for (origin, item) in session.origins().iter().zip(session.items()) {
+            if crate::features::answered_by_feature(origin.as_str(), &item.id) {
+                *self.shown.entry(origin.as_str().to_owned()).or_default() += 1;
+            }
+            if !self.packages.contains_key(origin.as_str())
+                && let Some(package) = row_package(origin, item)
+            {
+                self.packages.insert(origin.as_str().to_owned(), package);
+            }
         }
     }
 }
@@ -188,6 +212,7 @@ impl Probe {
                     "layout_ms": ms(done, drawn),
                     "providers": sample.providers,
                     "searched": sample.pending.keys().map(CommandId::as_str).collect::<Vec<_>>(),
+                    "packages": sample.packages,
                     "shown": sample.shown,
                 })
             }
@@ -202,5 +227,25 @@ impl Probe {
         if let Err(error) = written {
             crate::log::warn(&format!("couldn't write a latency sample: {error}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::features::answered_by_feature as answers;
+
+    #[test]
+    fn a_ported_command_answers_only_with_its_package_rows() {
+        for command in ["clipboard.history", "calendar.events", "dictionary.lookup"] {
+            assert!(answers(command, "extension:clipboard-history/0123abcd"));
+            assert!(answers(command, "2026-11-24T09:00:00Z/standup"));
+            assert!(!answers(command, "unavailable"), "the package is off or missing");
+            assert!(!answers(command, "extension-error"), "the package failed");
+            assert!(
+                !answers(command, "consent:turn-on"),
+                "the package waits to be turned on"
+            );
+        }
+        assert!(answers("apps.search", "unavailable"));
     }
 }

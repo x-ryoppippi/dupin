@@ -6,6 +6,7 @@
 //! package code, a package manager, or anything a repository supplies, and a `github:` source
 //! needs no Git.
 
+mod discover;
 mod error;
 mod git;
 mod github;
@@ -22,6 +23,7 @@ mod version;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+pub use discover::{Found, Manifest, Repository, TOPIC};
 pub use error::Error;
 pub use git::Git;
 pub use github::GitHub;
@@ -49,6 +51,9 @@ pub struct Installer {
     /// For Git URLs other than `github:`.
     pub git: Git,
     pub github: GitHub,
+    /// The names of the packages bundled with the launcher, which no installed package may
+    /// take: one would replace the bundled package under its name.
+    pub bundled: BTreeSet<String>,
 }
 
 /// What an install, update or sync did to one package.
@@ -229,6 +234,7 @@ impl Installer {
 
     fn place(&self, target: Target<'_>, taken: Taken<'_>) -> Result<Change, Error> {
         let stage = Stage::new(&self.extensions, "install")?;
+        let on = target.locked.and_then(|locked| locked.rev.as_deref());
         // Downloads go outside the extensions folder, so the launcher's watcher doesn't rescan
         // on every object Git writes.
         let fetched = match &target.source {
@@ -243,14 +249,14 @@ impl Installer {
                     name: repo,
                     scratch: &scratch.root,
                 };
-                let fetched = self.github.resolve(&repo, rev.as_deref())?;
+                let fetched = self.github.resolve(&repo, rev.as_deref(), on)?;
                 self.github.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
             Source::Git { url, rev } => {
                 let scratch = Stage::new(&std::env::temp_dir(), "fetch")?;
                 let repo = scratch.root.join("repo.git");
-                let fetched = self.git.resolve(&repo, url, rev.as_deref())?;
+                let fetched = self.git.resolve(&repo, url, rev.as_deref(), on)?;
                 self.git.export(&repo, &fetched.commit, &stage)?;
                 Some(fetched)
             }
@@ -315,6 +321,21 @@ impl Installer {
                 ),
             )
             .hint("Move or delete that folder first, or give the package another name."));
+        }
+        if self.bundled.contains(&package.name) {
+            return Err(Error::new(
+                "name-bundled",
+                format!(
+                    "`{}` is the name of an extension bundled with Dupin",
+                    package.name
+                ),
+            )
+            .file(manifest::PACKAGE_JSON)
+            .field("name")
+            .hint(format!(
+                "Give the package another name, or run `dupin ext eject {}` to edit the bundled one.",
+                package.name
+            )));
         }
         self.check_keyword(&package, taken)?;
 

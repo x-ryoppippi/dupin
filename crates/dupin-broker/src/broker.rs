@@ -191,6 +191,24 @@ impl fmt::Display for BrokerError {
 
 impl std::error::Error for BrokerError {}
 
+/// Why [`Broker::change_saved`] left the user's decisions as they were.
+#[derive(Debug)]
+pub enum SaveError {
+    Refused(BrokerError),
+    Store(StoreError),
+}
+
+impl fmt::Display for SaveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused(error) => error.fmt(f),
+            Self::Store(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SaveError {}
+
 impl fmt::Display for Denial {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -217,6 +235,12 @@ impl fmt::Display for Denial {
             }
         }
     }
+}
+
+/// A revision that ships inside Dupin, and whether it is on before anyone chooses.
+struct Bundled {
+    revision: Revision,
+    on: bool,
 }
 
 struct Installed {
@@ -246,7 +270,7 @@ pub struct Broker {
     // grants nothing new until the next launch, as a reload must never grant.
     ceiling: Base,
     local: Local,
-    bundled: BTreeMap<PackageId, Revision>,
+    bundled: BTreeMap<PackageId, Bundled>,
     installed: BTreeMap<PackageId, Installed>,
     os: BTreeMap<OsPermission, OsAccess>,
     sequence: u64,
@@ -278,10 +302,11 @@ impl Broker {
     }
 
     /// Records a first-party package that ships inside Dupin. While the installed revision of
-    /// `id` is exactly this one, the package is on by default and its scopes are pre-granted;
-    /// a modified copy is any other revision and gets neither.
-    pub fn set_bundled(&mut self, id: PackageId, revision: Revision) {
-        self.bundled.insert(id, revision);
+    /// `id` is exactly this one, its scopes are pre-granted and it is on unless `on` is false,
+    /// in which case it stays off until someone turns it on; a modified copy is any other
+    /// revision and gets neither.
+    pub fn set_bundled(&mut self, id: PackageId, revision: Revision, on: bool) {
+        self.bundled.insert(id, Bundled { revision, on });
     }
 
     /// Loads or updates a package's declaration. Scopes it no longer declares lose their
@@ -400,7 +425,34 @@ impl Broker {
         match (local, base) {
             (Some(false), _) | (_, Some(false)) => false,
             (Some(true), _) | (_, Some(true)) => true,
-            (None, None) => self.pristine(id, &installed.revision),
+            (None, None) => self.pristine(id, &installed.revision) && !self.off_until_chosen(id),
+        }
+    }
+
+    /// Whether the installed revision of `id` is a bundled package that ships off, so its own
+    /// switch is the only one that turns its feature on.
+    pub fn ships_off(&self, id: &PackageId) -> bool {
+        self.installed
+            .get(id)
+            .is_some_and(|installed| self.pristine(id, &installed.revision) && self.off_until_chosen(id))
+    }
+
+    /// Whether the user or the base turned the package off, or it ships off and nobody has
+    /// turned it on, rather than never turning it on. Unreadable grants count as off, since a
+    /// choice they hold can't be known.
+    pub fn is_turned_off(&self, id: &PackageId) -> bool {
+        let Some(installed) = self.installed.get(id) else {
+            return true;
+        };
+        let Some(packages) = &self.local.packages else {
+            return true;
+        };
+        let local = packages.get(id).and_then(|package| package.enabled);
+        let base = self.base_enabled(id, &installed.revision);
+        match (local, base) {
+            (Some(false), _) | (_, Some(false)) => true,
+            (Some(true), _) | (_, Some(true)) => false,
+            (None, None) => self.pristine(id, &installed.revision) && self.off_until_chosen(id),
         }
     }
 
@@ -705,6 +757,24 @@ impl Broker {
         store::write_atomically(path, &self.local.to_toml()?)
     }
 
+    /// Makes `change` to the user's decisions and saves them to `path`. If either step fails,
+    /// the decisions are left as they were, so the broker never enforces a choice the file
+    /// doesn't hold.
+    pub fn change_saved<T>(
+        &mut self,
+        path: &Path,
+        change: impl FnOnce(&mut Self) -> Result<T, BrokerError>,
+    ) -> Result<T, SaveError> {
+        let before = self.local.clone();
+        let changed = change(self)
+            .map_err(SaveError::Refused)
+            .and_then(|value| self.save(path).map(|()| value).map_err(SaveError::Store));
+        if changed.is_err() {
+            self.local = before;
+        }
+        changed
+    }
+
     #[cfg(test)]
     pub(crate) fn local_toml(&self) -> Result<String, StoreError> {
         self.local.to_toml()
@@ -718,7 +788,13 @@ impl Broker {
     }
 
     fn pristine(&self, id: &PackageId, revision: &Revision) -> bool {
-        self.bundled.get(id) == Some(revision)
+        self.bundled
+            .get(id)
+            .is_some_and(|bundled| bundled.revision == *revision)
+    }
+
+    fn off_until_chosen(&self, id: &PackageId) -> bool {
+        self.bundled.get(id).is_some_and(|bundled| !bundled.on)
     }
 
     fn base_packages<'a>(&'a self, id: &'a PackageId) -> impl Iterator<Item = &'a BasePackage> + 'a {
@@ -727,16 +803,24 @@ impl Broker {
             .filter_map(move |base| base.package(id))
     }
 
+    /// Whether the current base or the one read at startup holds an entry for `id` that
+    /// couldn't be read. Whatever it denied is unknown, so it denies everything and keeps the
+    /// package off.
+    fn base_rejects(&self, id: &PackageId) -> bool {
+        self.base.rejects(id) || self.ceiling.rejects(id)
+    }
+
     fn base_denies(&self, id: &PackageId, key: &ScopeKey) -> bool {
-        self.base_packages(id).any(|package| package.deny.contains(key))
+        self.base_rejects(id) || self.base_packages(id).any(|package| package.deny.contains(key))
     }
 
     /// A base disable applies to every revision, like a denial; an enable only to the
     /// revision it names, if it names one.
     fn base_enabled(&self, id: &PackageId, revision: &Revision) -> Option<bool> {
-        if self
-            .base_packages(id)
-            .any(|package| package.enabled == Some(false))
+        if self.base_rejects(id)
+            || self
+                .base_packages(id)
+                .any(|package| package.enabled == Some(false))
         {
             return Some(false);
         }
@@ -800,7 +884,9 @@ impl Broker {
                 binding,
             };
         }
-        if self.pristine(id, &installed.revision) && !declared.needs_binding() {
+        // Only the current base counts: a fixed file restores what the build ships granted,
+        // which grants nothing beyond it.
+        if self.pristine(id, &installed.revision) && !declared.needs_binding() && !self.base.is_unusable() {
             return Effective::Granted {
                 source: GrantSource::Bundled,
                 binding: None,

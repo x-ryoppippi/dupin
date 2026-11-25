@@ -46,6 +46,9 @@ impl Ui {
                 Effect::SaveHistory => self.saver.save(&self.session.history()),
                 Effect::Run(action) => match action {
                     Action::RunScript(command) => self.start_script(command, tx),
+                    Action::ConfiguredScript { script, argument } => {
+                        self.run_configured_script(&script, argument, tx)
+                    }
                     Action::ScriptArguments(path) => self.open_script_arguments(path, tx),
                     Action::Copy(text) => tx.copy(text),
                     Action::Snippet { text, paste } => self.run_snippet(text, paste, tx),
@@ -57,7 +60,6 @@ impl Ui {
                         }
                     }
                     Action::OpenPreferences => self.prepare_settings(),
-                    Action::ArrangeWindow(layout) => self.schedule_window_action(layout),
                     Action::System(command) => {
                         let run = self.system_runner;
                         let enabled = self.configuration.values.borrow().system_automation;
@@ -76,17 +78,13 @@ impl Ui {
                         }
                     }
                     Action::CopyFiles(paths) => self.copy_files(&paths, tx),
-                    Action::RestoreClipboardEntry { entry, paste } => {
-                        self.restore_clipboard_entry(entry, paste, tx)
-                    }
+
                     Action::ChooseApplication(_)
                     | Action::Trash(_)
                     | Action::Browse(_)
                     | Action::Push(_)
                     | Action::Rename(_)
-                    | Action::ChooseDestination { .. }
-                    | Action::DeleteClipboardEntry(_)
-                    | Action::ClearClipboardHistory => {}
+                    | Action::ChooseDestination { .. } => {}
                     Action::RequestClipboardAccess => self.request_clipboard_access(),
                     Action::Extension { extension, request } => {
                         self.run_extension_request(extension, request, tx)
@@ -107,14 +105,7 @@ impl Ui {
                     id,
                     action: Action::Trash(path),
                 } => self.trash_file(id, path),
-                Effect::RunConsuming {
-                    id,
-                    action: Action::DeleteClipboardEntry(entry),
-                } => self.delete_clipboard_entry(&id, entry, tx),
-                Effect::RunConsuming {
-                    action: Action::ClearClipboardHistory,
-                    ..
-                } => self.clear_clipboard_history(tx),
+
                 Effect::RunConsuming {
                     id,
                     action: Action::Extension { extension, request },
@@ -130,6 +121,9 @@ impl Ui {
                 }
             }
         }
+        self.sync_forms(tx);
+        // The selected row may have changed, and with it the preview its detail shows.
+        self.fetch_icons();
         mark_session_query(&mut self.query, &self.session);
     }
 

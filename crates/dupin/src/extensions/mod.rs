@@ -1,28 +1,45 @@
-//! User extensions in `extensions/<name>/` beside config.toml, each routed by one keyword: a
-//! JavaScript package compiled and run by QuickJS-ng in the sandboxed extension host process.
-//! Guests get the query and return rows. They reach host services only through the broker
+//! Extensions, each routed by one keyword: those bundled with Dupin and the user's own in
+//! `extensions/<name>/` beside config.toml. Each is a JavaScript package compiled and run by
+//! QuickJS-ng in the sandboxed extension host process. Guests get the query and return rows, or
+//! hand over a catalogue Dupin matches itself. They reach host services only through the broker
 //! bridge, which checks each request against the scopes a package declares and the user granted.
 
 pub mod access;
+pub mod bundled;
+mod catalogue;
 mod fixtures;
+#[cfg(test)]
+mod items_tests;
 mod manifest;
+#[cfg(test)]
+mod overrides;
+pub mod packages;
+#[cfg(test)]
+pub(crate) mod parity;
+pub(crate) mod preferences;
 mod provider;
 
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime};
 
-use dupin_core::Page;
-use dupin_extension_bridge::{Capabilities, PackageId, Revision};
-use dupin_extension_host::{ActionEffect, Compiled, Host, Services};
-use dupin_js_runtime::{Diagnostic, RunError, Sources};
-use dupin_plugin_protocol::PluginItem;
+use dupin_core::{Batch, Item};
+use dupin_extension_bridge::{Call, Capabilities, PackageId, Revision};
+use dupin_extension_host::{Compiled, Host, Services, Trust};
+use dupin_js_runtime::web_search::WebSearch;
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Exports, Handled, PageContext, Preferences, Reason, Row, RunError,
+    Sources, ViewAnswer,
+};
+
+use catalogue::Asking;
 
 pub use fixtures::{Snapped, snap, test};
-pub(crate) use provider::is_answered_consent_row;
-pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE};
+pub use provider::{ACTION_DEADLINE, ExtensionProvider, QUERY_DEADLINE, Role, answer};
+pub(crate) use provider::{hand_over_kinds, is_answered_consent_row, stands_in};
 
 pub(crate) use crate::catalog_watch::Watch;
 
@@ -34,14 +51,37 @@ pub struct Extension {
     pub name: String,
     pub version: String,
     pub keyword: String,
-    /// What the broker knows the package by.
+    /// The package's folder, which row icons are relative to.
+    pub root: PathBuf,
+    /// The package asked for its catalogue to answer the default search too.
+    pub default_search: bool,
+    /// The package's `search` answers its keyword before anything is typed.
+    pub empty_query: bool,
+    /// How its catalogue is matched, which also decides whether picks rank it.
+    pub matching: dupin_core::catalogue::Matching,
+    preferences: preferences::Preferences,
+    /// What the package exports, once a call has linked it.
+    exports: OnceLock<Exports>,
+    catalogue: catalogue::Cached,
+    web_searches_noted: AtomicBool,
+    /// What the broker knows the package by: its `name`, or `bundled:<name>` for one that
+    /// ships with Dupin.
     pub package: PackageId,
     /// The revision grants are for: package.json and every module Dupin runs.
     pub revision: Revision,
     /// The most the package may do, as the broker read it from package.json.
     pub capabilities: Capabilities,
+    /// The filters and kind actions it offers `[advanced]`.
+    pub provides: manifest::Provides,
     /// The bytecode the extension host compiled, which only the host ever loads.
     compiled: Compiled,
+}
+
+/// Where an extension was found. A user extension with a bundled one's `name` replaces it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    Bundled,
+    User,
 }
 
 impl std::fmt::Debug for Extension {
@@ -55,78 +95,306 @@ impl std::fmt::Debug for Extension {
 }
 
 impl Extension {
-    /// Links the package and checks that its entry exports `search`.
-    pub fn check(&self, deadline: Instant) -> Result<(), RunError> {
-        host().check(&self.compiled, deadline, &|| false)
+    /// Links the package and reports which of `search` and `items` its entry exports, which
+    /// must be at least one.
+    pub fn check(&self, deadline: Instant) -> Result<Exports, RunError> {
+        if let Some(exports) = self.exports.get() {
+            return Ok(*exports);
+        }
+        let exports = host().check(&self.compiled, deadline, &|| false)?;
+        Ok(*self.exports.get_or_init(|| exports))
     }
 
-    /// Asks the guest for `query`, answering its host requests with `services`. Extensions
-    /// can't open views, so none can ask inside one.
+    /// Asks the guest for `query`, answering its host requests with `services`.
     pub fn query(
         &self,
         query: &str,
-        page: Option<&Page>,
         limit: usize,
         deadline: Instant,
         is_cancelled: impl Fn() -> bool + 'static,
         services: &Arc<dyn Services>,
-    ) -> Result<Vec<PluginItem>, RunError> {
-        if page.is_some() {
-            return Err(RunError::Failed(Diagnostic::new(
-                "unsupported-view",
-                "extensions can't open views yet",
-            )));
-        }
+    ) -> Result<Vec<Row>, RunError> {
         host().search(&self.compiled, query, limit, deadline, &is_cancelled, services)
     }
 
-    /// Runs `actions[name](data)`, which the user chose.
+    /// Runs `filters[name]` on one batch of a source it is composed onto. It reaches no host
+    /// service, so it has no external effects or persistent state.
+    pub fn filter(
+        &self,
+        name: &str,
+        input: &dupin_js_runtime::FilterInput,
+        deadline: Instant,
+    ) -> Result<Vec<dupin_js_runtime::FilterHit>, RunError> {
+        let services: Arc<dyn Services> = Arc::new(dupin_extension_host::NoServices);
+        host().filter(
+            &self.compiled,
+            name,
+            input,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            &services,
+        )
+    }
+
+    /// Asks the guest's `views[name]` for the page `page` describes, answering its host
+    /// requests with `services`.
+    pub fn view(
+        &self,
+        name: &str,
+        page: &PageContext,
+        deadline: Instant,
+        is_cancelled: impl Fn() -> bool + 'static,
+        services: &Arc<dyn Services>,
+    ) -> Result<ViewAnswer, RunError> {
+        host().view(
+            &self.compiled,
+            name,
+            page,
+            &self.preferences(),
+            deadline,
+            &is_cancelled,
+            services,
+        )
+    }
+
+    /// Runs `actions[name](data)`, which the user chose from one of the package's rows on
+    /// `page`, and asks for the catalogue again if the handler invalidated it.
     pub fn act(
         &self,
         name: &str,
         data: &serde_json::Value,
+        page: &PageContext,
         deadline: Instant,
         services: &Arc<dyn Services>,
-    ) -> Result<Option<ActionEffect>, RunError> {
-        host().action(&self.compiled, name, data, deadline, &|| false, services)
+    ) -> Result<Acted, RunError> {
+        let acted = host().action(
+            &self.compiled,
+            name,
+            data,
+            page,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
+        if acted.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(acted)
     }
 
-    /// Runs `events[name](event)` for something Dupin watched on the package's behalf.
+    /// Runs `events[name](event)` for something Dupin watched on the package's behalf, and
+    /// asks for the catalogue again if the handler invalidated it.
     pub fn event(
         &self,
         name: &str,
         event: &serde_json::Value,
         deadline: Instant,
         services: &Arc<dyn Services>,
-    ) -> Result<(), RunError> {
-        host().event(&self.compiled, name, event, deadline, &|| false, services)
+    ) -> Result<Handled, RunError> {
+        let handled = host().event(
+            &self.compiled,
+            name,
+            event,
+            &self.preferences(),
+            deadline,
+            &|| false,
+            services,
+        )?;
+        if handled.invalidated {
+            self.catalogue.invalidate();
+        }
+        Ok(handled)
+    }
+
+    /// The catalogue's rows for `query`, asking the package for its catalogue first when Dupin
+    /// holds none, it went stale, its preferences changed or it was made under another
+    /// generation than `call`'s. Its host requests go through `call`, as a search's do. Typing
+    /// never cancels that, since the next keystroke needs the same catalogue. Every part of it
+    /// must arrive before `deadline`, the search's own, so a slow catalogue fails with its own
+    /// diagnostic before the search expires. For the main search, `role` holds off asking again
+    /// after a failure.
+    pub fn catalogue(
+        &self,
+        query: &str,
+        limit: usize,
+        deadline: Instant,
+        call: &Call,
+        role: Role,
+    ) -> Result<Vec<Batch>, RunError> {
+        let settings = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &settings,
+            generation: call.generation,
+            role,
+        };
+        let never = || false;
+        self.catalogue
+            .search(
+                query,
+                limit,
+                asking,
+                &mut self.fetch(host(), deadline, &never, &call.services),
+                self,
+            )
+            .map_err(|error| self.located(error))
+    }
+
+    /// Asks `host` for the parts of the package's catalogue. Every part of one catalogue is
+    /// asked for with the same settings, which may hold thousands of snippets, so their
+    /// preferences are encoded once, and again only for other settings.
+    fn fetch<'a>(
+        &'a self,
+        host: &'a Host,
+        deadline: Instant,
+        cancelled: &'a dyn Fn() -> bool,
+        services: &'a Arc<dyn Services>,
+    ) -> impl FnMut(Option<&str>, Reason, &Arc<Preferences>) -> Result<CataloguePage, RunError> + 'a {
+        let mut encoded: Option<(Arc<Preferences>, dupin_extension_host::Preferences)> = None;
+        move |cursor, reason, settings| {
+            let held = encoded.take().filter(|(held, _)| Arc::ptr_eq(held, settings));
+            let (_, preferences) = encoded.insert(held.unwrap_or_else(|| {
+                let preferences = self.preferences_with(settings);
+                (
+                    settings.clone(),
+                    dupin_extension_host::Preferences::encode(&preferences),
+                )
+            }));
+            host.items(
+                &self.compiled,
+                cursor,
+                reason,
+                preferences,
+                deadline,
+                cancelled,
+                services,
+            )
+        }
+    }
+
+    /// The catalogue's web searches, each with the row it shows before a query is typed, asking
+    /// the package first as [`Extension::catalogue`] does.
+    pub fn web_searches(
+        &self,
+        deadline: Instant,
+        call: &Call,
+        role: Role,
+    ) -> Result<Vec<(Item, WebSearch)>, RunError> {
+        let settings = preferences::of(&self.package);
+        let asking = Asking {
+            preferences: &settings,
+            generation: call.generation,
+            role,
+        };
+        let never = || false;
+        self.catalogue
+            .web_searches(
+                asking,
+                &mut self.fetch(host(), deadline, &never, &call.services),
+                self,
+            )
+            .map_err(|error| self.located(error))
+    }
+
+    /// What [`Extension::web_searches`] would return, if Dupin can answer it now without asking
+    /// the package or waiting.
+    pub fn held_web_searches(&self) -> Option<Vec<(Item, WebSearch)>> {
+        if !self.exports.get()?.items {
+            return Some(Vec::new());
+        }
+        self.catalogue.held_web_searches(&preferences::of(&self.package))
+    }
+
+    /// Whether the row `id` is one of this package's. A built-in's port keeps the built-in's
+    /// row IDs, which name no package, so it owns none by ID.
+    pub fn owns_row(&self, id: &str) -> bool {
+        let prefix = catalogue::Convert::entry_id(self, "");
+        !prefix.is_empty() && id.starts_with(&prefix)
+    }
+
+    /// Logs, once, that the package's web searches reach only its own keyword.
+    fn note_keyword_only_web_searches(&self) {
+        if crate::web::reaches_main_search(&self.package)
+            || self.web_searches_noted.swap(true, Ordering::Relaxed)
+        {
+            return;
+        }
+        crate::log::warn(&format!(
+            "extension {}: its web searches are listed only under its keyword `{}`; only the bundled Web Search package adds aliases and fallbacks to the main search",
+            self.id, self.keyword
+        ));
+    }
+
+    /// Drops the catalogue Dupin holds, so its next use asks for it from the start.
+    pub fn forget_catalogue(&self) {
+        self.catalogue.forget();
+    }
+
+    /// What `ctx.preferences` holds for the package's calls.
+    pub fn preferences(&self) -> serde_json::Value {
+        self.preferences_with(&preferences::of(&self.package))
+    }
+
+    /// The package's declared preferences with `settings`, a built-in's config.toml settings
+    /// for the package Dupin shipped for it.
+    fn preferences_with(&self, settings: &Preferences) -> serde_json::Value {
+        let mut values = self.preferences.values(&self.id);
+        if let serde_json::Value::Object(values) = &mut values {
+            values.extend(settings.clone());
+        }
+        values
+    }
+
+    /// A catalogue's failure, named after the package's entry when nothing else locates it.
+    fn located(&self, error: RunError) -> RunError {
+        match error {
+            RunError::Failed(diagnostic) if diagnostic.file.is_none() => {
+                RunError::Failed(diagnostic.file(self.compiled.entry()))
+            }
+            error => error,
+        }
     }
 }
 
-/// The one extension host every JavaScript extension shares, started on the first query.
+/// The one extension host every JavaScript extension shares, which starts a trust domain's
+/// helper on that domain's first query.
 fn host() -> &'static Host {
     static HOST: OnceLock<Host> = OnceLock::new();
     HOST.get_or_init(|| Host::fixed(Box::new(helper_command), headless_environment()))
 }
 
 /// The clock and seed of the fixture `dupin ext snap` renders, which it hands the headless
-/// launcher it starts. A launcher with a window never reads it.
+/// launcher it starts, or else the clock of the headless calendar fixtures, so guests see the
+/// same day the fixture events are laid out around. A launcher with a window never reads it.
 fn headless_environment() -> Option<dupin_js_runtime::Environment> {
     if !rune::tooling::is_headless() {
         return None;
     }
-    let value = std::env::var(fixtures::HEADLESS_ENVIRONMENT).ok()?;
+    let Ok(value) = std::env::var(fixtures::HEADLESS_ENVIRONMENT) else {
+        return Some(dupin_js_runtime::Environment {
+            now: dupin_mac::FIXTURE_CLOCK,
+            seed: 1,
+        });
+    };
     serde_json::from_str::<dupin_js_runtime::Environment>(&value)
         .ok()
         .filter(dupin_js_runtime::Environment::is_valid)
 }
 
-/// Dupin's own executable as the extension host, with nothing inherited it doesn't need.
+/// Dupin's own executable as the extension host, with nothing inherited it doesn't need. A
+/// headless run's guests keep to the calendar fixtures' UTC unless it names a zone.
 fn helper_command() -> std::io::Result<std::process::Command> {
     let mut command = std::process::Command::new(std::env::current_exe()?);
     command.env_clear().current_dir("/");
-    if let Some(zone) = std::env::var_os("TZ") {
-        command.env("TZ", zone);
+    match std::env::var_os("TZ") {
+        Some(zone) => {
+            command.env("TZ", zone);
+        }
+        None if rune::tooling::is_headless() => {
+            command.env("TZ", "UTC");
+        }
+        None => {}
     }
     #[cfg(not(test))]
     command.arg(dupin_extension_host::FLAG);
@@ -155,12 +423,17 @@ pub fn directory() -> Option<PathBuf> {
     Some(crate::settings::path()?.parent()?.join("extensions"))
 }
 
+/// Why a folder must stay off: it no longer matches extensions.lock, or isn't a bundled package
+/// this build sealed.
+type Integrity = Box<dyn FnMut(&Path) -> Option<String> + Send>;
+
 #[derive(Default)]
 struct Scanner {
     loaded: HashMap<PathBuf, LoadedExtension>,
     previous: Option<Catalog>,
-    /// Keeps a folder off when it no longer matches extensions.lock.
-    integrity: Option<dupin_extension_install::Integrity>,
+    integrity: Option<Integrity>,
+    /// Whether the folder holds the packages that ship with Dupin.
+    bundled: bool,
 }
 
 impl Scanner {
@@ -209,17 +482,13 @@ impl Scanner {
             folders.truncate(MAX_EXTENSIONS);
         }
         for folder in folders {
-            if let Some(problem) = self
-                .integrity
-                .as_mut()
-                .and_then(|integrity| integrity.check(&folder))
-            {
+            if let Some(problem) = self.integrity.as_mut().and_then(|integrity| integrity(&folder)) {
                 catalog
                     .problems
                     .push(format!("{}: {problem}", folder_name(&folder)));
                 continue;
             }
-            match load(&folder, previous.remove(&folder)) {
+            match load(&folder, previous.remove(&folder), self.bundled) {
                 Ok(loaded) => {
                     let extension = &loaded.extension;
                     if catalog.extensions.iter().any(|e| e.id == extension.id) {
@@ -275,7 +544,13 @@ impl FileStamp {
 
 /// Reads the extension in `folder` as the scanner does, for `dupin ext` to check or run.
 pub fn load_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
-    load(folder, None).map(|loaded| loaded.extension)
+    load(folder, None, false).map(|loaded| loaded.extension)
+}
+
+/// Loads the package in `folder` as one bundled with Dupin, without checking its seal.
+#[cfg(test)]
+pub(crate) fn load_bundled(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    load(folder, None, true).map(|loaded| loaded.extension)
 }
 
 /// Loads the extension in `folder` as the scanner does and links it: what `dupin ext check`
@@ -291,8 +566,15 @@ pub fn check_folder(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
     Ok(extension)
 }
 
-fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtension, Diagnostic> {
-    load_with(folder, previous, compile)
+fn load(
+    folder: &Path,
+    previous: Option<LoadedExtension>,
+    bundled: bool,
+) -> Result<LoadedExtension, Diagnostic> {
+    let trust = if bundled { Trust::Bundled } else { Trust::Own };
+    load_with(folder, previous, bundled, |folder, entry, previous| {
+        compile(folder, entry, previous, trust)
+    })
 }
 
 /// `compile` reads the package's files only after they are stamped, so an edit that lands while
@@ -300,6 +582,7 @@ fn load(folder: &Path, previous: Option<LoadedExtension>) -> Result<LoadedExtens
 fn load_with(
     folder: &Path,
     previous: Option<LoadedExtension>,
+    bundled: bool,
     compile: impl FnOnce(&Path, &str, Option<&LoadedExtension>) -> Result<(Compiled, blake3::Hash), Diagnostic>,
 ) -> Result<LoadedExtension, Diagnostic> {
     let manifests = manifest::Stamps::read(folder)?;
@@ -316,7 +599,7 @@ fn load_with(
     let manifest = manifest::read(&manifests)?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
-    let package = package_id(&manifest)?;
+    let package = package_id(&manifest, bundled)?;
     let revision = package_revision(folder, &content)?;
     Ok(LoadedExtension {
         manifests,
@@ -329,9 +612,18 @@ fn load_with(
             name: manifest.name,
             version: manifest.version,
             keyword: manifest.keyword,
+            root: folder.to_path_buf(),
+            default_search: manifest.default_search,
+            empty_query: manifest.empty_query,
+            matching: manifest.matching,
+            preferences: manifest.preferences,
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::new(manifest.matching),
+            web_searches_noted: AtomicBool::new(false),
             package,
             revision,
             capabilities: manifest.capabilities,
+            provides: manifest.provides,
             compiled,
         }),
     })
@@ -352,9 +644,14 @@ fn package_revision(folder: &Path, content: &blake3::Hash) -> Result<Revision, D
         .map_err(|error| Diagnostic::new("host-error", error))
 }
 
+pub(crate) const BUNDLED_PREFIX: &str = "bundled:";
+
 /// What the broker knows a package by: `name` in its package.json, whatever its folder is called.
-fn package_id(manifest: &manifest::Manifest) -> Result<PackageId, Diagnostic> {
-    PackageId::new(manifest.id.clone()).map_err(|error| {
+/// A bundled package is `bundled:<name>`, which no package.json name can be, so grants and
+/// choices never pass between it and a package in the extensions folder that reuses its name.
+fn package_id(manifest: &manifest::Manifest, bundled: bool) -> Result<PackageId, Diagnostic> {
+    let prefix = if bundled { BUNDLED_PREFIX } else { "" };
+    PackageId::new(format!("{prefix}{}", manifest.id)).map_err(|error| {
         Diagnostic::new("invalid-manifest", error)
             .file(manifest::PACKAGE_JSON)
             .field("name")
@@ -368,7 +665,7 @@ pub fn declaration_of(folder: &Path) -> Result<(PackageId, Revision, Capabilitie
     let manifest = manifest::read(&manifests)?;
     let sources = Sources::read(folder, &manifest.entry)?;
     Ok((
-        package_id(&manifest)?,
+        package_id(&manifest, false)?,
         package_revision(folder, &content_hash(&sources))?,
         manifest.capabilities,
     ))
@@ -378,6 +675,7 @@ fn compile(
     folder: &Path,
     entry: &str,
     previous: Option<&LoadedExtension>,
+    trust: Trust,
 ) -> Result<(Compiled, blake3::Hash), Diagnostic> {
     let sources = Sources::read(folder, entry)?;
     let content = content_hash(&sources);
@@ -385,7 +683,7 @@ fn compile(
         return Ok((previous.extension.compiled.clone(), content));
     }
     let compiled = host()
-        .compile(&sources, QUERY_DEADLINE, &|| false)
+        .compile(&sources, trust, QUERY_DEADLINE, &|| false)
         .map_err(|error| match error {
             RunError::Failed(diagnostic) => diagnostic,
             RunError::Cancelled => {
@@ -433,12 +731,44 @@ fn read_capped(path: &Path, cap: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Scans now and after changes under `directory`, delivering changed catalogues in order.
-pub fn watch(directory: PathBuf, deliver: impl Fn(Catalog) + Send + 'static) -> std::io::Result<Watch> {
-    let mut scanner = Scanner {
-        integrity: crate::extension_install::lock_path().map(dupin_extension_install::Integrity::new),
-        ..Scanner::default()
+/// Scans now and after changes under `directory`, delivering changed catalogues in order. The
+/// user's folder holds packages extensions.lock pins; the bundled folder only the packages
+/// this build sealed.
+pub fn watch(
+    directory: PathBuf,
+    origin: Origin,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
+    let integrity: Option<Integrity> = match origin {
+        Origin::User => crate::extension_install::lock_path().map(|lock| {
+            let bundled = bundled::directory()
+                .map(|directory| bundled::packages(&directory))
+                .unwrap_or_default();
+            let names = bundled.into_iter().map(|(_, name, _)| name).collect();
+            let mut integrity = dupin_extension_install::Integrity::new(lock, names);
+            Box::new(move |folder: &Path| integrity.check(folder)) as _
+        }),
+        Origin::Bundled => {
+            let seals = bundled::Seals::shipped();
+            Some(Box::new(move |folder: &Path| seals.check(folder)))
+        }
     };
+    watch_with(
+        directory,
+        Scanner {
+            integrity,
+            bundled: origin == Origin::Bundled,
+            ..Scanner::default()
+        },
+        deliver,
+    )
+}
+
+fn watch_with(
+    directory: PathBuf,
+    mut scanner: Scanner,
+    deliver: impl Fn(Catalog) + Send + 'static,
+) -> std::io::Result<Watch> {
     Watch::start(
         directory,
         crate::catalog_watch::Depth::Trees,
@@ -472,13 +802,22 @@ pub(crate) mod tests {
         let id = name.to_lowercase().replace(' ', "-");
         Extension {
             folder_name: format!("{id}-folder"),
+            package: PackageId::new(id.clone()).unwrap(),
             id,
             name: name.into(),
             version: "1.0.0".into(),
             keyword: keyword.into(),
-            package: PackageId::new("fixture").unwrap(),
+            root: PathBuf::from("/fixture"),
+            default_search: false,
+            empty_query: false,
+            matching: Default::default(),
+            preferences: Default::default(),
+            exports: OnceLock::new(),
+            catalogue: catalogue::Cached::default(),
+            web_searches_noted: AtomicBool::new(false),
             revision: Revision::new("blake3:fixture").unwrap(),
             capabilities: Capabilities::default(),
+            provides: Default::default(),
             compiled: Compiled::empty(),
         }
     }
@@ -523,7 +862,7 @@ pub(crate) mod tests {
 
     fn observe(directory: &Path) -> (Watch, mpsc::Receiver<Catalog>) {
         let (updates, received) = mpsc::channel();
-        let watcher = watch(directory.to_owned(), move |catalog| {
+        let watcher = watch_with(directory.to_owned(), Scanner::default(), move |catalog| {
             let _ = updates.send(catalog);
         })
         .unwrap();
@@ -824,8 +1163,9 @@ pub(crate) mod tests {
             },
         );
         lock.write(&lock_path).unwrap();
+        let mut integrity = dupin_extension_install::Integrity::new(lock_path, Default::default());
         let mut scanner = Scanner {
-            integrity: Some(dupin_extension_install::Integrity::new(lock_path)),
+            integrity: Some(Box::new(move |folder: &Path| integrity.check(folder))),
             ..Scanner::default()
         };
         assert_eq!(scanner.scan(&root).extensions.len(), 1);
@@ -843,6 +1183,62 @@ pub(crate) mod tests {
             "{:?}",
             catalog.problems
         );
+    }
+
+    #[test]
+    fn the_bundled_folder_loads_only_what_the_build_sealed() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let root = fixture.path();
+        install(root, "words", &package_json("words", "wc", None), Some(SEARCH));
+        let seals = bundled::Seals::of(&[&root.join("words")]);
+        install(root, "added", &package_json("added", "add", None), Some(SEARCH));
+        let mut scanner = Scanner {
+            integrity: Some(Box::new(move |folder: &Path| seals.check(folder))),
+            ..Scanner::default()
+        };
+        let catalog = scanner.scan(root);
+        assert_eq!(catalog.extensions.len(), 1);
+        assert_eq!(catalog.extensions[0].id, "words");
+        assert!(
+            catalog.problems[0].starts_with("added: isn't"),
+            "{:?}",
+            catalog.problems
+        );
+
+        fs::write(
+            root.join("words/main.js"),
+            "export const search = () => [{ title: 'tampered' }];",
+        )
+        .unwrap();
+        assert!(scanner.scan(root).extensions.is_empty());
+    }
+
+    #[test]
+    fn a_revision_covers_the_manifest_and_the_code() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let fixture = folder();
+        let words = fixture.path().join("words");
+        let revision = || load_folder(&words).unwrap().revision.clone();
+        install(
+            fixture.path(),
+            "words",
+            &package_json("words", "wc", None),
+            Some(SEARCH),
+        );
+        let first = revision();
+        assert_eq!(revision(), first);
+
+        fs::write(words.join(PACKAGE_JSON), package_json("words", "words", None)).unwrap();
+        assert_ne!(revision(), first);
+        fs::write(words.join(PACKAGE_JSON), package_json("words", "wc", None)).unwrap();
+        assert_eq!(revision(), first);
+        fs::write(
+            words.join("main.js"),
+            "export const search = () => [{ title: 'x' }];",
+        )
+        .unwrap();
+        assert_ne!(revision(), first);
     }
 
     #[test]
@@ -923,23 +1319,16 @@ pub(crate) mod tests {
         let updated = scanner.update(root, None).unwrap();
         assert!(!Arc::ptr_eq(&catalog.extensions[0], &updated.extensions[0]));
         assert!(Arc::ptr_eq(&catalog.extensions[1], &updated.extensions[1]));
-        let items = updated.extensions[0]
+        let rows = updated.extensions[0]
             .query(
                 "",
-                None,
                 10,
                 Instant::now() + QUERY_DEADLINE,
                 || false,
                 &(Arc::new(dupin_extension_host::NoServices) as _),
             )
             .unwrap();
-        assert_eq!(
-            items[0].view,
-            dupin_plugin_protocol::View::Text {
-                title: "second edit".into(),
-                subtitle: String::new()
-            }
-        );
+        assert_eq!(rows[0].title, "second edit");
 
         fs::write(root.join("b-js/extra.js"), "export {};").unwrap();
         assert!(scanner.update(root, None).is_some());
@@ -983,17 +1372,17 @@ pub(crate) mod tests {
         );
         let folder = root.join("js");
         let edited = folder.join("main.js");
-        let loaded = load_with(&folder, None, |folder, entry, previous| {
-            let compiled = compile(folder, entry, previous);
+        let loaded = load_with(&folder, None, false, |folder, entry, previous| {
+            let compiled = compile(folder, entry, previous, Trust::Own);
             fs::write(&edited, "export const search = () => [{ title: 'new edit' }];").unwrap();
             compiled
         })
         .unwrap();
         let before = Arc::clone(&loaded.extension);
-        let reloaded = load(&folder, Some(loaded)).unwrap();
+        let reloaded = load(&folder, Some(loaded), false).unwrap();
         assert!(!Arc::ptr_eq(&before, &reloaded.extension));
         let current = Arc::clone(&reloaded.extension);
-        let unchanged = load(&folder, Some(reloaded)).unwrap();
+        let unchanged = load(&folder, Some(reloaded), false).unwrap();
         assert!(Arc::ptr_eq(&current, &unchanged.extension));
     }
 }

@@ -1,0 +1,77 @@
+{
+	"total_count": 31,
+	"incomplete_results": false,
+	"items": [
+		{
+			"id": 1001,
+			"name": "dupin-word-count",
+			"full_name": "someone/dupin-word-count",
+			"private": false,
+			"owner": { "login": "someone", "id": 2001, "type": "User" },
+			"html_url": "https://github.com/someone/dupin-word-count",
+			"description": "Counts words\u001b[2J\u001b]8;;https://evil.example\u0007 in the selection\n\nfast",
+			"fork": false,
+			"created_at": "2026-01-01T00:00:00Z",
+			"updated_at": "2026-10-02T00:00:00Z",
+			"pushed_at": "2026-10-01T09:30:00Z",
+			"stargazers_count": 42,
+			"watchers_count": 42,
+			"language": "JavaScript",
+			"archived": false,
+			"topics": ["dupin", "dupin-extension"],
+			"visibility": "public",
+			"default_branch": "main",
+			"score": 1.0
+		},
+		{
+			"id": 1002,
+			"name": "dupin-unbuilt",
+			"full_name": "other/dupin-unbuilt",
+			"private": false,
+			"owner": { "login": "other", "id": 2002, "type": "Organization" },
+			"description": null,
+			"fork": false,
+			"pushed_at": "2026-09-15T12:00:00Z",
+			"stargazers_count": 7,
+			"topics": ["dupin-extension"],
+			"default_branch": "trunk",
+			"score": 1.0
+		},
+		{
+			"id": 1003,
+			"name": "not-tagged",
+			"full_name": "stranger/not-tagged",
+			"owner": { "login": "stranger", "id": 2003, "type": "User" },
+			"description": "Matched the words but not the topic",
+			"pushed_at": "2026-09-01T00:00:00Z",
+			"stargazers_count": 5,
+			"topics": ["launcher"],
+			"default_branch": "main",
+			"score": 1.0
+		},
+		{
+			"id": 1004,
+			"name": "..",
+			"full_name": "stranger/..",
+			"owner": { "login": "stranger", "id": 2003, "type": "User" },
+			"description": "A name no install takes",
+			"pushed_at": "2026-09-01T00:00:00Z",
+			"stargazers_count": 4,
+			"topics": ["dupin-extension"],
+			"default_branch": "main",
+			"score": 1.0
+		},
+		{
+			"id": 1005,
+			"name": "dupin-escapes",
+			"full_name": "mallory/dupin-escapes",
+			"owner": { "login": "mallory", "id": 2005, "type": "User" },
+			"description": "\u001b[31m",
+			"pushed_at": "not a date\u001b[0m",
+			"stargazers_count": 1,
+			"topics": ["dupin-extension"],
+			"default_branch": "main",
+			"score": 1.0
+		}
+	]
+}

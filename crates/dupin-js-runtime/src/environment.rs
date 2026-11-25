@@ -1,7 +1,9 @@
 //! A fixed clock and random seed for one call, so a fixture replays to the same answer on every
 //! run and every machine.
 
-use rquickjs::{Ctx, Function};
+use std::cell::RefCell;
+
+use rquickjs::{Ctx, Function, Module, WriteOptions};
 use serde::{Deserialize, Serialize};
 
 /// The furthest from the epoch a JavaScript `Date` reaches, in milliseconds.
@@ -24,7 +26,7 @@ impl Environment {
 
 /// Replaces `Date` with one whose clock stands at `now`, sharing the real prototype so
 /// `instanceof Date` and every method still work, and `Math.random` with mulberry32 from `seed`.
-const PRELUDE: &str = r#"(function (fixed, seed) {
+const PRELUDE: &str = r#"export default function (fixed, seed) {
 	'use strict';
 	const RealDate = Date;
 	const construct = Reflect.construct;
@@ -57,9 +59,31 @@ const PRELUDE: &str = r#"(function (fixed, seed) {
 			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 		}),
 	);
-})"#;
+}"#;
+
+/// A name no package module can have, since theirs are relative paths.
+const PRELUDE_MODULE: &str = "dupin:environment";
+
+thread_local! {
+    /// The prelude compiled once for the calls this thread runs: parsing it again for each call
+    /// took about as long as a short query.
+    static PRELUDE_BYTECODE: RefCell<Option<Vec<u8>>> = const { RefCell::new(None) };
+}
 
 pub(crate) fn install(ctx: &Ctx<'_>, environment: &Environment) -> rquickjs::Result<()> {
-    let prelude: Function = ctx.eval(PRELUDE)?;
+    let compiled = PRELUDE_BYTECODE.with_borrow(Clone::clone);
+    let module = match compiled {
+        // SAFETY: this thread wrote the bytes from the prelude it had just parsed.
+        Some(bytecode) => unsafe { Module::load(ctx.clone(), &bytecode)? },
+        None => {
+            let module = Module::declare(ctx.clone(), PRELUDE_MODULE, PRELUDE)?;
+            let bytecode = module.write(WriteOptions::default())?;
+            PRELUDE_BYTECODE.with_borrow_mut(|kept| *kept = Some(bytecode));
+            module
+        }
+    };
+    let (module, evaluated) = module.eval()?;
+    evaluated.finish::<()>()?;
+    let prelude: Function = module.get("default")?;
     prelude.call((environment.now as f64, environment.seed))
 }

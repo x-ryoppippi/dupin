@@ -4,7 +4,7 @@ use rune::{Color, El, TextStyle, col, el, row, text};
 use crate::ui::ICON_SIZE;
 
 use super::header::HEADER_H;
-use super::results::{LIST_PAD, text_row};
+use super::results::{LIST_PAD, RowLabels, text_row};
 
 pub struct ResolvedTheme {
     palette: tok::Theme,
@@ -121,11 +121,14 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
                         .radius(4.0)
                         .fill(t.text_secondary.alpha(0.25)),
                 ),
-                text(["dupin", "dupin-core", "dupin-mac"][i])
-                    .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
-                    .color(if on { t.selected_text } else { t.text })
-                    .truncate(),
-                "Repository · → Actions",
+                RowLabels {
+                    title: text(["dupin", "dupin-core", "dupin-mac"][i])
+                        .font(t.font(TextStyle::new(15.0, 500.0).lh(20.0)))
+                        .color(if on { t.selected_text } else { t.text })
+                        .truncate(),
+                    subtitle: "Repository · → Actions",
+                    accessories: &[],
+                },
             )
         })));
     el().size((w * scale).round(), (h * scale).round())

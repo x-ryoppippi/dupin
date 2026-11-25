@@ -229,6 +229,33 @@ impl CommandRegistry {
         Ok(())
     }
 
+    /// Add `command` to the default search right after `after`, or last when `after` isn't
+    /// one of its providers.
+    pub fn add_default_provider(
+        &mut self,
+        command: CommandId,
+        after: &CommandId,
+    ) -> Result<(), CommandError> {
+        if !self.contains(&command) {
+            return Err(CommandError::UnknownCommand(command));
+        }
+        if self.defaults.contains(&command) {
+            return Ok(());
+        }
+        let at = self
+            .defaults
+            .iter()
+            .position(|id| id == after)
+            .map_or(self.defaults.len(), |index| index + 1);
+        self.defaults.insert(at, command);
+        Ok(())
+    }
+
+    /// The commands the default search runs, in order.
+    pub fn default_providers(&self) -> &[CommandId] {
+        &self.defaults
+    }
+
     pub(crate) fn providers(&self, command: &CommandId) -> Vec<CommandId> {
         if command == &self.default {
             self.defaults.clone()
@@ -321,6 +348,11 @@ impl CommandRegistry {
 
     pub fn keyword(&self, keyword: &str) -> Option<&CommandId> {
         self.keywords.get(keyword)
+    }
+
+    /// Every keyword some command answers.
+    pub fn keywords(&self) -> impl Iterator<Item = &str> {
+        self.keywords.keys().map(String::as_str)
     }
 
     pub(crate) fn contains(&self, id: &CommandId) -> bool {

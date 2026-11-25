@@ -1,9 +1,11 @@
 use driver.nu [
+    DUPIN
     ad
     file-proof
     log-count
     mentions
     poll
+    press
     snap
     wait-for-log
 ]
@@ -30,14 +32,14 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r calculator }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
         ) | ignore
         snap $out cli-open
         let closed = log-count $log 'dupin-trace: panel closed '
-        ad $out cli-hide press escape | ignore
+        press $out cli-hide escape | ignore
         wait-for-log --after $closed $log 'dupin-trace: panel closed '
 
         let selected_closed = log-count $log 'dupin-trace: panel closed '
@@ -48,7 +50,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --native-id
             pick-query
             --first
@@ -66,14 +68,11 @@ export def cli-stage [out: path, binary: path] {
             ) }
             snapshot
             --app
-            Dupin
+            $DUPIN
             --include-bounds
         ) | ignore
         snap $out cli-pick
-        ^osascript -e 'tell application "System Events"
-            key code 125
-            key code 36
-        end tell'
+        press $out cli-pick-blue down return | ignore
         let selected = job recv --tag 2 --timeout 20sec
         $selected | to json | save ($out | path join cli-picked.json)
         if $selected.exit_code != 0 or ($selected.stdout | from json) != blue {
@@ -89,12 +88,12 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --native-id
             pick-query
             --first
         ) | ignore
-        ad $out cli-cancel press escape | ignore
+        press $out cli-cancel escape | ignore
         let result = job recv --tag 3 --timeout 20sec
         $result | to json | save ($out | path join cli-cancelled.json)
         if $result.exit_code != 1 or ($result.stdout | from json).error != Cancelled {
@@ -107,7 +106,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and $r.data?.match? == null }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -128,14 +127,14 @@ export def cli-stage [out: path, binary: path] {
             $r.data?
             | default []
             | any {|w| $w.title == 'Dupin Snapshots' and $w.is_focused }
-        ) } list-windows --app Dupin | ignore
+        ) } list-windows --app $DUPIN | ignore
         (poll
             $out
             cli-snapshot-field
             {|r| is-focused-query $r '' }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --name
@@ -152,7 +151,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         let panel_closed = log-count $log 'dupin-trace: panel closed '
         ^$binary open --query calculator --json | from json | ignore
@@ -162,7 +161,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| is-focused-query $r calculator }
             find
             --app
-            Dupin
+            $DUPIN
             --role
             textfield
             --first
@@ -176,7 +175,7 @@ export def cli-stage [out: path, binary: path] {
             {|r| $r.ok and not ($r.data? | default [] | any {|w| $w.title == 'Dupin Snapshots' }) }
             list-windows
             --app
-            Dupin
+            $DUPIN
         ) | ignore
         if (file-proof $archive) != $archive_before or (file-proof $history) != $before {
             error make {msg: 'CLI controls changed the Snapshot archive or launch history'}

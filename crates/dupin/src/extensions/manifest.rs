@@ -3,6 +3,7 @@
 
 use std::path::{Component, Path};
 
+use dupin_broker::{RowField, RowKind};
 use dupin_js_runtime::{DEFAULT_ENTRY, Diagnostic, is_module};
 use serde_json::{Map, Value};
 
@@ -13,7 +14,15 @@ pub const PACKAGE_JSON: &str = "package.json";
 pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
-const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main` and `capabilities`";
+const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch`, `emptyQuery`, `match`, `preferences`, `capabilities` and `provides`";
+const PROVIDES_HINT: &str = "`provides` takes `filters`, as `{ \"<name>\": { \"stage\": \"matcher\" | \"sorter\" } }`, and `kinds`, as `{ \"<kind>\": { \"<action>\": { \"field\": \"<field>\" } } }`; see docs/features/advanced.md.";
+/// Filters, and kind actions for each kind, one package may provide.
+const MAX_CONTRIBUTIONS: usize = 8;
+const DEFAULT_SEARCH_HINT: &str =
+    "Set `\"defaultSearch\": true` to list the package's `items()` in the main search, or leave it out.";
+const EMPTY_QUERY_HINT: &str =
+    "Set `\"emptyQuery\": true` to have `search` answer before anything is typed, or leave it out.";
+const MATCH_HINT: &str = "Set `\"match\": \"words\"` to find `items()` by every word typed, in the catalogue's order, or leave it out to rank them as apps are.";
 
 pub(super) struct Manifest {
     pub id: String,
@@ -22,8 +31,181 @@ pub(super) struct Manifest {
     pub keyword: String,
     /// Relative to the folder: a JavaScript or TypeScript module.
     pub entry: String,
+    /// The package's `items()` catalogue also answers the default search.
+    pub default_search: bool,
+    /// `search` answers the keyword before anything is typed.
+    pub empty_query: bool,
+    /// How the `items()` catalogue is matched.
+    pub matching: dupin_core::catalogue::Matching,
+    pub preferences: super::preferences::Preferences,
     /// The most the package may do; the user grants each scope.
     pub capabilities: dupin_broker::Capabilities,
+    pub provides: Provides,
+}
+
+/// What a package offers `[advanced]` to compose onto Dupin's own sources and kinds.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Provides {
+    /// Its `filters` exports by name, with the stage each is.
+    pub filters: std::collections::BTreeMap<String, dupin_js_runtime::FilterStage>,
+    /// Its `actions` exports that act on rows of a kind, by kind and name, with the one field
+    /// each receives.
+    pub kinds: std::collections::BTreeMap<(RowKind, String), RowField>,
+}
+
+/// The `provides` value of a manifest, checked against the scopes `capabilities` declares: a
+/// filter sees titles, a matcher also the query, and a kind action the one field it names.
+fn parse_provides(value: &Value, capabilities: &dupin_broker::Capabilities) -> Result<Provides, Diagnostic> {
+    use dupin_broker::{Scope, ScopeKey};
+    let problem = |field: &str, message: String| {
+        Diagnostic::new("invalid-manifest", message)
+            .file(PACKAGE_JSON)
+            .field(format!("dupin.provides{field}"))
+            .hint(PROVIDES_HINT)
+    };
+    let object = |value: &Value, field: &str| match value {
+        Value::Object(object) => Ok(object.clone()),
+        _ => Err(problem(field, "must be an object".into())),
+    };
+    let named = |name: &str, field: &str| {
+        let valid = (1..=64).contains(&name.len())
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+        if valid {
+            Ok(())
+        } else {
+            Err(problem(
+                field,
+                "must be named by 1–64 letters, digits or `_`".into(),
+            ))
+        }
+    };
+    let declared = |kind: RowKind, field: RowField| {
+        matches!(
+            capabilities.get(&ScopeKey::Rows(kind)),
+            Some(Scope::Rows { fields, .. }) if fields.contains(&field)
+        )
+    };
+    let mut provides = Provides::default();
+    for (key, value) in object(value, "")? {
+        match key.as_str() {
+            "filters" => {
+                let filters = object(&value, ".filters")?;
+                if filters.len() > MAX_CONTRIBUTIONS {
+                    return Err(problem(
+                        ".filters",
+                        format!("provides more than {MAX_CONTRIBUTIONS} filters"),
+                    ));
+                }
+                for (name, filter) in filters {
+                    let field = format!(".filters.{name}");
+                    named(&name, &field)?;
+                    let filter = object(&filter, &field)?;
+                    if let Some(key) = filter.keys().find(|key| *key != "stage") {
+                        return Err(problem(
+                            &format!("{field}.{key}"),
+                            "is not a key Dupin reads".into(),
+                        ));
+                    }
+                    let stage = match filter.get("stage").and_then(Value::as_str) {
+                        Some("matcher") => dupin_js_runtime::FilterStage::Matcher,
+                        Some("sorter") => dupin_js_runtime::FilterStage::Sorter,
+                        _ => {
+                            return Err(problem(
+                                &format!("{field}.stage"),
+                                "must be \"matcher\" or \"sorter\"".into(),
+                            ));
+                        }
+                    };
+                    if !RowKind::ALL
+                        .into_iter()
+                        .any(|kind| declared(kind, RowField::Title))
+                    {
+                        return Err(problem(
+                            &field,
+                            "needs `capabilities.rows` to declare the `title` of a kind of row it filters"
+                                .into(),
+                        ));
+                    }
+                    if stage == dupin_js_runtime::FilterStage::Matcher
+                        && capabilities.get(&ScopeKey::Query).is_none()
+                    {
+                        return Err(problem(
+                            &field,
+                            "is a matcher, so it needs `capabilities.query`".into(),
+                        ));
+                    }
+                    provides.filters.insert(name, stage);
+                }
+            }
+            "kinds" => {
+                for (kind_name, actions) in object(&value, ".kinds")? {
+                    let field = format!(".kinds.{kind_name}");
+                    let kind = RowKind::ALL
+                        .into_iter()
+                        .find(|kind| kind.as_str() == kind_name)
+                        .ok_or_else(|| {
+                            problem(
+                                &field,
+                                format!("`{kind_name}` isn't a kind; use text, url, file or app"),
+                            )
+                        })?;
+                    let actions = object(&actions, &field)?;
+                    if actions.len() > MAX_CONTRIBUTIONS {
+                        return Err(problem(
+                            &field,
+                            format!("provides more than {MAX_CONTRIBUTIONS} actions"),
+                        ));
+                    }
+                    for (name, action) in actions {
+                        let field = format!("{field}.{name}");
+                        named(&name, &field)?;
+                        let action = object(&action, &field)?;
+                        if let Some(key) = action.keys().find(|key| *key != "field") {
+                            return Err(problem(
+                                &format!("{field}.{key}"),
+                                "is not a key Dupin reads".into(),
+                            ));
+                        }
+                        let value = action.get("field").and_then(Value::as_str).unwrap_or_default();
+                        let row_field = kind
+                            .fields()
+                            .iter()
+                            .copied()
+                            .filter(|known| *known != RowField::Title)
+                            .find(|known| known.as_str() == value)
+                            .ok_or_else(|| {
+                                let known: Vec<_> = kind
+                                    .fields()
+                                    .iter()
+                                    .filter(|known| **known != RowField::Title)
+                                    .map(|known| known.as_str())
+                                    .collect();
+                                problem(
+                                    &format!("{field}.field"),
+                                    format!("must be one of {} for {} rows", known.join(", "), kind.as_str()),
+                                )
+                            })?;
+                        if !declared(kind, row_field) {
+                            return Err(problem(
+                                &field,
+                                format!(
+                                    "receives the {} of {} rows, so `capabilities.rows.{}` must declare it",
+                                    row_field.as_str(),
+                                    kind.as_str(),
+                                    kind.as_str()
+                                ),
+                            ));
+                        }
+                        provides.kinds.insert((kind, name), row_field);
+                    }
+                }
+            }
+            _ => return Err(problem(&format!(".{key}"), "is not a key Dupin reads".into())),
+        }
+    }
+    Ok(provides)
 }
 
 /// The manifest files in one folder, so a later scan can tell whether any appeared, changed or
@@ -131,6 +313,11 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
     let required = |object: &Map<String, Value>, key: &str, field_name: &str, hint: &str| {
         string(object, key, field_name, hint)?.ok_or_else(|| field(field_name, "is missing", hint))
     };
+    let flag = |object: &Map<String, Value>, key: &str, hint: &str| match object.get(key) {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(field(&format!("dupin.{key}"), "must be true or false", hint)),
+    };
 
     let Value::Object(dupin) = dupin else {
         return Err(field(
@@ -139,10 +326,20 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
             &format!("Give `dupin` {DUPIN_KEYS}."),
         ));
     };
-    if let Some(key) = dupin
-        .keys()
-        .find(|key| !matches!(key.as_str(), "title" | "keyword" | "main" | "capabilities"))
-    {
+    if let Some(key) = dupin.keys().find(|key| {
+        !matches!(
+            key.as_str(),
+            "title"
+                | "keyword"
+                | "main"
+                | "defaultSearch"
+                | "emptyQuery"
+                | "match"
+                | "preferences"
+                | "capabilities"
+                | "provides"
+        )
+    }) {
         return Err(field(
             &format!("dupin.{key}"),
             "is not a key Dupin reads",
@@ -155,7 +352,21 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         version: required(package, "version", "version", VERSION_HINT)?,
         keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
+        default_search: flag(dupin, "defaultSearch", DEFAULT_SEARCH_HINT)?,
+        empty_query: flag(dupin, "emptyQuery", EMPTY_QUERY_HINT)?,
+        matching: match string(dupin, "match", "dupin.match", MATCH_HINT)?.as_deref() {
+            None | Some("fuzzy") => dupin_core::catalogue::Matching::Fuzzy,
+            Some("words") => dupin_core::catalogue::Matching::Words,
+            Some(_) => {
+                return Err(field("dupin.match", "must be \"fuzzy\" or \"words\"", MATCH_HINT));
+            }
+        },
+        preferences: match dupin.get("preferences") {
+            Some(preferences) => super::preferences::Preferences::parse(preferences)?,
+            None => super::preferences::Preferences::default(),
+        },
         capabilities: dupin_broker::Capabilities::default(),
+        provides: Provides::default(),
     };
     validate(&manifest)?;
     let entry = relative_inside(&manifest.entry)
@@ -171,9 +382,14 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         Some(capabilities) => parse_capabilities(capabilities)?,
         None => dupin_broker::Capabilities::default(),
     };
+    let provides = match dupin.get("provides") {
+        Some(provides) => parse_provides(provides, &capabilities)?,
+        None => Provides::default(),
+    };
     Ok(Manifest {
         entry,
         capabilities,
+        provides,
         ..manifest
     })
 }
@@ -488,5 +704,99 @@ mod tests {
             (empty.code.as_ref(), empty.file.as_deref()),
             ("missing-manifest", Some(PACKAGE_JSON))
         );
+    }
+
+    fn provided(capabilities: Value, provides: Value) -> Result<Provides, Diagnostic> {
+        let package: Map<String, Value> = serde_json::from_value(serde_json::json!({
+            "name": "kana",
+            "version": "0.1.0",
+        }))
+        .unwrap();
+        let dupin = serde_json::json!({
+            "title": "Kana",
+            "keyword": "kana",
+            "capabilities": capabilities,
+            "provides": provides,
+        });
+        javascript(&package, &dupin).map(|manifest| manifest.provides)
+    }
+
+    #[test]
+    fn provides_names_filters_and_kind_actions_the_declared_scopes_cover() {
+        use dupin_js_runtime::FilterStage;
+        let provides = provided(
+            serde_json::json!({ "rows": { "app": ["title"], "file": ["path"] }, "query": ["read"] }),
+            serde_json::json!({
+                "filters": { "romaji": { "stage": "matcher" }, "pinned": { "stage": "sorter" } },
+                "kinds": { "file": { "upload": { "field": "path" } } }
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            provides.filters.into_iter().collect::<Vec<_>>(),
+            [
+                ("pinned".to_owned(), FilterStage::Sorter),
+                ("romaji".to_owned(), FilterStage::Matcher)
+            ]
+        );
+        assert_eq!(
+            provides.kinds.into_iter().collect::<Vec<_>>(),
+            [((RowKind::File, "upload".to_owned()), RowField::Path)]
+        );
+        let titles = serde_json::json!({ "rows": { "app": ["title"] } });
+        for (capabilities, provides, field) in [
+            (
+                titles.clone(),
+                serde_json::json!({ "filters": { "romaji": { "stage": "matcher" } } }),
+                "dupin.provides.filters.romaji",
+            ),
+            (
+                serde_json::json!({ "query": ["read"] }),
+                serde_json::json!({ "filters": { "pinned": { "stage": "sorter" } } }),
+                "dupin.provides.filters.pinned",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "filters": { "pinned": { "stage": "converter" } } }),
+                "dupin.provides.filters.pinned.stage",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "filters": { "bad-name": { "stage": "sorter" } } }),
+                "dupin.provides.filters.bad-name",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "kinds": { "app": { "open": { "field": "path" } } } }),
+                "dupin.provides.kinds.app.open",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "kinds": { "app": { "open": { "field": "title" } } } }),
+                "dupin.provides.kinds.app.open.field",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "kinds": { "folder": {} } }),
+                "dupin.provides.kinds.folder",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "sources": {} }),
+                "dupin.provides.sources",
+            ),
+            (
+                titles.clone(),
+                serde_json::json!({ "filters": { "pinned": { "stage": "sorter", "fields": ["path"] } } }),
+                "dupin.provides.filters.pinned.fields",
+            ),
+        ] {
+            let problem = provided(capabilities, provides.clone()).unwrap_err();
+            assert_eq!(problem.field.as_deref(), Some(field), "{provides}: {problem:?}");
+        }
+        let many: Map<String, Value> = (0..=MAX_CONTRIBUTIONS)
+            .map(|index| (format!("f{index}"), serde_json::json!({ "stage": "sorter" })))
+            .collect();
+        assert!(provided(titles, serde_json::json!({ "filters": many })).is_err());
     }
 }

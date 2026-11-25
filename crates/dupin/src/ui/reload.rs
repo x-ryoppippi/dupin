@@ -12,7 +12,11 @@ impl Ui {
         let previous_limit = self.session.command().result_limit;
         let mut registration =
             crate::commands::configured(config).expect("built-in command registration is valid");
-        let feature_changed = crate::features::reload(self, config, &mut registration);
+        let recomposed = self.composition.apply(&config.advanced);
+        if recomposed.kinds {
+            self.extensions.forget_catalogues();
+        }
+        let feature_changed = crate::features::reload(self, config, &mut registration) || recomposed.any();
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let effects = self

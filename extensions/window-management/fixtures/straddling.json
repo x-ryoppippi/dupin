@@ -1,0 +1,108 @@
+{
+	"fixture": 1,
+	"description": "A window across two displays is arranged on the display it overlaps most, here the secondary one to the left.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"windows": {
+			"displays": [
+				{
+					"frame": {
+						"height": 900,
+						"width": 1440,
+						"x": 0,
+						"y": 0
+					},
+					"scale": 2,
+					"visibleFrame": {
+						"height": 844,
+						"width": 1440,
+						"x": 0,
+						"y": 24
+					}
+				},
+				{
+					"frame": {
+						"height": 1000,
+						"width": 1200,
+						"x": -1200,
+						"y": -200
+					},
+					"scale": 1,
+					"visibleFrame": {
+						"height": 976,
+						"width": 1180,
+						"x": -1180,
+						"y": -176
+					}
+				}
+			],
+			"focused": {
+				"app": {
+					"bundleId": "com.apple.Terminal",
+					"name": "Terminal"
+				},
+				"frame": {
+					"height": 300,
+					"width": 360,
+					"x": -300,
+					"y": 10
+				}
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "Top Half",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"run": {
+									"action": "arrange",
+									"data": "top-half"
+								},
+								"title": "Arrange"
+							}
+						],
+						"id": "top-half",
+						"keywords": ["window top half", "Window Management"],
+						"subtitle": "Window Management",
+						"title": "Top Half"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Arrange",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "arrange",
+						"data": "top-half"
+					}
+				},
+				"panel": "hide",
+				"windows": [
+					{
+						"height": 488.0,
+						"width": 1180.0,
+						"x": -1180.0,
+						"y": -176.0
+					}
+				]
+			}
+		}
+	]
+}

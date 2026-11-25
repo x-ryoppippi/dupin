@@ -13,6 +13,7 @@
 
 mod call;
 pub mod services;
+pub mod storage;
 mod watch;
 
 use std::collections::{HashMap, HashSet};
@@ -23,12 +24,13 @@ use std::time::{Instant, SystemTime};
 
 pub use dupin_broker::{
     Base, Broker, BrokerError, Capabilities, ClipboardAccess, ConsentReason, ConsentState, Denial, FilesKind,
-    Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Reconciliation, Revision,
-    Scope, ScopeKey, StoreError, Trigger,
+    Generation, GrantSource, Local, OsAccess, OsConsumer, OsPermission, PackageId, Permit, Reconciliation,
+    Request, Revision, SaveError, Scope, ScopeKey, StoreError, Trigger, WindowsAccess,
 };
 use dupin_extension_host::Services as HostServices;
 use dupin_host_services::files;
 pub use services::{Failure, Services};
+pub use storage::{Origin, PackageStorage};
 
 /// The largest reply a guest receives, encoded; its heap is 16 MiB.
 const MAX_REPLY_BYTES: usize = 4 * 1024 * 1024;
@@ -61,6 +63,23 @@ impl ConsentRequest {
     }
 }
 
+/// An image a package's row names by a handle it was given, never by its bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageRef<'a> {
+    /// The handle of a blob one of the package's records carries.
+    Blob(&'a str),
+    /// A file the package's clipboard watch delivered, by its path and the handle it came with.
+    File { path: &'a str, handle: &'a str },
+}
+
+/// The image an [`ImageRef`] names, once the bridge has checked that it is the package's own.
+#[derive(Clone, Copy, Debug)]
+pub enum ImageData<'a> {
+    /// A stored blob's bytes, which are wiped once the reader returns.
+    Bytes(&'a [u8]),
+    File(&'a Path),
+}
+
 /// One declared scope of a package, for Settings → Extensions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopeEntry {
@@ -89,9 +108,35 @@ pub struct Session {
     revision: Revision,
     generation: Generation,
     trigger: Trigger,
+    /// The package's own storage namespace, for the origin it was installed from.
+    namespace: String,
+    /// The calendar event links this call's replies gave the guest, the only ones not on the
+    /// web its rows may open.
+    links: Mutex<HashSet<String>>,
+}
+
+impl Session {
+    fn issue_links(&self, events: &serde_json::Value) {
+        let links = events
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|event| event.get("link")?.as_str());
+        self.links
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .extend(links.map(str::to_owned));
+    }
 }
 
 impl HostServices for Session {
+    fn opens(&self, url: &str) -> bool {
+        self.links
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(url)
+    }
+
     fn call(&self, op: &str, args: &[u8], deadline: Instant, cancelled: &AtomicBool) -> Vec<u8> {
         let reply = match self.dispatch(op, args, deadline, cancelled) {
             Ok(value) => serde_json::json!({ "ok": value }),
@@ -116,6 +161,16 @@ pub struct Call {
     pub generation: Option<Generation>,
 }
 
+impl Call {
+    /// A call that reaches no host service, as `dupin ext run` and tests make.
+    pub fn none() -> Self {
+        Self {
+            services: Arc::new(dupin_extension_host::NoServices),
+            generation: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Bridge {
     inner: Arc<Inner>,
@@ -130,6 +185,9 @@ struct Inner {
     local: Option<PathBuf>,
     files: Mutex<HashMap<PackageId, FilesTable>>,
     watches: watch::Watches,
+    /// The image of each package's latest clipboard change, which its handler may store
+    /// without the bytes crossing to the guest.
+    clips: Mutex<HashMap<PackageId, watch::Staged>>,
     listener: Mutex<Option<Listener>>,
 }
 
@@ -147,6 +205,8 @@ struct State {
     problems: Vec<String>,
     /// Each grant file as the bridge last read or wrote it.
     seen: Seen,
+    /// Where each installed package came from, which picks its storage namespace.
+    origins: HashMap<PackageId, Origin>,
 }
 
 #[derive(Default)]
@@ -172,15 +232,6 @@ fn stamp(path: &Path) -> Option<Stamp> {
         len: metadata.len(),
         inode: metadata.ino(),
     })
-}
-
-/// A missing file declares nothing.
-fn read_base(path: &Path) -> Result<Base, String> {
-    match std::fs::read_to_string(path) {
-        Ok(source) => Base::parse(&source).map_err(|error| error.to_string()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Base::default()),
-        Err(error) => Err(error.to_string()),
-    }
 }
 
 /// A missing file holds no decisions; one that can't be read stands for unknown decisions.
@@ -212,31 +263,35 @@ impl Bridge {
                     os: HashMap::new(),
                     problems: Vec::new(),
                     seen,
+                    origins: HashMap::new(),
                 }),
                 services,
                 base,
                 local,
                 files: Mutex::default(),
                 watches: watch::Watches::default(),
+                clips: Mutex::default(),
                 listener: Mutex::default(),
             }),
         }
     }
 
     /// Reads the declarative base at `base` and the local grants at `local`. A missing file is
-    /// empty. An unreadable local file grants nothing and is never overwritten; an unreadable
-    /// base is reported and grants nothing.
+    /// empty. An unreadable local file grants nothing and is never overwritten; an unusable
+    /// base is reported, and while it stands only local grants apply; a base entry that can't
+    /// be read is reported and keeps its package off.
     pub fn open(base: &Path, local: &Path, services: Services) -> Self {
-        let mut problems = Vec::new();
         // Stamped before reading, so a change made during the read is read again later.
         let seen = Seen {
             base: stamp(base),
             local: stamp(local),
         };
-        let base_grants = read_base(base).unwrap_or_else(|error| {
-            problems.push(format!("{}: {error}", base.display()));
-            Base::default()
-        });
+        let base_grants = Base::read(base);
+        let mut problems: Vec<_> = base_grants
+            .problems()
+            .into_iter()
+            .map(|problem| format!("{}: {problem}", base.display()))
+            .collect();
         let local_grants = read_local(local).unwrap_or_else(|error| {
             problems.push(format!("{}: {error}", local.display()));
             Local::unreadable()
@@ -271,11 +326,41 @@ impl Bridge {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(listener));
     }
 
+    /// Records a package that ships inside Dupin at `revision`: while that revision is the one
+    /// installed, its scopes are pre-granted and it is on, or waits for the user to turn it on
+    /// when `on` is false. Call it before installing.
+    pub fn set_bundled(&self, id: &PackageId, revision: Revision, on: bool) {
+        self.inner.lock().broker.set_bundled(id.clone(), revision, on);
+    }
+
     /// Loads or updates a package's declaration at `revision`. It never grants anything; what
     /// a new revision widens needs consent again, and what it no longer declares is dropped.
     pub fn install(&self, id: &PackageId, revision: Revision, capabilities: Capabilities) -> Reconciliation {
+        self.load(id, revision, capabilities, Origin::User)
+    }
+
+    /// Loads a package that ships in Dupin, as [`Bridge::install`] does, into the bundled
+    /// origin, which names its own storage namespace. While `revision` is the one
+    /// [`Bridge::set_bundled`] recorded, its scopes are granted without asking.
+    pub fn install_bundled(
+        &self,
+        id: &PackageId,
+        revision: Revision,
+        capabilities: Capabilities,
+    ) -> Reconciliation {
+        self.load(id, revision, capabilities, Origin::Bundled)
+    }
+
+    fn load(
+        &self,
+        id: &PackageId,
+        revision: Revision,
+        capabilities: Capabilities,
+        origin: Origin,
+    ) -> Reconciliation {
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
+        state.origins.insert(id.clone(), origin);
         let before = state.broker.generation(id);
         let report = state.broker.install(id.clone(), revision, capabilities);
         let changed = before != state.broker.generation(id);
@@ -297,26 +382,49 @@ impl Bridge {
     /// Host services for one call of `id`, as `trigger` describes why it runs. The app sets the
     /// trigger from what it saw: typing, a chosen action or a watched event.
     pub fn call(&self, id: &PackageId, trigger: Trigger) -> Call {
-        self.inner.sync();
-        let state = self.inner.lock();
-        let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
-        else {
-            return Call {
-                services: Arc::new(dupin_extension_host::NoServices),
-                generation: None,
-            };
-        };
-        let session = Session {
-            bridge: self.inner.clone(),
-            package: id.clone(),
-            revision: revision.clone(),
-            generation,
-            trigger,
-        };
-        Call {
-            services: Arc::new(session),
-            generation: Some(generation),
+        match self.session(id, trigger) {
+            Some(session) => Call {
+                generation: Some(session.generation),
+                services: Arc::new(session),
+            },
+            None => Call::none(),
         }
+    }
+
+    fn session(&self, id: &PackageId, trigger: Trigger) -> Option<Session> {
+        self.inner.session(id, trigger)
+    }
+
+    /// Decides an effect Dupin performs itself for `id`, such as pasting a row's text, exactly
+    /// as a request from the package's own code would be decided: a refusal for want of consent
+    /// is kept for the panel and Settings. Pass the permit to [`Bridge::validate`] just before
+    /// performing the effect.
+    pub fn authorize(&self, id: &PackageId, request: &Request, trigger: Trigger) -> Result<Permit, Failure> {
+        let session = self
+            .session(id, trigger)
+            .ok_or_else(|| failure_for(&Denial::NotInstalled))?;
+        session.permit(request)
+    }
+
+    /// Hands `read` the image a row of `id` names, resolved in `id`'s own storage namespace
+    /// alone, so no package can draw another's data. It reads storage and decides as typing
+    /// does, but a refusal records no consent request: drawing a row is not the package asking.
+    /// Call it off the panel's thread; storage blocks on file IO.
+    pub fn read_image<R>(
+        &self,
+        id: &PackageId,
+        image: &ImageRef<'_>,
+        read: impl FnOnce(ImageData<'_>) -> R,
+    ) -> Result<R, Failure> {
+        self.session(id, Trigger::Query)
+            .ok_or_else(|| failure_for(&Denial::NotInstalled))?
+            .read_image(image, read)
+    }
+
+    /// Whether a permit from [`Bridge::authorize`] still holds.
+    pub fn validate(&self, permit: &Permit) -> bool {
+        self.inner.sync();
+        self.inner.lock().broker.validate(permit)
     }
 
     /// Whether work stamped with `generation` may still be shown for `id`.
@@ -328,8 +436,19 @@ impl Bridge {
         self.inner.lock().broker.is_enabled(id)
     }
 
+    /// Whether `id` is the shipped revision of a bundled package that ships off, whose switch is
+    /// then its feature's switch.
+    pub fn ships_off(&self, id: &PackageId) -> bool {
+        self.inner.lock().broker.ships_off(id)
+    }
+
+    /// Whether the user or the base turned `id` off, rather than never turning it on.
+    pub fn is_turned_off(&self, id: &PackageId) -> bool {
+        self.inner.lock().broker.is_turned_off(id)
+    }
+
     /// Turns a package's capabilities on or off. Turning off drops its in-flight results.
-    pub fn set_enabled(&self, id: &PackageId, enabled: bool) -> Result<(), BrokerError> {
+    pub fn set_enabled(&self, id: &PackageId, enabled: bool) -> Result<(), SaveError> {
         self.change(id, |broker| broker.set_enabled(id, enabled))?;
         self.inner.lock().asked_while_off.remove(id);
         Ok(())
@@ -349,7 +468,7 @@ impl Bridge {
         revision: &Revision,
         scope: &Scope,
         binding: Option<PathBuf>,
-    ) -> Result<(), BrokerError> {
+    ) -> Result<(), SaveError> {
         let key = scope.key();
         self.change(id, |broker| {
             broker.consent(id, revision, scope, binding)?;
@@ -368,13 +487,27 @@ impl Bridge {
 
     /// Takes `key` away at once, whoever granted it. In-flight results of the package are
     /// dropped, and the scope stays off until the user grants it again.
-    pub fn revoke(&self, id: &PackageId, key: &ScopeKey) -> Result<(), BrokerError> {
+    pub fn revoke(&self, id: &PackageId, key: &ScopeKey) -> Result<(), SaveError> {
         self.change(id, |broker| broker.revoke(id, key))?;
         self.inner
             .lock()
             .pending
             .retain(|request| request.package != *id || request.key() != *key);
         Ok(())
+    }
+
+    /// Where `id` was installed from, as [`Bridge::delete_data`] takes it.
+    pub fn origin(&self, id: &PackageId) -> Origin {
+        self.inner.lock().origins.get(id).copied().unwrap_or_default()
+    }
+
+    /// Deletes everything `id` keeps in storage as a package from `origin`. Revoking `storage`
+    /// keeps the data, so allowing it again finds it; removing the package should delete it.
+    pub fn delete_data(&self, id: &PackageId, origin: Origin) -> Result<(), Failure> {
+        self.inner
+            .services
+            .storage
+            .discard(&storage::namespace(id, origin))
     }
 
     /// Reports what macOS allows, read without prompting.
@@ -474,23 +607,39 @@ impl Bridge {
     /// Stops delivering clipboard changes to `id`.
     pub fn unwatch_clipboard(&self, id: &PackageId) {
         self.inner.watches.unregister(id);
+        self.inner
+            .clips
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(id);
     }
 
+    /// Makes `change` and saves it, or leaves the decisions as they were if either fails, so
+    /// the broker never enforces a choice the local grant file doesn't hold.
     fn change(
         &self,
         id: &PackageId,
         change: impl FnOnce(&mut Broker) -> Result<(), BrokerError>,
-    ) -> Result<(), BrokerError> {
+    ) -> Result<(), SaveError> {
         let mut state = self.inner.lock();
         let synced = self.inner.sync_locked(&mut state);
         let before = state.broker.generation(id);
-        if let Err(error) = change(&mut state.broker) {
+        let changed = match &self.inner.local {
+            Some(path) => {
+                let changed = state.broker.change_saved(path, change);
+                if changed.is_ok() {
+                    state.seen.local = stamp(path);
+                }
+                changed
+            }
+            None => change(&mut state.broker).map_err(SaveError::Refused),
+        };
+        if let Err(error) = changed {
             drop(state);
             self.inner.announce(synced);
             return Err(error);
         }
         let bumped = state.broker.generation(id) != before;
-        self.inner.save(&mut state);
         drop(state);
         if bumped {
             self.inner.forget_files(id);
@@ -505,6 +654,25 @@ impl Bridge {
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Host services for one call of `id` under `trigger`, or none when `id` isn't installed.
+    fn session(self: &Arc<Self>, id: &PackageId, trigger: Trigger) -> Option<Session> {
+        self.sync();
+        let state = self.lock();
+        let (Some(revision), Some(generation)) = (state.broker.revision(id), state.broker.generation(id))
+        else {
+            return None;
+        };
+        Some(Session {
+            bridge: self.clone(),
+            package: id.clone(),
+            revision: revision.clone(),
+            generation,
+            trigger,
+            namespace: storage::namespace(id, state.origins.get(id).copied().unwrap_or_default()),
+            links: Mutex::default(),
+        })
     }
 
     fn notify(&self, notice: Notice) {
@@ -548,9 +716,9 @@ impl Inner {
             let now = stamp(path);
             if now != state.seen.base {
                 state.seen.base = now;
-                let base = read_base(path);
-                note_problem(state, path, base.as_ref().err());
-                changed.extend(state.broker.replace_base(base.unwrap_or_default()));
+                let base = Base::read(path);
+                note_problem(state, path, &base.problems());
+                changed.extend(state.broker.replace_base(base));
             }
         }
         if let Some(path) = &self.local {
@@ -647,11 +815,11 @@ impl Inner {
     }
 }
 
-/// Replaces what Settings shows about reading `path` with `problem`, if any.
-fn note_problem(state: &mut State, path: &Path, problem: Option<&String>) {
+/// Replaces what Settings shows about reading `path` with `problems`.
+fn note_problem<'a>(state: &mut State, path: &Path, problems: impl IntoIterator<Item = &'a String>) {
     let prefix = format!("{}: ", path.display());
     state.problems.retain(|known| !known.starts_with(&prefix));
-    if let Some(problem) = problem {
+    for problem in problems {
         state.problems.push(format!("{prefix}{problem}"));
     }
 }
@@ -665,10 +833,6 @@ pub(crate) fn failure_for(denial: &Denial) -> Failure {
         Denial::Disabled => "disabled",
         Denial::Invalid(_) => "invalid",
         Denial::Undeclared(_) => "undeclared",
-        Denial::OutOfScope {
-            key: ScopeKey::Storage,
-            ..
-        } => "quota-exceeded",
         Denial::OutOfScope { .. } => "out-of-scope",
         Denial::NeedsActivation => "needs-activation",
         Denial::Revoked(_) => "revoked",

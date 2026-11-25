@@ -13,8 +13,10 @@ mod sandbox;
 mod wire;
 
 pub use dupin_js_runtime::ActionEffect;
+pub use dupin_js_runtime::{PageContext, ViewAnswer};
 pub use helper::serve;
-pub use host::{Compiled, Host, Launcher, NoServices, Services};
+pub use host::{Compiled, Host, Launcher, NoServices, Services, Trust};
+pub use wire::Preferences;
 
 /// The argument that starts Dupin's executable as the extension host.
 pub const FLAG: &str = "--extension-host";

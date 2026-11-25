@@ -1,0 +1,22 @@
+{
+	"name": "kana",
+	"version": "0.1.0",
+	"dupin": {
+		"title": "Kana",
+		"keyword": "kana",
+		"capabilities": {
+			"rows": {
+				"app": [
+					"title"
+				]
+			}
+		},
+		"provides": {
+			"filters": {
+				"longest": {
+					"stage": "sorter"
+				}
+			}
+		}
+	}
+}

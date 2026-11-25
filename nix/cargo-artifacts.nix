@@ -78,7 +78,7 @@ let
   latencyArgs = baseArgs // {
     pname = "dupin-latency";
     CARGO_PROFILE = "latency";
-    cargoExtraArgs = "--offline --locked --package dupin --features tooling";
+    cargoExtraArgs = "--offline --locked --package dupin";
     doCheck = false;
   };
   releaseArtifacts = craneLib.buildDepsOnly releaseArgs;
@@ -150,6 +150,15 @@ let
     latencyArgs
     // {
       cargoArtifacts = craneLib.buildDepsOnly latencyArgs;
+      # A binary outside the source tree finds bundled extensions only in an app's Resources,
+      # so the ports are measured running, as the released app runs them.
+      postInstall = ''
+        contents="$out/Dupin.app/Contents"
+        mkdir -p "$contents/MacOS" "$contents/Resources"
+        mv "$out/bin/dupin" "$contents/MacOS/dupin"
+        cp -R extensions "$contents/Resources/extensions"
+        ln -s ../Dupin.app/Contents/MacOS/dupin "$out/bin/dupin"
+      '';
     }
   );
 in
@@ -180,6 +189,7 @@ pkgs.stdenv.mkDerivation (
         latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
+      inherit (native) bundledExtensions;
       baseline = native;
     };
   }

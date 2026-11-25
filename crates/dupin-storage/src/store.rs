@@ -246,7 +246,8 @@ impl Record {
         self.stamp.device
     }
 
-    fn cursor(&self) -> Cursor {
+    /// Where [`Store::list`] continues after this record, for a caller that cuts a page short.
+    pub fn cursor(&self) -> Cursor {
         Cursor {
             stamp: self.stamp,
             id: self.id,
@@ -610,14 +611,24 @@ impl Storage {
     }
 }
 
-fn lock_namespace(dir: &Path) -> Result<File, Error> {
+struct NamespaceLock(File);
+
+impl Drop for NamespaceLock {
+    fn drop(&mut self) {
+        // A child spawned on any thread while the namespace was open shares this descriptor
+        // until it execs, so closing ours alone could leave the namespace locked a while longer.
+        let _ = self.0.unlock();
+    }
+}
+
+fn lock_namespace(dir: &Path) -> Result<NamespaceLock, Error> {
     let mut options = OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let file = options.open(dir.join(LOCK))?;
     match file.try_lock() {
-        Ok(()) => Ok(file),
+        Ok(()) => Ok(NamespaceLock(file)),
         Err(fs::TryLockError::WouldBlock) => Err(Error::Busy),
         Err(fs::TryLockError::Error(error)) => Err(error.into()),
     }
@@ -943,7 +954,7 @@ pub struct Store {
     clock: Arc<dyn Clock>,
     state: Mutex<State>,
     report: Mutex<OpenReport>,
-    _lock: File,
+    _lock: NamespaceLock,
     #[cfg(test)]
     crash_before_rename: std::sync::atomic::AtomicBool,
     #[cfg(test)]
@@ -993,20 +1004,40 @@ impl Store {
         RecordId(self.keys.key_id(key))
     }
 
+    /// A tag only the host can make for `value` in this namespace, for `purpose`: no record ID,
+    /// whatever key its owner stores it under, is ever one.
+    pub fn host_tag(&self, purpose: &str, value: &str) -> String {
+        hex(&self.keys.host_tag(purpose, value))
+    }
+
     /// Seals and stores a new record under a random ID. Blobs already stored in this
     /// namespace are shared, not written again. The plaintext buffers are zeroized before
     /// this returns.
     pub fn put(&self, record: NewRecord) -> Result<Record, Error> {
-        self.write(RecordId::random()?, record)
+        self.write(RecordId::random()?, record, false)
+    }
+
+    /// Like [`Store::put`], but refuses a record the namespace has no room for with
+    /// [`Error::QuotaExceeded`], instead of deleting its oldest records to make room. The
+    /// check and the write hold one lock, so concurrent writers can't overrun the limits
+    /// together. Records past `max_age` go first and don't count against the room.
+    pub fn put_within_limits(&self, record: NewRecord) -> Result<Record, Error> {
+        self.write(RecordId::random()?, record, true)
     }
 
     /// Stores `record` as the record for the owner's logical `key`, replacing the one stored
     /// before, which keeps its creation time. The key itself is never written.
     pub fn upsert(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
-        self.write(self.key_id(key), record)
+        self.write(self.key_id(key), record, false)
     }
 
-    fn write(&self, id: RecordId, record: NewRecord) -> Result<Record, Error> {
+    /// Like [`Store::upsert`], but refuses a record there is no room for, as
+    /// [`Store::put_within_limits`] does. The record it replaces makes room for it.
+    pub fn upsert_within_limits(&self, key: &str, record: NewRecord) -> Result<Record, Error> {
+        self.write(self.key_id(key), record, true)
+    }
+
+    fn write(&self, id: RecordId, record: NewRecord, within_limits: bool) -> Result<Record, Error> {
         let NewRecord { data, blobs } = record;
         let blobs: Vec<Zeroizing<Vec<u8>>> = blobs.into_iter().map(Zeroizing::new).collect();
         if blobs.len() > MAX_BLOBS_PER_RECORD {
@@ -1023,11 +1054,41 @@ impl Store {
         if bytes > limit {
             return Err(Error::TooLarge { bytes, limit });
         }
+        let handles: Vec<BlobHandle> = blobs
+            .iter()
+            .map(|blob| BlobHandle(self.keys.blob_handle(blob)))
+            .collect();
+        if within_limits {
+            self.enforce(&mut state)?;
+            let mut new_blobs = HashSet::new();
+            let new_blob_bytes: u64 = handles
+                .iter()
+                .zip(&blobs)
+                .filter(|(handle, _)| !state.blobs.contains_key(handle) && new_blobs.insert(**handle))
+                .map(|(_, blob)| blob.len() as u64)
+                .sum();
+            let replaced = state.records.get(&id);
+            let entries = state.records.len() + usize::from(replaced.is_none());
+            // A blob only the replaced record carries goes with it.
+            let freed: u64 = replaced.map_or(0, |meta| {
+                meta.body_len
+                    + meta
+                        .blobs
+                        .iter()
+                        .filter(|blob| !handles.contains(&blob.handle))
+                        .filter(|blob| state.blobs.get(&blob.handle).is_some_and(|entry| entry.refs == 1))
+                        .map(|blob| blob.len)
+                        .sum::<u64>()
+            });
+            let bytes = (state.total + body.len() as u64 + new_blob_bytes).saturating_sub(freed);
+            if entries > state.limits.max_entries || bytes > state.limits.max_total_bytes {
+                return Err(Error::QuotaExceeded { entries, bytes });
+            }
+        }
 
         let mut refs = Vec::with_capacity(blobs.len());
         let mut written = HashMap::new();
-        for blob in &blobs {
-            let handle = BlobHandle(self.keys.blob_handle(blob));
+        for (blob, &handle) in blobs.iter().zip(&handles) {
             let len = blob.len() as u64;
             if !state.blobs.contains_key(&handle) && !written.contains_key(&handle) {
                 let aad = self.keys.aad("blob", &[&handle.0]);
@@ -1525,5 +1586,22 @@ mod tests {
         assert_eq!(store.device_id(), first.device());
         assert!(dir.path().join("storage.state").exists());
         assert!(!dir.path().join("storage").join("storage.state").exists());
+    }
+
+    /// A process spawned on another thread while a namespace is open holds a duplicate of its
+    /// lock descriptor until the child execs; a duplicate here stands in for that child.
+    #[test]
+    fn a_closed_namespace_reopens_while_a_spawned_child_still_holds_its_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().join("storage"), MemoryKey::random());
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        let child = store._lock.0.try_clone().unwrap();
+        drop(store);
+        let store = storage.open("clipboard", Limits::default()).unwrap();
+        let other_child = store._lock.0.try_clone().unwrap();
+        drop(store);
+        storage.discard("clipboard").unwrap();
+        assert!(!dir.path().join("storage/clipboard").exists());
+        drop((child, other_child));
     }
 }

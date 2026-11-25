@@ -1,6 +1,9 @@
 use std::path::{Component, Path};
 
-use crate::scope::{ClipboardAccess, FilesAccess, Method, Origin, Scope, ScopeKey, ScopeName, StorageOp};
+use crate::scope::{
+    ClipboardAccess, FilesAccess, Method, Origin, RowField, RowKind, Scope, ScopeKey, ScopeName, StorageOp,
+    WindowsAccess,
+};
 
 /// One operation a host service is about to perform for a package.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,10 +25,10 @@ pub enum Request {
         name: ScopeName,
         output: bool,
     },
-    /// `size_after` is the package's stored bytes once a write completes.
+    /// Its quota isn't checked here: only the store can check it and write in one step, so
+    /// the service applies the quota the permit's scope names.
     Storage {
         op: StorageOp,
-        size_after: u64,
     },
     Clipboard(ClipboardAccess),
     DictionaryLookup,
@@ -34,6 +37,14 @@ pub enum Request {
         past_days: u32,
         future_days: u32,
     },
+    Windows(WindowsAccess),
+    /// Handing the package `field` of rows of `kind` that Dupin's own sources found.
+    Rows {
+        kind: RowKind,
+        field: RowField,
+    },
+    /// Handing the package what the user typed.
+    Query,
 }
 
 pub(crate) enum Resolved {
@@ -60,6 +71,9 @@ impl Request {
             Self::Clipboard(access) => ScopeKey::Clipboard(*access),
             Self::DictionaryLookup => ScopeKey::Dictionary,
             Self::CalendarRead { .. } => ScopeKey::Calendar,
+            Self::Windows(access) => ScopeKey::Windows(*access),
+            Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
+            Self::Query => ScopeKey::Query,
         })
     }
 
@@ -69,10 +83,13 @@ impl Request {
             Self::Http { method, .. } => method.mutates(),
             Self::Exec { .. } | Self::Script { .. } => true,
             Self::Clipboard(access) => *access != ClipboardAccess::Watch,
+            Self::Windows(access) => *access == WindowsAccess::Arrange,
             Self::Files { .. }
             | Self::Storage { .. }
             | Self::DictionaryLookup
-            | Self::CalendarRead { .. } => false,
+            | Self::CalendarRead { .. }
+            | Self::Rows { .. }
+            | Self::Query => false,
         }
     }
 
@@ -102,10 +119,6 @@ impl Request {
                     name,
                 },
             ) => (*output && !allowed).then(|| format!("returning the output of “{name}” isn't declared")),
-            (Self::Storage { op, size_after }, Scope::Storage { quota_bytes, .. }) => {
-                (*op == StorageOp::Write && size_after > quota_bytes)
-                    .then(|| format!("storage would exceed its {quota_bytes}-byte quota"))
-            }
             (
                 Self::CalendarRead {
                     past_days,
@@ -117,6 +130,8 @@ impl Request {
                 },
             ) => (past_days > past || future_days > future)
                 .then(|| format!("calendar reads are limited to {past} days back and {future} days ahead")),
+            (Self::Rows { field, .. }, Scope::Rows { kind, fields }) => (!fields.contains(field))
+                .then(|| format!("the {} of {} rows isn't declared", field.as_str(), kind.as_str())),
             _ => None,
         }
     }

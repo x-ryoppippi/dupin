@@ -6,7 +6,12 @@
 # `run` measures each scenario in scripts/latency/scenarios.toml headless, with fixtures,
 # and writes the percentiles as JSON. `compare` holds one result set against another (main
 # against a pull request), and `parity` holds each feature's other implementations against
-# its native one within a result set. See docs/development.md, "Keypress latency".
+# its native one: the same run's, or the one `baseline` recorded from the last commit that had
+# it, scaled by how fast this run's machine measured the native control against that one's. See
+# docs/development.md, "Keypress latency".
+
+use latency/measure.nu [measure-all stage-names]
+
 def main []: nothing -> nothing {
     help main
 }
@@ -17,7 +22,7 @@ def main []: nothing -> nothing {
 # `--warmup` times unmeasured, then enough times for `--samples` measured keypresses, each
 # `--gap` after the last. The reported percentiles are the median of the runs' own.
 def "main run" [
-    --bin: path = "target/latency/dupin" # `cargo build --profile latency -p dupin --features tooling`, or a debug build
+    --bin: path = "target/latency/dupin" # `cargo build --profile latency -p dupin`, or a debug build
     --out: path = "target/latency/results.json"
     --samples: int = 210 # Measured keypresses per scenario and run
     --warmup: int = 10 # Unmeasured repetitions of each scenario before the measured ones
@@ -29,19 +34,6 @@ def "main run" [
 ]: nothing -> nothing {
     let root = $env.FILE_PWD | path dirname
     cd $root
-    let catalogue = open scripts/latency/scenarios.toml
-    let jobs = $catalogue.scenarios
-    | where {|scenario| $only == null or ($scenario.id | str contains $only) }
-    | each {|scenario|
-        let implementations = $catalogue.features | get $scenario.feature | transpose label setup
-        $implementations
-        | where {|it| $implementation == null or $it.label == $implementation }
-        | each {|it| $scenario | insert implementation $it.label | insert setup $it.setup }
-    }
-    | flatten
-    if ($jobs | is-empty) {
-        error make {msg: "no scenario matches"}
-    }
     let settings = {
         samples: $samples
         warmup: $warmup
@@ -49,21 +41,10 @@ def "main run" [
         gap_ms: ($gap / 1ms)
         fps: $fps
     }
-    let tmp = mktemp --directory
-    # Round by round rather than scenario by scenario, so whatever else the machine is doing
-    # weighs on every implementation alike.
-    let measured = 1..$runs | each {|run|
-        $jobs | enumerate | each {|job|
-            let name = $"($job.item.id) [($job.item.implementation)]"
-            print --stderr $"run ($run)/($runs): ($name)"
-            let dir = $tmp | path join $"($job.item.id)-($job.item.implementation)-($run)"
-            {job: $job.index, run: (measure $bin $job.item $settings $dir)}
-        }
-    } | flatten
-    let results = $jobs | enumerate | each {|job|
-        summarize $job.item ($measured | where job == $job.index | get run)
-    }
-    rm --recursive $tmp
+    let results = (
+        measure-all (open scripts/latency/scenarios.toml) $bin $settings
+        --only $only --implementation $implementation
+    )
     let report = {
         schema: 1
         created: (date now | format date "%+")
@@ -115,19 +96,56 @@ def "main compare" [
     judge $pairs $tolerance $floor $report $summary "Keypress latency"
 }
 
-# Hold every implementation other than `native` against the native one of the same feature,
-# within one result set. Passes when no feature declares a second implementation.
+# The least regression `parity` allows. Native p95 varies by about a quarter of a millisecond
+# between CI runs, so `compare`'s 1 ms would let a port of a scenario that takes 1.4 ms be 70%
+# slower and pass.
+export const PARITY_FLOOR = 500us
+
+# The native feature every run measures, so a baseline recorded on one machine can be held to a
+# run on another: the recorded p95 is scaled by this run's control p95 over the one recorded
+# with it. Runners of one class differ in speed by more than parity's tolerance.
+export const CONTROL = "search"
+
+# Hold every implementation other than `native` against the native one of the same scenario:
+# the run's own, or, for a feature whose native implementation is gone, the one recorded in
+# `--baseline` from the last commit that had it. One that never had a native implementation is
+# held to its own `budget_ms`. One with none of these fails, so a port can't skip the gate by
+# deleting its native implementation without recording a baseline. A recorded one counts only
+# when the benchmark that measured it is the one this run measured the port with, and only with
+# the `CONTROL` recorded beside it and measured by this run, which scale it to this machine.
 def "main parity" [
     results: path
+    --baseline: path # Native results recorded from earlier commits; scripts/latency/native-baseline.json
     --tolerance: float = 10.0 # Percent of native's p95
-    --floor: duration = 1ms # The least regression ever allowed
+    --floor: duration = $PARITY_FLOOR # The least regression ever allowed
     --summary: path # Also append the comparison to this Markdown file
 ]: nothing -> nothing {
     let all = open $results | get results
-    let pairs = $all | where implementation != "native" | each {|result|
-        {
-            candidate: $result
-            baseline: ($all | where id == $result.id and implementation == "native" | get 0?)
+    let recorded = open ($baseline | default ($env.FILE_PWD | path join latency native-baseline.json))
+    | get results
+    let unmeasured = unmeasured $all $recorded
+    if ($unmeasured | is-not-empty) {
+        error make {
+            msg: $"($unmeasured | str join ', ') has a recorded native baseline but no result in ($results); a port must be measured against it"
+        }
+    }
+    let pairs = parity-pairs $all $recorded
+    let unheld = unheld $pairs
+    if ($unheld | is-not-empty) {
+        error make {
+            msg: $"($unheld | str join ', ') has no native result, recorded native baseline or budget_ms to be held to; record the baseline of the native implementation it replaces, or declare a budget for a feature that never had one"
+        }
+    }
+    let stale = stale $pairs
+    if ($stale | is-not-empty) {
+        error make {
+            msg: $"($stale | str join ', ') has a native baseline recorded by another version of the benchmark than this run's; re-record it with this version, as docs/development.md, \"Native baselines\", describes"
+        }
+    }
+    let uncontrolled = uncontrolled $pairs
+    if ($uncontrolled | is-not-empty) {
+        error make {
+            msg: $"($uncontrolled | str join ', ') has a native baseline that cannot be scaled to this run: it was recorded without the native ($CONTROL) scenarios, or ($results) lacks one of them; re-record it, or measure them"
         }
     }
     if ($pairs | is-empty) {
@@ -137,213 +155,223 @@ def "main parity" [
     judge $pairs $tolerance $floor false $summary "Extension parity"
 }
 
-# One process: type the scenario, then read back the samples for the measured keypresses.
-def measure [
-    bin: path
-    job: record
-    settings: record
-    dir: path
-]: nothing -> record {
-    mkdir $dir
-    let gap = $settings.gap_ms / 1000
-    let per_pass = $job.typed | str length
-    let passes = $settings.warmup + ($settings.samples / $per_pass | math ceil)
-    let script = typing-script $job $passes $gap
-    let script_path = $dir | path join script.json
-    {events: $script.events} | to json | save $script_path
-    let config = $dir | path join config
-    mkdir ($config | path join dupin)
-    cp $job.setup.config ($config | path join dupin config.toml)
-    if $job.setup.extensions? != null {
-        cp --recursive $job.setup.extensions ($config | path join dupin extensions)
-    }
-    let log = $dir | path join samples.jsonl
-    let env_vars = {
-        HOME: $dir
-        XDG_CONFIG_HOME: $config
-        XDG_DATA_HOME: ($dir | path join data)
-        DUPIN_LATENCY: $log
-        DUPIN_HEADLESS_CLIPBOARD: ($env.PWD | path join scripts/fixtures/clipboard.json)
-    }
-    let result = with-env $env_vars {
-        ^$bin --script $script_path --realtime --fps $settings.fps --tree ($dir | path join tree.json) --at mark:end
-        | complete
-    }
-    if $result.exit_code != 0 {
-        error make {msg: $"($bin) failed on ($job.id):\n($result.stderr)"}
-    }
-    let lines = open --raw $log | lines | each { from json }
-    let measured = $script.keys | skip ($settings.warmup * $per_pass) | first $settings.samples
-    let matched = $measured | each {|t|
-        $lines | where {|line| $line.t >= $t - 1e-6 and $line.t < $t + $gap / 2 } | get 0?
-    }
-    let unseen = $matched | where $it == null | length
-    if $unseen > 0 {
-        error make {
-            msg: $"($job.id): ($unseen) measured keypresses left no sample; is ($bin) built with the latency probe?"
+# Each implementation other than `native` in `results`, paired with the run's native result of
+# its scenario or, failing that, the one `recorded` from the last commit that had it. A recorded
+# one comes with its `control`: the control scenarios recorded beside it, each with this run's
+# result of it, and `scale`, this run's control p95 over the recorded one, once the run has all.
+export def parity-pairs [results: list<record>, recorded: list<record>]: nothing -> list<record> {
+    $results | where implementation != "native" | each {|result|
+        let native = $results | where id == $result.id and implementation == "native" | get 0?
+        let earlier = $recorded
+        | where id == $result.id
+        | get 0?
+        | if $in != null { upsert implementation $"native at ($in.commit | str substring 0..<7)" } else { $in }
+        let held = $native == null and $earlier != null
+        {
+            candidate: $result
+            baseline: ($native | default $earlier)
+            recorded: $held
+            control: (if $held { control-of $results $earlier.control? } else { null })
         }
     }
-    let superseded = $matched | where superseded? == true
-    # A keypress whose results were never drawn has no latency to report; more than a few
-    # mean the gap is shorter than the scenario takes.
-    if ($superseded | length) * 100 > ($matched | length) {
-        error make {
-            msg: $"($job.id): ($superseded | length) of ($matched | length) keypresses were typed over before their results showed; raise --gap"
-        }
+}
+
+def control-of [results: list<record>, recorded]: nothing -> any {
+    if $recorded == null {
+        return null
     }
-    let provider = $job.setup.provider
-    let missed = unanswered $matched $provider $per_pass
-    if $missed > 0 {
-        error make {
-            msg: $"($job.id) [($job.implementation)]: ($missed) measured keypresses did not search ($provider), or ended a pass without its rows; the scenario does not reach its feature"
-        }
+    let scenarios = $recorded.scenarios | each {|scenario|
+        $scenario
+        | insert measured ($results | where id == $scenario.id and implementation == "native" | get 0?)
     }
-    let samples = $matched | where superseded? != true
+    let complete = ($scenarios | is-not-empty) and ($scenarios | all {|scenario| $scenario.measured != null })
     {
-        commands: ($samples | get command | uniq)
-        samples: ($samples | length)
-        superseded: ($superseded | length)
-        total_ms: ($samples | get total_ms | percentiles)
-        stages: (
-            stage-names
-            | each {|stage| {$stage: ($samples | get $stage | percentiles)} }
-            | into record
+        scenarios: $scenarios
+        scale: (
+            if $complete { ($scenarios | get measured.p95_ms | math median) / $recorded.p95_ms } else { null }
         )
     }
 }
 
-# How many drawn keypresses, `per_pass` to a pass, did not search `provider`, or ended a pass
-# without a row from it. Only the whole of `typed` must show the feature's rows: a shorter
-# query may rightly have none.
-export def unanswered [samples: list<record>, provider: string, per_pass: int]: nothing -> int {
-    $samples
-    | enumerate
-    | where {|it| $it.item.superseded? != true }
-    | where {|it|
-        let searched = $provider in ($it.item.searched? | default [])
-        let shown = $it.item.shown?
-        | default {}
-        | transpose name rows
-        | where name == $provider and rows > 0
-        | is-not-empty
-        let ends_pass = ($it.index + 1) mod $per_pass == 0
-        not $searched or ($ends_pass and not $shown)
-    }
-    | length
-}
-
-def stage-names []: nothing -> list<string> {
-    [dispatch_ms provider_ms merge_ms layout_ms]
-}
-
-# The scripted keys: per pass, select all and delete twice (back to the default search) and
-# type the unmeasured prefix, all in one frame, then each measured character `gap` apart.
-export def typing-script [job: record, count: int, gap: float]: nothing -> record {
-    let typed = $job.typed | split chars
-    let prefix = $job.prefix | split chars
-    let pass_length = ($typed | length) + 1
-    let start = 0.3
-    let passes = 0..<$count | each {|pass|
-        let t0 = $start + $pass * $pass_length * $gap
-        let reset = [
-            {t: $t0, type: key, name: a, cmd: true}
-            {t: $t0, type: key, name: Backspace}
-            {t: $t0, type: key, name: Backspace}
-        ]
-        let prefix_keys = $prefix | each {|ch| {t: $t0, type: type, text: $ch} }
-        let keys = $typed | enumerate | each {|it| {t: ($t0 + (1 + $it.index) * $gap), type: type, text: $it.item} }
-        {events: ($reset ++ $prefix_keys ++ $keys), keys: ($keys | get t)}
-    }
-    let end = $start + $count * $pass_length * $gap + $gap
-    {
-        events: (
-            $passes
-            | get events
-            | flatten
-            | append {t: $end, type: mark, name: end}
+# The scenarios of `pairs` held to a recorded native result that another version of the
+# benchmark measured: its `fingerprint` differs from the candidate's, or it predates them, or one
+# of its control scenarios' differs from this run's.
+export def stale [pairs: list<record>]: nothing -> list<string> {
+    $pairs
+    | where {|pair|
+        let control = $pair.control?.scenarios? | default []
+        $pair.recorded and (
+            $pair.baseline.benchmark? == null
+            or $pair.baseline.benchmark != $pair.candidate.benchmark?
+            or ($control | any {|scenario| $scenario.measured != null and $scenario.measured.benchmark? != $scenario.benchmark })
         )
-        keys: ($passes | get keys | flatten)
     }
+    | each {|pair| $"($pair.candidate.id) [($pair.candidate.implementation)]" }
 }
 
-# Nearest-rank p50, p95 and p99 of a list of milliseconds.
-export def percentiles []: list<number> -> record {
-    let sorted = $in | sort
-    let count = $sorted | length
-    let at = {|p|
-        $sorted | get ([
-            ((($count * $p) | math ceil) - 1)
-            0
-        ] | math max)
-    }
-    {
-        p50: (do $at 0.5)
-        p95: (do $at 0.95)
-        p99: (do $at 0.99)
-    }
+# The scenarios of `pairs` held to a recorded native result that cannot be scaled to this run:
+# it was recorded without a control, or the run lacks one of its control scenarios.
+export def uncontrolled [pairs: list<record>]: nothing -> list<string> {
+    $pairs
+    | where {|pair| $pair.recorded and $pair.control?.scale? == null }
+    | each {|pair| $"($pair.candidate.id) [($pair.candidate.implementation)]" }
 }
 
-# One scenario's runs as one result: each percentile is the median of the runs' own, which
-# keeps one disturbed run on a shared CI machine from moving the result.
-def summarize [job: record, runs: list<record>]: nothing -> record {
-    let median = {|get_value|
-        $runs | each $get_value | math median
+# The scenarios of `pairs` with nothing to hold them to: no native result, no recorded one and no
+# `budget_ms`. `compare` reports such a scenario as `new`, but for `parity` it is a port whose
+# native implementation went without its baseline being recorded.
+export def unheld [pairs: list<record>]: nothing -> list<string> {
+    $pairs
+    | where {|pair| $pair.baseline == null and $pair.candidate.budget_ms? == null }
+    | each {|pair| $"($pair.candidate.id) [($pair.candidate.implementation)]" }
+}
+
+# The recorded scenarios `results` has no result for. In CI that is a port whose scenario was
+# dropped or renamed, which would otherwise go unmeasured.
+export def unmeasured [results: list<record>, recorded: list<record>]: nothing -> list<string> {
+    let ids = $results | get id
+    $recorded | get id | where {|id| $id not-in $ids }
+}
+
+# Record the native results of `feature` in the native baseline that `parity` holds its port
+# to once the native implementation is deleted. `results` are `run` outputs of the last commit
+# that has it (see docs/development.md, "Native baselines"); each figure is the median of theirs.
+# Beside them it records what the same results measured of the native `CONTROL` scenarios, which
+# `parity` scales the baseline by.
+def "main baseline" [
+    feature: string
+    ...results: path
+    --out: path # scripts/latency/native-baseline.json
+]: nothing -> nothing {
+    let out = $out | default ($env.FILE_PWD | path join latency native-baseline.json)
+    if ($results | is-empty) {
+        error make {msg: "name at least one results.json"}
     }
-    {
-        id: $job.id
-        feature: $job.feature
-        implementation: $job.implementation
-        prefix: $job.prefix
-        typed: $job.typed
-        provider: $job.setup.provider
-        commands: (
-            $runs
-            | get commands
-            | flatten
-            | uniq
-        )
-        samples: ($runs | get samples | math sum)
-        superseded: ($runs | get superseded | math sum)
-        p50_ms: (do $median {|run| $run.total_ms.p50 })
-        p95_ms: (do $median {|run| $run.total_ms.p95 })
-        p99_ms: (do $median {|run| $run.total_ms.p99 })
-        stages: (stage-names | each {|stage|
-            {
-                $stage: {
-                    p50: (do $median {|run| $run.stages | get $stage | get p50 })
-                    p95: (do $median {|run| $run.stages | get $stage | get p95 })
-                }
+    let reports = $results | each { open }
+    let commits = $reports | get commit | uniq
+    if ($commits | length) != 1 {
+        error make {
+            msg: $"the results come from more than one commit: ($commits | str join ', ')"
+        }
+    }
+    let without = $results | zip $reports | where {|pair|
+        $pair.1.results | where feature == $feature and implementation == "native" | is-empty
+    }
+    if ($without | is-not-empty) {
+        error make {
+            msg: $"($without | each { get 0 } | str join ', ') has no native ($feature); every result must measure it with the control it is scaled by"
+        }
+    }
+    let measured = $reports
+    | each {|report| $report.results | where feature == $feature and implementation == "native" }
+    | flatten
+    let median = {|rows: list<record>, get_value: closure|
+        $rows | each $get_value | math median
+    }
+    let benchmark_of = {|id: string, rows: list<record>|
+        let benchmarks = $rows | get --optional benchmark | uniq
+        if ($benchmarks | length) != 1 or $benchmarks.0 == null {
+            error make {
+                msg: $"($id) was not measured by one fingerprinted version of the benchmark; measure a commit whose scripts/latency/measure.nu records `benchmark`"
             }
-        } | into record)
-        runs: ($runs | each {|run| $run.total_ms })
+        }
+        $benchmarks.0
     }
+    let controls = $reports | each {|report|
+        $report.results | where feature == $CONTROL and implementation == "native"
+    }
+    let control_ids = $controls | each { get id | sort } | uniq
+    if ($control_ids | length) != 1 or ($control_ids.0 | is-empty) {
+        error make {
+            msg: $"every result must measure the same native ($CONTROL) scenarios; `parity` scales the baseline by them"
+        }
+    }
+    let control_scenarios = $controls | flatten | group-by id | items {|id, rows|
+        {
+            id: $id
+            benchmark: (do $benchmark_of $id $rows)
+            p95_ms: (do $median $rows {|row| $row.p95_ms })
+        }
+    } | sort-by id
+    let control = {
+        scenarios: $control_scenarios
+        p95_ms: ($control_scenarios | get p95_ms | math median)
+    }
+    let recorded = $measured | group-by id | items {|id, rows|
+        {
+            id: $id
+            feature: $feature
+            implementation: "native"
+            commit: $commits.0
+            benchmark: (do $benchmark_of $id $rows)
+            runs: ($rows | length)
+            p50_ms: (do $median $rows {|row| $row.p50_ms })
+            p95_ms: (do $median $rows {|row| $row.p95_ms })
+            p99_ms: (do $median $rows {|row| $row.p99_ms })
+            stages: (stage-names | each {|stage|
+                {
+                    $stage: {
+                        p50: (do $median $rows {|row| $row.stages | get $stage | get p50 })
+                        p95: (do $median $rows {|row| $row.stages | get $stage | get p95 })
+                    }
+                }
+            } | into record)
+            control: $control
+        }
+    }
+    let kept = if ($out | path exists) {
+        open $out | get results | where feature != $feature
+    } else {
+        []
+    }
+    {
+        schema: 1
+        results: ($kept ++ $recorded | sort-by id)
+    }
+    | to json --tabs 1
+    | $in + "\n"
+    | save --force $out
+    print --stderr $"recorded ($recorded | length) scenarios of ($feature) from ($commits.0) in ($out)"
 }
 
 # Each pair's verdict: `regressed` when the candidate's p95 exceeds the baseline's by more than
-# `tolerance` percent of it or `floor`, whichever is larger; `new` without a baseline.
+# `tolerance` percent of it or `floor`, whichever is larger, after a recorded baseline is
+# multiplied by its control's `scale`. Without a baseline, `regressed` when it exceeds the
+# candidate's own `budget_ms`, and `new` when it has none.
 export def verdicts [pairs: list<record>, tolerance: float, floor: duration]: nothing -> table {
     $pairs | each {|pair|
         let cand = $pair.candidate
         match $pair.baseline {
             null => {
-                id: $cand.id
-                baseline: null
-                candidate: $cand.implementation
-                baseline_p95_ms: null
-                candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
-                allowed_ms: null
-                verdict: "new"
+                let budget = $cand.budget_ms?
+                {
+                    id: $cand.id
+                    baseline: (if $budget == null { null } else { "budget" })
+                    candidate: $cand.implementation
+                    baseline_p95_ms: null
+                    scale: null
+                    candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
+                    allowed_ms: $budget
+                    limit_ms: $budget
+                    verdict: (
+                        if $budget == null { "new" } else if $cand.p95_ms > $budget { "regressed" } else { "ok" }
+                    )
+                }
             }
             $base => {
-                let allowed = [($base.p95_ms * $tolerance / 100) ($floor / 1ms)] | math max
+                let scale = $pair.control?.scale?
+                let held = $base.p95_ms * ($scale | default 1.0)
+                let allowed = [($held * $tolerance / 100) ($floor / 1ms)] | math max
                 {
                     id: $cand.id
                     baseline: $base.implementation
                     candidate: $cand.implementation
                     baseline_p95_ms: ($base.p95_ms | math round --precision 2)
+                    scale: ($scale | if $in == null { null } else { math round --precision 3 })
                     candidate_p95_ms: ($cand.p95_ms | math round --precision 2)
                     allowed_ms: ($allowed | math round --precision 2)
-                    verdict: (if $cand.p95_ms > $base.p95_ms + $allowed { "regressed" } else { "ok" })
+                    limit_ms: ($held + $allowed | math round --precision 2)
+                    verdict: (if $cand.p95_ms > $held + $allowed { "regressed" } else { "ok" })
                 }
             }
         }
@@ -361,7 +389,7 @@ def judge [
     let rows = verdicts $pairs $tolerance $floor
     print ($rows | table)
     if $summary != null {
-        $"## ($title)\n\np95 keypress-to-results latency; a regression is more than ($tolerance)% or ($floor), whichever is larger.\n\n($rows | to md)\n\n"
+        $"## ($title)\n\np95 keypress-to-results latency; a regression is more than ($tolerance)% or ($floor), whichever is larger. A baseline recorded at an earlier commit is first multiplied by `scale`, this run's native ($CONTROL) p95 over the one recorded with it; `limit_ms` is the most the candidate may take.\n\n($rows | to md)\n\n"
         | save --append $summary
     }
     let regressed = $rows | where verdict == "regressed"

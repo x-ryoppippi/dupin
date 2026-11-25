@@ -521,22 +521,20 @@ fn extension_tool(
                 return Err("query too large".into());
             }
             let extension = crate::extensions::load_folder(&package).map_err(diagnostic)?;
-            let items = extension
-                .query(
-                    query,
-                    None,
-                    dupin_js_runtime::MAX_ROWS,
-                    std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
-                    cancelled.clone(),
-                    &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
-                )
-                .map_err(|error| match error {
-                    dupin_js_runtime::RunError::Failed(failure) => diagnostic(failure),
-                    dupin_js_runtime::RunError::Cancelled => "the query was cancelled".into(),
-                })?;
-            serde_json::to_value(dupin_plugin_protocol::Outcome::Results { items, state: None })
-                .map(Output::Json)
-                .map_err(|_| "could not encode the answer".into())
+            let batches = crate::extensions::answer(
+                &extension,
+                query,
+                None,
+                dupin_js_runtime::MAX_ROWS,
+                std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
+                cancelled.clone(),
+                &dupin_extension_bridge::Call::none(),
+            )
+            .map_err(|error| match error {
+                dupin_js_runtime::RunError::Failed(failure) => diagnostic(failure),
+                dupin_js_runtime::RunError::Cancelled => "the query was cancelled".into(),
+            })?;
+            Ok(Output::Json(crate::cli::answer_json(&batches)))
         }
         "ext_test" => Ok(Output::Json(
             crate::extensions::test(&package, false, &cancelled)

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use dupin_plugin_protocol::View;
 
@@ -48,15 +48,6 @@ pub enum Action {
         paths: Vec<PathBuf>,
     },
     CopyFiles(Vec<PathBuf>),
-    /// Put a clipboard history entry back on the clipboard as it was copied, then, with
-    /// `paste`, paste it into the frontmost app.
-    RestoreClipboardEntry {
-        entry: u64,
-        paste: bool,
-    },
-    /// Remove one entry from the clipboard history; the system clipboard keeps its contents.
-    DeleteClipboardEntry(u64),
-    ClearClipboardHistory,
     /// Read the clipboard once so macOS asks whether Dupin may; the contents are discarded.
     RequestClipboardAccess,
     /// Copy a snippet's text with its placeholders filled in as it runs, then, with `paste`,
@@ -73,7 +64,12 @@ pub enum Action {
     Push(Page),
     ScriptArguments(PathBuf),
     RunScript(crate::script::ScriptRun),
-    ArrangeWindow(crate::window_management::Layout),
+    /// Run the script config.toml names, by its file name in the scripts folder, with the
+    /// row's value as its one argument. Dupin finds the script only when the action runs.
+    ConfiguredScript {
+        script: String,
+        argument: String,
+    },
     /// Something only the extension `extension` (its package ID) offered on its own row.
     Extension {
         extension: String,
@@ -89,6 +85,9 @@ pub enum ExtensionRequest {
         action: String,
         data: Option<serde_json::Value>,
     },
+    /// Paste the text into the frontmost app while the extension holds `clipboard:paste`, or
+    /// copy it. With `template`, its placeholders are filled in first, as a snippet's are.
+    Paste { text: String, template: bool },
     /// Grant the scope named `scope` as `revision` declares it, which the row showed.
     Allow { scope: String, revision: String },
     /// Turn the scope off, so the extension stops asking for it.
@@ -99,6 +98,13 @@ pub enum ExtensionRequest {
     TurnOn,
     /// Show the extension in Settings, where the user picks what a scope may use.
     Review,
+    /// Run the package's kind action `action` on a row Dupin's own sources found, which stands
+    /// for `subject`. Dupin hands the package only the field its manifest names for the action,
+    /// and only once the user allows it to see that field.
+    Kind {
+        action: String,
+        subject: crate::kind::Subject,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,6 +216,79 @@ impl ItemAction {
     }
 }
 
+/// One line a row shows at its end.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Accessory {
+    Text(String),
+    /// Drawn as a label.
+    Tag(String),
+}
+
+/// What a row's icon shows.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Icon {
+    /// The Finder icon of a file, folder or app.
+    File(PathBuf),
+    /// An image file drawn as it is, such as an extension's or a script's own icon.
+    Image(PathBuf),
+    /// An image an extension keeps, drawn scaled down.
+    Host(HostImage),
+}
+
+/// An image an extension's row names by a handle only Dupin resolves, within that package's
+/// own storage, so its bytes never travel with the row.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HostImage {
+    /// The extension whose storage the handle belongs to, as [`Action::Extension`] names it.
+    pub extension: String,
+    pub source: HostImageSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HostImageSource {
+    /// A blob stored with one of the package's records, by its handle.
+    Blob(String),
+    /// A file a clipboard watch delivered to the package, by its path and the handle it came
+    /// with.
+    File { path: PathBuf, handle: String },
+}
+
+impl HostImage {
+    /// The bytes of text it carries, for budgets on what is kept in memory.
+    pub(crate) fn text_bytes(&self) -> usize {
+        self.extension.len()
+            + match &self.source {
+                HostImageSource::Blob(handle) => handle.len(),
+                HostImageSource::File { path, handle } => path.as_os_str().len() + handle.len(),
+            }
+    }
+}
+
+impl Icon {
+    /// An icon a script or extension named: the image itself when the path names an image
+    /// file, otherwise that file's Finder icon.
+    pub fn declared(path: PathBuf) -> Self {
+        const IMAGES: [&str; 8] = ["png", "jpg", "jpeg", "gif", "svg", "pdf", "icns", "tiff"];
+        let image = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| IMAGES.contains(&extension.to_ascii_lowercase().as_str()));
+        if image {
+            Self::Image(path)
+        } else {
+            Self::File(path)
+        }
+    }
+
+    /// The file the icon is drawn from, unless it is an extension's stored image.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::File(path) | Self::Image(path) => Some(path),
+            Self::Host(_) => None,
+        }
+    }
+}
+
 /// One candidate row, as every provider returns it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Item {
@@ -219,8 +298,7 @@ pub struct Item {
     pub payload: Payload,
     /// Participate in usage recording and history ranking.
     pub record_usage: bool,
-    /// The file whose icon represents the row, if any.
-    pub icon: Option<PathBuf>,
+    pub icon: Option<Icon>,
     /// Character indices in `display_title()` that matched the query, for highlighting.
     pub matched: Vec<usize>,
     /// Text to put in the query field when the user completes this result.
@@ -236,8 +314,20 @@ pub struct Item {
 }
 
 impl Item {
-    /// A file system entry: Enter opens it, ⌘Enter reveals it.
+    /// A file system entry: Enter opens it, ⌘Enter reveals it. A source gives it the rest of
+    /// its kind's actions with [`Kinds`](crate::kind::Kinds).
     pub fn path(path: PathBuf, title: String, matched: Vec<usize>) -> Self {
+        let opening = crate::kind::opening(&path);
+        Self::path_with(path, title, matched, opening)
+    }
+
+    /// A file system entry with the actions its kind resolved.
+    pub(crate) fn path_with(
+        path: PathBuf,
+        title: String,
+        matched: Vec<usize>,
+        resolved: crate::kind::Resolved,
+    ) -> Self {
         let subtitle = path
             .parent()
             .map(|p| tilde(&p.to_string_lossy()))
@@ -250,16 +340,13 @@ impl Item {
                 paths: vec![path.clone()],
             },
             record_usage: true,
-            icon: Some(path.clone()),
+            icon: Some(Icon::File(path.clone())),
             matched,
             completion: None,
             score: None,
-            primary: Some("open".into()),
-            alternate: Some("reveal".into()),
-            actions: vec![
-                ItemAction::new("open", "Open", Action::Open(path.clone())),
-                ItemAction::new("reveal", "Reveal in Finder", Action::Reveal(path)),
-            ],
+            primary: resolved.primary,
+            alternate: resolved.alternate,
+            actions: resolved.actions,
         }
     }
 

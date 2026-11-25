@@ -9,6 +9,7 @@ mod control;
 mod effects;
 mod extensions;
 mod files;
+mod form;
 mod hotkeys;
 mod keys;
 mod lifecycle;
@@ -20,16 +21,14 @@ mod search;
 mod selection;
 mod snapshots;
 mod snippets;
-mod window_management;
+mod thumbnails;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
-use dupin_core::window_management::Layout as WindowLayout;
 use dupin_core::{
     Backdrop, CommandId, Config, DisplaySelection, History, InputSource, Position, Searcher, Session,
 };
@@ -42,20 +41,31 @@ pub use action_screen::{ActionStage, ApplicationState, SEND_TO};
 pub use control::pick_indices;
 pub use lifecycle::Busy;
 pub use search::ICON_SIZE;
+pub use thumbnails::{PREVIEW_HEIGHT, Preview};
 
 use action_screen::ActionScreen;
 use control::{CallerHold, Picker};
-use extensions::Extensions;
+pub(crate) use extensions::Extensions;
+pub(crate) use form::{Draft, Entry, field_key};
 use lifecycle::Restart;
 use notices::Notices;
 use reload::backdrop_source;
 use search::spawn_searcher;
 use selection::SelectionRequest;
-use snippets::SnippetRun;
+use snippets::{RowText, SnippetRun};
 
 enum PendingPaste {
     Snippet(SnippetRun),
-    ClipboardEntry(u64),
+    /// What an extension's action just put on the clipboard, pasted only while the permit to
+    /// paste for it still holds.
+    Clipboard {
+        permit: dupin_extension_bridge::Permit,
+    },
+    /// An extension row's text, pasted only while the permit to paste for it still holds.
+    Extension {
+        text: RowText,
+        permit: dupin_extension_bridge::Permit,
+    },
 }
 
 pub struct Windows {
@@ -85,6 +95,13 @@ pub struct Ui {
     runner: crate::scripts::runner::Runner,
     _scripts_watcher: Option<crate::catalog_watch::Watch>,
     pub action_screen: Option<ActionScreen>,
+    /// The drafts of the forms on the stack of pages, the deepest last.
+    forms: Vec<form::Draft>,
+    /// Edited in place of a form field that has gone, so a late edit lands nowhere.
+    form_scratch: TextEdit,
+    /// Whether the panel showed a form when it last changed, so the query takes focus back
+    /// once it closes.
+    showing_form: bool,
     next_lookup: u64,
     notices: Notices,
     pub session: Session,
@@ -98,7 +115,11 @@ pub struct Ui {
     quick_look: Rc<RefCell<Option<Previewer>>>,
     acknowledged_config: Config,
     bindings_applied: bool,
-    pub icons: HashMap<PathBuf, Image>,
+    pub icons: HashMap<dupin_core::Icon, Image>,
+    /// The images extension rows name, made off the panel's thread.
+    pub(crate) thumbnails: thumbnails::Thumbnails,
+    /// The rows the windowed result list last showed.
+    visible_rows: std::ops::Range<usize>,
     /// Between `show` and `hide`: the backdrop animates only then.
     pub shown: bool,
     /// The clock when the panel last showed, and when the query last changed.
@@ -109,13 +130,16 @@ pub struct Ui {
     icon_cache: Option<ImageCache>,
     searchers: HashMap<CommandId, Searcher>,
     pub(crate) currency: crate::calculator::Currency,
-    pub(crate) web: Arc<RwLock<crate::web::WebCatalog>>,
-    pub(crate) snippets: Arc<RwLock<dupin_core::snippets::SnippetCatalog>>,
+    pub(crate) web: Arc<RwLock<crate::web::WebSearches>>,
     /// What to paste once the panel has closed and the front app has its keys back.
     paste_after_close: Option<PendingPaste>,
     /// Why something wasn't pasted, to show once the panel has closed.
     notice_after_close: Option<String>,
     sharing: dupin_mac::sharing::Picker,
+    /// What gives each row its actions and Send to… its choices.
+    kinds: dupin_core::kind::Kinds,
+    /// What `[advanced]` composes the native sources and kinds with.
+    composition: crate::composition::Composition,
     panel_window: Option<rune::WindowHandle>,
     pub(crate) file_demotions: Arc<RwLock<Vec<String>>>,
     pub(crate) system_provider: Arc<dupin_mac::system_commands::SystemProvider>,
@@ -136,11 +160,8 @@ pub struct Ui {
     settings_after_close: bool,
     snapshots_after_close: bool,
     accessibility_after_close: bool,
-    pub(crate) window_management_enabled: bool,
-    frontmost_pid: Option<i32>,
-    window_action_after_close: Option<(WindowLayout, Option<i32>, Busy)>,
-    window_action_running: bool,
-    pub window_permission_required: bool,
+    /// The app the panel opened over, whose focused window extensions may read and move.
+    front: Arc<dupin_mac::window_management::Front>,
     system_runner: dupin_mac::system_commands::Runner,
     /// Native actions that haven't returned yet; a relaunch waits for them.
     running: Arc<AtomicUsize>,
@@ -170,7 +191,12 @@ impl Ui {
             scripts: script_output,
         } = windows;
         let config = configuration.values.borrow().clone();
-        let apps_provider = Arc::new(AppsProvider::standard());
+        let composition = crate::composition::Composition::native(dupin_mac::kinds::native());
+        composition.apply(&config.advanced);
+        let kinds = composition.kinds().clone();
+        let apps_provider = Arc::new(AppsProvider::standard(
+            composition.rows(crate::features::apps::SOURCE),
+        ));
         let currency = crate::calculator::Currency::start({
             let me = me.clone();
             move || {
@@ -183,17 +209,12 @@ impl Ui {
         });
         currency.set_enabled(config.calculator && config.calculator_currency);
         let clipboard = crate::clipboard::Clipboard::new(&config.clipboard);
-        let calendar = if rune::tooling::is_headless() {
-            dupin_mac::CalendarProvider::fixtures()
-        } else {
-            dupin_mac::CalendarProvider::new(calendar_access.clone())
-        };
         let registration = crate::commands::register(
             &config,
             apps_provider.clone(),
+            &composition,
             history,
-            calendar,
-            clipboard.history(),
+            (!rune::tooling::is_headless()).then(|| calendar_access.clone()),
             currency.calculator(),
         )
         .expect("built-in command registration is valid");
@@ -207,15 +228,19 @@ impl Ui {
             }),
         );
         let scripts_watcher = crate::scripts::watch(me.clone());
+        let front = Arc::new(dupin_mac::window_management::Front::default());
         let bridge = crate::extensions::access::open(crate::extensions::access::Platform {
             scripts: registration.scripts.clone(),
             runner: runner.clone(),
             calendar_access: calendar_access.clone(),
-            history: clipboard.history(),
+            clipboard: clipboard.settings(),
+            front: front.clone(),
         });
+        composition.guests().set_bridge(bridge.clone());
+        clipboard.start(&bridge);
         bridge.set_listener({
             let me = me.clone();
-            move |notice| me.update(move |ui, _| ui.extension_access_changed(notice))
+            move |notice| me.update(move |ui, tx| ui.extension_access_changed(notice, tx))
         });
         crate::extensions::access::refresh_os_access(&bridge, &calendar_access);
         let apps_watcher = apps_provider.watch({
@@ -258,6 +283,9 @@ impl Ui {
             theme: config.theme.clone(),
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
+            forms: Vec::new(),
+            form_scratch: TextEdit::new(""),
+            showing_form: false,
             next_lookup: 0,
             notices: Notices::default(),
             acknowledged_config: config.clone(),
@@ -271,6 +299,8 @@ impl Ui {
             selection_permission_required: false,
             selection_request: SelectionRequest::Idle,
             icons: HashMap::new(),
+            thumbnails: thumbnails::Thumbnails::new(),
+            visible_rows: 0..0,
             shown: false,
             shown_at: 0.0,
             caller_hold: CallerHold::default(),
@@ -281,15 +311,16 @@ impl Ui {
             searchers,
             currency,
             web: registration.web,
-            snippets: registration.snippets,
             paste_after_close: None,
             notice_after_close: None,
             sharing: dupin_mac::sharing::Picker::default(),
+            kinds,
+            composition,
             panel_window: None,
             file_demotions: registration.file_demotions,
             system_provider: registration.system_provider,
             deadlines: HashMap::new(),
-            extensions: Extensions::new(bridge),
+            extensions: Extensions::new(bridge, registration.ports),
             calendar_access,
             _apps_watcher: apps_watcher,
             clipboard,
@@ -303,11 +334,7 @@ impl Ui {
             settings_after_close: false,
             snapshots_after_close: false,
             accessibility_after_close: false,
-            window_management_enabled: config.window_management,
-            frontmost_pid: None,
-            window_action_after_close: None,
-            window_action_running: false,
-            window_permission_required: false,
+            front,
             system_runner: if cfg!(test) || rune::tooling::is_headless() {
                 |_| Err("System commands are unavailable in headless runs.".into())
             } else {

@@ -8,6 +8,7 @@ mod catalog_watch;
 mod cli;
 mod clipboard;
 mod commands;
+mod composition;
 mod control;
 mod extension_install;
 mod extensions;
@@ -31,7 +32,6 @@ mod update;
 mod view;
 mod wall_clock;
 mod web;
-mod window_management;
 
 fn main() {
     if std::env::args_os()

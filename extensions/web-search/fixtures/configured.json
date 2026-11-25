@@ -1,0 +1,54 @@
+{
+	"fixture": 1,
+	"description": "web_searches from config.toml replace the defaults, and the query is percent-encoded as UTF-8.",
+	"preferences": {
+		"webSearches": {
+			"docs": {
+				"name": "Rust documentation",
+				"url": "https://doc.rust-lang.org/std/?search={query}"
+			},
+			"gh": { "name": "GitHub", "url": "https://github.com/search?q={query}" }
+		},
+		"webFallbacks": ["gh"]
+	},
+	"steps": [
+		{
+			"query": "日本語 +&/#?",
+			"expect": {
+				"rows": [
+					{
+						"id": "docs",
+						"title": "Search Rust documentation for 日本語 +&/#?",
+						"subtitle": "docs",
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "https://doc.rust-lang.org/std/?search=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%26%2F%23%3F"
+							}
+						]
+					},
+					{
+						"id": "gh",
+						"title": "Search GitHub for 日本語 +&/#?",
+						"subtitle": "gh",
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "https://github.com/search?q=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%26%2F%23%3F"
+							}
+						]
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "open",
+			"expect": {
+				"effect": {
+					"url": "https://doc.rust-lang.org/std/?search=%E6%97%A5%E6%9C%AC%E8%AA%9E%20%2B%26%2F%23%3F"
+				}
+			}
+		}
+	]
+}

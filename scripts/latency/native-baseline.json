@@ -1,0 +1,225 @@
+{
+	"schema": 1,
+	"results": [
+		{
+			"id": "calendar.rev",
+			"feature": "calendar",
+			"implementation": "native",
+			"commit": "840fc1c733b66dabc5b7e5f94f6364f805c903c2",
+			"benchmark": "ddfee89538c193ca70f9686353936f7e85986682faaf7d72a3841f550829273b",
+			"runs": 2,
+			"p50_ms": 1.0803955,
+			"p95_ms": 1.396854,
+			"p99_ms": 1.4488545,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.020853999999999998,
+					"p95": 0.0263125
+				},
+				"provider_ms": {
+					"p50": 0.48795849999999996,
+					"p95": 0.6119585000000001
+				},
+				"merge_ms": {
+					"p50": 0.35349949999999997,
+					"p95": 0.7159584999999999
+				},
+				"layout_ms": {
+					"p50": 0.1810205,
+					"p95": 0.2491665
+				}
+			},
+			"control": {
+				"scenarios": [
+					{
+						"id": "search.saf",
+						"benchmark": "8218dad1ddbddde33cab8bb33cf2dc0266cf77652c9418319190328076b6f2ab",
+						"p95_ms": 2.1882915
+					},
+					{
+						"id": "search.term",
+						"benchmark": "7d62250a395d378ca3bb65069cc8da598f91ca4d739a2b5784adafc170fc55f9",
+						"p95_ms": 2.246271
+					}
+				],
+				"p95_ms": 2.21728125
+			}
+		},
+		{
+			"id": "clipboard.bak",
+			"feature": "clipboard",
+			"implementation": "native",
+			"commit": "f34b56c8bfcfc4c0cf4a2bfbae9c508e311b8228",
+			"benchmark": "f59511625630e45c4f56289edd5894e662c66b2b2935dcfd8d3ae5982e000593",
+			"runs": 2,
+			"p50_ms": 1.018125,
+			"p95_ms": 1.418834,
+			"p99_ms": 1.5436044999999998,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.021228999999999998,
+					"p95": 0.028041499999999997
+				},
+				"provider_ms": {
+					"p50": 0.030688,
+					"p95": 0.0386665
+				},
+				"merge_ms": {
+					"p50": 0.796375,
+					"p95": 1.204104
+				},
+				"layout_ms": {
+					"p50": 0.1501255,
+					"p95": 0.22506250000000003
+				}
+			},
+			"control": {
+				"scenarios": [
+					{
+						"id": "search.saf",
+						"benchmark": "8218dad1ddbddde33cab8bb33cf2dc0266cf77652c9418319190328076b6f2ab",
+						"p95_ms": 2.13575
+					},
+					{
+						"id": "search.term",
+						"benchmark": "7d62250a395d378ca3bb65069cc8da598f91ca4d739a2b5784adafc170fc55f9",
+						"p95_ms": 2.309542
+					}
+				],
+				"p95_ms": 2.222646
+			}
+		},
+		{
+			"id": "dictionary.run",
+			"feature": "dictionary",
+			"implementation": "native",
+			"commit": "42142057bbd3778d9a0368d046c63c1466378820",
+			"benchmark": "0c864bf6ac5a27fa5ffc8c51a50ae453890d52b141f525387d664883dce3cfd9",
+			"runs": 2,
+			"p50_ms": 1.022417,
+			"p95_ms": 1.5624790000000002,
+			"p99_ms": 1.667229,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.0128125,
+					"p95": 0.020978999999999998
+				},
+				"provider_ms": {
+					"p50": 0.015687,
+					"p95": 0.1270835
+				},
+				"merge_ms": {
+					"p50": 0.757146,
+					"p95": 1.2485415
+				},
+				"layout_ms": {
+					"p50": 0.1332085,
+					"p95": 0.3611875
+				}
+			},
+			"control": {
+				"scenarios": [
+					{
+						"id": "search.saf",
+						"benchmark": "8218dad1ddbddde33cab8bb33cf2dc0266cf77652c9418319190328076b6f2ab",
+						"p95_ms": 2.067604
+					},
+					{
+						"id": "search.term",
+						"benchmark": "7d62250a395d378ca3bb65069cc8da598f91ca4d739a2b5784adafc170fc55f9",
+						"p95_ms": 2.1713744999999998
+					}
+				],
+				"p95_ms": 2.11948925
+			}
+		},
+		{
+			"id": "snippets.sig",
+			"feature": "snippets",
+			"implementation": "native",
+			"commit": "de7e38f2e280e7e57aaeee885b8b7d59d6eb2ef4",
+			"benchmark": "f49f68907d5fb707f5c0474ffb24f589c983d27de12ccdd166f4d24e2686d283",
+			"runs": 2,
+			"p50_ms": 1.0130415,
+			"p95_ms": 1.422583,
+			"p99_ms": 1.4807709999999998,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.0147085,
+					"p95": 0.026104000000000002
+				},
+				"provider_ms": {
+					"p50": 0.0284375,
+					"p95": 0.037458500000000006
+				},
+				"merge_ms": {
+					"p50": 0.7932294999999999,
+					"p95": 1.1952705000000001
+				},
+				"layout_ms": {
+					"p50": 0.1573335,
+					"p95": 0.249917
+				}
+			},
+			"control": {
+				"scenarios": [
+					{
+						"id": "search.saf",
+						"benchmark": "8218dad1ddbddde33cab8bb33cf2dc0266cf77652c9418319190328076b6f2ab",
+						"p95_ms": 2.1531455
+					},
+					{
+						"id": "search.term",
+						"benchmark": "7d62250a395d378ca3bb65069cc8da598f91ca4d739a2b5784adafc170fc55f9",
+						"p95_ms": 2.2435834999999997
+					}
+				],
+				"p95_ms": 2.1983645
+			}
+		},
+		{
+			"id": "web.rust",
+			"feature": "web",
+			"implementation": "native",
+			"commit": "b268f8e97340988ec87476ef9c2fce9bdd9569c0",
+			"benchmark": "6b6599c71495e2111f8373fae6d012ab1c694a5781077aa37861f1a02c290c0c",
+			"runs": 2,
+			"p50_ms": 1.492229,
+			"p95_ms": 2.1762085000000004,
+			"p99_ms": 2.3098124999999996,
+			"stages": {
+				"dispatch_ms": {
+					"p50": 0.06925,
+					"p95": 0.1009795
+				},
+				"provider_ms": {
+					"p50": 0.069271,
+					"p95": 0.120583
+				},
+				"merge_ms": {
+					"p50": 0.9653335,
+					"p95": 1.267
+				},
+				"layout_ms": {
+					"p50": 0.37481299999999995,
+					"p95": 0.7770630000000001
+				}
+			},
+			"control": {
+				"scenarios": [
+					{
+						"id": "search.saf",
+						"benchmark": "8218dad1ddbddde33cab8bb33cf2dc0266cf77652c9418319190328076b6f2ab",
+						"p95_ms": 2.332667
+					},
+					{
+						"id": "search.term",
+						"benchmark": "7d62250a395d378ca3bb65069cc8da598f91ca4d739a2b5784adafc170fc55f9",
+						"p95_ms": 2.5999375000000002
+					}
+				],
+				"p95_ms": 2.46630225
+			}
+		}
+	]
+}

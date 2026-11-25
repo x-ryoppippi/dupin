@@ -22,12 +22,12 @@ mod tests;
 
 pub use broker::{
     Broker, BrokerError, ConsentNeeded, ConsentReason, ConsentState, Decision, Denial, Generation,
-    GrantSource, OsAccess, OsConsumer, Permit, Reconciliation, Trigger,
+    GrantSource, OsAccess, OsConsumer, Permit, Reconciliation, SaveError, Trigger,
 };
 pub use manifest::{Capabilities, Diagnostic};
 pub use request::Request;
 pub use scope::{
-    ClipboardAccess, FilesAccess, FilesKind, Method, Origin, OsPermission, PackageId, Revision, Scope,
-    ScopeKey, ScopeName, StorageOp,
+    ClipboardAccess, FilesAccess, FilesKind, Method, Origin, OsPermission, PackageId, Revision, RowField,
+    RowKind, Scope, ScopeKey, ScopeName, StorageOp, WindowsAccess, displayable,
 };
 pub use store::{Base, Local, StoreError};

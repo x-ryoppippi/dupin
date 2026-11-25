@@ -206,6 +206,7 @@ impl Fixture {
                 token: token.map(str::to_owned),
                 ..GitHub::default()
             },
+            bundled: Default::default(),
         }
     }
 
@@ -313,10 +314,67 @@ impl Fixture {
             format!("{base}/git/matching-refs/tags"),
             json_response(&Value::Array(self.tag_refs())),
         );
+        let tagged = git(
+            &self.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname:strip=2) %(*objectname) %(objectname)",
+                "refs/tags",
+            ],
+        );
+        let tags: Vec<Value> = tagged
+            .lines()
+            .map(|line| {
+                let [name, peeled, object] = line.split(' ').collect::<Vec<_>>()[..] else {
+                    panic!("{line}");
+                };
+                let commit = if peeled.is_empty() { object } else { peeled };
+                json!({"name": name, "commit": {"sha": commit}})
+            })
+            .collect();
+        for (page, chunk) in tags.chunks(100).chain([&[][..]]).enumerate() {
+            self.server.set(
+                format!("{base}/tags?per_page=100&page={}", page + 1),
+                json_response(&Value::Array(chunk.to_vec())),
+            );
+        }
+        let names = git(
+            &self.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname:strip=2)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        );
         let commits = git(&self.repo, &["rev-list", "--all"]);
         for commit in commits.lines() {
             self.publish_commit(commit);
+            for name in names.lines() {
+                let tip = git(&self.repo, &["rev-parse", &format!("{name}^{{commit}}")]);
+                let reached = Command::new("git")
+                    .args(["merge-base", "--is-ancestor", commit, &tip])
+                    .current_dir(&self.repo)
+                    .envs(ISOLATION)
+                    .status()
+                    .unwrap()
+                    .success();
+                let status = match (commit == tip, reached) {
+                    (true, _) => "identical",
+                    (false, true) => "behind",
+                    (false, false) => "diverged",
+                };
+                self.compare(name, commit, status);
+            }
         }
+    }
+
+    /// Answers GitHub's comparison of the branch or tag `base` with `commit`.
+    fn compare(&self, base: &str, commit: &str, status: &str) {
+        self.server.set(
+            format!("{}/compare/{base}...{commit}", self.repo_path()),
+            json_response(&json!({ "status": status })),
+        );
     }
 
     fn publish_commit(&self, commit: &str) {
@@ -409,6 +467,82 @@ fn leftovers(installer: &Installer) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[test]
+fn a_pinned_commit_must_be_one_the_repository_publishes() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    let first = fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "released"]);
+    fixture.write("main.js", "export function search() { return []; }\n");
+    let tagged = fixture.commit("tagged off the default branch");
+    fixture.tag("v2.0.0");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "fork", "main"]);
+    fixture.write("main.js", "export function search() { steal(); }\n");
+    let forked = fixture.commit("pushed to a fork");
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    git(&fixture.repo, &["branch", "--quiet", "-D", "fork", "released"]);
+    fixture.publish();
+    // GitHub serves a fork's commits through the repository it was forked from.
+    fixture.publish_commit(&forked);
+    fixture.compare("main", &forked, "ahead");
+
+    let github = fixture.without_git("github");
+    let asked = fixture.server.seen().len();
+    let error = install(&github, &format!("{SPEC}@{forked}")).unwrap_err();
+    assert_eq!(error.code, "unknown-ref", "{error:?}");
+    assert!(error.message.contains("default branch or a tag"), "{error:?}");
+    assert_eq!(fixture.downloads(), 0);
+    let tag_requests: Vec<String> = fixture.server.seen()[asked..]
+        .iter()
+        .map(|seen| seen.path.clone())
+        .filter(|path| path.contains("/tags"))
+        .collect();
+    assert_eq!(
+        tag_requests,
+        [format!("{}/tags?per_page=100&page=1", fixture.repo_path())],
+        "the tag list names each tag's commit, so no annotated tag is peeled one by one"
+    );
+
+    let pinned = install(&github, &format!("{SPEC}@{first}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(first.as_str()));
+    let released = fixture.without_git("released");
+    let pinned = install(&released, &format!("{SPEC}@{tagged}")).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(tagged.as_str()));
+
+    let pull = install(&fixture.without_git("pull"), &format!("{SPEC}@refs/pull/1/head")).unwrap_err();
+    assert_eq!(pull.code, "invalid-source", "{pull:?}");
+}
+
+#[test]
+fn a_package_installed_from_a_branch_syncs_from_it_after_the_branch_moves_on() {
+    let fixture = Fixture::new();
+    fixture.package("word-count");
+    fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [];\n");
+    let dev = fixture.commit("on dev only");
+
+    let github = fixture.without_git("github");
+    let installed = install(&github, &format!("{SPEC}@dev")).unwrap();
+    assert_eq!(installed.entry.rev.as_deref(), Some("dev"));
+    assert_eq!(installed.entry.commit.as_deref(), Some(dev.as_str()));
+
+    fixture.write("lib/rows.js", "export const rows = [1];\n");
+    fixture.commit("dev moves on");
+    let folder = github.extensions.join("word-count");
+    std::fs::write(folder.join("main.js"), "tampered").unwrap();
+    let synced = github.sync(&|_| None).unwrap();
+    let restored = synced[0].1.as_ref().unwrap();
+    assert_eq!(restored.entry.commit.as_deref(), Some(dev.as_str()));
+    assert_eq!(restored.entry.rev.as_deref(), Some("dev"));
+    assert_eq!(content_hash(&folder).unwrap(), installed.entry.content_hash);
+
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = github.sync(&|_| None).unwrap();
+    assert!(synced[0].1.is_ok(), "{synced:?}");
+    assert_eq!(content_hash(&folder).unwrap(), installed.entry.content_hash);
 }
 
 #[test]
@@ -934,4 +1068,186 @@ fn a_connection_timeout_is_told_apart_from_a_slow_download() {
     assert_eq!(error.code, "download-failed");
     assert!(error.message.contains("took longer than 1 seconds"), "{error}");
     drop(silent);
+}
+
+const SEARCH_ALL: &str = "/search/repositories?q=topic%3Adupin-extension&sort=stars&order=desc&per_page=20";
+
+/// A [`GitHub`] whose API and raw hosts are one loopback server under two host names, so the
+/// token's scope can be checked.
+fn searcher(server: &Server, token: Option<&str>) -> GitHub {
+    GitHub {
+        api: server.origin(),
+        raw: format!("http://localhost:{}", server.port),
+        timeout: Duration::from_secs(30),
+        token: token.map(str::to_owned),
+        ..GitHub::default()
+    }
+}
+
+fn recorded(name: &str) -> Response {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/search")
+        .join(name);
+    Response {
+        status: 200,
+        location: None,
+        body: std::fs::read(path).unwrap(),
+    }
+}
+
+#[test]
+fn search_lists_tagged_repositories_with_what_they_request_as_plain_text() {
+    let server = Server::start();
+    server.set(SEARCH_ALL, recorded("repositories.json"));
+    server.set(
+        "/someone/dupin-word-count/main/package.json",
+        json_response(&json!({
+            "name": "word-count",
+            "version": "1.2.0",
+            "dupin": {
+                "title": "Word\u{202e} Count\u{2066}\u{200b}",
+                "keyword": "wc",
+                "capabilities": {
+                    "clipboard": ["write"],
+                    "http": [{"origin": "https://api.example.com", "methods": ["GET"]}]
+                }
+            }
+        })),
+    );
+    server.set(
+        "/mallory/dupin-escapes/main/package.json",
+        json_response(&json!({
+            "name": "escapes",
+            "version": "1.0.0",
+            "dupin": {"title": "T", "keyword": "t", "\u{1b}]0;owned\u{7}": true}
+        })),
+    );
+    let found = searcher(&server, Some("ghp_secret")).search(None).unwrap();
+    assert_eq!(found.total, 31);
+    assert!(!found.incomplete);
+    let names: Vec<_> = found.repositories.iter().map(|repo| repo.source()).collect();
+    assert_eq!(
+        names,
+        [
+            "github:someone/dupin-word-count",
+            "github:other/dupin-unbuilt",
+            "github:mallory/dupin-escapes"
+        ],
+        "an untagged repository and a name install refuses are left out"
+    );
+
+    let counted = &found.repositories[0];
+    assert_eq!(
+        counted.install_command(),
+        "dupin ext install github:someone/dupin-word-count"
+    );
+    assert_eq!(
+        counted.description.as_deref(),
+        Some("Counts words[2J]8;;https://evil.example in the selection fast")
+    );
+    assert_eq!(
+        (counted.stars, counted.pushed.as_deref()),
+        (42, Some("2026-10-01"))
+    );
+    let package = counted.package.as_ref().unwrap();
+    assert_eq!(
+        (package.title.as_str(), package.keyword.as_str()),
+        ("Word Count", "wc")
+    );
+    assert_eq!(
+        package.capabilities,
+        ["clipboard:write", "http:https://api.example.com"]
+    );
+
+    let unbuilt = &found.repositories[1];
+    assert_eq!(unbuilt.description, None);
+    assert_eq!(unbuilt.package, Err("no package.json on `trunk`".to_owned()));
+
+    let escapes = &found.repositories[2];
+    assert_eq!(escapes.pushed, None);
+    let problem = escapes.package.as_ref().unwrap_err();
+    assert!(problem.starts_with("not a Dupin package"), "{problem}");
+    for text in [problem.as_str(), escapes.description.as_deref().unwrap()] {
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+    }
+
+    let seen = server.seen();
+    let api_host = format!("127.0.0.1:{}", server.port);
+    assert!(!seen.is_empty());
+    for request in seen {
+        let sent = request.authorization.is_some();
+        assert_eq!(sent, request.host == api_host, "{request:?}");
+        if sent {
+            assert_eq!(request.authorization.as_deref(), Some("Bearer ghp_secret"));
+        }
+    }
+}
+
+#[test]
+fn a_query_narrows_the_topic_search_and_bad_answers_say_what_to_do() {
+    let server = Server::start();
+    let narrowed =
+        "/search/repositories?q=topic%3Adupin-extension%20clip%20board&sort=stars&order=desc&per_page=20";
+    server.set(
+        narrowed,
+        json_response(&json!({"total_count": 0, "incomplete_results": true, "items": []})),
+    );
+    let github = searcher(&server, None);
+    let found = github.search(Some("  clip board ")).unwrap();
+    assert!(found.repositories.is_empty() && found.incomplete);
+
+    let refused = |status: u16| Response {
+        status,
+        location: None,
+        body: br#"{"message":"API rate limit exceeded"}"#.to_vec(),
+    };
+    server.set(SEARCH_ALL, refused(403));
+    let error = github.search(None).unwrap_err();
+    assert_eq!(error.code, "rate-limited");
+    assert!(error.hint.unwrap().contains("GITHUB_TOKEN"));
+    server.set(SEARCH_ALL, refused(422));
+    assert_eq!(github.search(Some("")).unwrap_err().code, "invalid-query");
+    server.set(SEARCH_ALL, json_response(&json!({"items": "not a list"})));
+    assert_eq!(github.search(None).unwrap_err().code, "download-failed");
+
+    let requests = server.seen().len();
+    assert_eq!(
+        github.search(Some("a\u{1b}[2J")).unwrap_err().code,
+        "invalid-query"
+    );
+    assert_eq!(
+        github.search(Some(&"x".repeat(201))).unwrap_err().code,
+        "invalid-query"
+    );
+    assert_eq!(server.seen().len(), requests, "a refused query sends nothing");
+}
+
+#[test]
+fn an_oversized_package_json_is_not_read() {
+    let server = Server::start();
+    server.set(
+        SEARCH_ALL,
+        json_response(&json!({
+            "total_count": 1,
+            "items": [{
+                "name": "huge",
+                "owner": {"login": "someone"},
+                "default_branch": "main",
+                "topics": ["dupin-extension"]
+            }]
+        })),
+    );
+    server.set(
+        "/someone/huge/main/package.json",
+        Response {
+            status: 200,
+            location: None,
+            body: vec![b' '; 65 * 1024],
+        },
+    );
+    let found = searcher(&server, None).search(None).unwrap();
+    assert_eq!(
+        found.repositories[0].package,
+        Err("package.json is larger than 64 KiB".to_owned())
+    );
 }

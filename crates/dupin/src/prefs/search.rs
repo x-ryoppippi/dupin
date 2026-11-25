@@ -4,7 +4,7 @@ use rune_kit::{Kit, Switch};
 
 use super::Prefs;
 use super::controls::{
-    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, tilde, value_button,
+    DESCRIPTION, ROW_PX, card, choose, menu_value, setting, setting_with_lock, value_button,
 };
 use crate::icons;
 
@@ -24,10 +24,8 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         clipboard_images_setting(s, k),
         clipboard_files_setting(s, k),
         snippet_paste_setting(s, k),
-        window_management_setting(s, k),
-        extensions_setting(s, k),
+        window_management_setting(k),
     ];
-    rows.extend(extension_problems(s, k));
     rows.extend(snippet_accessibility(s, k));
     let mut body = vec![card(k, hair, rows)];
     body.extend(
@@ -35,7 +33,28 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
             .as_deref()
             .map(|notice| scripts_notice(k, notice)),
     );
+    let composed = crate::composition::summary(&s.config.advanced);
+    if !composed.is_empty() {
+        body.push(advanced_composition(k, &composed));
+    }
     body
+}
+
+/// What `[advanced]` composes, shown and not edited here: it is written in config.toml.
+fn advanced_composition(k: &Kit, lines: &[String]) -> El {
+    let mut block = col().key("advanced-composition").mx(ROW_PX).gap(4.0).child(
+        text("Advanced composition")
+            .font(k.ty.body_medium)
+            .color(k.c.text_base),
+    );
+    for line in lines {
+        block = block.child(text(line).w_full().font(DESCRIPTION).color(k.c.text_muted).wrap());
+    }
+    block.child(
+        text("Edit [advanced] in config.toml to change it.")
+            .font(DESCRIPTION)
+            .color(k.c.text_muted),
+    )
 }
 
 fn calculator_setting(s: &Prefs, k: &Kit) -> El {
@@ -160,7 +179,7 @@ fn clipboard_setting(s: &Prefs, k: &Kit) -> El {
         k,
         &icons::CLIPBOARD,
         "Clipboard history",
-        Some("Keeps what you copy in memory until Dupin quits; type clip and Space to search it"),
+        Some("Keeps what you copy, encrypted on this Mac; type clip and Space to search it"),
         clipboard,
         s.lock_note(locked),
     )
@@ -259,73 +278,21 @@ fn snippet_paste_setting(s: &Prefs, k: &Kit) -> El {
     )
 }
 
-fn window_management_setting(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("window_management");
-    let enabled = s.config.window_management;
-    let window_management = Switch::new(enabled)
-        .label("Window Management")
-        .hide_label()
-        .disabled(locked)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.window_management = !enabled))
-        .build(k);
-    setting_with_lock(
+fn window_management_setting(k: &Kit) -> El {
+    let open = value_button(
+        k,
+        "open-window-management",
+        "Extensions",
+        &rune_theme_opencode::icons::CHEVRON_RIGHT,
+    )
+    .on_press(|s: &mut Prefs| s.show_extensions());
+    setting(
         k,
         &icons::PANEL,
         "Window Management",
-        Some("Show commands to move and resize windows. Requires Accessibility access."),
-        window_management,
-        s.lock_note(locked),
+        Some("Now an extension: turn on Window Management in Settings → Extensions"),
+        open,
     )
-}
-
-fn extensions_setting(s: &Prefs, k: &Kit) -> El {
-    let locked = s.locked("extensions");
-    let enabled = s.config.extensions;
-    let switch = Switch::new(enabled)
-        .label("Extensions")
-        .hide_label()
-        .disabled(locked)
-        .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
-        .build(k);
-    let folder = crate::extensions::directory()
-        .map(|path| tilde(&path.to_string_lossy()))
-        .unwrap_or_else(|| "the extensions folder".into());
-    let (loaded, _) = &s.extensions;
-    let status = if !enabled {
-        format!("Off. Extensions are third-party code; when on, extensions in {folder} answer their keywords")
-    } else if loaded.is_empty() {
-        format!("No extensions loaded from {folder}")
-    } else {
-        format!("Loaded from {folder}: {}", loaded.join(", "))
-    };
-    setting_with_lock(
-        k,
-        &icons::PUZZLE,
-        "Extensions",
-        Some(&status),
-        switch,
-        s.lock_note(locked),
-    )
-}
-
-fn extension_problems(s: &Prefs, k: &Kit) -> Option<El> {
-    let (_, problems) = &s.extensions;
-    (s.config.extensions && !problems.is_empty()).then(|| {
-        col()
-            .key("extension-problems")
-            .w_full()
-            .px(ROW_PX)
-            .py(10.0)
-            .gap(4.0)
-            .child(text("Skipped extensions").font(k.ty.ui).color(k.c.text_base))
-            .children(problems.iter().map(|problem| {
-                text(problem.clone())
-                    .font(DESCRIPTION)
-                    .color(k.c.text_muted)
-                    .wrap()
-                    .w_full()
-            }))
-    })
 }
 
 fn snippet_accessibility(s: &Prefs, k: &Kit) -> Option<El> {

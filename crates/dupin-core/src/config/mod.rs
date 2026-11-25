@@ -1,5 +1,6 @@
 //! `config.toml`: user settings. Every key is optional; a missing file is the defaults.
 
+mod advanced;
 mod calculator;
 mod calendar;
 mod clipboard;
@@ -17,13 +18,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+pub use advanced::{Advanced, KindAction, KindActions, Route, Routes, SourceStages, contribution};
 pub use calendar::Calendar;
 pub use clipboard::{Clipboard, Retention};
 pub use hotkeys::HotkeyTarget;
 pub use panel::{DisplaySelection, InputSource, Position};
 pub use snippets::Snippet;
 pub use theme::{Backdrop, Colors, FontFamily, Theme};
-pub use web::{MAPS_SEARCH_TEMPLATE, WebSearch};
+pub use web::WebSearch;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -42,11 +44,15 @@ pub struct Config {
     pub file_demotions: Vec<String>,
     /// Keywords followed by Space that enter macOS Dictionary search.
     pub dictionary_keywords: Vec<String>,
-    pub window_management: bool,
+    /// Window management is the optional Window Management extension now.
+    #[serde(skip_serializing)]
+    pub window_management: Retired,
     pub calculator: bool,
     pub calculator_currency: bool,
-    /// Web search keywords and their URL templates. `{query}` is replaced when selected.
-    pub web_searches: BTreeMap<String, WebSearch>,
+    /// Web search keywords and their URL templates, which replace the bundled web-search
+    /// extension's own when set. `{query}` is replaced when selected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_searches: Option<BTreeMap<String, WebSearch>>,
     /// Web search keywords offered when no regular results match.
     pub web_fallbacks: Vec<String>,
     /// Text snippets by keyword. Placeholders in the text are filled in when one is used.
@@ -73,6 +79,9 @@ pub struct Config {
     pub theme: Theme,
     pub calendar: Calendar,
     pub clipboard: Clipboard,
+    /// Recomposition of the built-in sources, filters and kinds.
+    #[serde(skip_serializing_if = "Advanced::is_empty")]
+    pub advanced: Advanced,
 }
 
 impl Default for Config {
@@ -86,10 +95,10 @@ impl Default for Config {
             file_demotions: files::default_demotions(),
             dictionary_keywords: dictionary::default_keywords(),
             display: DisplaySelection::default(),
-            window_management: false,
+            window_management: Retired,
             calculator: calculator::DEFAULT_ENABLED,
             calculator_currency: calculator::DEFAULT_CURRENCY,
-            web_searches: web::default_searches(),
+            web_searches: None,
             web_fallbacks: Vec::new(),
             snippets: BTreeMap::new(),
             snippet_keywords: snippets::default_keywords(),
@@ -103,6 +112,7 @@ impl Default for Config {
             theme: Theme::default(),
             calendar: Calendar::default(),
             clipboard: Clipboard::default(),
+            advanced: Advanced::default(),
         }
     }
 }
@@ -113,6 +123,17 @@ impl Config {
     }
 }
 
+/// A key Dupin no longer reads. Settings wrote every key to each config.toml it saved, so a
+/// retired one is still accepted, whatever its value, and is dropped at the next save.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Retired;
+
+impl<'de> Deserialize<'de> for Retired {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
@@ -120,5 +141,13 @@ mod tests {
     #[test]
     fn rejects_unknown_keys() {
         assert!(Config::parse("hotkye = \"alt+space\"").is_err());
+    }
+
+    #[test]
+    fn a_retired_key_loads_and_is_never_written() {
+        let config = Config::parse("window_management = true\nshow_recent = false").unwrap();
+        assert!(!config.show_recent);
+        assert_eq!(config, Config::parse("show_recent = false").unwrap());
+        assert!(!toml::to_string(&config).unwrap().contains("window_management"));
     }
 }

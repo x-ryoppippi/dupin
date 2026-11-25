@@ -1,4 +1,4 @@
-// Types for Dupin extensions, apiVersion 2. Dupin never reads this file; it is for editors and
+// Types for Dupin extensions, apiVersion 4. Dupin never reads this file; it is for editors and
 // `tsc --noEmit`. `dupin ext new` copies it into each package.
 //
 // Dupin runs a TypeScript `dupin.main` as written by erasing its types, without type-checking.
@@ -9,7 +9,7 @@
 
 declare module 'dupin' {
 	/** The guest API this file describes. The host's `dupin` module exports the same value. */
-	export const apiVersion: 2;
+	export const apiVersion: 4;
 
 	type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
@@ -20,62 +20,389 @@ declare module 'dupin' {
 	}
 
 	/**
-	 * One row. Enter runs Open URL when `url` is set, otherwise Copy when `text` is set, otherwise
-	 * the first of `actions`. Any other field fails the whole answer.
+	 * One row. Enter runs its first action: Open URL when `url` is set, then Copy when `text` is
+	 * set, then `actions` in order. Any other field fails the whole answer.
 	 */
 	export interface Item {
 		/** One line, up to 512 bytes. */
 		title: string;
 		/** Up to 2,048 bytes. */
 		subtitle?: string;
-		/** Unique among the items, up to 128 bytes. Dupin numbers items without one. */
+		/** Unique among the items, up to 128 bytes. Dupin numbers `search` items without one. */
 		id?: string;
-		/** An `http` or `https` URL with a host, up to 2,048 bytes. */
+		/** An `http` or `https` URL with a host, a `dict://` URL or, from `search`, a calendar event's `link`; up to 2,048 bytes. */
 		url?: string;
 		/** Non-empty, up to 16 KiB. */
 		text?: string;
-		/** Named handlers of the module's `actions` export. Eight actions at most, `url` and `text` included. */
-		actions?: ItemAction[];
+		/** An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to `package.json`. */
+		icon?: string;
+		/** An image the package keeps, drawn scaled down as the row's icon in place of `icon`. */
+		image?: HostImage;
+		/** The heading the item is listed under; a section's items get its title. Up to 128 bytes. */
+		section?: string;
+		/** Shown while the item is selected. */
+		detail?: DetailPane;
+		/** Up to eight, counting the ones `url` and `text` add. */
+		actions?: Action[];
+		/** Up to three, shown at the row's end: `{ text }` as it is, `{ tag }` as a label. */
+		accessories?: Accessory[];
+		/**
+		 * From `search` or a view: the row shows its title and this, one line of up to 512 bytes,
+		 * as two values, as a calculation does.
+		 */
+		answer?: string;
 	}
+
+	/** One line of up to 64 bytes. */
+	export type Accessory = { text: string } | { tag: string };
 
 	/** Runs `actions[run](data, ctx)` when the user chooses it. */
 	export interface ItemAction {
 		/** One line, up to 512 bytes. */
 		title: string;
-		/** A key of the module's `actions` export, up to 64 bytes. */
+		/** A key of the module's `actions` export: up to 64 letters, digits, `_` or `$`. */
 		run: string;
-		/** Passed to the handler as JSON: at most 4 KiB, nested at most 16 deep. */
+		/** Passed to the handler as JSON, or `null` without it: at most 4 KiB, nested at most 16 deep. */
 		data?: Json;
+		/** ⌘Enter runs it. At most one action of an item. */
+		alternate?: boolean;
+		/** Dupin asks this first, one line, with the action's title as the button and Cancel selected. */
+		confirm?: string;
+		/** It acts on the item's `file`: while the file is gone, Dupin leaves it out. */
+		needsFile?: boolean;
 	}
 
-	export interface List {
-		type?: 'list';
-		items: Item[];
+	/** An item of an `items` catalogue, which may carry words that also find it. */
+	export interface CatalogueItem extends Omit<Item, 'answer'> {
+		/**
+		 * Required, and kept with the item as the list changes: Dupin applies updates and
+		 * remembers which items are picked by it.
+		 */
+		id: string;
+		/** Up to 16 other names of up to 64 bytes, such as a short code, matched as the title is. */
+		aliases?: string[];
+		/** Up to 16 words of up to 64 bytes, matched below an equal match on the title. */
+		keywords?: string[];
+		/** With `"match": "words"`, more text, up to 64 KiB, that finds the item; it never shows. */
+		matchText?: string;
+		/** Milliseconds since the epoch the item is from: its subtitle starts with how long ago that was. */
+		time?: number;
+		/**
+		 * The file the item stands for, by absolute path: it shows the file's Finder icon unless
+		 * it has an `icon` or an `image`, and while the file is gone it shows as Unavailable,
+		 * without its icon or image and the actions that need it.
+		 */
+		file?: string;
+		/**
+		 * Makes the item a web search, which takes no `url`, `text` or `actions`. The package's own
+		 * keyword lists every web search for the query, and `webSearch.title` shows it; Enter
+		 * opens the URL filled with the query. Only the bundled Web Search package's also reach
+		 * the main search by their alias. Query matching never reaches the item.
+		 */
+		webSearch?: WebSearch;
 	}
+
+	/** Dupin fills `{query}` as the user types, without calling the package. */
+	export interface WebSearch {
+		/** Up to 32 ASCII letters, digits, `_` or `-`, matched case-sensitively. A keyword wins over it. */
+		alias: string;
+		/**
+		 * An `http` or `https` URL of up to 4,096 bytes, with no credentials and one `{query}` after
+		 * its host, which Dupin percent-encodes; or exactly `maps://?q={query}`, which opens Apple
+		 * Maps and needs a query.
+		 */
+		url: string;
+		/** The title once a query is typed: one line with one `{query}`, which the query replaces. */
+		title: string;
+		/** Offered, lowest first, when nothing else matches the main search: 0 to 1,000. */
+		fallback?: number;
+	}
+
+	export interface Metadata {
+		/** One line, up to 64 bytes. */
+		label: string;
+		/** One line, up to 512 bytes. */
+		text: string;
+	}
+
+	/**
+	 * An image Dupin draws from what the package keeps, by a handle and never by its bytes: a
+	 * stored blob's `handle`, or a file its clipboard watch delivered, as `{ path, handle }` with
+	 * the handle it came with. Dupin reads it from the package's own storage alone, decodes it
+	 * only when it is PNG, TIFF, HEIC, HEIF or JPEG, up to 64 MiB and 64 megapixels, and scales
+	 * it down off the panel's thread, only for the rows in view. While the package may not read
+	 * its storage, the handle names nothing of its own, or the image is of another format or
+	 * doesn't decode, the image is left out, and a detail keeps no space for it.
+	 */
+	export type HostImage = string | { path: string; handle: string };
+
+	export interface DetailPane {
+		/** Shown large above the metadata. */
+		image?: HostImage;
+		/** Up to 32 KiB: headings, paragraphs, emphasis, lists, inline and fenced code and HTTP(S) links. */
+		markdown?: string;
+		/** Up to 12 entries, above the Markdown. */
+		metadata?: Metadata[];
+	}
+
+	/**
+	 * `copy` and `paste` take 1 byte to 64 KiB of text. With `template`, Dupin fills `{date}`
+	 * (`2026-01-31`), `{time}` (`09:05`), `{datetime}` and `{clipboard}` (the clipboard's text)
+	 * when the action is chosen, so the package never sees the clipboard; other braces stay as
+	 * written. Only a bundled package that replaces a built-in gets templates; any other's text
+	 * is copied or pasted as written. `paste` needs the `clipboard: ['paste']` scope, and copies
+	 * without it.
+	 */
+	export type Action =
+		| { title: string; copy: string; template?: boolean }
+		| { title: string; paste: string; template?: boolean }
+		| { title: string; open: string }
+		/** Shows the file at the absolute path selected in Finder; it opens nothing. */
+		| { title: string; reveal: string }
+		| PushAction
+		| ItemAction;
+
+	/**
+	 * Opens `views[push.view](ctx)` on a page of its own above the list, titled with the
+	 * action's title. Dupin holds `push.state` for the page, at most 16 KiB of JSON nested at
+	 * most 16 deep, and hands it back as `ctx.state` to the view and to the actions chosen there.
+	 * Esc, or ⌫ in an empty field, closes the page; at most eight are open at once.
+	 */
+	export interface PushAction {
+		title: string;
+		push: { view: string; state?: Json };
+	}
+
+	export interface Section<T extends Item = Item> {
+		title: string;
+		items: T[];
+	}
+
+	export type List = { type?: 'list'; items: Item[] } | { type?: 'list'; sections: Section[] };
 
 	/** Up to 50 items and 256 KiB of text. */
 	export type SearchResult = Item[] | List;
 
-	/** The entry module's `search` export. It runs as the user types, so it may only read. */
+	/** What `views` and the actions chosen on their pages receive. Dupin freezes it. */
+	export interface ViewContext {
+		/** What is typed on the page; Dupin asks the view again as it changes. */
+		readonly query: string;
+		/** What the page holds: the push's `state`, or the last `replaceState`, or `null`. */
+		readonly state: Json;
+		readonly preferences: Preferences;
+	}
+
+	/** A list, as `search` returns one, with what the page shows while it has no items. */
+	export type ListView = List & {
+		/** One line of up to 256 bytes. */
+		emptyText?: string;
+	};
+
+	/** A detail that fills the page, with its own actions, which Enter and ⌘K run. */
+	export interface DetailView extends DetailPane {
+		type: 'detail';
+		/** One line, up to 512 bytes. */
+		title: string;
+		/** Up to eight. */
+		actions?: Action[];
+	}
+
+	/**
+	 * A form. Dupin keeps what is typed while the page is open, moves between the fields with
+	 * Tab, checks that required fields hold more than spaces and, on ⌘Enter (or Enter outside a
+	 * multi-line field), calls `actions[submit](values, ctx)` with each field's value by its
+	 * `id`: a text field's text, a checkbox's boolean or a select's option `value`. Esc cancels.
+	 */
+	export interface Form {
+		type: 'form';
+		/** One line, up to 512 bytes. */
+		title: string;
+		/** 1 to 16, with different `id`s. */
+		fields: Field[];
+		/** A key of the module's `actions`. */
+		submit: string;
+		/** What the submit key says; `Submit` without it. Up to 128 bytes. */
+		submitTitle?: string;
+	}
+
+	/**
+	 * `id` is 1–64 letters, digits, `_` or `-`, and `title` one line of up to 128 bytes. A
+	 * `text` field holds one line of up to 1 KiB and a `textarea` up to 16 KiB; a select's
+	 * `default` is its first option's `value` without one.
+	 */
+	export type Field =
+		| {
+				type: 'text' | 'textarea';
+				id: string;
+				title: string;
+				required?: boolean;
+				default?: string;
+				placeholder?: string;
+		  }
+		| { type: 'checkbox'; id: string; title: string; default?: boolean }
+		| {
+				type: 'select';
+				id: string;
+				title: string;
+				/** 1 to 32, with different values, each one line of up to 128 bytes. */
+				options: { value: string; title: string }[];
+				default?: string;
+		  };
+
+	export type View = Item[] | ListView | DetailView | Form;
+
+	/**
+	 * The entry module's `views` export: the pages its `push` actions and effects open. A view
+	 * runs as `search` does, again whenever the page's query or state changes, so it may only
+	 * read, and write its own `storage`; each call starts with fresh module state, so keep what a
+	 * page needs in its state. Dupin stops it after 2 seconds.
+	 */
+	export type Views = Record<string, (ctx: ViewContext) => View | Promise<View>>;
+
+	/**
+	 * The entry module's `search` export: answers computed for each query. It runs as the user
+	 * types, so it may only read, and write its own `storage`, and only once something is typed
+	 * unless the manifest sets `emptyQuery`.
+	 */
 	export type Search = (query: string, ctx: SearchContext) => SearchResult | Promise<SearchResult>;
 
-	/** What an action may ask Dupin to do once it has run. */
-	export type ActionEffect = { type: 'toast'; text: string };
+	/** What `items` receives. Dupin freezes it. */
+	export interface ItemsContext {
+		/** What the previous answer's `cursor` was, or null when Dupin holds no catalogue. */
+		readonly cursor: string | null;
+		/**
+		 * `load` when Dupin holds nothing, `more` after an answer with `more: true`, `expired`
+		 * after its `ttl` and `invalidated` after an action or event handler called
+		 * `items.invalidate()`.
+		 */
+		readonly reason: 'load' | 'more' | 'expired' | 'invalidated';
+		readonly preferences: Preferences;
+	}
+
+	/**
+	 * What the user chose for each of the manifest's `preferences`, or its default. The package
+	 * Dupin shipped for a built-in that reads config.toml also finds that built-in's settings
+	 * here, as Web Search finds `webSearches` and `webFallbacks`; a change asks `items` again
+	 * with reason `load`. Dupin freezes it through and through.
+	 */
+	export type Preferences = Readonly<Record<string, Json>>;
+
+	interface CatalogueAnswer {
+		/** Seconds, from 1 to 86,400, until Dupin asks again. Without it, it asks again only when invalidated. */
+		ttl?: number;
+		/** Up to 256 bytes, handed back as `ctx.cursor` next time. */
+		cursor?: string;
+		/** Ask again at once, with `cursor`, for the next part. */
+		more?: boolean;
+	}
+
+	/** The whole catalogue, replacing what Dupin holds, or its first part with `more`. */
+	export type CatalogueList = CatalogueAnswer &
+		(
+			| { type?: 'list'; items: CatalogueItem[] }
+			| { type?: 'list'; sections: Section<CatalogueItem>[] }
+		);
+
+	/** Changes to the catalogue Dupin holds, by item `id`. */
+	export interface CatalogueUpdate extends CatalogueAnswer {
+		type: 'update';
+		/** Items Dupin doesn't hold yet, before the others, in this order. */
+		prepend?: CatalogueItem[];
+		/** Items Dupin doesn't hold yet, after the others. */
+		append?: CatalogueItem[];
+		/** Items that take the place of the ones with their `id`. */
+		replace?: CatalogueItem[];
+		/** The `id` of each item to drop. */
+		remove?: string[];
+	}
+
+	/** Up to 500 items, or 500 removals, and 1 MiB of text in one answer. */
+	export type ItemsResult = CatalogueItem[] | CatalogueList | CatalogueUpdate;
+
+	/**
+	 * The entry module's `items` export: a catalogue Dupin holds and matches natively as the
+	 * user types, asking again only on first use, after `ttl`, when an action or event handler
+	 * invalidates it or when its preferences change. At most 10,000 items and 8 MiB of text. It
+	 * may use host services as `search` does: what reads, and `storage` writes too, but nothing
+	 * that needs an action the user chose. With `defaultSearch`, it may run as the user types in
+	 * the main search.
+	 */
+	export type Items = (ctx: ItemsContext) => ItemsResult | Promise<ItemsResult>;
+
+	/** The host's catalogue controls. */
+	export const items: {
+		/** From an action or event handler: ask `items` again, with its cursor, before the next use. */
+		invalidate(): void;
+	};
+
+	/**
+	 * What an action may ask Dupin to do once it has run: show one line; hide the panel as
+	 * copying does; hide it and paste what the action put on the clipboard into the app in
+	 * front (which needs Accessibility; without it, Dupin says how to allow it); open a view on
+	 * a page above the one the action was chosen on, titled `title` or the extension's title;
+	 * close that page; ask its view (or the search) again; give it new state, which asks its view
+	 * again; or, from a form's submit, show what is wrong with its fields. The ones that move or
+	 * change a page take a `toast` too, which Dupin shows once it has. An effect lands only while
+	 * the page it was chosen on is still the one on screen. Toasts are one line of up to 512
+	 * bytes, state at most 16 KiB of JSON and each field error one line of up to 256 bytes.
+	 */
+	export type ActionEffect =
+		| { type: 'toast'; text: string }
+		| { type: 'hide' }
+		| { type: 'paste' }
+		| { type: 'push'; view: string; title?: string; state?: Json; toast?: string }
+		| { type: 'pop'; toast?: string }
+		| { type: 'refresh'; toast?: string }
+		| { type: 'replaceState'; state: Json; toast?: string }
+		| { type: 'fieldErrors'; errors: Record<string, string> };
+
+	/**
+	 * What an action receives beside its data. On one of the package's pages, `query` and
+	 * `state` are the page's; anywhere else they are `''` and `null`. Dupin freezes it.
+	 */
+	export type ActionContext = ViewContext;
 
 	/**
 	 * The entry module's `actions` export. A handler runs only because the user chose its item
-	 * action, so it may also write, send and run programs. Dupin stops it after 30 seconds.
+	 * action or submitted a form, so it may also write, send and run programs. Dupin stops it
+	 * after 30 seconds.
 	 */
 	export type Actions = Record<
 		string,
-		(
-			data: Json,
-			ctx: Readonly<Record<string, never>>,
-		) => ActionEffect | void | Promise<ActionEffect | void>
+		(data: Json, ctx: ActionContext) => ActionEffect | void | Promise<ActionEffect | void>
 	>;
 
-	/** What `events.clipboard` receives for each copy, as `clipboard.read()` returns it. */
-	export type ClipboardChange = Clip & { truncated?: true };
+	/**
+	 * What `events.clipboard` receives for each copy: as `clipboard.read()` returns it, except
+	 * that an image's PNG stays with Dupin under `blob`, which `storage.put` stores as one of
+	 * the record's blobs, and each file carries a `handle` that lets the package put it back on
+	 * the clipboard while it may use its storage.
+	 */
+	export type ClipboardChange = (
+		| { type: 'text'; text: string }
+		| { type: 'url'; url: string }
+		| { type: 'files'; files: CopiedFile[] }
+		| {
+				type: 'image';
+				mediaType: 'image/png';
+				width: number;
+				height: number;
+				size: number;
+				blob: string;
+		  }
+	) & { truncated?: true; source?: string };
+
+	export interface CopiedFile {
+		path: string;
+		name: string;
+		/** The folder it is in, with the home folder written `~`. */
+		folder?: string;
+		/** Bytes, when the file could be measured as it was copied. */
+		size?: number;
+		/** Its uniform type identifier, such as `public.mpeg-4`. */
+		kind?: string;
+		handle?: string;
+	}
 
 	/**
 	 * The entry module's `events` export: handlers for what Dupin watches on the package's
@@ -84,8 +411,56 @@ declare module 'dupin' {
 	 * run programs.
 	 */
 	export interface Events {
-		clipboard?(change: ClipboardChange): void | Promise<void>;
+		clipboard?(
+			change: ClipboardChange,
+			ctx: { readonly preferences: Preferences },
+		): void | Promise<void>;
 	}
+
+	/**
+	 * What a filter receives: the titles of one batch of a source's candidates, up to 1,000 of
+	 * 512 bytes each, and for a matcher what was typed. Only a source `[advanced]` composes the
+	 * filter onto hands it a batch, and only while the user allows `rows` for that source's kind
+	 * (and `query`, for a matcher). Dupin freezes it.
+	 */
+	export interface FilterInput {
+		/** Present for a matcher only. */
+		readonly query?: string;
+		readonly candidates: readonly { readonly title: string }[];
+	}
+
+	/** A candidate a matcher finds: its index in `candidates`. */
+	export interface FilterMatch {
+		index: number;
+		/** Higher ranks first; a whole number from -1,000,000 to 1,000,000. Defaults to 0. */
+		score?: number;
+		/** The ascending character indices of its title that matched, which Dupin highlights. */
+		positions?: number[];
+	}
+
+	/**
+	 * The entry module's `filters` export, each declared in `dupin.provides.filters`. A matcher
+	 * returns the candidates the query finds; a sorter returns every index of `candidates` once,
+	 * in its order. A filter runs as the user types and reaches no host service: every request
+	 * fails with `unavailable`. Past 250 ms, or on any failure, the source runs its own stage.
+	 */
+	export type Filters = Record<
+		string,
+		(
+			input: FilterInput,
+			ctx: { readonly preferences: Preferences },
+		) => FilterMatch[] | number[] | Promise<FilterMatch[] | number[]>
+	>;
+
+	/**
+	 * What an `actions` handler declared in `dupin.provides.kinds` receives as its data when the
+	 * user chooses it on a row Dupin found: the one field it names, and only once they allow it.
+	 */
+	export type KindActionData =
+		| { text: string }
+		| { url: string }
+		| { name: string }
+		| { path: string };
 
 	/**
 	 * Why a host request failed. `code` is stable: `needs-consent` (the user hasn't allowed the
@@ -111,11 +486,44 @@ declare module 'dupin' {
 		title: string;
 		/** Typed before a space to reach the extension. Up to 32 bytes, no spaces. */
 		keyword: string;
-		/** The module that exports `search`, inside the package. Defaults to `main.js`. */
+		/** The module that exports `search` or `items`, inside the package. Defaults to `main.js`. */
 		main?: `${string}.js` | `${string}.mjs` | `${string}.ts` | `${string}.mts` | `${string}.tsx`;
+		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */
+		defaultSearch?: boolean;
+		/** Call `search` with an empty query as soon as the keyword is typed, for a package with something to show before anything is typed. */
+		emptyQuery?: boolean;
+		/**
+		 * How the `items` catalogue is matched: `fuzzy` ranks items as apps are ranked, and
+		 * `words` keeps the items that hold every word typed, ignoring case, in the catalogue's
+		 * order, as a history is searched, and leaves them out of usage ranking.
+		 */
+		match?: 'fuzzy' | 'words';
+		/** Up to 16 choices `ctx.preferences` hands every call, by name. */
+		preferences?: Record<string, PreferenceDeclaration>;
 		/** The most the extension may do. The user allows each scope separately. */
 		capabilities?: Capabilities;
+		/** Filters and kind actions `[advanced]` in config.toml may compose onto Dupin's own sources and kinds. */
+		provides?: Provides;
 	}
+
+	/** Up to 8 filters, and 8 actions for each kind, named by 1–64 letters, digits or `_`. */
+	export interface Provides {
+		/** Each one an export of `filters`. A matcher also needs `capabilities.query`. */
+		filters?: Record<string, { stage: 'matcher' | 'sorter' }>;
+		/** Each one an export of `actions`, receiving the field it names, which `capabilities.rows` declares. */
+		kinds?: {
+			text?: Record<string, { field: 'text' }>;
+			url?: Record<string, { field: 'url' }>;
+			file?: Record<string, { field: 'name' | 'path' }>;
+			app?: Record<string, { field: 'name' | 'path' }>;
+		};
+	}
+
+	export type PreferenceDeclaration = { title: string } & (
+		| { type: 'checkbox'; default: boolean }
+		| { type: 'select'; options: string[]; default: string }
+		| { type: 'number'; min: number; max: number; default: number }
+	);
 
 	export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
@@ -131,12 +539,27 @@ declare module 'dupin' {
 		 * user's script commands. `output` asks to receive stdout and stderr.
 		 */
 		exec?: Record<string, { args?: string[]; output?: boolean }>;
-		/** Encrypted key-value data private to the package. */
+		/** Encrypted records private to the package: 1 byte to 64 MiB, kept 1–3,650 days or until deleted. */
 		storage?: { quotaBytes: number; retentionDays?: number };
-		clipboard?: ('read' | 'write' | 'watch')[];
+		/** `paste` lets a row's `paste` action paste into the front app; without it, Dupin copies. */
+		clipboard?: ('read' | 'write' | 'watch' | 'paste')[];
 		dictionary?: ['lookup'];
 		/** Each 0–366 days from today. */
 		calendar?: { access: ['read']; pastDays: number; futureDays: number };
+		/** `read` lists displays and reads the focused window; `arrange` moves and resizes it. Both need Accessibility. */
+		windows?: ('read' | 'arrange')[];
+		/**
+		 * The fields of each kind of row Dupin's own sources find that the package's filters and
+		 * kind actions may receive. Another extension's rows never reach them.
+		 */
+		rows?: {
+			text?: ('title' | 'text')[];
+			url?: ('title' | 'url')[];
+			file?: ('title' | 'name' | 'path')[];
+			app?: ('title' | 'name' | 'path')[];
+		};
+		/** What is typed in the searches a matcher is composed into. */
+		query?: ['read'];
 	}
 
 	export interface PackageJson {
@@ -221,30 +644,131 @@ declare module 'dupin' {
 		run(profile: string, inputs?: Record<string, string | number>): Promise<ExecResult>;
 	};
 
-	/** `storage` capability. Keys are 1–256 bytes; a value is at most 1 MiB of JSON. */
+	/** A blob stored with a record. The handle is opaque; pass it to `storage.readBlob`. */
+	export interface StoredBlob {
+		readonly handle: string;
+		/** In bytes. */
+		readonly size: number;
+	}
+
+	/** A record as `storage` returns it. Dupin freezes it, but not `data`. */
+	export interface StoredRecord {
+		/** Opaque and random; `storage.list` gives the order records were stored in. */
+		readonly id: string;
+		/** ISO 8601, UTC. */
+		readonly createdAt: string;
+		readonly data: Json;
+		/** In the order they were given to `put`. */
+		readonly blobs: readonly StoredBlob[];
+	}
+
+	export interface StoragePage {
+		/** Newest first. */
+		readonly records: readonly StoredRecord[];
+		/** Pass as `before` for the next page; absent once this page reached the oldest. */
+		readonly next?: string;
+	}
+
+	export interface StorageUsage {
+		readonly entries: number;
+		/** Each record's JSON plus each distinct blob, counted once however many records share it. */
+		readonly bytes: number;
+		readonly quotaBytes: number;
+		readonly retentionDays?: number;
+	}
+
+	/**
+	 * `storage` capability: records of JSON and the blobs they carry, encrypted at rest and private
+	 * to the package. A record's JSON and blobs are at most 1 MiB together, with up to 16 blobs;
+	 * Dupin keeps up to 10,000 records within the declared `quotaBytes`, and deletes records older
+	 * than `retentionDays`. A `put` that doesn't fit fails with `quota-exceeded` and deletes
+	 * nothing; one over 1 MiB fails with `too-large`.
+	 */
 	export const storage: {
-		get(key: string): Promise<Json | undefined>;
-		set(key: string, value: Json): Promise<void>;
-		delete(key: string): Promise<void>;
-		keys(): Promise<string[]>;
+		/**
+		 * A blob may be the `blob` of the latest clipboard change, whose image never crosses to
+		 * the guest and may be up to 32 MiB. With `key`, up to 256 bytes, the record replaces the
+		 * one stored for that key before, keeps its ID and lists as the newest.
+		 */
+		put(
+			data: Json,
+			options?: { blobs?: (ArrayBufferView | ArrayBuffer | string)[]; key?: string },
+		): Promise<StoredRecord>;
+		/** `undefined` when no such record is stored. */
+		get(id: string): Promise<StoredRecord | undefined>;
+		/** Up to `limit` records (50 by default, 200 at most) older than `before`, newest first. */
+		list(options?: { before?: string; limit?: number }): Promise<StoragePage>;
+		/** Fails with `not-found` once no record carries the blob. */
+		readBlob(handle: string): Promise<Uint8Array>;
+		/** Whether the record was stored. Its blobs go once no other record carries them. */
+		delete(id: string): Promise<boolean>;
+		clear(): Promise<void>;
+		usage(): Promise<StorageUsage>;
 	};
 
 	export type Clip =
 		| { type: 'text'; text: string }
 		| { type: 'url'; url: string }
-		| { type: 'files'; files: { path: string; name: string }[] }
-		| { type: 'image'; [key: string]: unknown };
+		| { type: 'files'; files: CopiedFile[] }
+		/** `data` is the PNG in Base64, up to 2 MiB. */
+		| { type: 'image'; mediaType: 'image/png'; width: number; height: number; data: string };
 
 	/** `clipboard` capability. Reading and writing happen only in an action. */
 	export const clipboard: {
 		read(): Promise<Clip | null>;
 		readText(): Promise<string | undefined>;
 		writeText(text: string): Promise<void>;
+		/**
+		 * Text; an image the package stored, by its blob's handle; or files a watch delivered,
+		 * by the handles they came with, which must still be there.
+		 */
+		write(
+			clip:
+				| { type: 'text'; text: string }
+				| { type: 'image'; blob: string }
+				| { type: 'files'; files: { path: string; handle: string }[] },
+		): Promise<void>;
 	};
 
+	/** One sense: its text, its examples and, one level deep, its sub-senses. */
+	export interface DictionarySense {
+		definition: string;
+		examples: string[];
+		senses: DictionarySense[];
+	}
+
+	/** The senses under one part of speech, or under none before the first. */
+	export interface DictionaryGroup {
+		partOfSpeech: string | null;
+		/** What comes before the numbered senses, such as inflections. */
+		note: string | null;
+		senses: DictionarySense[];
+	}
+
+	/** A labeled part such as Phrases or Origin, as plain text, one paragraph or item a line. */
+	export interface DictionarySection {
+		title: string;
+		text: string;
+	}
+
+	/** Each structured text is at most 4 KiB; `truncated` says whether anything was cut. */
 	export interface DictionaryEntry {
 		headword: string;
-		[key: string]: unknown;
+		/** The dictionary the entry came from; `null` on macOS, which doesn't say. */
+		dictionary: string | null;
+		pronunciation: string | null;
+		/** The definition as the dictionary wrote it, up to 16 KiB. */
+		text: string;
+		/**
+		 * The entry as Dupin lays it out, up to 32 KiB of Markdown for an item's `detail`: each
+		 * part of speech under a `###` heading with its numbered senses and examples in italics,
+		 * and each labeled part under a `##` heading. The headword and pronunciation are left
+		 * to the item's title and metadata.
+		 */
+		markdown: string;
+		groups: DictionaryGroup[];
+		sections: DictionarySection[];
+		truncated: boolean;
 	}
 
 	/** `dictionary` capability. */
@@ -253,142 +777,86 @@ declare module 'dupin' {
 	};
 
 	export interface CalendarEvent {
-		title: string;
+		/** Names one occurrence of a recurring event. */
+		readonly id: string;
+		/** One line, up to 512 bytes, so it fits an item's `title` as it comes. */
+		readonly title: string;
 		/** ISO 8601, UTC. */
-		start: string;
-		end: string;
-		allDay: boolean;
-		calendar: unknown;
-		location?: string;
-		[key: string]: unknown;
+		readonly start: string;
+		readonly end: string;
+		readonly allDay: boolean;
+		readonly calendar: {
+			readonly name: string;
+			/** `#rrggbb` in sRGB. */ readonly color: string | null;
+		};
+		readonly location: string | null;
+		/** The event's own link, as its calendar holds it. */
+		readonly url: string | null;
+		/** Shows this occurrence in Calendar, as an `open` action of the `search` that read it. */
+		readonly link: string | null;
+		/** Its dates as this Mac's locale and time zone write them, since the guest has no `Intl`. */
+		readonly labels: {
+			/** The day it starts, such as `Wednesday 25 November`, with the year when it isn't this year. */
+			readonly day: string;
+			/** Only the time, such as `10:00 – 11:00`, or `All day`, when it falls within one day. */
+			readonly time: string | null;
+			/** Its dates and times, such as `23 Nov, 10:00 – 11:00`, with the year when it isn't this year. */
+			readonly dates: string;
+		};
 	}
 
 	/** `calendar` capability, inside the declared window around today. `to` is exclusive. */
 	export const calendar: {
+		/**
+		 * Events overlapping the range, earliest start first, or latest with `order: 'latest'`:
+		 * the first `limit` (100 by default, 500 at most) in that order whose title or location
+		 * holds every word of `query`, in any order and case.
+		 */
 		events(range: {
 			from: Date | string | number;
 			to: Date | string | number;
+			query?: string;
 			limit?: number;
+			order?: 'earliest' | 'latest';
 		}): Promise<CalendarEvent[]>;
 	};
 
 	/**
-	 * Drafts of what later API versions are planned to add, from docs/design/extension-platform.md.
-	 * apiVersion 2 hosts provide none of it: the `dupin` module exports no such values and an
-	 * item with these fields is rejected. Shapes may change before they ship.
+	 * A rectangle in points. Every display shares one space: the origin is the primary display's
+	 * top-left corner and `y` grows downwards.
 	 */
-	export namespace v2 {
-		type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-		/** `items(ctx)`: a list source. Dupin caches the rows and matches them as the user types. */
-		type Items = (ctx: ItemsContext) => ListResult | Promise<ListResult>;
-
-		interface ItemsContext {
-			readonly limit: number;
-			readonly preferences: Readonly<Record<string, string | boolean>>;
-		}
-
-		interface Item {
-			title: string;
-			subtitle?: string;
-			id?: string;
-			url?: string;
-			text?: string;
-			/** Extra words native matching considers. */
-			keywords?: string[];
-			/** A built-in icon name. */
-			icon?: string;
-			/** Up to three text or tag accessories. */
-			accessories?: Accessory[];
-			/** Shown in the selected-item Detail pane. */
-			detail?: DetailPane;
-			/** Up to eight. Enter runs the first. */
-			actions?: Action[];
-		}
-
-		type Accessory = { text: string } | { tag: string };
-
-		interface Section {
-			title: string;
-			items: Item[];
-		}
-
-		interface List {
-			type: 'list';
-			items?: Item[];
-			sections?: Section[];
-			/** Shown when there are no items. */
-			emptyText?: string;
-		}
-
-		type ListResult = Item[] | List;
-
-		interface Metadata {
-			label: string;
-			text: string;
-		}
-
-		interface DetailPane {
-			/** Headings, paragraphs, emphasis, lists, inline and fenced code and HTTP(S) links. */
-			markdown?: string;
-			metadata?: Metadata[];
-		}
-
-		interface Detail extends DetailPane {
-			type: 'detail';
-			title: string;
-			actions?: Action[];
-		}
-
-		type Field =
-			| { type: 'text'; id: string; title: string; required?: boolean; default?: string }
-			| { type: 'textarea'; id: string; title: string; required?: boolean; default?: string }
-			| { type: 'checkbox'; id: string; title: string; default?: boolean }
-			| {
-					type: 'select';
-					id: string;
-					title: string;
-					options: { value: string; title: string }[];
-					default?: string;
-			  };
-
-		interface Form {
-			type: 'form';
-			title: string;
-			fields: Field[];
-			/** The named action that runs on submit with the field values. */
-			submit: string;
-		}
-
-		type View = List | Detail | Form;
-
-		interface ViewContext {
-			readonly query: string;
-			readonly preferences: Readonly<Record<string, string | boolean>>;
-			readonly state: Json;
-		}
-
-		/** `views`: named handlers a `push` action opens. */
-		type Views = Record<string, (ctx: ViewContext) => View | Promise<View>>;
-
-		type Action =
-			| { title: string; copy: string }
-			| { title: string; open: string }
-			| { title: string; push: { view: string; state?: Json } }
-			| { title: string; run: string; data?: Json; destructive?: boolean };
-
-		type Effect =
-			| { type: 'push'; view: string; state?: Json }
-			| { type: 'pop' }
-			| { type: 'refresh' }
-			| { type: 'replaceState'; state: Json }
-			| { type: 'toast'; text: string }
-			| { type: 'fieldErrors'; errors: Record<string, string> };
-
-		/** `actions`: named handlers that run on explicit activation, including form submit. */
-		type Actions = Record<
-			string,
-			(data: Json, ctx: ViewContext) => Effect | void | Promise<Effect | void>
-		>;
+	export interface WindowFrame {
+		x: number;
+		y: number;
+		width: number;
+		height: number;
 	}
+
+	export interface WindowDisplay {
+		readonly frame: Readonly<WindowFrame>;
+		/** The part windows may use, outside the menu bar and the Dock. */
+		readonly visibleFrame: Readonly<WindowFrame>;
+		/** Pixels per point. */
+		readonly scale: number;
+	}
+
+	export interface FocusedWindow {
+		readonly frame: Readonly<WindowFrame>;
+		/** The app that was in front when the panel opened. */
+		readonly app: { readonly name: string; readonly bundleId: string | null };
+	}
+
+	/** `windows` capability: the focused window of the app that was in front when the panel opened. */
+	export const windows: {
+		/** Every display, the primary one first. Needs `read`. */
+		displays(): Promise<WindowDisplay[]>;
+		/** That window, or `null` when the app has none. Needs `read`. */
+		focused(): Promise<FocusedWindow | null>;
+		/**
+		 * Moves and resizes that window and resolves to the frame it took, which the app may
+		 * constrain. The frame must lie at least partly on a display. Needs `arrange` and an action
+		 * the user chose.
+		 */
+		setFrame(frame: WindowFrame): Promise<WindowFrame>;
+	};
 }

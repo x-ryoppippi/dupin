@@ -17,6 +17,8 @@ const MAX_LINK_BYTES: usize = 2048;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Detail {
     pub title: String,
+    /// Shown large above the metadata.
+    pub image: Option<crate::HostImage>,
     pub metadata: Vec<Metadata>,
     pub body: Document,
 }
@@ -31,9 +33,43 @@ impl Detail {
     pub fn new(title: impl Into<String>, markdown: &str) -> Self {
         Self {
             title: title.into(),
+            image: None,
             metadata: Vec::new(),
             body: Document::parse(markdown),
         }
+    }
+
+    pub fn with_image(mut self, image: crate::HostImage) -> Self {
+        self.image = Some(image);
+        self
+    }
+
+    /// The bytes of text the detail holds, for budgets on what is kept in memory.
+    pub(crate) fn text_bytes(&self) -> usize {
+        fn blocks(list: &[Block]) -> usize {
+            list.iter()
+                .map(|block| match block {
+                    Block::Heading { text, .. } | Block::Paragraph(text) => {
+                        text.text.len()
+                            + text
+                                .runs
+                                .iter()
+                                .map(|run| run.style.link.as_ref().map_or(0, String::len))
+                                .sum::<usize>()
+                    }
+                    Block::List { items, .. } => items.iter().map(|item| blocks(item)).sum(),
+                    Block::Code(code) => code.len(),
+                })
+                .sum()
+        }
+        self.title.len()
+            + self.image.as_ref().map_or(0, crate::HostImage::text_bytes)
+            + self
+                .metadata
+                .iter()
+                .map(|entry| entry.label.len() + entry.value.len())
+                .sum::<usize>()
+            + blocks(&self.body.blocks)
     }
 
     /// Add a labeled value above the body; values past [`MAX_METADATA`] are dropped.

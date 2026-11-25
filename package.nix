@@ -23,13 +23,65 @@ let
     (root + /sdk)
     # The backdrop shader examples, which a test compiles.
     (root + /examples/shaders)
-    # The JavaScript word counter, which tests load and run.
+    # The JavaScript word counter and notes examples, which tests load and run.
     (root + /examples/extensions/word-count-js)
+    (root + /examples/extensions/notes-js)
+    # The bundled extensions, which a test build finds in the source tree.
+    (root + /extensions)
   ];
   bundleFiles = lib.fileset.unions [
     (root + /packaging)
     (root + /assets/logo/dupin.svg)
+    (root + /extensions)
   ];
+  # Each bundled package by the name the broker knows it by after `bundled:`, `name` in its
+  # package.json, with the scope keys its capabilities declare. checks.bundled-extension-scopes
+  # holds these scope keys to what Dupin itself reads.
+  scopesOf =
+    capabilities:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        kind: declared:
+        if
+          lib.elem kind [
+            "storage"
+            "dictionary"
+            "calendar"
+          ]
+        then
+          [ kind ]
+        else if
+          lib.elem kind [
+            "clipboard"
+            "windows"
+          ]
+        then
+          map (access: "${kind}:${access}") declared
+        else if kind == "http" then
+          map (entry: "http:${entry.origin}") declared
+        else if kind == "files" then
+          map (name: "files:${name}") (lib.attrNames declared)
+        else if kind == "exec" then
+          map (
+            name:
+            if lib.hasPrefix "@script:" name then
+              "script:${lib.removePrefix "@script:" name}"
+            else
+              "exec:${name}"
+          ) (lib.attrNames declared)
+        else
+          throw "package.nix doesn't know the scope keys of the `${kind}` capability"
+      ) capabilities
+    );
+  bundledExtensions = lib.listToAttrs (
+    lib.mapAttrsToList (
+      folder: _:
+      let
+        manifest = lib.importJSON (root + "/extensions/${folder}/package.json");
+      in
+      lib.nameValuePair manifest.name (scopesOf (manifest.dupin.capabilities or { }))
+    ) (lib.filterAttrs (_: type: type == "directory") (builtins.readDir (root + /extensions)))
+  );
   cargoSrc = lib.fileset.toSource {
     inherit root;
     fileset = cargoFiles;
@@ -105,6 +157,11 @@ let
       icns assets/logo/dupin.svg $app/Resources/dupin.icns
       # scripts/package-app.nu points a nightly build at this one.
       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
+      # Each package folder, without extensions/tsconfig.json, which only the type check reads.
+      mkdir $app/Resources/extensions
+      for package in extensions/*/; do
+        cp -R "''${package%/}" $app/Resources/extensions/
+      done
       ln -s $app/MacOS/dupin $out/bin/dupin
     '';
     meta = {
@@ -133,6 +190,7 @@ rustPlatform.buildRustPackage (
         cargoVendorDir
         cargoSrc
         bundleSrc
+        bundledExtensions
         ;
     };
   }

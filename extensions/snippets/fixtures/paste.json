@@ -1,0 +1,47 @@
+{
+	"fixture": 1,
+	"description": "With pasting turned on, Enter pastes the snippet into the front app and the other action copies it; both leave the placeholders for Dupin to fill.",
+	"preferences": {
+		"snippets": [
+			{ "keyword": "sig", "name": "Email signature", "text": "Best wishes,\nSherlock" },
+			{ "keyword": "stamp", "name": "Checked stamp", "text": "Checked on {datetime}" }
+		],
+		"paste": true
+	},
+	"steps": [
+		{
+			"query": "stamp",
+			"expect": {
+				"rows": [
+					{
+						"id": "snippet:stamp",
+						"title": "Checked stamp",
+						"subtitle": "stamp  ·  Checked on {datetime}",
+						"aliases": ["stamp"],
+						"actions": [
+							{
+								"title": "Paste into Front App",
+								"paste": "Checked on {datetime}",
+								"template": true
+							},
+							{ "title": "Copy to Clipboard", "copy": "Checked on {datetime}", "template": true }
+						]
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Paste into Front App",
+			"expect": {
+				"effect": { "paste": "Checked on {datetime}", "template": true }
+			}
+		},
+		{
+			"activate": "Copy to Clipboard",
+			"expect": {
+				"effect": { "copy": "Checked on {datetime}", "template": true }
+			}
+		}
+	]
+}

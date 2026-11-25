@@ -5,11 +5,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use dupin_plugin_protocol::{Effect, View};
+use crate::row::RowEffect;
 
 use super::*;
 
+mod items;
+
 const DEADLINE: Duration = Duration::from_secs(2);
+
+fn engine() -> Engine {
+    Engine::new().unwrap()
+}
 
 fn timeout(timeout: Duration) -> Control {
     Control {
@@ -43,38 +49,70 @@ fn package(files: &[(&str, &str)]) -> (tempfile::TempDir, Result<Package, Diagno
     (folder, loaded)
 }
 
-fn search(package: &Package, query: &str) -> Result<Vec<PluginItem>, RunError> {
+fn search(package: &Package, query: &str) -> Result<Vec<Row>, RunError> {
     package.search(query, MAX_ROWS, timeout(DEADLINE))
 }
 
-fn failure(result: Result<Vec<PluginItem>, RunError>) -> Diagnostic {
+fn failure(result: Result<Vec<Row>, RunError>) -> Diagnostic {
     match result {
         Err(RunError::Failed(diagnostic)) => diagnostic,
         other => panic!("expected a failure, got {other:?}"),
     }
 }
 
-fn run(source: &str, query: &str) -> Result<Vec<PluginItem>, RunError> {
+/// A row's title and subtitle.
+fn text(row: &Row) -> (&str, &str) {
+    (&row.title, &row.subtitle)
+}
+
+fn run(source: &str, query: &str) -> Result<Vec<Row>, RunError> {
     let (_folder, loaded) = package(&[("main.js", source)]);
     search(&loaded.unwrap(), query)
+}
+
+#[test]
+fn an_engine_runs_one_call_and_refuses_a_second() {
+    let (_folder, loaded) = package(&[(
+        "main.js",
+        "export function search() { globalThis.left = (globalThis.left ?? 0) + 1; return [{ title: String(globalThis.left) }]; }",
+    )]);
+    let package = loaded.unwrap();
+    let engine = engine();
+    let mut bridge = Unavailable::default();
+    let rows = package
+        .search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge)
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
+    let refused = failure(package.search_with(&engine, "", MAX_ROWS, timeout(DEADLINE), &mut bridge));
+    assert_eq!(refused.code, "engine-error", "{refused:?}");
+    let rows = package
+        .search_with(
+            &Engine::new().unwrap(),
+            "",
+            MAX_ROWS,
+            timeout(DEADLINE),
+            &mut bridge,
+        )
+        .unwrap();
+    assert_eq!(text(&rows[0]), ("1", ""));
 }
 
 #[test]
 fn the_word_count_example_counts_words_and_copies_the_count() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/word-count-js");
     let package = load(&root).unwrap();
-    package.check(timeout(DEADLINE)).unwrap();
-    let rows = search(&package, "two words").unwrap();
-    assert_eq!(rows.len(), 1);
     assert_eq!(
-        rows[0].view,
-        View::Text {
-            title: "2 words".into(),
-            subtitle: String::new()
+        package.check(&engine(), timeout(DEADLINE)).unwrap(),
+        Exports {
+            search: true,
+            items: false
         }
     );
+    let rows = search(&package, "two words").unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(text(&rows[0]), ("2 words", ""));
     assert_eq!(rows[0].actions.len(), 1);
-    assert_eq!(rows[0].actions[0].effect, Effect::Copy { text: "2".into() });
+    assert_eq!(rows[0].actions[0].effect, RowEffect::Copy { text: "2".into() });
     assert!(search(&package, "   ").unwrap().is_empty());
 }
 
@@ -111,21 +149,15 @@ fn async_search_lists_relative_imports_and_the_host_module_load() {
     let rows = package.search("a b", 7, timeout(DEADLINE)).unwrap();
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].id, "docs");
-    assert_eq!(
-        rows[0].view,
-        View::Text {
-            title: "Docs for a b".into(),
-            subtitle: "v2, 7 rows".into()
-        }
-    );
+    assert_eq!(text(&rows[0]), ("Docs for a b", "v4, 7 rows"));
     let effects: Vec<_> = rows[0].actions.iter().map(|action| &action.effect).collect();
     assert_eq!(
         effects,
         [
-            &Effect::OpenUrl {
+            &RowEffect::OpenUrl {
                 url: "https://example.com/search?q=a%20b".into()
             },
-            &Effect::Copy { text: "a b".into() },
+            &RowEffect::Copy { text: "a b".into() },
         ]
     );
     assert_eq!(rows[1].id, "#1");
@@ -139,20 +171,8 @@ fn the_row_limit_keeps_the_first_rows() {
         "export function search(query, ctx) { return ['a', 'b', 'c'].map((title) => ({ title: `${title} ${ctx.limit}` })); }",
     )]);
     let rows = loaded.unwrap().search("", 2, timeout(DEADLINE)).unwrap();
-    let titles: Vec<_> = rows.iter().map(|row| row.view.clone()).collect();
-    assert_eq!(
-        titles,
-        [
-            View::Text {
-                title: "a 2".into(),
-                subtitle: String::new()
-            },
-            View::Text {
-                title: "b 2".into(),
-                subtitle: String::new()
-            },
-        ]
-    );
+    let titles: Vec<_> = rows.iter().map(text).collect();
+    assert_eq!(titles, [("a 2", ""), ("b 2", "")]);
 }
 
 #[test]
@@ -230,7 +250,9 @@ fn deep_recursion_hits_the_stack_limit() {
 fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
     let looping = load(&fixture("startup-loop")).unwrap();
     for result in [
-        looping.check(timeout(Duration::from_millis(100))),
+        looping
+            .check(&engine(), timeout(Duration::from_millis(100)))
+            .map(drop),
         looping
             .search("", MAX_ROWS, timeout(Duration::from_millis(100)))
             .map(drop),
@@ -239,7 +261,7 @@ fn top_level_code_meets_the_same_deadline_and_heap_limit_as_search() {
         assert_eq!(diagnostic.code, "deadline", "{diagnostic:?}");
     }
     let allocating = load(&fixture("startup-allocation")).unwrap();
-    let diagnostic = failure(allocating.check(timeout(DEADLINE)).map(|()| Vec::new()));
+    let diagnostic = failure(allocating.check(&engine(), timeout(DEADLINE)).map(|_| Vec::new()));
     assert_eq!(diagnostic.code, "memory-limit", "{diagnostic:?}");
 }
 
@@ -403,13 +425,7 @@ fn imports_other_than_package_files_and_dupin_are_refused() {
         "main.js",
         "import { apiVersion } from 'dupin'; export const search = () => [{ title: `${apiVersion}` }];",
     )]);
-    assert_eq!(
-        search(&loaded.unwrap(), "").unwrap()[0].view,
-        View::Text {
-            title: "2".into(),
-            subtitle: String::new()
-        }
-    );
+    assert_eq!(search(&loaded.unwrap(), "").unwrap()[0].title, "4");
 }
 
 #[test]
@@ -455,9 +471,69 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             Some("items[0].title"),
         ),
         (
-            "export function search() { return [{ title: 'a', icon: 'x' }]; }",
-            "unknown-field",
+            "export function search() { return [{ title: 'a', icon: '../x.png' }]; }",
+            "invalid-field",
             Some("items[0].icon"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', keywords: ['b'] }]; }",
+            "unknown-field",
+            Some("items[0].keywords"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', badges: [] }]; }",
+            "unknown-field",
+            Some("items[0].badges"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', detail: { markdown: 'x'.repeat(32769) } }]; }",
+            "field-too-long",
+            Some("items[0].detail.markdown"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', detail: { html: '<b>' } }]; }",
+            "unknown-field",
+            Some("items[0].detail.html"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', detail: { metadata: [{ label: 'x' }] } }]; }",
+            "missing-field",
+            Some("items[0].detail.metadata[0]"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', copy: 'a', open: 'https://a.example' }] }]; }",
+            "invalid-field",
+            Some("items[0].actions[0]"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', run: 'not a name' }] }]; }",
+            "invalid-field",
+            Some("items[0].actions[0].run"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', run: 'go', data: () => 1 }] }]; }",
+            "invalid-field",
+            Some("items[0].actions[0].data"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', open: 'file:///' }] }]; }",
+            "invalid-url",
+            Some("items[0].actions[0].open"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', url: 'https://a.example', actions: Array.from({ length: 8 }, () => ({ title: 'x', copy: 'y' })) }]; }",
+            "invalid-field",
+            Some("items[0].actions"),
+        ),
+        (
+            "export function search() { return { sections: [{ title: 'S', items: [{ id: 'a', title: 'a' }] }, { title: 'T', items: [{ id: 'a', title: 'b' }] }] }; }",
+            "duplicate-id",
+            Some("sections[1].items[0].id"),
+        ),
+        (
+            "export function search() { return { items: [], sections: [] }; }",
+            "invalid-field",
+            Some("items"),
         ),
         (
             "export function search() { return [{ title: 'a\\nb' }]; }",
@@ -478,6 +554,16 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             "export function search() { return [{ title: 'a', url: 'javascript:alert(1)' }]; }",
             "invalid-url",
             Some("items[0].url"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', url: 'dict://' }]; }",
+            "invalid-url",
+            Some("items[0].url"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', actions: [{ title: 'x', open: 'dict://two words' }] }]; }",
+            "invalid-url",
+            Some("items[0].actions[0].open"),
         ),
         (
             "export function search() { return [{ title: 'x'.repeat(513) }]; }",
@@ -562,13 +648,7 @@ fn each_call_starts_from_fresh_globals() {
     let package = loaded.unwrap();
     for _ in 0..3 {
         let rows = search(&package, "").unwrap();
-        assert_eq!(
-            rows[0].view,
-            View::Text {
-                title: "1 1".into(),
-                subtitle: String::new()
-            }
-        );
+        assert_eq!(text(&rows[0]), ("1 1", ""));
     }
 }
 
@@ -715,10 +795,7 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
             .with_environment(environment.copied())
             .search("", MAX_ROWS, timeout(DEADLINE))
             .unwrap();
-        let View::Text { title, .. } = &rows[0].view else {
-            panic!("expected a text row");
-        };
-        title.clone()
+        rows[0].title.clone()
     };
     let fixed = title(Some(&environment));
     assert_eq!(fixed, title(Some(&environment)));
@@ -745,4 +822,42 @@ fn an_environment_fixes_the_clock_and_random_numbers_from_module_load_on() {
     assert_ne!(title(None).split('|').next(), Some("1767225600000"));
 }
 
+#[test]
+fn rows_open_web_urls_dictionary_words_and_calendar_event_links_only() {
+    use crate::row::{Source, is_openable};
+    for url in [
+        "https://example.com/",
+        "dict://serendipity",
+        "dict://a%20b%2F%23%C3%A9",
+    ] {
+        assert!(is_openable(url, Source::Search), "{url}");
+        assert!(is_openable(url, Source::Items), "{url}");
+    }
+    for url in [
+        "ical://ekevent/20261123T100000Z/7F3C%3A1?method=show&options=more",
+        "ical://ekevent/shared%2Fmeeting%3F?method=show&options=more",
+    ] {
+        assert!(is_openable(url, Source::Search), "{url}");
+        // A catalogue reaches no host service, so no calendar link reached it.
+        assert!(!is_openable(url, Source::Items), "{url}");
+    }
+    for url in [
+        "dict://",
+        "dict://a b",
+        "DICT://run",
+        "ical://ekevent/?method=show&options=more",
+        "ical://ekevent/a b?method=show&options=more",
+        "ical://ekevent/a?method=edit",
+        "ical://calendar/a?method=show&options=more",
+        "webcal://example.com/feed.ics",
+        "x-apple.systempreferences:com.apple.preference.security",
+        "file:///etc/passwd",
+    ] {
+        assert!(!is_openable(url, Source::Search), "{url}");
+        assert!(!is_openable(url, Source::Items), "{url}");
+    }
+}
+
 mod host;
+mod sdk;
+mod views;

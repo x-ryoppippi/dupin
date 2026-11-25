@@ -2,15 +2,23 @@
 //! stack, deadline and promise-job budget, and with no APIs beyond the language itself and the
 //! host's `dupin` module: no files, network, processes or timers.
 //!
+//! A call's runtime is an [`Engine`], which the caller may make before the call and drop after
+//! answering, so that neither is part of the call's latency.
+//!
 //! Dupin itself only reads a package's [`Sources`]; compiling and running them, and erasing the
 //! types of TypeScript modules first, is the extension host's work.
 
 mod diagnostic;
 mod environment;
+pub mod filter;
 mod host;
 mod output;
 mod package;
+pub mod row;
 mod typescript;
+pub mod view;
+
+pub use dupin_plugin_protocol::web_search;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -18,7 +26,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use dupin_plugin_protocol::PluginItem;
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::Declared;
 use rquickjs::promise::PromiseState;
@@ -26,9 +33,25 @@ use rquickjs::{Context, Ctx, Exception, Function, Module, Object, Promise, Runti
 
 pub use diagnostic::Diagnostic;
 pub use environment::Environment;
+pub use filter::{FilterHit, FilterInput, FilterStage};
 pub use host::{Bridge, MAX_ARGS_BYTES, MAX_CALLS, MAX_OP_BYTES, MAX_PENDING, Reply, Unavailable};
 pub use output::ActionEffect;
 pub use package::{Sources, is_module, is_source_name, source_files};
+pub use row::{CataloguePage, Reason, Row};
+pub use view::ViewAnswer;
+
+/// What the user set for a package, which `items` reads as `ctx.preferences`.
+pub type Preferences = serde_json::Map<String, serde_json::Value>;
+
+/// The page a view or an action runs on: what is typed there and the state Dupin holds for it,
+/// which `ctx.query` and `ctx.state` hand the guest. An action chosen outside the package's
+/// pages has neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PageContext {
+    pub query: String,
+    pub state: serde_json::Value,
+}
 
 const HEAP_BYTES: usize = 16 * 1024 * 1024;
 const STACK_BYTES: usize = 512 * 1024;
@@ -40,14 +63,65 @@ pub const MAX_ROWS: usize = 50;
 pub const COMPILE_HEAP_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_ENTRY: &str = "main.js";
 const HOST_MODULE: &str = "dupin";
-/// The longest name of an action or event handler.
-pub(crate) const MAX_HANDLER_BYTES: usize = 64;
 
 /// When a call must stop. Checked between promise jobs and, through QuickJS's interrupt
 /// handler, while JavaScript runs.
 pub struct Control {
     pub deadline: Instant,
     pub is_cancelled: Box<dyn Fn() -> bool>,
+}
+
+/// A QuickJS runtime and a context with the language's standard library and the host's `dupin`
+/// module, for one call.
+///
+/// Making them is most of what a call costs before any guest code runs, and freeing them most of
+/// what it costs after, so the extension host makes the next call's engine while it waits and
+/// drops each after answering. Only the host's own module runs in an engine before the call that
+/// takes it, and its guest's code is the only guest code that ever runs there. A second call
+/// refuses it, so no guest state reaches another call.
+pub struct Engine {
+    calls: host::Shared,
+    invalidation: Rc<host::Invalidation>,
+    // Dropped in order: the context's values before the runtime that owns them.
+    context: Context,
+    runtime: Runtime,
+    taken: Cell<bool>,
+}
+
+impl Engine {
+    pub fn new() -> Result<Self, RunError> {
+        let bytecode = host::bytecode().map_err(|error| internal(&error))?;
+        let runtime = Runtime::new().map_err(|error| internal(&error))?;
+        runtime.set_memory_limit(HEAP_BYTES);
+        runtime.set_max_stack_size(STACK_BYTES);
+        let context = Context::full(&runtime).map_err(|_| memory_limit())?;
+        let calls = host::Shared::default();
+        let invalidation = Rc::<host::Invalidation>::default();
+        context
+            .with(|ctx| {
+                host::install(&ctx, &calls, &invalidation)?;
+                // SAFETY: `host::bytecode` wrote these bytes in this process from the host's own
+                // module source.
+                let (_, evaluated) = unsafe { Module::load(ctx.clone(), bytecode) }?.eval()?;
+                evaluated.finish::<()>()
+            })
+            .map_err(|error| internal(&error))?;
+        Ok(Self {
+            calls,
+            invalidation,
+            context,
+            runtime,
+            taken: Cell::new(false),
+        })
+    }
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("taken", &self.taken.get())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -137,101 +211,279 @@ impl Package {
             .map(|(name, bytecode)| (name.as_str(), &bytecode[..]))
     }
 
-    /// Links and evaluates the entry module, and checks that it exports `search`.
-    pub fn check(&self, control: Control) -> Result<(), RunError> {
+    /// Links and evaluates the entry module in `engine`, and reports which of `search` and
+    /// `items` it exports. A package must export at least one.
+    pub fn check(&self, engine: &Engine, control: Control) -> Result<Exports, RunError> {
         let mut bridge = Unavailable::default();
-        let sandbox = Sandbox::new(self, control, &mut bridge, Work::Search)?;
+        let sandbox = Sandbox::new(self, engine, control, &mut bridge, Work::Search)?;
         sandbox.run(|ctx| {
-            sandbox.export_function(ctx, "search")?;
-            Ok(())
+            let namespace = sandbox.namespace(ctx)?;
+            let exports = Exports {
+                search: namespace.get::<_, Value>("search")?.is_function(),
+                items: namespace.get::<_, Value>("items")?.is_function(),
+            };
+            if !exports.search && !exports.items {
+                return Err(missing_export(&self.entry).into());
+            }
+            Ok(exports)
         })
     }
 
-    /// Calls `search(query, { limit })` with no host services and reads its answer.
-    pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<PluginItem>, RunError> {
-        self.search_with(query, limit, control, &mut Unavailable::default())
+    /// Calls `search(query, { limit })` in an engine of its own, with no host services, and reads
+    /// its answer.
+    pub fn search(&self, query: &str, limit: usize, control: Control) -> Result<Vec<Row>, RunError> {
+        self.search_with(
+            &Engine::new()?,
+            query,
+            limit,
+            control,
+            &mut Unavailable::default(),
+        )
     }
 
-    /// Calls `search(query, { limit })`, carrying its host requests through `bridge`, and reads
-    /// its answer. At most `limit` rows are kept.
+    /// Calls `search(query, { limit })` in `engine`, carrying its host requests through
+    /// `bridge`, and reads its answer. At most `limit` rows are kept.
     pub fn search_with(
         &self,
+        engine: &Engine,
         query: &str,
         limit: usize,
         control: Control,
         bridge: &mut dyn Bridge,
-    ) -> Result<Vec<PluginItem>, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Search)?;
+    ) -> Result<Vec<Row>, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Search)?;
         sandbox.run(|ctx| {
-            let search = sandbox.export_function(ctx, "search")?;
+            let search = sandbox.function(ctx, "search")?;
             let options = Object::new(ctx.clone())?;
             options.set("limit", limit.min(MAX_ROWS) as u32)?;
             let options = frozen(ctx, options)?;
-            let answer: Value = search
-                .call((query, options))
-                .map_err(|error| sandbox.thrown(ctx, error, Stage::Call))?;
-            let answer = match answer.as_promise() {
-                Some(promise) => sandbox.settle(ctx, promise.clone(), Stage::Call)?,
-                None => answer,
-            };
-            let mut reader = output::Reader::new(&self.entry, limit.min(MAX_ROWS));
-            reader.rows(answer)
+            let answer = sandbox.call(ctx, search, (query, options))?;
+            output::Reader::search(&self.entry, limit.min(MAX_ROWS)).rows(answer)
         })
     }
 
-    /// Calls `actions[name](data, ctx)`, which runs because the user chose it, and reads the
-    /// effect it returns. `data` is the JSON the item's action carried.
-    pub fn action(
+    /// Calls `items({ cursor, reason, preferences })` in `engine`, carrying its host requests
+    /// through `bridge`, and reads the part of the catalogue it answers with. The catalogue loads
+    /// as the user types, before any row is chosen, so Dupin answers its requests as it does a
+    /// search's. `preferences` is a JSON object.
+    pub fn items(
         &self,
-        name: &str,
-        data: &str,
+        engine: &Engine,
+        cursor: Option<&str>,
+        reason: Reason,
+        preferences: &serde_json::Value,
         control: Control,
         bridge: &mut dyn Bridge,
-    ) -> Result<Option<ActionEffect>, RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Action)?;
+    ) -> Result<CataloguePage, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Items)?;
+        sandbox.run(|ctx| {
+            let items = sandbox.function(ctx, "items")?;
+            let context = Object::new(ctx.clone())?;
+            match cursor {
+                Some(cursor) => context.set("cursor", cursor)?,
+                None => context.set("cursor", rquickjs::Null)?,
+            }
+            context.set("reason", reason.as_str())?;
+            context.set("preferences", frozen_preferences(ctx, preferences)?)?;
+            let context = frozen(ctx, context)?;
+            let answer = sandbox.call(ctx, items, (context,))?;
+            output::Reader::items(&self.entry).page(answer)
+        })
+    }
+
+    /// Calls `views[name](ctx)` in `engine` for the page `page` opened, carrying its host
+    /// requests through `bridge`, and reads the list, detail or form it answers with. A page is
+    /// searched as the package's keyword is, so Dupin answers its requests as it does a search's.
+    pub fn view(
+        &self,
+        engine: &Engine,
+        name: &str,
+        page: &PageContext,
+        preferences: &serde_json::Value,
+        control: Control,
+        bridge: &mut dyn Bridge,
+    ) -> Result<ViewAnswer, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::View)?;
+        sandbox.run(|ctx| {
+            let view = sandbox.handler(ctx, "views", name)?;
+            let context = page_context(ctx, page, preferences)?;
+            let answer = sandbox.call(ctx, view, (context,))?;
+            output::Reader::view(&self.entry).view_answer(answer)
+        })
+    }
+
+    /// Calls `actions[name](data, ctx)` in `engine`, which runs because the user chose it, and
+    /// reads the effect it returns and whether it invalidated the catalogue. `data` is the JSON
+    /// the item's action carried, and `preferences` the JSON object `ctx.preferences` holds;
+    /// `page` is the page it was chosen on.
+    #[allow(clippy::too_many_arguments)]
+    pub fn action(
+        &self,
+        engine: &Engine,
+        name: &str,
+        data: &str,
+        page: &PageContext,
+        preferences: &serde_json::Value,
+        control: Control,
+        bridge: &mut dyn Bridge,
+    ) -> Result<Acted, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Action)?;
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "actions", name)?;
             let data = ctx.json_parse(data)?;
-            let context = frozen(ctx, Object::new(ctx.clone())?)?;
-            let answer: Value = handler
-                .call((data, context))
-                .map_err(|error| sandbox.thrown(ctx, error, Stage::Call))?;
-            let answer = match answer.as_promise() {
-                Some(promise) => sandbox.settle(ctx, promise.clone(), Stage::Call)?,
-                None => answer,
-            };
-            output::effect(&self.entry, &answer)
+            let context = page_context(ctx, page, preferences)?;
+            let answer = sandbox.call(ctx, handler, (data, context))?;
+            Ok(Acted {
+                invalidated: sandbox.invalidation.called.get(),
+                effect: output::effect(&self.entry, &answer)?,
+            })
         })
     }
 
-    /// Calls `events[name](event)` for something Dupin watches on the package's behalf, such as
-    /// a clipboard change. What it returns is ignored.
-    pub fn event(
+    /// Calls `filters[name](input, ctx)` in `engine` for one batch of another source's
+    /// candidates, and reads which it keeps and in what order. A filter has no external effects
+    /// or persistent state, so none of its host requests leaves the engine.
+    pub fn filter(
         &self,
+        engine: &Engine,
         name: &str,
-        event: &str,
+        input: &FilterInput,
+        preferences: &serde_json::Value,
         control: Control,
         bridge: &mut dyn Bridge,
-    ) -> Result<(), RunError> {
-        let sandbox = Sandbox::new(self, control, bridge, Work::Event)?;
+    ) -> Result<Vec<FilterHit>, RunError> {
+        if input.titles.len() > filter::MAX_CANDIDATES {
+            return Err(RunError::Failed(Diagnostic::new(
+                "too-many-candidates",
+                format!("a filter takes at most {} candidates", filter::MAX_CANDIDATES),
+            )));
+        }
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Filter)?;
+        sandbox.run(|ctx| {
+            let handler = sandbox.handler(ctx, "filters", name)?;
+            let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+            let batch = frozen_json(ctx, &freeze, &input.json())?;
+            let context = Object::new(ctx.clone())?;
+            context.set("preferences", frozen_preferences(ctx, preferences)?)?;
+            let context = frozen(ctx, context)?;
+            let answer = sandbox.call(ctx, handler, (batch, context))?;
+            let json = ctx
+                .json_stringify(answer)?
+                .map(|json| json.to_string())
+                .transpose()?;
+            filter::read(&self.entry, input, json.as_deref()).map_err(Failure::Report)
+        })
+    }
+
+    /// Calls `events[name](event, ctx)` in `engine` for something Dupin watches on the
+    /// package's behalf, such as a clipboard change, and reports whether it invalidated the
+    /// catalogue. What it returns is ignored.
+    pub fn event(
+        &self,
+        engine: &Engine,
+        name: &str,
+        event: &str,
+        preferences: &serde_json::Value,
+        control: Control,
+        bridge: &mut dyn Bridge,
+    ) -> Result<Handled, RunError> {
+        let sandbox = Sandbox::new(self, engine, control, bridge, Work::Event)?;
         sandbox.run(|ctx| {
             let handler = sandbox.handler(ctx, "events", name)?;
             let event = ctx.json_parse(event)?;
-            let answer: Value = handler
-                .call((frozen(ctx, event)?,))
-                .map_err(|error| sandbox.thrown(ctx, error, Stage::Call))?;
-            if let Some(promise) = answer.as_promise() {
-                sandbox.settle(ctx, promise.clone(), Stage::Call)?;
-            }
-            Ok(())
+            let context = Object::new(ctx.clone())?;
+            context.set("preferences", frozen_preferences(ctx, preferences)?)?;
+            let context = frozen(ctx, context)?;
+            sandbox.call(ctx, handler, (frozen(ctx, event)?, context))?;
+            Ok(Handled {
+                invalidated: sandbox.invalidation.called.get(),
+            })
         })
     }
+}
+
+/// Which of the exports Dupin calls a package has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Exports {
+    pub search: bool,
+    pub items: bool,
+}
+
+/// What an action handler did that Dupin acts on.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Acted {
+    /// It called `items.invalidate()`.
+    pub invalidated: bool,
+    pub effect: Option<ActionEffect>,
+}
+
+/// What an event handler did that Dupin acts on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Handled {
+    /// It called `items.invalidate()`.
+    pub invalidated: bool,
+}
+
+fn missing_export(entry: &str) -> Diagnostic {
+    Diagnostic::new("missing-search", "doesn't export a `search` or `items` function")
+        .file(entry)
+        .hint("Add `export function search(query) { return []; }` or `export function items() { return []; }` to the entry module.")
 }
 
 /// `Object.freeze(value)`, for what the guest receives and must not change.
 fn frozen<'js>(ctx: &Ctx<'js>, value: impl rquickjs::IntoJs<'js>) -> rquickjs::Result<Value<'js>> {
     let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
     freeze.call((value,))
+}
+
+/// `ctx` for a view or an action: `preferences`, and the page's `query` and `state`, frozen
+/// through and through, so a guest changes a page's state only by returning an effect.
+fn page_context<'js>(
+    ctx: &Ctx<'js>,
+    page: &PageContext,
+    preferences: &serde_json::Value,
+) -> rquickjs::Result<Value<'js>> {
+    let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+    let context = Object::new(ctx.clone())?;
+    context.set("preferences", frozen_json(ctx, &freeze, preferences)?)?;
+    context.set("query", page.query.as_str())?;
+    context.set("state", frozen_json(ctx, &freeze, &page.state)?)?;
+    freeze.call((context,))
+}
+
+/// The JSON object `preferences` as `ctx.preferences`, with every object and array in it
+/// frozen, since a bundled port's preferences nest lists of objects.
+fn frozen_preferences<'js>(ctx: &Ctx<'js>, preferences: &serde_json::Value) -> rquickjs::Result<Value<'js>> {
+    let freeze: Function = ctx.globals().get::<_, Object>("Object")?.get("freeze")?;
+    frozen_json(ctx, &freeze, preferences)
+}
+
+fn frozen_json<'js>(
+    ctx: &Ctx<'js>,
+    freeze: &Function<'js>,
+    value: &serde_json::Value,
+) -> rquickjs::Result<Value<'js>> {
+    use rquickjs::IntoJs;
+    match value {
+        serde_json::Value::Null => Ok(Value::new_null(ctx.clone())),
+        serde_json::Value::Bool(value) => value.into_js(ctx),
+        serde_json::Value::Number(number) => number.as_f64().unwrap_or_default().into_js(ctx),
+        serde_json::Value::String(text) => text.as_str().into_js(ctx),
+        serde_json::Value::Array(values) => {
+            let array = rquickjs::Array::new(ctx.clone())?;
+            for (index, value) in values.iter().enumerate() {
+                array.set(index, frozen_json(ctx, freeze, value)?)?;
+            }
+            freeze.call((array,))
+        }
+        serde_json::Value::Object(values) => {
+            let object = Object::new(ctx.clone())?;
+            for (key, value) in values {
+                object.set(key.as_str(), frozen_json(ctx, freeze, value)?)?;
+            }
+            freeze.call((object,))
+        }
+    }
 }
 
 fn compile(sources: Sources, control: Control) -> Result<HashMap<String, Box<[u8]>>, RunError> {
@@ -317,7 +569,11 @@ impl Compiler {
             .get(name)
             .ok_or_else(|| rquickjs::Error::new_loading(name))?;
         let module = Module::declare(ctx.clone(), name, source.as_str())?;
-        let bytecode = module.write(WriteOptions::default())?;
+        // Every call that imports `dupin` loads its bytecode, and nothing reads its source back.
+        let bytecode = module.write(WriteOptions {
+            strip_source: name == HOST_MODULE,
+            ..WriteOptions::default()
+        })?;
         self.compiled
             .borrow_mut()
             .insert(name.to_owned(), bytecode.into_boxed_slice());
@@ -496,16 +752,22 @@ impl Loader for PackageModules {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Work {
     Search,
+    Items,
+    View,
     Action,
     Event,
+    Filter,
 }
 
 impl Work {
     fn name(self) -> &'static str {
         match self {
             Work::Search => "search",
+            Work::Items => "items",
+            Work::View => "the view",
             Work::Action => "the action",
             Work::Event => "the event handler",
+            Work::Filter => "the filter",
         }
     }
 }
@@ -519,26 +781,30 @@ enum Stage {
 
 struct Sandbox<'a> {
     package: &'a Package,
+    invalidation: Rc<host::Invalidation>,
     watchdog: Watchdog,
     problem: LinkProblem,
     work: Work,
     calls: host::Shared,
     bridge: RefCell<&'a mut dyn Bridge>,
-    // Dropped in order: the context's values before the runtime that owns them.
-    context: Context,
-    _runtime: Runtime,
+    context: &'a Context,
 }
 
 impl<'a> Sandbox<'a> {
     fn new(
         package: &'a Package,
+        engine: &'a Engine,
         control: Control,
         bridge: &'a mut dyn Bridge,
         work: Work,
     ) -> Result<Self, RunError> {
-        let runtime = Runtime::new().map_err(|error| internal(&error))?;
-        runtime.set_memory_limit(HEAP_BYTES);
-        runtime.set_max_stack_size(STACK_BYTES);
+        if engine.taken.replace(true) {
+            return Err(RunError::Failed(Diagnostic::new(
+                "engine-error",
+                "an engine runs one call, and this one already ran",
+            )));
+        }
+        let runtime = &engine.runtime;
         let watchdog = Watchdog::new(control);
         let interrupt = watchdog.clone();
         runtime.set_interrupt_handler(Some(Box::new(move || interrupt.tripped())));
@@ -553,26 +819,25 @@ impl<'a> Sandbox<'a> {
                 problem: problem.clone(),
             },
         );
-        let context = Context::full(&runtime).map_err(|_| memory_limit())?;
-        let calls = host::Shared::default();
-        context
-            .with(|ctx| {
-                host::install(&ctx, &calls)?;
-                match &package.environment {
-                    Some(environment) => environment::install(&ctx, environment),
-                    None => Ok(()),
-                }
-            })
-            .map_err(|_| memory_limit())?;
+        let context = &engine.context;
+        engine
+            .invalidation
+            .allowed
+            .set(matches!(work, Work::Action | Work::Event));
+        if let Some(environment) = &package.environment {
+            context
+                .with(|ctx| environment::install(&ctx, environment))
+                .map_err(|_| memory_limit())?;
+        }
         Ok(Self {
             package,
+            invalidation: engine.invalidation.clone(),
             watchdog,
             problem,
             work,
-            calls,
+            calls: engine.calls.clone(),
             bridge: RefCell::new(bridge),
             context,
-            _runtime: runtime,
         })
     }
 
@@ -611,7 +876,12 @@ impl<'a> Sandbox<'a> {
                 .file(&self.package.entry)
                 .hint(match self.work {
                     Work::Search => "Make search return sooner: it runs as the user types, and Dupin stops it after 2 seconds.",
+                    Work::Items => {
+                        "Make items return sooner: Dupin stops loading a catalogue 2 seconds after it asks, counting every part."
+                    }
+                    Work::View => "Make the view return sooner: Dupin stops it after 2 seconds, as it does a search.",
                     Work::Action | Work::Event => "Do less in one call: Dupin stops actions and event handlers at their deadline.",
+                    Work::Filter => "Make the filter return sooner: it runs as the user types, and Dupin shows the source's own matches once it overruns.",
                 }),
             ),
         }
@@ -626,15 +896,37 @@ impl<'a> Sandbox<'a> {
             .ok_or(Failure::Js(rquickjs::Error::Unknown))
     }
 
-    fn export_function<'js>(&self, ctx: &Ctx<'js>, name: &str) -> Result<Function<'js>, Failure> {
-        let value: Value = self.namespace(ctx)?.get(name)?;
-        value.into_function().ok_or_else(|| {
-            Failure::Report(
-                Diagnostic::new("missing-search", format!("doesn't export a `{name}` function"))
-                    .file(&self.package.entry)
+    /// The entry module's exported function `name`.
+    fn function<'js>(&self, ctx: &Ctx<'js>, name: &str) -> Result<Function<'js>, Failure> {
+        let entry = &self.package.entry;
+        let namespace = self.namespace(ctx)?;
+        let function: Value = namespace.get(name)?;
+        function.into_function().ok_or_else(|| {
+            Failure::Report(match name {
+                "items" => Diagnostic::new("missing-items", "doesn't export an `items` function")
+                    .file(entry)
+                    .hint("Add `export function items() { return []; }` to the entry module."),
+                _ => Diagnostic::new("missing-search", "doesn't export a `search` function")
+                    .file(entry)
                     .hint("Add `export function search(query) { return []; }` to the entry module."),
-            )
+            })
         })
+    }
+
+    /// Calls `function` and waits for the promise it may return.
+    fn call<'js>(
+        &self,
+        ctx: &Ctx<'js>,
+        function: Function<'js>,
+        arguments: impl rquickjs::function::IntoArgs<'js>,
+    ) -> Result<Value<'js>, Failure> {
+        let answer: Value = function
+            .call(arguments)
+            .map_err(|error| self.thrown(ctx, error, Stage::Call))?;
+        match answer.as_promise() {
+            Some(promise) => self.settle(ctx, promise.clone(), Stage::Call),
+            None => Ok(answer),
+        }
     }
 
     /// `map[name]` from the entry module's exported `map`, such as `actions.save`.
@@ -652,7 +944,7 @@ impl<'a> Sandbox<'a> {
                 )),
             )
         };
-        if name.is_empty() || name.len() > MAX_HANDLER_BYTES {
+        if name.is_empty() || name.len() > row::MAX_HANDLER_BYTES {
             return Err(missing());
         }
         let handlers: Value = self.namespace(ctx)?.get(map)?;
@@ -673,7 +965,12 @@ impl<'a> Sandbox<'a> {
         let outbox = self.calls.borrow_mut().take_outbox();
         let mut bridge = self.bridge.borrow_mut();
         for (call, op, args) in outbox {
-            if let Err(diagnostic) = bridge.send(call, &op, &args) {
+            let sent = if matches!(self.work, Work::Filter) {
+                Err(Diagnostic::new("unavailable", "a filter can't use host services"))
+            } else {
+                bridge.send(call, &op, &args)
+            };
+            if let Err(diagnostic) = sent {
                 drop(bridge);
                 let reply = Reply {
                     call,
@@ -805,6 +1102,16 @@ impl<'a> Sandbox<'a> {
                 format!("search threw {}", thrown.message),
                 "Catch the error inside search, or return an item that explains the problem.",
             ),
+            (Stage::Call, Work::Items) => (
+                "items-threw",
+                format!("items threw {}", thrown.message),
+                "Catch the error inside items, or return an item that explains the problem.",
+            ),
+            (Stage::Call, Work::View) => (
+                "view-threw",
+                format!("the view threw {}", thrown.message),
+                "Catch the error inside the view, or return a detail that explains the problem.",
+            ),
             (Stage::Call, Work::Action) => (
                 "action-threw",
                 format!("the action threw {}", thrown.message),
@@ -814,6 +1121,11 @@ impl<'a> Sandbox<'a> {
                 "event-threw",
                 format!("the event handler threw {}", thrown.message),
                 "Catch the error inside the handler.",
+            ),
+            (Stage::Call, Work::Filter) => (
+                "filter-threw",
+                format!("the filter threw {}", thrown.message),
+                "Catch the error inside the filter; Dupin shows the source's own matches while it fails.",
             ),
         };
         let mut diagnostic = Diagnostic::new(code, message).hint(hint);

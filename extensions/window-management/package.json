@@ -1,0 +1,17 @@
+{
+	"name": "window-management",
+	"version": "0.1.0",
+	"private": true,
+	"dupin": {
+		"title": "Window Management",
+		"keyword": "window",
+		"main": "main.ts",
+		"defaultSearch": true,
+		"capabilities": {
+			"windows": [
+				"read",
+				"arrange"
+			]
+		}
+	}
+}

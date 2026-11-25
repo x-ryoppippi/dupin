@@ -33,14 +33,7 @@ impl Ui {
             crate::trace::edited(&self.query.text);
         }
         self.apply(effects, tx);
-        crate::latency::edit_applied(
-            self.session.command_id(),
-            !matches!(
-                self.session.results(),
-                dupin_core::session::Results::Searching { .. }
-            ),
-            self.session.origins(),
-        );
+        crate::latency::edit_applied(&self.session, &|origin, item| self.row_package(origin, item));
     }
 }
 

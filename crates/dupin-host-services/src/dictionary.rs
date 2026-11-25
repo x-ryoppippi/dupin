@@ -1,9 +1,9 @@
 //! The `dictionary` capability: looking a term up in the dictionaries this Mac has.
 //!
-//! Entries have the structure the native Dictionary feature lays out (headword,
-//! pronunciation, senses grouped by part of speech with their examples, and labeled sections
-//! such as Origin), so a guest renders them without parsing dictionary text. Lookups need no
-//! OS permission.
+//! Entries come as the dictionary wrote them, laid out as Markdown, and as structure
+//! (headword, pronunciation, senses grouped by part of speech with their examples, and labeled
+//! sections such as Origin), so a guest shows or renders them without parsing dictionary text.
+//! Lookups need no OS permission.
 
 use serde::Serialize;
 
@@ -19,6 +19,10 @@ pub const MAX_EXAMPLES: usize = 16;
 pub const MAX_SECTIONS: usize = 16;
 /// Each headword, definition, example and section text.
 pub const MAX_TEXT_BYTES: usize = 4096;
+/// The entry's own text, as much as an item copies.
+pub const MAX_DEFINITION_BYTES: usize = 16 * 1024;
+/// The laid-out entry, as much as a detail shows.
+pub const MAX_MARKDOWN_BYTES: usize = 32 * 1024;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +31,12 @@ pub struct Entry {
     /// The dictionary the entry came from, when the backend can tell.
     pub dictionary: Option<String>,
     pub pronunciation: Option<String>,
+    /// The definition as the dictionary wrote it.
+    pub text: String,
+    /// The entry laid out as the bundled Dictionary shows it, without the headword and
+    /// pronunciation: each part of speech under a `###` heading with its numbered senses,
+    /// examples in italics and each labeled part under a `##` heading.
+    pub markdown: String,
     pub groups: Vec<Group>,
     pub sections: Vec<Section>,
     /// Whether the entry was cut to fit the bounds.
@@ -137,6 +147,8 @@ impl Entry {
         let headword = cut.text(self.headword);
         let dictionary = self.dictionary.map(|value| cut.text(value));
         let pronunciation = self.pronunciation.map(|value| cut.text(value));
+        let text = cut.at(self.text, MAX_DEFINITION_BYTES);
+        let markdown = cut.at(self.markdown, MAX_MARKDOWN_BYTES);
         let groups = cut
             .list(self.groups, MAX_GROUPS)
             .into_iter()
@@ -158,6 +170,8 @@ impl Entry {
             headword,
             dictionary,
             pronunciation,
+            text,
+            markdown,
             groups,
             sections,
             truncated: cut.0,
@@ -170,8 +184,12 @@ struct Cut(bool);
 
 impl Cut {
     fn text(&mut self, value: String) -> String {
-        self.0 |= value.len() > MAX_TEXT_BYTES;
-        bounded(value, MAX_TEXT_BYTES)
+        self.at(value, MAX_TEXT_BYTES)
+    }
+
+    fn at(&mut self, value: String, max: usize) -> String {
+        self.0 |= value.len() > max;
+        bounded(value, max)
     }
 
     fn list<T>(&mut self, mut items: Vec<T>, max: usize) -> Vec<T> {

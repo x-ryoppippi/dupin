@@ -65,6 +65,7 @@ impl Fixture {
                 token: None,
                 ..GitHub::default()
             },
+            bundled: Default::default(),
         };
         Self {
             _root: root,
@@ -330,6 +331,125 @@ fn unsafe_or_unbuilt_packages_are_refused_before_anything_is_placed() {
 }
 
 #[test]
+fn a_pinned_commit_or_ref_must_be_a_branch_or_tag_of_the_repository() {
+    let fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    let first = fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "proposed"]);
+    fixture.write("main.js", "export function search() { steal(); }\n");
+    let proposed = fixture.commit("proposed by someone else");
+    git(&fixture.repo, &["update-ref", "refs/pull/1/head", &proposed]);
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    git(&fixture.repo, &["branch", "--quiet", "-D", "proposed"]);
+
+    for rev in [proposed.as_str(), "pull/1/head", "refs/pull/1/head"] {
+        let error = fixture.install(&format!("{}@{rev}", fixture.url())).unwrap_err();
+        assert!(
+            matches!(error.code, "unknown-ref" | "invalid-source"),
+            "{rev}: {error:?}"
+        );
+    }
+    assert!(!fixture.installed("word-count").exists());
+
+    let pinned = fixture.install(&format!("{}@{first}", fixture.url())).unwrap();
+    assert_eq!(pinned.entry.commit.as_deref(), Some(first.as_str()));
+}
+
+#[test]
+fn sync_fetches_the_whole_repository_only_once_the_installed_ref_moved_on() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = Fixture::new();
+    let logged = tempfile::tempdir().unwrap();
+    let log = logged.path().join("args");
+    let program = logged.path().join("git");
+    std::fs::write(
+        &program,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nexec git \"$@\"\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    fixture.installer.git.program = program;
+    let whole_fetches = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter(|line| line.contains("refs/heads/*"))
+            .count()
+    };
+
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    git(&fixture.repo, &["switch", "--quiet", "-c", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [];\n");
+    let dev = fixture.commit("on dev only");
+    git(&fixture.repo, &["switch", "--quiet", "main"]);
+    let installed = fixture.install(&format!("{}@dev", fixture.url())).unwrap();
+    assert_eq!(installed.entry.commit.as_deref(), Some(dev.as_str()));
+
+    let folder = fixture.installed("word-count");
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = fixture.installer.sync(&|_| None).unwrap();
+    assert!(synced[0].1.is_ok(), "{synced:?}");
+    assert_eq!(fixture.lock().packages["word-count"].rev.as_deref(), Some("dev"));
+    assert_eq!(whole_fetches(), 0);
+
+    git(&fixture.repo, &["switch", "--quiet", "dev"]);
+    fixture.write("lib/rows.js", "export const rows = [1];\n");
+    fixture.commit("dev moves on");
+    std::fs::remove_dir_all(&folder).unwrap();
+    let synced = fixture.installer.sync(&|_| None).unwrap();
+    let restored = synced[0].1.as_ref().unwrap();
+    assert_eq!(restored.entry.commit.as_deref(), Some(dev.as_str()));
+    assert_eq!(restored.entry.content_hash, installed.entry.content_hash);
+    assert_eq!(whole_fetches(), 1);
+}
+
+#[test]
+fn a_package_cannot_take_a_bundled_name() {
+    let mut fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.installer.bundled.insert("word-count".into());
+
+    let error = fixture.install(&fixture.url()).unwrap_err();
+    assert_eq!(error.code, "name-bundled");
+    assert!(!fixture.installed("word-count").exists());
+    assert!(fixture.lock().packages.is_empty());
+}
+
+#[test]
+fn a_package_installed_before_its_name_was_bundled_stays_off_after_the_upgrade() {
+    let mut fixture = Fixture::new();
+    fixture.package("word-count", "wc", "{}");
+    fixture.commit("one");
+    fixture.install(&fixture.url()).unwrap();
+    let folder = fixture.installed("word-count");
+    assert_eq!(
+        Integrity::new(fixture.installer.lock.clone(), Default::default()).check(&folder),
+        None
+    );
+
+    fixture.installer.bundled.insert("word-count".into());
+    let mut integrity = Integrity::new(fixture.installer.lock.clone(), fixture.installer.bundled.clone());
+    let problem = integrity
+        .check(&folder)
+        .expect("an installed package never replaces a bundled one");
+    assert!(
+        problem.contains("bundles an extension called `word-count`")
+            && problem.contains("dupin ext remove word-count"),
+        "{problem}"
+    );
+    assert_eq!(
+        integrity.check(&fixture.installer.extensions.join("hand-made")),
+        None,
+        "a folder extensions.lock doesn't list, such as an ejected copy, still may"
+    );
+}
+
+#[test]
 fn keywords_and_folders_belong_to_one_package() {
     let fixture = Fixture::new();
     fixture.package("word-count", "wc", "{}");
@@ -415,7 +535,7 @@ fn tampering_disables_the_package_until_sync_restores_it() {
     fixture.tag("v1.0.0");
     let change = fixture.install(&fixture.url()).unwrap();
     let folder = fixture.installed("word-count");
-    let mut integrity = Integrity::new(fixture.installer.lock.clone());
+    let mut integrity = Integrity::new(fixture.installer.lock.clone(), Default::default());
     assert_eq!(integrity.check(&folder), None);
     assert_eq!(
         integrity.check(&fixture.installer.extensions.join("hand-made")),

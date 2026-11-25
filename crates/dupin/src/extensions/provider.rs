@@ -1,15 +1,20 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::{Duration, Instant};
 
+use dupin_core::catalogue::Entry;
+use dupin_core::form::{FieldKind, Form};
+use dupin_core::kind::{Kinds, Producer, Subject};
 use dupin_core::{
-    Action, ExtensionRequest, Item, ItemAction, Page, Payload, Provider, ProviderError, Request, View,
+    Accessory, Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction,
+    Page, Payload, Provider, ProviderError, Request, View, snippets,
 };
-use dupin_extension_bridge::{Bridge, ConsentReason, ConsentRequest, PackageId, Trigger};
-use dupin_extension_host::{NoServices, Services};
-use dupin_js_runtime::RunError;
-use dupin_plugin_protocol as protocol;
+use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
+use dupin_js_runtime::row::{self, Row, RowEffect, RowImage};
+use dupin_js_runtime::view::{self, ViewAnswer};
+use dupin_js_runtime::{PageContext, RunError};
 
 use super::Extension;
+use super::catalogue::Convert;
 
 /// Shorter than the command's session deadline, so a slow guest ends with its own error row
 /// rather than the generic expiry.
@@ -17,32 +22,54 @@ pub const QUERY_DEADLINE: Duration = Duration::from_secs(2);
 /// An action the user chose may wait on the network or a program for longer than typing may.
 pub const ACTION_DEADLINE: Duration = Duration::from_secs(30);
 
+/// Ranks what `search` computed for the query above the catalogue's matches, in its own order,
+/// while every row still carries a score, so usage ranking applies to the catalogue's rows.
+const COMPUTED_SCORE: i32 = 1_000_000;
+
+/// Which search an extension's provider answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// Its own keyword: `search` and the catalogue.
+    Keyword,
+    /// The main search, from the catalogue alone, so no keystroke reaches the package.
+    DefaultSearch,
+}
+
 pub struct ExtensionProvider {
     extension: Arc<Extension>,
+    role: Role,
     bridge: Option<Bridge>,
 }
 
 impl ExtensionProvider {
-    /// A provider whose guest reaches no host service.
+    /// A provider for the keyword whose guest reaches no host service.
     #[cfg(test)]
     pub fn new(extension: Arc<Extension>) -> Self {
+        Self::with_role(extension, Role::Keyword)
+    }
+
+    /// A provider whose guest reaches no host service.
+    #[cfg(test)]
+    pub fn with_role(extension: Arc<Extension>, role: Role) -> Self {
         Self {
             extension,
+            role,
             bridge: None,
         }
     }
 
     /// A provider whose guest's requests go through `bridge`, as typing in the launcher.
-    pub fn with_bridge(extension: Arc<Extension>, bridge: Bridge) -> Self {
+    pub fn with_bridge(extension: Arc<Extension>, role: Role, bridge: Bridge) -> Self {
         Self {
             extension,
+            role,
             bridge: Some(bridge),
         }
     }
 
     fn problem(&self, message: String) -> Item {
         Item {
-            id: "extension-error".into(),
+            id: PROBLEM_ROW.into(),
             payload: Payload::default(),
             view: View::Text {
                 title: format!("{} failed", self.extension.name),
@@ -60,103 +87,585 @@ impl ExtensionProvider {
     }
 }
 
-fn item(extension: &str, row: protocol::PluginItem) -> Item {
-    let protocol::PluginItem {
+/// The rows `extension` answers `query` with under its keyword: what `search` computes for it,
+/// then the catalogue's matches, in batches by section. Both answer their host requests through
+/// `call`.
+pub fn answer(
+    extension: &Extension,
+    query: &str,
+    page: Option<&Page>,
+    limit: usize,
+    deadline: Instant,
+    is_cancelled: impl Fn() -> bool + 'static,
+    call: &Call,
+) -> Result<Vec<Batch>, RunError> {
+    if let Some(page) = page {
+        return page_answer(extension, page, query, deadline, is_cancelled, call);
+    }
+    let exports = extension.check(deadline)?;
+    let mut batches = Vec::new();
+    // Like any keyword command, `search` runs once there is something to search for, unless
+    // the package has something to show before that.
+    if exports.search && (extension.empty_query || !query.trim().is_empty()) {
+        let scored = exports.items;
+        let rows = extension.query(query, limit, deadline, is_cancelled, &call.services)?;
+        let rows = rows.into_iter().enumerate().map(|(index, row)| {
+            let mut shown = row_item(extension, row, false);
+            if scored {
+                shown.item.score = Some(COMPUTED_SCORE - index as i32);
+            }
+            shown
+        });
+        batches.extend(sectioned(rows));
+    }
+    if exports.items {
+        let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
+        batches.extend(extension.catalogue(query, left, deadline, call, Role::Keyword)?);
+        let left = limit.saturating_sub(batches.iter().map(|batch| batch.items.len()).sum());
+        let searches: Vec<Item> = extension
+            .web_searches(deadline, call, Role::Keyword)?
+            .iter()
+            .filter_map(|(item, search)| crate::web::item(item, search, query.trim(), false))
+            .take(left)
+            .collect();
+        if !searches.is_empty() {
+            batches.push(Batch::from(searches));
+        }
+    }
+    Ok(batches)
+}
+
+/// The catalogue's matches for the main search. The package never sees the query, but loading
+/// its catalogue reaches host services through `call` as it does under the keyword.
+pub fn default_answer(
+    extension: &Extension,
+    query: &str,
+    limit: usize,
+    deadline: Instant,
+    call: &Call,
+) -> Result<Vec<Batch>, RunError> {
+    if query.trim().is_empty() || !extension.check(deadline)?.items {
+        return Ok(Vec::new());
+    }
+    extension.catalogue(query, limit, deadline, call, Role::DefaultSearch)
+}
+
+/// What a page of the package's shows with `query` typed on it: what its view answered,
+/// with the state the page holds.
+fn page_answer(
+    extension: &Extension,
+    page: &Page,
+    query: &str,
+    deadline: Instant,
+    is_cancelled: impl Fn() -> bool + 'static,
+    call: &Call,
+) -> Result<Vec<Batch>, RunError> {
+    let context = PageContext {
+        query: query.to_owned(),
+        state: page.context.clone().unwrap_or_default(),
+    };
+    let answer = extension.view(&page.view, &context, deadline, is_cancelled, &call.services)?;
+    Ok(view_batches(extension, answer))
+}
+
+/// The row a detail view shows as, which carries the view's actions.
+pub(super) const DETAIL_ROW: &str = "detail";
+/// The row a form view shows as.
+pub(super) const FORM_ROW: &str = "form";
+
+/// A view's answer as the batches the session shows: a list's rows, a detail as one card that
+/// stays open, or a form as one row the page shows in its place.
+pub(super) fn view_batches(extension: &Extension, answer: ViewAnswer) -> Vec<Batch> {
+    match answer {
+        ViewAnswer::List { rows, empty_text } => {
+            let mut batches = sectioned(rows.into_iter().map(|row| row_item(extension, row, false)));
+            match batches.first_mut() {
+                Some(batch) => batch.empty_text = empty_text,
+                None => batches.push(Batch {
+                    empty_text,
+                    ..Batch::default()
+                }),
+            }
+            batches
+        }
+        ViewAnswer::Detail {
+            title,
+            detail,
+            actions,
+        } => {
+            let row = Row {
+                detail: Some(detail),
+                actions,
+                ..Row::new(DETAIL_ROW, title)
+            };
+            let shown = row_item(extension, row, false);
+            let mut batch = Batch::from(vec![shown.item]);
+            batch
+                .details
+                .extend(shown.detail.map(|detail| (DETAIL_ROW.to_owned(), detail)));
+            vec![batch]
+        }
+        ViewAnswer::Form(form) => {
+            let item = Item {
+                id: FORM_ROW.into(),
+                view: View::Text {
+                    title: form.title.clone(),
+                    subtitle: String::new(),
+                },
+                payload: Payload::default(),
+                record_usage: false,
+                icon: None,
+                matched: Vec::new(),
+                completion: None,
+                score: None,
+                primary: None,
+                alternate: None,
+                actions: Vec::new(),
+            };
+            vec![Batch {
+                form: Some(Arc::new(form_of(extension, form))),
+                ..Batch::from(vec![item])
+            }]
+        }
+    }
+}
+
+/// The form as the launcher draws it and holds its drafts.
+pub(super) fn form_of(extension: &Extension, form: view::Form) -> Form {
+    Form {
+        submit_title: form.submit_title.unwrap_or_else(|| "Submit".into()),
+        title: form.title,
+        extension: extension.id.clone(),
+        submit: form.submit,
+        fields: form
+            .fields
+            .into_iter()
+            .map(|field| {
+                let max_bytes = field.kind.max_text_bytes();
+                let kind = match field.kind {
+                    view::FieldKind::Text {
+                        required,
+                        default,
+                        placeholder,
+                    }
+                    | view::FieldKind::Textarea {
+                        required,
+                        default,
+                        placeholder,
+                    } => FieldKind::Text {
+                        multiline: max_bytes == Some(view::MAX_TEXTAREA_BYTES),
+                        required,
+                        default,
+                        placeholder,
+                        max_bytes: max_bytes.expect("a text field"),
+                    },
+                    view::FieldKind::Checkbox { default } => FieldKind::Checkbox { default },
+                    view::FieldKind::Select { options, default } => FieldKind::Select {
+                        default: options
+                            .iter()
+                            .position(|option| option.value == default)
+                            .unwrap_or_default(),
+                        options: options
+                            .into_iter()
+                            .map(|option| (option.value, option.title))
+                            .collect(),
+                    },
+                };
+                dupin_core::form::Field {
+                    id: field.id,
+                    title: field.title,
+                    kind,
+                }
+            })
+            .collect(),
+    }
+}
+
+/// Consecutive rows of one section in one batch, each with its detail shown while selected.
+fn sectioned(rows: impl Iterator<Item = Shown>) -> Vec<Batch> {
+    let mut batches: Vec<Batch> = Vec::new();
+    for shown in rows {
+        let Shown {
+            item,
+            detail,
+            section,
+            accessories,
+        } = shown;
+        let batch = match batches.last_mut() {
+            Some(batch) if batch.section == section => batch,
+            _ => {
+                batches.push(Batch {
+                    section,
+                    details_when_selected: true,
+                    ..Batch::default()
+                });
+                batches.last_mut().expect("just pushed")
+            }
+        };
+        if let Some(detail) = detail {
+            batch.details.insert(item.id.clone(), detail);
+        }
+        if !accessories.is_empty() {
+            batch.accessories.insert(item.id.clone(), accessories);
+        }
+        batch.items.push(item);
+    }
+    batches
+}
+
+impl Convert for Extension {
+    /// A catalogue row as the launcher holds it.
+    fn entry(&self, mut row: Row) -> Entry {
+        let aliases = std::mem::take(&mut row.aliases);
+        let keywords = std::mem::take(&mut row.keywords);
+        let web_search = row.web_search.take();
+        if web_search.is_some() {
+            self.note_keyword_only_web_searches();
+        }
+        let match_text = row.match_text.take();
+        let time = row.time.map(|ms| ms / 1000);
+        let file = row.file.clone().map(Into::into);
+        let file_actions = file_actions(&row);
+        let Shown {
+            item,
+            detail,
+            section,
+            accessories,
+        } = row_item(self, row, true);
+        Entry {
+            item,
+            aliases,
+            keywords,
+            section: section.map(Into::into),
+            accessories,
+            detail,
+            web_search,
+            match_text,
+            time,
+            file,
+            file_actions,
+        }
+    }
+
+    /// Carries the extension's ID, since usage history keys rows by ID across every command. A
+    /// built-in's port keeps the IDs the built-in gave its rows, so what was used carries over.
+    fn entry_id(&self, id: &str) -> String {
+        if crate::features::ported_command(&self.id).is_some() {
+            return id.to_owned();
+        }
+        format!("extension:{}/{id}", self.id)
+    }
+}
+
+/// The IDs [`row_item`] gives the row's actions that act on its file.
+fn file_actions(row: &Row) -> Vec<String> {
+    row.actions
+        .iter()
+        .enumerate()
+        .filter(|(_, action)| action.needs_file || matches!(action.effect, RowEffect::Reveal { .. }))
+        .map(|(index, _)| format!("action-{index}"))
+        .collect()
+}
+
+/// The app's kinds, which a guest's row resolves through once the app has handed them over.
+/// A row's `text` and `url` are text and URLs as any source's are, so they take the actions
+/// config.toml adds to those kinds as well, which only the user runs. Its `file` is a path the
+/// guest named, which Dupin hasn't checked is one the guest may act on, so it is no file-kind
+/// row: it shows the file's icon and nothing more.
+static KINDS: OnceLock<Kinds> = OnceLock::new();
+/// Outside the app, as `dupin ext run` and fixtures run a package, nothing is configured.
+static UNCONFIGURED: LazyLock<Kinds> = LazyLock::new(|| Kinds::native(Vec::new()));
+
+/// Resolve every guest row's text and URLs through `kinds` from now on.
+pub(crate) fn hand_over_kinds(kinds: Kinds) {
+    let _ = KINDS.set(kinds);
+}
+
+fn kinds() -> &'static Kinds {
+    KINDS.get().unwrap_or(&UNCONFIGURED)
+}
+
+/// The action `subject`'s kind runs first, under the ID and title the row gives it.
+fn kind_action(kinds: &Kinds, subject: &Subject, id: String, title: &str) -> ItemAction {
+    let mut action = kinds
+        .resolve(subject, title)
+        .actions
+        .into_iter()
+        .next()
+        .expect("the text and URL kinds offer an action for their own subjects");
+    action.id = id;
+    title.clone_into(&mut action.title);
+    action
+}
+
+/// A row as the launcher shows it, with what it shows beside the item.
+pub(super) struct Shown {
+    pub item: Item,
+    pub detail: Option<Arc<Detail>>,
+    pub section: Option<String>,
+    pub accessories: Vec<Accessory>,
+}
+
+pub(super) fn row_item(extension: &Extension, row: Row, catalogue: bool) -> Shown {
+    row_item_with(kinds(), extension, row, catalogue)
+}
+
+fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool) -> Shown {
+    let Row {
         id,
-        view,
+        title,
+        subtitle,
+        aliases: _,
+        keywords: _,
+        match_text: _,
+        time: _,
+        file,
+        icon,
+        image,
+        section,
+        detail,
         actions: offered,
+        web_search: _,
+        accessories,
+        answer,
     } = row;
+    let accessories = accessories
+        .into_iter()
+        .map(|accessory| match accessory {
+            row::Accessory::Text(text) => Accessory::Text(text),
+            row::Accessory::Tag(text) => Accessory::Tag(text),
+        })
+        .collect();
+    let detail = detail.map(|detail| {
+        let mut shown = Detail::new(title.clone(), &detail.markdown);
+        if let Some(image) = detail.image {
+            shown = shown.with_image(host_image(extension, image));
+        }
+        for entry in detail.metadata {
+            shown = shown.with_metadata(entry.label, entry.text);
+        }
+        Arc::new(shown)
+    });
+    // Dupin reads the clipboard unfiltered to fill a template, as the built-in it ports did, so
+    // only the package Dupin shipped for a built-in gets templates; any other copies as written.
+    let templates = crate::features::fills_templates(&extension.package);
+    // Text Dupin fills in only when it is chosen isn't the row's text until then.
     let payload = offered
         .iter()
         .find_map(|action| match &action.effect {
-            protocol::Effect::Copy { text } => Some(Payload::text(text.clone())),
+            RowEffect::Copy { text }
+                if !(templates && action.template) || !snippets::has_placeholders(text) =>
+            {
+                Some(Payload::text(text.clone()))
+            }
+            RowEffect::Copy { .. } => Some(Payload::default()),
             _ => None,
         })
         .unwrap_or_default();
-    let actions: Vec<_> = offered
+    let (mut copy, mut paste, mut open) = (false, false, false);
+    let mut alternate = None;
+    // The first text a row copies as written and the first URL it opens are what the kinds'
+    // configured actions take, once each.
+    let mut configured = Vec::new();
+    let mut configure = |subject: Subject, done: &mut bool| {
+        if !std::mem::replace(done, true) {
+            configured.extend(kinds.configured(&subject, Producer::Extension));
+        }
+    };
+    let (mut texts, mut urls) = (false, false);
+    let mut actions: Vec<ItemAction> = offered
         .into_iter()
-        .map(|action| {
-            let run = match action.effect {
-                protocol::Effect::Copy { text } => Action::Copy(text),
-                protocol::Effect::OpenUrl { url } => Action::OpenUrl(url),
-                protocol::Effect::Push { view, title, context } => {
-                    Action::Push(Page { view, title, context })
-                }
-                protocol::Effect::Run { action: name, data } => {
-                    let run = Action::Extension {
-                        extension: extension.to_owned(),
-                        request: ExtensionRequest::Run { action: name, data },
-                    };
-                    return ItemAction::new(&action.id, &action.title, run).keep_open();
+        .enumerate()
+        .map(|(index, action)| {
+            let name = |taken: &mut bool, first: &str| {
+                if std::mem::replace(taken, true) {
+                    format!("action-{index}")
+                } else {
+                    first.to_owned()
                 }
             };
-            ItemAction::new(&action.id, &action.title, run)
+            let template = templates && action.template;
+            match action.effect {
+                RowEffect::Copy { text } if template => ItemAction::new(
+                    &name(&mut copy, "copy"),
+                    &action.title,
+                    Action::Snippet { text, paste: false },
+                ),
+                RowEffect::Copy { text } => {
+                    configure(Subject::Text(text.clone()), &mut texts);
+                    kind_action(
+                        kinds,
+                        &Subject::Text(text),
+                        name(&mut copy, "copy"),
+                        &action.title,
+                    )
+                }
+                RowEffect::Paste { text } => ItemAction::new(
+                    &name(&mut paste, "paste"),
+                    &action.title,
+                    Action::Extension {
+                        extension: extension.id.clone(),
+                        request: ExtensionRequest::Paste { text, template },
+                    },
+                ),
+                RowEffect::OpenUrl { url } => {
+                    configure(Subject::Url(url.clone()), &mut urls);
+                    kind_action(kinds, &Subject::Url(url), name(&mut open, "open"), &action.title)
+                }
+                RowEffect::Reveal { path } => ItemAction::new(
+                    &format!("action-{index}"),
+                    &action.title,
+                    Action::Reveal(path.into()),
+                ),
+                RowEffect::Run { handler, data } => {
+                    let id = format!("action-{index}");
+                    if action.alternate {
+                        alternate = Some(id.clone());
+                    }
+                    let run = ItemAction::new(
+                        &id,
+                        &action.title,
+                        Action::Extension {
+                            extension: extension.id.clone(),
+                            request: ExtensionRequest::Run {
+                                action: handler,
+                                data,
+                            },
+                        },
+                    )
+                    .keep_open();
+                    match &action.confirm {
+                        Some(prompt) => run.confirm(prompt, &action.title),
+                        None => run,
+                    }
+                }
+                RowEffect::Push { view, state } => ItemAction::new(
+                    &format!("action-{index}"),
+                    &action.title,
+                    Action::Push(Page {
+                        view,
+                        title: action.title.clone(),
+                        context: state,
+                    }),
+                ),
+            }
         })
         .collect();
-    Item {
-        id,
+    actions.extend(configured);
+    let view = match answer {
+        Some(result) => View::Pair {
+            source: title,
+            result,
+        },
+        None => View::Text { title, subtitle },
+    };
+    let item = Item {
+        id: if catalogue { extension.entry_id(&id) } else { id },
         view,
         payload,
-        record_usage: false,
-        icon: None,
+        // A catalogue matched by words keeps its own order, as a history does, so picks never
+        // rank it.
+        record_usage: catalogue && extension.matching == dupin_core::catalogue::Matching::Fuzzy,
+        icon: image
+            .map(|image| Icon::Host(host_image(extension, image)))
+            .or_else(|| icon.map(|icon| Icon::Image(extension.root.join(icon))))
+            .or_else(|| file.map(|file| Icon::File(file.into()))),
         matched: Vec::new(),
         completion: None,
         score: None,
         primary: actions.first().map(|action| action.id.clone()),
-        alternate: None,
+        // Without an `alternate` of its own, ⌘Enter copies what Enter would paste, as it does
+        // for snippets.
+        alternate: alternate.or_else(|| {
+            actions
+                .first()
+                .filter(|action| action.id == "paste")
+                .and(copy.then(|| "copy".to_owned()))
+        }),
         actions,
+    };
+    Shown {
+        item,
+        detail,
+        section,
+        accessories,
+    }
+}
+
+/// The image a row of the extension names, which Dupin resolves in that package's storage.
+fn host_image(extension: &Extension, image: RowImage) -> HostImage {
+    HostImage {
+        extension: extension.id.clone(),
+        source: match image {
+            RowImage::Blob(handle) => HostImageSource::Blob(handle),
+            RowImage::File(file) => HostImageSource::File {
+                path: file.path.into(),
+                handle: file.handle,
+            },
+        },
     }
 }
 
 impl Provider for ExtensionProvider {
     fn search(&self, request: &Request, emit: &mut dyn FnMut(Vec<Item>)) -> Result<(), ProviderError> {
+        self.search_batches(request, &mut |batch| emit(batch.items))
+    }
+
+    fn search_batches(&self, request: &Request, emit: &mut dyn FnMut(Batch)) -> Result<(), ProviderError> {
         if request.limit == 0 {
             return Ok(());
         }
-        let cancellation = request.cancellation();
-        let access = self
-            .bridge
-            .as_ref()
-            .map(|bridge| (bridge, &self.extension.package));
-        let (services, generation): (Arc<dyn Services>, _) = match access {
-            Some((bridge, id)) => {
-                let call = bridge.call(id, Trigger::Query);
-                (call.services, call.generation)
-            }
-            None => (Arc::new(NoServices), None),
+        // A page belongs to its package alone, wherever its row was chosen, so it answers as the
+        // keyword does, questions and failures included.
+        let role = if request.page.is_some() {
+            Role::Keyword
+        } else {
+            self.role
         };
-        let answer = self.extension.query(
-            &request.query,
-            request.page.as_ref(),
-            request.limit,
-            Instant::now() + QUERY_DEADLINE,
-            move || cancellation.is_cancelled(),
-            &services,
-        );
-        if let Some((bridge, id)) = access
-            && !bridge.is_current(id, generation)
+        let deadline = Instant::now() + QUERY_DEADLINE;
+        let id = &self.extension.package;
+        // Loading a catalogue is a query too, from either search, with no activation.
+        let call = match &self.bridge {
+            Some(bridge) => bridge.call(id, Trigger::Query),
+            None => Call::none(),
+        };
+        let answer = match role {
+            Role::Keyword => {
+                let cancellation = request.cancellation();
+                answer(
+                    &self.extension,
+                    &request.query,
+                    request.page.as_ref(),
+                    request.limit,
+                    deadline,
+                    move || cancellation.is_cancelled(),
+                    &call,
+                )
+            }
+            Role::DefaultSearch => {
+                default_answer(&self.extension, &request.query, request.limit, deadline, &call)
+            }
+        };
+        if let Some(bridge) = &self.bridge
+            && !bridge.is_current(id, call.generation)
         {
-            emit(vec![self.problem(
-                "Its access changed while it ran, so its answer was dropped. Type again to retry.".into(),
-            )]);
+            // The main search shows everyone's results; a package whose access changed only
+            // drops its own.
+            if role == Role::Keyword {
+                emit(Batch::from(vec![self.problem(
+                    "Its access changed while it ran, so its answer was dropped. Type again to retry.".into(),
+                )]));
+            }
             return Ok(());
         }
-        let mut items: Vec<Item> = match answer {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|row| item(&self.extension.id, row))
-                .collect(),
-            Err(RunError::Cancelled) => return Ok(()),
-            Err(RunError::Failed(diagnostic)) => {
-                crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
-                // A located problem starts with its file name, which keeps its case.
-                let subtitle = if diagnostic.file.is_some() {
-                    diagnostic.to_string()
-                } else {
-                    capitalized(&diagnostic.message)
-                };
-                vec![self.problem(subtitle)]
-            }
+        if request.is_cancelled() || matches!(answer, Err(RunError::Cancelled)) {
+            return Ok(());
+        }
+        // Only the keyword asks for consent; the main search never shows another package's
+        // questions among its results.
+        let access = match role {
+            Role::Keyword => self.bridge.as_ref().map(|bridge| (bridge, id)),
+            Role::DefaultSearch => None,
         };
         if let Some((bridge, id)) = access {
             let mut asking: Vec<_> = bridge
@@ -167,9 +676,27 @@ impl Provider for ExtensionProvider {
             if bridge.asked_while_off(id) {
                 asking.insert(0, turn_on_row(&self.extension));
             }
-            items.splice(0..0, asking);
+            if !asking.is_empty() {
+                emit(Batch::from(asking));
+            }
         }
-        emit(items);
+        match answer {
+            Ok(batches) => batches.into_iter().for_each(emit),
+            Err(RunError::Cancelled) => {}
+            Err(RunError::Failed(diagnostic)) => {
+                crate::log::warn(&format!("extension {}: {diagnostic}", self.extension.id));
+                // The main search shows everyone's results; a failing extension only logs.
+                if role == Role::Keyword {
+                    // A located problem starts with its file name, which keeps its case.
+                    let subtitle = if diagnostic.file.is_some() {
+                        diagnostic.to_string()
+                    } else {
+                        capitalized(&diagnostic.message)
+                    };
+                    emit(Batch::from(vec![self.problem(subtitle)]));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -273,6 +800,13 @@ pub(crate) fn consent_row(extension: &Extension, request: &ConsentRequest) -> It
 
 const CONSENT_ROW: &str = "consent:";
 const TURN_ON_ROW: &str = "consent:turn-on";
+const PROBLEM_ROW: &str = "extension-error";
+
+/// Whether the row `id` is one Dupin shows in place of an extension's answer: the extension
+/// failed, or waits to be turned on or for consent.
+pub(crate) fn stands_in(id: &str) -> bool {
+    id == PROBLEM_ROW || id.starts_with(CONSENT_ROW)
+}
 
 /// Whether `row` asks the user something about `id` that the bridge no longer waits on, so the
 /// panel can drop it after an answer without running the guest again.
@@ -322,63 +856,116 @@ mod tests {
         rows
     }
 
-    fn row(value: serde_json::Value) -> Item {
-        item("word-count", serde_json::from_value(value).unwrap())
-    }
-
-    #[test]
-    fn guest_rows_become_items_whose_first_action_runs_on_enter() {
-        let count = row(serde_json::json!(
-            {"id": "count", "view": {"kind": "pair", "source": "two words", "result": "2 words"},
-             "actions": [
-                {"id": "copy", "title": "Copy", "effect": {"kind": "copy", "text": "2"}},
-                {"id": "web", "title": "Search", "effect": {"kind": "open_url", "url": "https://example.com/?q=2"}}
-             ]}
-        ));
-        assert_eq!(
-            count.view,
-            View::Pair {
-                source: "two words".into(),
-                result: "2 words".into()
-            }
-        );
-        assert_eq!(count.primary.as_deref(), Some("copy"));
-        assert_eq!(count.action("copy"), Some(&Action::Copy("2".into())));
-        assert_eq!(count.payload, Payload::text("2"));
-        assert_eq!(
-            count.action("web"),
-            Some(&Action::OpenUrl("https://example.com/?q=2".into()))
-        );
-        assert!(!count.record_usage);
-
-        let inert = row(serde_json::json!(
-            {"id": "detail", "view": {"kind": "detail", "title": "Details", "body": "Body"}, "actions": []}
-        ));
-        assert_eq!(inert.primary, None);
-        assert_eq!(inert.payload, Payload::default());
-    }
-
-    #[test]
-    fn a_page_never_reaches_the_guest() {
-        let provider =
-            ExtensionProvider::new(Arc::new(crate::extensions::tests::extension("Word Count", "wc")));
+    fn page(provider: &ExtensionProvider, view: &str, query: &str, state: serde_json::Value) -> Vec<Batch> {
         let page = Page {
-            view: "stats".into(),
-            title: "Statistics".into(),
-            context: None,
+            view: view.into(),
+            title: "Page".into(),
+            context: Some(state),
         };
-        let mut rows = Vec::new();
+        let mut batches = Vec::new();
         provider
-            .search(&Request::detached_page("", page, 10), &mut |batch| {
-                rows.extend(batch)
+            .search_batches(&Request::detached_page(query, page, 10), &mut |batch| {
+                batches.push(batch)
             })
             .unwrap();
+        batches
+    }
+
+    const VIEWS: &str = r#"
+        export const search = () => [{ title: 'Note', accessories: [{ text: '2 KB' }, { tag: 'New' }], answer: '4',
+            actions: [{ title: 'Read', push: { view: 'note', state: { id: 7 } } }] }];
+        export const views = {
+            note: (ctx) => ({ type: 'detail', title: `Note ${ctx.state.id}`, markdown: ctx.query,
+                actions: [{ title: 'Edit', push: { view: 'edit', state: ctx.state } }, { title: 'Delete', run: 'remove', confirm: 'Delete it?' }] }),
+            empty: (ctx) => ({ type: 'list', sections: [], emptyText: `No ${ctx.query}` }),
+            edit: () => ({ type: 'form', title: 'Edit', submit: 'save', fields: [
+                { type: 'text', id: 'title', title: 'Title', required: true },
+                { type: 'select', id: 'label', title: 'Label', default: 'blue',
+                  options: [{ value: 'red', title: 'Red' }, { value: 'blue', title: 'Blue' }] }] }),
+            broken: () => ({ type: 'grid' }),
+        };
+    "#;
+
+    #[test]
+    fn rows_open_their_package_views_and_show_accessories_and_answers() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(VIEWS);
+        let mut batches = Vec::new();
+        provider
+            .search_batches(&Request::detached("x", 10), &mut |batch| batches.push(batch))
+            .unwrap();
+        let row = &batches[0].items[0];
         assert_eq!(
-            rows[0].view,
-            View::Text {
-                title: "Word Count failed".into(),
-                subtitle: "Extensions can't open views yet".into(),
+            row.view,
+            View::Pair {
+                source: "Note".into(),
+                result: "4".into()
             }
+        );
+        assert_eq!(
+            batches[0].accessories[&row.id],
+            [Accessory::Text("2 KB".into()), Accessory::Tag("New".into())]
+        );
+        assert_eq!(
+            row.action("action-0"),
+            Some(&Action::Push(Page {
+                view: "note".into(),
+                title: "Read".into(),
+                context: Some(serde_json::json!({"id": 7})),
+            }))
+        );
+    }
+
+    #[test]
+    fn a_page_shows_its_view_with_the_state_it_holds() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(VIEWS);
+        let detail = page(&provider, "note", "typed", serde_json::json!({"id": 7}));
+        let row = &detail[0].items[0];
+        assert_eq!(row.id, DETAIL_ROW);
+        assert!(!detail[0].details_when_selected, "a detail page stays open");
+        assert_eq!(detail[0].details[DETAIL_ROW].title, "Note 7");
+        assert_eq!(row.primary.as_deref(), Some("action-0"));
+        assert!(row.item_action("action-1").unwrap().confirmation().is_some());
+
+        let empty = page(&provider, "empty", "tea", serde_json::Value::Null);
+        assert!(empty[0].items.is_empty());
+        assert_eq!(empty[0].empty_text.as_deref(), Some("No tea"));
+
+        let form = page(&provider, "edit", "", serde_json::Value::Null);
+        let form = form[0].form.as_ref().expect("a form");
+        assert_eq!(
+            (
+                form.extension.as_str(),
+                form.submit.as_str(),
+                form.submit_title.as_str()
+            ),
+            ("word-count", "save", "Submit")
+        );
+        assert!(form.fields[0].required());
+        assert!(matches!(
+            form.fields[1].kind,
+            FieldKind::Select { default: 1, .. }
+        ));
+
+        let broken = page(&provider, "broken", "", serde_json::Value::Null);
+        assert_eq!(broken[0].items[0].id, PROBLEM_ROW);
+        let missing = page(&provider, "absent", "", serde_json::Value::Null);
+        let View::Text { subtitle, .. } = &missing[0].items[0].view else {
+            panic!()
+        };
+        assert!(subtitle.contains("views.absent"), "{subtitle}");
+    }
+
+    #[test]
+    fn a_page_opened_from_the_main_search_answers_as_the_keyword_does() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, keyword) = javascript(VIEWS);
+        let main = ExtensionProvider::with_role(keyword.extension.clone(), Role::DefaultSearch);
+        let shown = page(&main, "broken", "", serde_json::Value::Null);
+        assert_eq!(
+            shown[0].items[0].id, PROBLEM_ROW,
+            "its failure shows on its own page"
         );
     }
 
@@ -417,6 +1004,100 @@ mod tests {
     }
 
     #[test]
+    fn configured_kind_actions_take_a_guest_rows_text_and_url_but_never_its_file() {
+        use dupin_js_runtime::row::RowAction;
+
+        let kinds = dupin_mac::kinds::native();
+        kinds.configure(
+            &dupin_core::Config::parse(
+                r#"
+[[advanced.kinds.text.actions]]
+title = "Translate"
+url = "https://translate.example/?q={text}"
+
+[[advanced.kinds.url.actions]]
+title = "Archive"
+script = "archive"
+
+[[advanced.kinds.file.actions]]
+title = "Open in Zed"
+script = "open-in-zed"
+
+[[advanced.kinds.app.actions]]
+title = "App"
+script = "app"
+"#,
+            )
+            .unwrap()
+            .advanced
+            .kinds,
+        );
+        let extension = super::super::tests::extension("Guest", "g");
+        let mut row: Row = serde_json::from_value(serde_json::json!({
+            "id": "configured-file-0",
+            "title": "configured-text-0",
+            "file": "/Applications/Safari.app"
+        }))
+        .unwrap();
+        row.actions = vec![
+            RowAction::new("Copy", RowEffect::Copy { text: "one".into() }),
+            RowAction::new("Copy again", RowEffect::Copy { text: "two".into() }),
+            RowAction::new(
+                "Open",
+                RowEffect::OpenUrl {
+                    url: "https://example.com/a b".into(),
+                },
+            ),
+            RowAction::new(
+                "Reveal",
+                RowEffect::Reveal {
+                    path: "/Applications/Safari.app".into(),
+                },
+            ),
+        ];
+        let item = row_item_with(&kinds, &extension, row, false).item;
+        let ids: Vec<_> = item.actions.iter().map(|action| action.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "copy",
+                "action-1",
+                "open",
+                "action-3",
+                "configured-text-0",
+                "configured-url-0"
+            ]
+        );
+        assert_eq!(item.primary.as_deref(), Some("copy"));
+        assert_eq!(
+            item.action("configured-text-0"),
+            Some(&Action::OpenUrl("https://translate.example/?q=one".into()))
+        );
+        assert_eq!(
+            item.action("configured-url-0"),
+            Some(&Action::ConfiguredScript {
+                script: "archive".into(),
+                argument: "https://example.com/a b".into()
+            })
+        );
+        for id in ["configured-file-0", "configured-app-0", "configured-text-1"] {
+            assert_eq!(
+                item.action(id),
+                None,
+                "a guest's file or app path, or second text, reaches no configured action"
+            );
+        }
+
+        let unconfigured = row_item_with(
+            &dupin_mac::kinds::native(),
+            &extension,
+            serde_json::from_value(serde_json::json!({"id": "plain", "title": "Plain"})).unwrap(),
+            false,
+        );
+        assert!(unconfigured.item.actions.is_empty());
+    }
+
+    #[test]
     fn javascript_urls_open_first_and_text_copies() {
         dupin_extension_host::skip_inside_a_sandbox!();
         let (_folder, provider) = javascript(
@@ -434,6 +1115,73 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_action_asks_for_its_extension_and_a_copy_is_its_payload() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let (_folder, provider) = javascript(
+            "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: '🍵' }, { title: 'Copy', copy: '🍵' }] }]; }",
+        );
+        let rows = search(&provider, "tea");
+        assert_eq!(rows[0].primary.as_deref(), Some("paste"));
+        assert_eq!(
+            rows[0].action("paste"),
+            Some(&Action::Extension {
+                extension: provider.extension.id.clone(),
+                request: ExtensionRequest::Paste {
+                    text: "🍵".into(),
+                    template: false,
+                },
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::text("🍵"));
+    }
+
+    #[test]
+    fn only_the_package_dupin_shipped_for_a_built_in_fills_templates() {
+        dupin_extension_host::skip_inside_a_sandbox!();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join(super::super::manifest::PACKAGE_JSON),
+            r#"{"name": "snippets", "version": "0.1.0", "dupin": {"title": "Snippets", "keyword": "snip"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            folder.path().join("main.js"),
+            "export function search() { return [{ title: 'Quote', actions: [{ title: 'Paste', paste: '> {clipboard}', template: true }, { title: 'Copy', copy: '> {clipboard}', template: true }] }]; }",
+        )
+        .unwrap();
+        let paste = |template| Action::Extension {
+            extension: "snippets".into(),
+            request: ExtensionRequest::Paste {
+                text: "> {clipboard}".into(),
+                template,
+            },
+        };
+
+        let copy = super::super::load_folder(folder.path()).unwrap();
+        assert_eq!(crate::features::paste_notice(&copy.package), None);
+        let rows = search(&ExtensionProvider::new(copy), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(false)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Copy("> {clipboard}".into()))
+        );
+        assert_eq!(rows[0].payload, Payload::text("> {clipboard}"));
+
+        let shipped = super::super::load_bundled(folder.path()).unwrap();
+        assert!(crate::features::paste_notice(&shipped.package).is_some());
+        let rows = search(&ExtensionProvider::new(shipped), "quote");
+        assert_eq!(rows[0].action("paste"), Some(&paste(true)));
+        assert_eq!(
+            rows[0].action("copy"),
+            Some(&Action::Snippet {
+                text: "> {clipboard}".into(),
+                paste: false,
+            })
+        );
+        assert_eq!(rows[0].payload, Payload::default());
+    }
+
+    #[test]
     fn javascript_failures_become_a_visible_error_row_with_the_location() {
         dupin_extension_host::skip_inside_a_sandbox!();
         for (source, subtitle) in [
@@ -443,7 +1191,7 @@ mod tests {
             ),
             (
                 "export function search() { return [{ title: 'x', url: 'file:///' }]; }",
-                "main.js: `items[0].url` must be an http or https URL with a host",
+                "main.js: `items[0].url` must be an http or https URL with a host, a dict:// URL, or a calendar event's `link`",
             ),
         ] {
             let (_folder, provider) = javascript(source);
@@ -484,7 +1232,7 @@ mod tests {
         assert_eq!(revision_on_disk, extension.revision);
         (
             folder,
-            ExtensionProvider::with_bridge(extension, bridge.clone()),
+            ExtensionProvider::with_bridge(extension, Role::Keyword, bridge.clone()),
             bridge,
         )
     }
@@ -494,7 +1242,7 @@ mod tests {
         dupin_extension_host::skip_inside_a_sandbox!();
         let (_folder, provider, bridge) = declaring(
             r#"{"storage": {"quotaBytes": 1024}}"#,
-            "import { storage } from 'dupin'; export async function search() { try { await storage.keys(); } catch (error) { return [{ title: error.code }]; } }",
+            "import { storage } from 'dupin'; export async function search() { try { await storage.usage(); } catch (error) { return [{ title: error.code }]; } }",
         );
         let rows = search(&provider, "x");
         assert_eq!(rows[0].id, "consent:turn-on");
@@ -558,9 +1306,9 @@ mod tests {
             "export const search = () => [{ title: 'Note', actions: [{ title: 'Save', run: 'save', data: { id: 7 } }] }];",
         );
         let rows = search(&provider, "x");
-        assert_eq!(rows[0].primary.as_deref(), Some("run-0"));
+        assert_eq!(rows[0].primary.as_deref(), Some("action-0"));
         assert_eq!(
-            rows[0].action("run-0"),
+            rows[0].action("action-0"),
             Some(&Action::Extension {
                 extension: "word-count".into(),
                 request: ExtensionRequest::Run {

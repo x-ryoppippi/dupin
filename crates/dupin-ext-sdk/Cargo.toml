@@ -10,7 +10,6 @@ license.workspace = true
 
 [dependencies]
 dupin-js-runtime = { path = "../dupin-js-runtime" }
-dupin-plugin-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

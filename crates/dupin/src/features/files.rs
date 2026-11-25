@@ -3,19 +3,39 @@ use std::sync::Arc;
 use dupin_core::{CommandError, CommandId, CommandSpec, Config, QueryEligibility};
 use dupin_mac::{FolderProvider, SpotlightProvider, Target};
 
-use super::Feature;
+use super::{Feature, Source};
 use crate::commands::{Configure, ConfiguredCommands, Providers, id, presentation};
 use crate::ui::Ui;
 
 pub const FILES: &str = "files.names";
 pub const CONTENTS: &str = "files.contents";
-const BROWSE: &str = "files.browse";
+pub(crate) const BROWSE: &str = "files.browse";
 pub(crate) const MAX_FILE_CANDIDATES: usize = 10_000;
 
 pub(super) const FEATURE: Feature = Feature {
     configure,
     start,
     reload,
+    sources: &[
+        Source {
+            name: "files",
+            command: FILES,
+            matcher: None,
+            rows: None,
+        },
+        Source {
+            name: "files.contents",
+            command: CONTENTS,
+            matcher: None,
+            rows: None,
+        },
+        Source {
+            name: "folder",
+            command: BROWSE,
+            matcher: Some(dupin_core::filter::FUZZY),
+            rows: Some(dupin_broker::RowKind::File),
+        },
+    ],
     ..Feature::EMPTY
 };
 
@@ -66,15 +86,16 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
 }
 
 fn start(providers: &mut Providers) {
-    providers.add(
-        FILES,
-        Arc::new(SpotlightProvider::with_demotions(
-            Target::Names,
-            providers.registration.file_demotions.clone(),
-        )),
+    let names = SpotlightProvider::with_demotions(
+        Target::Names,
+        providers.registration.file_demotions.clone(),
+        providers.kinds.clone(),
     );
-    providers.add(CONTENTS, Arc::new(SpotlightProvider::new(Target::Contents)));
-    providers.add(BROWSE, Arc::new(FolderProvider));
+    providers.add_source("files", Arc::new(names));
+    let contents = SpotlightProvider::new(Target::Contents, providers.kinds.clone());
+    providers.add_source("files.contents", Arc::new(contents));
+    let folder = FolderProvider::new(providers.rows("folder"));
+    providers.add_source("folder", Arc::new(folder));
 }
 
 fn reload(ui: &mut Ui, config: &Config, _: &mut ConfiguredCommands) -> bool {

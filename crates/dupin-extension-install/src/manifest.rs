@@ -11,7 +11,7 @@ use crate::Error;
 
 pub(crate) const PACKAGE_JSON: &str = "package.json";
 const DEFAULT_MAIN: &str = "main.js";
-const MAX_PACKAGE_JSON_BYTES: u64 = 64 * 1024;
+pub(crate) const MAX_PACKAGE_JSON_BYTES: u64 = 64 * 1024;
 
 /// What an installer needs to know about a package, read without running it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,10 +38,15 @@ pub(crate) fn read(folder: &Path) -> Result<Package, Error> {
     file.take(MAX_PACKAGE_JSON_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| Error::new("invalid-manifest", error.to_string()).file(PACKAGE_JSON))?;
+    parse_bytes(&bytes)
+}
+
+/// Checks the bytes of a package.json.
+pub(crate) fn parse_bytes(bytes: &[u8]) -> Result<Package, Error> {
     if bytes.len() as u64 > MAX_PACKAGE_JSON_BYTES {
         return Err(Error::new("invalid-manifest", "is larger than 64 KiB").file(PACKAGE_JSON));
     }
-    let Ok(Value::Object(package)) = serde_json::from_slice::<Value>(&bytes) else {
+    let Ok(Value::Object(package)) = serde_json::from_slice::<Value>(bytes) else {
         return Err(Error::new("invalid-manifest", "must be a JSON object")
             .file(PACKAGE_JSON)
             .hint("package.json must be valid JSON, without comments."));
@@ -64,11 +69,25 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
     let Value::Object(dupin) = dupin else {
         return Err(invalid("dupin", "must be an object"));
     };
-    if let Some(key) = dupin
-        .keys()
-        .find(|key| !matches!(key.as_str(), "title" | "keyword" | "main" | "capabilities"))
-    {
+    if let Some(key) = dupin.keys().find(|key| {
+        !matches!(
+            key.as_str(),
+            "title"
+                | "keyword"
+                | "main"
+                | "defaultSearch"
+                | "emptyQuery"
+                | "match"
+                | "preferences"
+                | "capabilities"
+        )
+    }) {
         return Err(invalid(&format!("dupin.{key}"), "is not a key Dupin reads"));
+    }
+    for key in ["defaultSearch", "emptyQuery"] {
+        if dupin.get(key).is_some_and(|value| !value.is_boolean()) {
+            return Err(invalid(&format!("dupin.{key}"), "must be true or false"));
+        }
     }
     let string = |object: &Map<String, Value>, key: &str, field: &str| match object.get(key) {
         Some(Value::String(value)) => Ok(Some(value.clone())),

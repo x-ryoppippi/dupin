@@ -1,0 +1,8 @@
+hotkey = ""
+auto_update = false
+input_source = "keep"
+web_searches = {}
+extensions = true
+
+[advanced.sources.apps]
+sorter = "kana/longest"

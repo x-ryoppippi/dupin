@@ -1,6 +1,6 @@
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use dupin_core::{Item, View};
+use dupin_core::{Accessory, Item, View};
 use rune::tok::type_;
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
@@ -22,15 +22,99 @@ pub(super) const LIST_PAD: f32 = 6.0;
 /// The height of a section's heading row.
 pub(super) const SECTION_H: f32 = 30.0;
 
+/// The height of a long list whose selected row shows its detail, as tall as a list of cards.
+const CARDS_MAX_H: f32 = 440.0;
+
+/// How the result list lays out its rows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layout {
+    /// One row per result, only those in view laid out.
+    Windowed,
+    /// One row per result, every one laid out: headings break the uniform row height that
+    /// windowing needs, and sectioned lists are short (a provider's own results).
+    Sectioned,
+    /// Cards and rows, every one laid out.
+    Cards,
+    /// A long list of rows, only those in view laid out, whose selected row shows its detail.
+    WindowedCard,
+}
+
+fn layout(s: &Ui, items: &[Item]) -> Layout {
+    let text_only = items.iter().all(|item| matches!(item.view, View::Text { .. }));
+    let cards = !text_only || (0..items.len()).any(|index| s.session.detail(index).is_some());
+    let headings = (0..items.len()).any(|index| s.session.section_start(index).is_some());
+    let long = items.len() > 2 * visible_rows(s.theme.row_height as f32);
+    match (cards, headings) {
+        (false, false) => Layout::Windowed,
+        (false, true) => Layout::Sectioned,
+        // Only the selected row of a long list of text rows shows a card: the rest stay rows,
+        // so the list can still lay out only what is in view, however many rows it holds.
+        (true, false) if text_only && long && only_selected_shows_detail(s, items) => Layout::WindowedCard,
+        (true, _) => Layout::Cards,
+    }
+}
+
+fn only_selected_shows_detail(s: &Ui, items: &[Item]) -> bool {
+    let selected = s.session.selected();
+    (0..items.len()).all(|index| index == selected || s.session.detail(index).is_none())
+}
+
+/// The rows to load icons for: those in view and a screenful either side, and the selected
+/// row's, while the list lays out only what is in view; otherwise, every row. `in_view` is the
+/// range the windowed list last reported.
+pub fn wanted_rows(s: &Ui, in_view: std::ops::Range<usize>) -> Vec<usize> {
+    let items = s.session.items();
+    if !matches!(layout(s, items), Layout::Windowed | Layout::WindowedCard) {
+        return (0..items.len()).collect();
+    }
+    let screen = visible_rows(s.theme.row_height as f32);
+    let around = |range: std::ops::Range<usize>| {
+        range.start.saturating_sub(screen)..range.end.saturating_add(screen).min(items.len())
+    };
+    let selected = s.session.selected();
+    let mut rows: Vec<usize> = around(in_view).chain(around(selected..selected + 1)).collect();
+    rows.sort_unstable();
+    rows.dedup();
+    rows
+}
+
 pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) -> El {
     // Rows without icons only keep the icon column when another row in the list has one, so
     // titles still line up.
     let gutter = items.iter().any(|item| item.icon.is_some());
-    let plain_rows = items
-        .iter()
-        .enumerate()
-        .all(|(index, item)| matches!(item.view, View::Text { .. }) && s.session.detail(index).is_none());
-    if !plain_rows {
+    let layout = layout(s, items);
+    if layout == Layout::WindowedCard {
+        let selected = s.session.selected();
+        let rows: Vec<El> = items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let on = index == selected;
+                let row = match s.session.detail(index) {
+                    Some(detail) => super::detail::detail_card(s, item, detail, index, on, t, accent),
+                    None => result_row(s, item, index, on, gutter, t, accent),
+                };
+                row.key(row_key(&s.session.layout_key(index)))
+            })
+            .collect();
+        let list = col()
+            .key("rows")
+            .w_full()
+            .growth(GrowthSpec::default())
+            .virtualize(s.theme.row_height as f32)
+            .on_visible_rows(Ui::rows_in_view)
+            .children(rows);
+        return col().key("results").w_full().py(LIST_PAD).child(
+            col()
+                .key("scroll")
+                .w_full()
+                .h(CARDS_MAX_H)
+                .scroll(ScrollSpec { stick_bottom: false })
+                .instant_changes()
+                .child(list),
+        );
+    }
+    if layout == Layout::Cards {
         let rows = items
             .iter()
             .enumerate()
@@ -74,11 +158,12 @@ pub(super) fn results(s: &Ui, items: &[Item], t: &ResolvedTheme, accent: Color) 
         .filter(|&index| s.session.section_start(index).is_some())
         .count();
     let list = col().key("rows").w_full().growth(GrowthSpec::default());
-    // Headings break the uniform row height that virtualisation needs; sectioned lists are
-    // short (a provider's own results), so they lay out every row instead.
-    let (height, list) = if headings == 0 {
+    let (height, list) = if layout == Layout::Windowed {
         let shown = items.len().min(visible_rows(row_height)) as f32;
-        (shown * row_height, list.virtualize(row_height))
+        (
+            shown * row_height,
+            list.virtualize(row_height).on_visible_rows(Ui::rows_in_view),
+        )
     } else {
         let full = items.len() as f32 * row_height + headings as f32 * SECTION_H;
         (full.min(visible_rows(row_height) as f32 * row_height), list)
@@ -280,7 +365,7 @@ fn result_row(
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let icon = item_icon(s, item.icon.as_deref(), gutter);
+    let icon = item_icon(s, item.icon.as_ref(), gutter);
     let id = s.session.result_key(index);
     text_row(
         t,
@@ -288,28 +373,42 @@ fn result_row(
         s.theme.row_height as f32,
         on,
         icon,
-        title(
-            item,
-            if on { t.selected_text } else { t.text },
-            if on { t.selected_text } else { accent },
-            t,
-        ),
-        subtitle,
+        RowLabels {
+            title: title(
+                item,
+                if on { t.selected_text } else { t.text },
+                if on { t.selected_text } else { accent },
+                t,
+            ),
+            subtitle,
+            accessories: s.session.accessories(index),
+        },
     )
     .on_press_tx(move |s: &mut Ui, tx| s.open(&id, tx))
 }
 
-/// The icon for `path`, an empty slot while it loads, or nothing when there is no icon and
-/// `gutter` is false.
-pub(super) fn item_icon(s: &Ui, path: Option<&std::path::Path>, gutter: bool) -> Option<El> {
-    if path.is_none() && !gutter {
+/// The icon, an empty slot while it loads, or nothing when there is no icon and `gutter` is
+/// false.
+pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool) -> Option<El> {
+    if icon.is_none() && !gutter {
         return None;
     }
-    let icon = el().size(ICON_SIZE, ICON_SIZE);
-    Some(match path.and_then(|path| s.icons.get(path)) {
-        Some(image) => icon.pixels(image.pixels()),
-        None => icon,
+    let slot = el().size(ICON_SIZE, ICON_SIZE);
+    Some(match (icon, icon.and_then(|icon| s.icons.get(icon))) {
+        // A picture keeps its own shape inside the icon's square, as Finder's thumbnails do.
+        (Some(dupin_core::Icon::Host(_)), Some(image)) => {
+            slot.radius(4.0).pixels_fit(image.pixels(), rune::SurfaceFit::Fit)
+        }
+        (_, Some(image)) => slot.pixels(image.pixels()),
+        (_, None) => slot,
     })
+}
+
+/// What a text row says: its title, its subtitle beneath and its accessories at its end.
+pub(super) struct RowLabels<'a> {
+    pub title: El,
+    pub subtitle: &'a str,
+    pub accessories: &'a [Accessory],
 }
 
 pub(super) fn text_row(
@@ -318,9 +417,33 @@ pub(super) fn text_row(
     height: f32,
     on: bool,
     icon: Option<El>,
-    title: El,
-    subtitle: &str,
+    labels: RowLabels<'_>,
 ) -> El {
+    let RowLabels {
+        title,
+        subtitle,
+        accessories,
+    } = labels;
+    let ink = if on { t.selected_text } else { t.text_secondary };
+    let accessories = accessories.iter().map(|accessory| match accessory {
+        Accessory::Text(text) => rune::text(text).font(t.font(type_::LABEL)).color(ink).truncate(),
+        Accessory::Tag(tag) => row()
+            .h(22.0)
+            .px(8.0)
+            .radius(6.0)
+            .center_y()
+            .fill(if on {
+                t.selected_text.alpha(0.2)
+            } else {
+                accent.alpha(0.16)
+            })
+            .child(
+                rune::text(tag)
+                    .font(t.font(type_::LABEL))
+                    .color(if on { t.selected_text } else { accent })
+                    .truncate(),
+            ),
+    });
     row().w_full().h(height).px(LIST_PAD).child(
         row()
             .w_full()
@@ -343,7 +466,8 @@ pub(super) fn text_row(
                         })
                         .truncate(),
                 ),
-            ),
+            )
+            .children(accessories),
     )
 }
 

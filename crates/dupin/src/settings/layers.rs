@@ -67,6 +67,8 @@ impl Layers {
                 config = merged.try_into().map_err(|_| "could not merge settings.toml")?;
             }
         }
+        crate::composition::check(&config.advanced)
+            .map_err(|problem| format!("config.toml is invalid: {problem}"))?;
         Ok(Effective {
             config,
             locked_keys,

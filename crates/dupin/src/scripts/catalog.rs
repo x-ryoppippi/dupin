@@ -202,7 +202,10 @@ mod tests {
             )
             .unwrap();
             assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].icon, Some(root.0.join("icon.svg")));
+            assert_eq!(
+                rows[0].icon,
+                Some(dupin_core::Icon::Image(root.0.join("icon.svg")))
+            );
             assert!(matches!(
                 rows[0].action("run"),
                 Some(dupin_core::Action::RunScript(_))
@@ -214,7 +217,10 @@ mod tests {
                 &mut |items| rows.extend(items),
             )
             .unwrap();
-            assert_eq!(rows[0].icon, Some(root.0.join("plain.sh")));
+            assert_eq!(
+                rows[0].icon,
+                Some(dupin_core::Icon::File(root.0.join("plain.sh")))
+            );
             assert!(!marker.exists());
         }
     }

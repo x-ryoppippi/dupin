@@ -1,0 +1,12 @@
+{
+	"name": "web-search",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Web searches: type an alias such as g, gh, maps or yt and a query in the main search.",
+	"dupin": {
+		"title": "Web Search",
+		"keyword": "web",
+		"main": "main.ts",
+		"defaultSearch": true
+	}
+}

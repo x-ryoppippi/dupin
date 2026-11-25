@@ -1,0 +1,172 @@
+//! Thumbnails of the images extensions keep, decoded and scaled down with ImageIO, which is let
+//! read only the types clipboard history reads. Call it off the panel's thread.
+
+use std::io::Read;
+use std::path::Path;
+
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFNumber, CFString, CFType};
+use objc2_image_io::{
+    kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth, kCGImageSourceCreateThumbnailFromImageAlways,
+    kCGImageSourceCreateThumbnailWithTransform, kCGImageSourceShouldCache,
+    kCGImageSourceThumbnailMaxPixelSize,
+};
+
+use crate::clipboard::image::{dimension, encode, source};
+
+/// The largest encoded image read, as large as a copied image clipboard history reads.
+const MAX_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+/// The most pixels an image may have: ImageIO may decode a PNG whole before scaling it down, so
+/// this bounds what one thumbnail holds in memory while it is made.
+const MAX_SOURCE_PIXELS: u64 = 64 * 1024 * 1024;
+
+/// The image in `data` as PNG, scaled down to fit `fit` pixels (width, height), keeping its aspect
+/// ratio and its orientation, never scaled up. `None` when it isn't a PNG, TIFF, HEIC, HEIF or
+/// JPEG image, or is larger than [`MAX_SOURCE_BYTES`] or [`MAX_SOURCE_PIXELS`].
+pub fn from_bytes(data: &[u8], fit: (u32, u32)) -> Option<Vec<u8>> {
+    if data.is_empty() || data.len() > MAX_SOURCE_BYTES || fit.0 == 0 || fit.1 == 0 {
+        return None;
+    }
+    let source = source(data)?;
+    // SAFETY: The options dictionaries map ImageIO's keys to CF values of the documented types;
+    // `source` has an image at index 0.
+    unsafe {
+        let properties = source.properties_at_index(0, None)?;
+        let properties: &CFDictionary<CFString, CFType> = properties.cast_unchecked();
+        let width = dimension(properties, kCGImagePropertyPixelWidth)?;
+        let height = dimension(properties, kCGImagePropertyPixelHeight)?;
+        if u64::from(width) * u64::from(height) > MAX_SOURCE_PIXELS {
+            return None;
+        }
+        let scale = (f64::from(fit.0) / f64::from(width))
+            .min(f64::from(fit.1) / f64::from(height))
+            .min(1.0);
+        let longest = (f64::from(width.max(height)) * scale).ceil().max(1.0) as i64;
+        let longest = CFNumber::new_i64(longest);
+        let options = CFDictionary::<CFString, CFType>::from_slices(
+            &[
+                kCGImageSourceCreateThumbnailFromImageAlways,
+                kCGImageSourceCreateThumbnailWithTransform,
+                kCGImageSourceThumbnailMaxPixelSize,
+                kCGImageSourceShouldCache,
+            ],
+            &[
+                CFBoolean::new(true).as_ref(),
+                CFBoolean::new(true).as_ref(),
+                longest.as_ref(),
+                CFBoolean::new(false).as_ref(),
+            ],
+        );
+        let image = source.thumbnail_at_index(0, Some(options.as_opaque()))?;
+        encode(&image, "public.png")
+    }
+}
+
+/// As [`from_bytes`], for the image in the regular file at `path`, which is read only when it
+/// is no larger than [`MAX_SOURCE_BYTES`].
+pub fn from_file(path: &Path, fit: (u32, u32)) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_SOURCE_BYTES as u64 {
+        return None;
+    }
+    let mut data = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_SOURCE_BYTES as u64 + 1)
+        .read_to_end(&mut data)
+        .ok()?;
+    from_bytes(&data, fit)
+}
+
+#[cfg(test)]
+mod tests {
+    use objc2_core_foundation::{CFData, CFRetained};
+    use objc2_core_graphics::{
+        CGBitmapInfo, CGColorRenderingIntent, CGColorSpace, CGDataProvider, CGImage, CGImageAlphaInfo,
+    };
+
+    use super::*;
+
+    fn encoded(width: usize, height: usize, kind: &str) -> Vec<u8> {
+        let bytes: Vec<u8> = (0..width * height)
+            .flat_map(|i| [(i % 251) as u8, (i % 13) as u8 * 19, 200, 255])
+            .collect();
+        let provider = CGDataProvider::with_cf_data(Some(&CFData::from_bytes(&bytes))).unwrap();
+        // SAFETY: The buffer holds `height` rows of `width` RGBX pixels; no decode array.
+        let image: CFRetained<CGImage> = unsafe {
+            CGImage::new(
+                width,
+                height,
+                8,
+                32,
+                width * 4,
+                CGColorSpace::new_device_rgb().as_deref(),
+                CGBitmapInfo(CGImageAlphaInfo::NoneSkipLast.0),
+                Some(&provider),
+                std::ptr::null(),
+                false,
+                CGColorRenderingIntent::RenderingIntentDefault,
+            )
+        }
+        .unwrap();
+        encode(&image, kind).unwrap()
+    }
+
+    /// The width and height a PNG's header states.
+    fn size(png: &[u8]) -> (u32, u32) {
+        let header = png.strip_prefix(b"\x89PNG\r\n\x1a\n").expect("a PNG");
+        let number = |at: usize| u32::from_be_bytes(header[at..at + 4].try_into().unwrap());
+        (number(8), number(12))
+    }
+
+    #[test]
+    fn images_shrink_to_fit_keeping_their_shape_and_never_grow() {
+        let wide = encoded(400, 100, "public.png");
+        assert_eq!(size(&from_bytes(&wide, (64, 64)).unwrap()), (64, 16));
+
+        let tall = encoded(100, 400, "public.tiff");
+        assert_eq!(size(&from_bytes(&tall, (600, 200)).unwrap()), (50, 200));
+
+        let small = encoded(20, 10, "public.jpeg");
+        assert_eq!(size(&from_bytes(&small, (64, 64)).unwrap()), (20, 10));
+    }
+
+    #[test]
+    fn only_the_image_types_clipboard_history_reads_reach_a_decoder() {
+        for kind in ["public.png", "public.tiff", "public.heic", "public.jpeg"] {
+            assert!(from_bytes(&encoded(8, 8, kind), (4, 4)).is_some(), "{kind}");
+        }
+        let others = [
+            "com.compuserve.gif",
+            "com.microsoft.bmp",
+            "com.adobe.photoshop-image",
+            "public.jpeg-2000",
+        ];
+        for kind in others {
+            assert!(from_bytes(&encoded(8, 8, kind), (4, 4)).is_none(), "{kind}");
+        }
+
+        let folder = tempfile::tempdir().unwrap();
+        let mislabelled = folder.path().join("a.png");
+        std::fs::write(&mislabelled, encoded(8, 8, "com.compuserve.gif")).unwrap();
+        assert!(from_file(&mislabelled, (4, 4)).is_none());
+    }
+
+    #[test]
+    fn what_isnt_an_image_or_is_too_large_has_no_thumbnail() {
+        assert!(from_bytes(b"not an image", (64, 64)).is_none());
+        assert!(from_bytes(&[], (64, 64)).is_none());
+        assert!(from_bytes(&encoded(4, 4, "public.png"), (0, 64)).is_none());
+
+        let folder = tempfile::tempdir().unwrap();
+        let png = folder.path().join("a.png");
+        std::fs::write(&png, encoded(8, 8, "public.png")).unwrap();
+        assert_eq!(from_file(&png, (4, 4)).map(|png| size(&png)), Some((4, 4)));
+        assert!(from_file(folder.path(), (4, 4)).is_none(), "a folder");
+        assert!(from_file(&folder.path().join("gone.png"), (4, 4)).is_none());
+        let huge = folder.path().join("huge.png");
+        std::fs::File::create(&huge)
+            .unwrap()
+            .set_len(MAX_SOURCE_BYTES as u64 + 1)
+            .unwrap();
+        assert!(from_file(&huge, (4, 4)).is_none());
+    }
+}

@@ -1,23 +1,36 @@
 //! `dupin ext test` and `dupin ext snap`: a package's fixtures replayed through the same
 //! extension host, bytecode and checks the launcher uses, with the fixture's clock, seed and time
-//! zone instead of the machine's. `snap` renders a step's panel with the launcher itself,
-//! headless, in a scratch home that holds only the package.
+//! zone instead of the machine's. A query step answers as the launcher's keyword does: what
+//! `search` computes, then the `items()` catalogue matched natively, held across steps and
+//! updated as actions and events invalidate it. `snap` renders a step's panel with the launcher
+//! itself, headless, in a scratch home that holds only the package, answering its host requests
+//! from the fixture's `replies` as `test` does.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dupin_ext_sdk::fixture::{self, Action, Difference, Fixture};
-use dupin_extension_bridge::Trigger;
-use dupin_extension_host::{ActionEffect, Host};
-use dupin_js_runtime::{Diagnostic, RunError};
-use dupin_plugin_protocol::{Effect, PluginItem};
+use dupin_core::catalogue::Entry;
+use dupin_ext_sdk::fixture::{self, Difference, Fixture};
+use dupin_extension_bridge::Call;
+use dupin_extension_host::Host;
+use dupin_js_runtime::row::{Row, RowEffect};
+use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
 
-use super::{ACTION_DEADLINE, Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
+use super::catalogue::{Asking, Cached, Convert};
+use super::{Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
 
+mod replay;
 mod services;
+
+use replay::replay;
+
+pub(super) use services::headless;
 
 /// Passes a fixture's clock and seed to the headless launcher `snap` starts.
 pub(super) const HEADLESS_ENVIRONMENT: &str = "DUPIN_HEADLESS_EXTENSION_ENVIRONMENT";
@@ -27,6 +40,8 @@ const RENDER_DEADLINE: Duration = Duration::from_secs(120);
 /// Realtime seconds before the first key, for the launcher to load the package.
 const FIRST_KEY: f64 = 1.0;
 const STEP_SECONDS: f64 = 0.75;
+/// Seconds between the characters of typed text.
+const TYPING: f64 = 0.035;
 
 /// What `dupin ext test` found: every fixture and step, as JSON and as text.
 pub struct Report {
@@ -110,141 +125,187 @@ struct StepResult {
     differences: Vec<Difference>,
     /// Why the step couldn't run, such as selecting a row the answer doesn't have.
     problem: Option<String>,
+    /// What a person presses for the step, which `snap` replays in the headless launcher.
+    presses: Vec<Press>,
 }
 
-/// Runs the steps in order through the fixture's host and broker bridge, stopping at the first
-/// that can't run.
-fn replay(
-    extension: &Extension,
-    name: &str,
-    fixture: &Fixture,
-    cancelled: &dyn Fn() -> bool,
-) -> Result<Replay, Diagnostic> {
-    let host = fixture_host(name, fixture)?;
-    let world = services::Fixture::open(extension, name, &fixture.replies, guest_environment(fixture).now)?;
-    let call = |trigger| world.bridge.call(&extension.package, trigger).services;
-    let mut rows: Vec<PluginItem> = Vec::new();
-    let mut selected: Option<usize> = None;
-    let mut steps = Vec::new();
-    for step in &fixture.steps {
-        let action = step.action();
-        let mut outcome = Map::new();
-        let mut problem = None;
-        match action {
-            Action::Query(query) => {
-                let answer = host.search(
-                    &extension.compiled,
-                    query,
-                    dupin_js_runtime::MAX_ROWS,
-                    Instant::now() + QUERY_DEADLINE,
-                    cancelled,
-                    &call(Trigger::Query),
-                );
-                rows = match answer {
-                    Ok(items) => items,
-                    Err(error) => {
-                        problem = record(error, &mut outcome);
-                        Vec::new()
-                    }
-                };
-                selected = (!rows.is_empty()).then_some(0);
-                outcome.insert("rows".into(), fixture::rows(&rows));
-                if let Some(index) = selected {
-                    outcome.insert("selected".into(), index.into());
-                }
-            }
-            Action::Select(index) if index < rows.len() => {
-                selected = Some(index);
-                outcome.insert("selected".into(), index.into());
-            }
-            Action::Select(index) => {
-                problem = Some(format!(
-                    "there is no row {index} to select; the answer has {} {}",
-                    rows.len(),
-                    if rows.len() == 1 { "row" } else { "rows" }
-                ));
-            }
-            Action::Activate(name) => {
-                let row = selected.and_then(|index| rows.get(index));
-                let chosen = row.and_then(|row| {
-                    row.actions
-                        .iter()
-                        .find(|action| action.title == name || action.id == name)
-                });
-                match chosen {
-                    Some(action) => {
-                        outcome.insert("effect".into(), Value::Object(fixture::effect(&action.effect)));
-                        if let Effect::Run { action, data } = &action.effect {
-                            let acted = host.action(
-                                &extension.compiled,
-                                action,
-                                data.as_ref().unwrap_or(&Value::Null),
-                                Instant::now() + ACTION_DEADLINE,
-                                cancelled,
-                                &call(Trigger::Activation),
-                            );
-                            match acted {
-                                Ok(Some(ActionEffect::Toast { text })) => {
-                                    outcome.insert("toasts".into(), json!([text]));
-                                }
-                                Ok(None) => {}
-                                Err(error) => problem = record(error, &mut outcome),
-                            }
-                        }
-                    }
-                    None => {
-                        let offered: Vec<&str> = row
-                            .map(|row| row.actions.iter().map(|action| action.title.as_str()).collect())
-                            .unwrap_or_default();
-                        problem = Some(if offered.is_empty() {
-                            format!("the selected row has no action {}", Value::from(name))
-                        } else {
-                            format!(
-                                "the selected row has no action {}; it offers {}",
-                                Value::from(name),
-                                offered.join(", ")
-                            )
-                        });
-                    }
-                }
-            }
-            Action::Event(event, data) => {
-                let handled = host.event(
-                    &extension.compiled,
-                    event,
-                    data,
-                    Instant::now() + ACTION_DEADLINE,
-                    cancelled,
-                    &call(Trigger::Background),
-                );
-                if let Err(error) = handled {
-                    problem = record(error, &mut outcome);
-                }
-            }
-        }
-        let effects = world.take_effects();
-        if !effects.clipboard.is_empty() {
-            outcome.insert("clipboard".into(), effects.clipboard.into());
-        }
-        if effects.storage_changed {
-            outcome.insert("storage".into(), world.storage());
-        }
-        let differences = match (&problem, &step.expect) {
-            (None, Some(expected)) => fixture::compare(expected, &outcome),
-            _ => Vec::new(),
-        };
-        let stop = problem.is_some();
-        steps.push(StepResult {
-            action: action.describe(),
-            outcome,
-            differences,
-            problem,
-        });
-        if stop {
-            break;
+/// A key or text a person gives the panel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Press {
+    Type(String),
+    Key { name: &'static str, cmd: bool },
+}
+
+impl Press {
+    fn key(name: &'static str) -> Self {
+        Self::Key { name, cmd: false }
+    }
+
+    fn command(name: &'static str) -> Self {
+        Self::command_key(name)
+    }
+
+    fn command_key(name: &'static str) -> Self {
+        Self::Key { name, cmd: true }
+    }
+}
+
+/// The catalogue a fixture holds across its steps, as the launcher holds one per package, with
+/// each row as the package sent it, so a step reports and activates catalogue rows as it does
+/// `search`'s.
+struct Held<'a> {
+    extension: &'a Extension,
+    cached: Cached,
+    rows: RefCell<HashMap<String, Row>>,
+}
+
+impl Convert for Held<'_> {
+    fn entry(&self, row: Row) -> Entry {
+        self.rows
+            .borrow_mut()
+            .insert(self.extension.entry_id(&row.id), row.clone());
+        self.extension.entry(row)
+    }
+
+    fn entry_id(&self, id: &str) -> String {
+        self.extension.entry_id(id)
+    }
+}
+
+impl<'a> Held<'a> {
+    fn new(extension: &'a Extension) -> Self {
+        Self {
+            extension,
+            cached: Cached::new(extension.matching),
+            rows: RefCell::default(),
         }
     }
-    Ok(Replay { steps })
+
+    /// The catalogue's matches for `query`, as the launcher ranks and groups them, then its web
+    /// searches filled with the query, asking the package through `host` with `preferences`
+    /// first when the catalogue is missing, invalidated, expired or asked for with others.
+    fn search(
+        &self,
+        host: &Host,
+        query: &str,
+        limit: usize,
+        preferences: &Arc<Preferences>,
+        call: &Call,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<Vec<Row>, RunError> {
+        let deadline = Instant::now() + QUERY_DEADLINE;
+        let mut fetch = self.extension.fetch(host, deadline, cancelled, &call.services);
+        let asking = Asking {
+            preferences,
+            generation: call.generation,
+            role: super::Role::Keyword,
+        };
+        let batches = self
+            .cached
+            .search(query, limit, asking, &mut fetch, self)
+            .map_err(|error| self.extension.located(error))?;
+        let searches = self
+            .cached
+            .web_searches(asking, &mut fetch, self)
+            .map_err(|error| self.extension.located(error))?;
+        let held = self.rows.borrow();
+        let mut rows: Vec<Row> = batches
+            .into_iter()
+            .flat_map(|batch| {
+                let section = batch.section;
+                batch
+                    .items
+                    .into_iter()
+                    .filter_map(|item| held.get(&item.id).cloned())
+                    .map(move |row| Row {
+                        // A ranked list drops the headings, as the launcher's does.
+                        section: section.clone(),
+                        ..row
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        rows.extend(
+            searches
+                .iter()
+                .filter_map(|(shown, search)| crate::web::item(shown, search, query.trim(), false))
+                .map(|item| item_row(self.extension, &item)),
+        );
+        rows.truncate(limit);
+        Ok(rows)
+    }
+}
+
+/// What the launcher's keyword answers `query` with: `search`'s rows for a query that isn't
+/// blank, or for any query when the manifest sets `emptyQuery`, then the catalogue's matches and
+/// web searches.
+fn query_rows(
+    host: &Host,
+    extension: &Extension,
+    held: &Held<'_>,
+    query: &str,
+    preferences: &Arc<Preferences>,
+    call: &Call,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<Row>, RunError> {
+    let exports = host.check(&extension.compiled, Instant::now() + QUERY_DEADLINE, cancelled)?;
+    let limit = dupin_js_runtime::MAX_ROWS;
+    let mut rows = Vec::new();
+    if exports.search && (extension.empty_query || !query.trim().is_empty()) {
+        rows = host.search(
+            &extension.compiled,
+            query,
+            limit,
+            Instant::now() + QUERY_DEADLINE,
+            cancelled,
+            &call.services,
+        )?;
+    }
+    if exports.items {
+        let left = limit.saturating_sub(rows.len());
+        rows.extend(held.search(host, query, left, preferences, call, cancelled)?);
+    }
+    Ok(rows)
+}
+
+/// A web search's row as the launcher fills it, as fixtures state rows: the package's own ID
+/// and what each action does.
+fn item_row(extension: &Extension, item: &dupin_core::Item) -> Row {
+    let prefix = format!("extension:{}/", extension.id);
+    let subtitle = match &item.view {
+        dupin_core::View::Text { subtitle, .. } => subtitle.clone(),
+        _ => String::new(),
+    };
+    let actions = item
+        .actions
+        .iter()
+        .filter_map(|action| {
+            let effect = match item.action(&action.id)? {
+                dupin_core::Action::Copy(text) => RowEffect::Copy { text: text.clone() },
+                dupin_core::Action::OpenUrl(url) => RowEffect::OpenUrl { url: url.clone() },
+                dupin_core::Action::Extension {
+                    request: dupin_core::ExtensionRequest::Run { action, data },
+                    ..
+                } => RowEffect::Run {
+                    handler: action.clone(),
+                    data: data.clone(),
+                },
+                _ => return None,
+            };
+            Some(dupin_js_runtime::row::RowAction::new(
+                action.title.clone(),
+                effect,
+            ))
+        })
+        .collect();
+    Row {
+        subtitle,
+        actions,
+        ..Row::new(
+            item.id.strip_prefix(&prefix).unwrap_or(&item.id),
+            item.display_title(),
+        )
+    }
 }
 
 /// A failed call is the step's outcome; a cancelled one means the step never ran.
@@ -408,9 +469,8 @@ pub fn snap(
         )
     })?;
     let render_failed = |message: String| {
-        Diagnostic::new("render-failed", message).hint(
-            "`snap` runs Dupin headless, which a debug build or one with Rune's `tooling` feature can do.",
-        )
+        Diagnostic::new("render-failed", message)
+            .hint("`snap` runs this Dupin headless; a build without Rune's `tooling` feature can't.")
     };
     let scratch = tempfile::Builder::new()
         .prefix("dupin-snap-")
@@ -434,8 +494,31 @@ pub fn snap(
         .map_err(|error| render_failed(format!("couldn't prepare the scratch home: {error}")))?;
     copy_package(folder, &extensions.join(&extension.id))?;
     let script = root.join("script.json");
-    std::fs::write(&script, script_for(&extension.keyword, &parsed, last).to_string())
+    // The replay works out what to press for each step: which action sits where in its row's
+    // panel, and where each field of a form is.
+    let replayed = replay(&extension, &name, &parsed, cancelled)?;
+    let steps = &replayed.steps[..last.min(replayed.steps.len())];
+    if let Some((index, problem)) = steps
+        .iter()
+        .enumerate()
+        .find_map(|(index, step)| Some((index, step.problem.as_ref()?)))
+    {
+        return Err(
+            Diagnostic::new("invalid-step", format!("step {} can't run: {problem}", index + 1))
+                .file(name)
+                .hint("Run `dupin ext test` on the package to see each step's outcome."),
+        );
+    }
+    std::fs::write(&script, script_for(steps).to_string())
         .map_err(|error| render_failed(format!("couldn't write the input script: {error}")))?;
+    let handed = root.join("fixture.json");
+    std::fs::write(&handed, fixture::to_json(&parsed))
+        .map_err(|error| render_failed(format!("couldn't write the fixture: {error}")))?;
+    let handed = serde_json::to_string(&services::HeadlessFixture {
+        fixture: handed,
+        package: extension.package.to_string(),
+    })
+    .unwrap_or_default();
 
     let exe =
         std::env::current_exe().map_err(|error| render_failed(format!("couldn't find Dupin: {error}")))?;
@@ -457,6 +540,7 @@ pub fn snap(
                 HEADLESS_ENVIRONMENT,
                 serde_json::to_string(&guest_environment(&parsed)).unwrap_or_default(),
             )
+            .env(services::HEADLESS_FIXTURE, &handed)
             .arg("--script")
             .arg(&script)
             .args([
@@ -522,35 +606,29 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
     Ok(())
 }
 
-/// The keys a person would press for steps `1..=last`: the keyword and each query, replacing
-/// the field, and arrow keys to each selected row.
-fn script_for(keyword: &str, fixture: &Fixture, last: usize) -> Value {
+/// The keys a person would press for `steps`, as the replay worked them out, a step's keys
+/// close together and each step given time to answer.
+fn script_for(steps: &[StepResult]) -> Value {
     let mut events = Vec::new();
     let mut at = FIRST_KEY;
-    let mut selected = 0;
-    for step in &fixture.steps[..last] {
-        match step.action() {
-            Action::Query(query) => {
-                if !events.is_empty() {
-                    events.push(json!({ "t": at, "type": "key", "name": "a", "cmd": true }));
-                    at += 0.05;
+    for step in steps {
+        if step.presses.is_empty() {
+            continue;
+        }
+        for press in &step.presses {
+            events.push(match press {
+                Press::Type(text) => {
+                    let typed = json!({ "t": at, "type": "type", "text": text, "every": TYPING });
+                    // The headless run types one character at a time.
+                    at += TYPING * text.chars().count() as f64;
+                    typed
                 }
-                events.push(json!({ "t": at, "type": "type", "text": format!("{keyword} {query}") }));
-                selected = 0;
-            }
-            Action::Select(index) => {
-                let (key, presses) = if index >= selected {
-                    ("Down", index - selected)
-                } else {
-                    ("Up", selected - index)
-                };
-                for _ in 0..presses {
-                    events.push(json!({ "t": at, "type": "key", "name": key }));
-                    at += 0.05;
+                Press::Key { name, cmd: true } => {
+                    json!({ "t": at, "type": "key", "name": name, "cmd": true })
                 }
-                selected = index;
-            }
-            Action::Activate(_) | Action::Event(..) => continue,
+                Press::Key { name, cmd: false } => json!({ "t": at, "type": "key", "name": name }),
+            });
+            at += 0.05;
         }
         at += STEP_SECONDS;
     }

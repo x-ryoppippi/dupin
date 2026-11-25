@@ -11,7 +11,7 @@ use headless-config.nu scenario-env
 # fits the M5 Max it was measured on; pass it elsewhere. Every scenario pays the same charge, so
 # `--share`, measured against the `empty` scenario, leaves it out.
 def main [
-    --bin: path = "target/debug/dupin" # A debug build, or a release build with Rune's `tooling` feature
+    --bin: path = "target/debug/dupin" # Any build of Dupin, or the app's Contents/MacOS/dupin
     --budget: filesize = 405MB # The highest peak footprint a scenario may reach
     --share: filesize = 45MB # How far a scenario's peak may rise above the empty panel's
 ]: nothing -> table {

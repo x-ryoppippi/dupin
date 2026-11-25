@@ -3,6 +3,8 @@ use std::fs;
 use serde_json::json;
 
 use super::*;
+use crate::extensions::ACTION_DEADLINE;
+use dupin_extension_bridge::Trigger;
 
 fn scaffolded(template: dupin_ext_sdk::Template) -> (tempfile::TempDir, PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -333,22 +335,28 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
     let (_root, package) = capable(
         json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["write", "watch"] }),
         "import { storage, clipboard } from 'dupin';\n\
+         async function find(key) {\n\
+         \tconst { records } = await storage.list();\n\
+         \treturn records.find((record) => key in record.data);\n\
+         }\n\
          export async function search() {\n\
-         \tconst count = (await storage.get('count')) ?? 0;\n\
-         \tconst last = (await storage.get('last')) ?? 'none';\n\
+         \tconst count = (await find('count'))?.data.count ?? 0;\n\
+         \tconst last = (await find('last'))?.data.last ?? 'none';\n\
          \treturn [{ title: `count ${count}, last ${last}`, actions: [{ title: 'Bump', run: 'bump', data: { by: 2 } }] }];\n\
          }\n\
          export const actions = {\n\
          \tasync bump(data) {\n\
-         \t\tconst count = ((await storage.get('count')) ?? 0) + data.by;\n\
-         \t\tawait storage.set('count', count);\n\
+         \t\tconst old = await find('count');\n\
+         \t\tconst count = (old?.data.count ?? 0) + data.by;\n\
+         \t\tif (old) await storage.delete(old.id);\n\
+         \t\tawait storage.put({ count });\n\
          \t\tawait clipboard.writeText(String(count));\n\
          \t\treturn { type: 'toast', text: `now ${count}` };\n\
          \t},\n\
          };\n\
          export const events = {\n\
          \tasync clipboard(event) {\n\
-         \t\tawait storage.set('last', event.text);\n\
+         \t\tawait storage.put({ last: event.text });\n\
          \t},\n\
          };\n",
     );
@@ -357,7 +365,7 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
         "actions.json",
         json!({
             "fixture": 1,
-            "replies": { "storage": { "count": 1 } },
+            "replies": { "storage": [{ "count": 1 }] },
             "steps": [
                 { "query": "x" },
                 { "activate": "Bump" },
@@ -376,14 +384,194 @@ fn actions_events_storage_and_the_clipboard_are_replayed_and_recorded() {
             "effect": { "run": { "action": "bump", "data": { "by": 2 } } },
             "toasts": ["now 3"],
             "clipboard": ["3"],
-            "storage": { "count": 3 },
+            "storage": [{ "count": 3 }],
         })
     );
     assert_eq!(
         steps[2]["outcome"],
-        json!({ "storage": { "count": 3, "last": "elsewhere" } })
+        json!({ "storage": [{ "count": 3 }, { "last": "elsewhere" }] })
     );
     assert_eq!(steps[3]["outcome"]["rows"][0]["title"], "count 3, last elsewhere");
+}
+
+/// Clipboard history as an `items()` catalogue: it lists what storage holds, and each copy the
+/// watch delivers is stored and appended to the catalogue Dupin holds. It is the recipe in
+/// docs/features/extensions.md, listing 3 records where that lists 200, so a fixture fills a
+/// page with a few.
+const CLIPS: &str = "import { storage, items as catalogue } from 'dupin';\n\
+     const row = (record) => ({ id: record.id, title: record.data.text, text: record.data.text });\n\
+     export async function items(ctx) {\n\
+     \tconst { records } = await storage.list({ limit: 3 });\n\
+     \tconst seen = records.findIndex((record) => record.id === ctx.cursor);\n\
+     \tconst cursor = records[0]?.id;\n\
+     \tif (ctx.reason !== 'invalidated' || seen < 0) {\n\
+     \t\treturn { items: [...records].reverse().map(row), cursor, ttl: 3600 };\n\
+     \t}\n\
+     \treturn { type: 'update', append: records.slice(0, seen).reverse().map(row), cursor, ttl: 3600 };\n\
+     }\n\
+     export const events = {\n\
+     \tasync clipboard(change) {\n\
+     \t\tif (change.type !== 'text') return;\n\
+     \t\tawait storage.put({ text: change.text });\n\
+     \t\tcatalogue.invalidate();\n\
+     \t},\n\
+     };\n";
+
+#[test]
+fn a_catalogue_is_replayed_with_its_host_requests_and_updates_and_matched_natively() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["watch"] }),
+        CLIPS,
+    );
+    write_fixture(
+        &package,
+        "history.json",
+        json!({
+            "fixture": 1,
+            "replies": { "storage": [{ "text": "first copy" }, { "text": "shopping list" }] },
+            "steps": [
+                { "query": "" },
+                { "event": "clipboard", "data": { "type": "text", "text": "second copy" } },
+                { "event": "clipboard", "data": { "type": "image" } },
+                { "query": "copy" },
+                { "select": 1 },
+                { "activate": "Copy" },
+            ],
+        }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    assert!(report.passed, "{}\n{:#}", report.text, report.json);
+    let replayed = steps(&report, 0);
+    let titles = |step: &Value| -> Vec<String> {
+        step["outcome"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(titles(&replayed[0]), ["first copy", "shopping list"]);
+    assert_eq!(replayed[1]["outcome"]["invalidated"], true);
+    assert_eq!(
+        replayed[1]["outcome"]["storage"],
+        json!([{ "text": "first copy" }, { "text": "shopping list" }, { "text": "second copy" }])
+    );
+    assert_eq!(
+        replayed[2]["outcome"],
+        json!({}),
+        "an ignored copy changes nothing"
+    );
+    // The launcher's matcher ranks the held rows, the appended one included; `search` isn't
+    // exported, so nothing but the catalogue answers.
+    assert_eq!(titles(&replayed[3]), ["first copy", "second copy"]);
+    assert_eq!(replayed[5]["outcome"]["effect"], json!({ "copy": "second copy" }));
+
+    write_fixture(
+        &package,
+        "history.json",
+        json!({
+            "fixture": 1,
+            "replies": { "consent": { "storage": "pending" } },
+            "steps": [{ "query": "" }],
+        }),
+    );
+    let refused = test(&package, false, &|| false).unwrap();
+    let error = &steps(&refused, 0)[0]["outcome"]["error"];
+    assert_eq!(error["code"], "items-threw", "{error}");
+    assert!(
+        error["message"].as_str().unwrap().contains("first"),
+        "a catalogue's request needs consent as a search's does: {error}"
+    );
+}
+
+#[test]
+fn clipboard_history_keeps_appending_once_storage_holds_more_than_it_lists() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["watch"] }),
+        CLIPS,
+    );
+    let copy = |text: &str| json!({ "event": "clipboard", "data": { "type": "text", "text": text } });
+    write_fixture(
+        &package,
+        "full.json",
+        json!({
+            "fixture": 1,
+            "replies": { "storage": [{ "text": "one" }, { "text": "two" }, { "text": "three" }] },
+            "steps": [{ "query": "" }, copy("four"), copy("five"), { "query": "" }],
+        }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    assert!(report.passed, "{}\n{:#}", report.text, report.json);
+    let replayed = steps(&report, 0);
+    let titles = |step: &Value| -> Vec<String> {
+        step["outcome"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["title"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(titles(&replayed[0]), ["one", "two", "three"]);
+    assert_eq!(
+        titles(&replayed[3]),
+        ["one", "two", "three", "four", "five"],
+        "copies past a full page still reach the catalogue"
+    );
+}
+
+#[test]
+fn a_snap_answers_host_requests_from_the_fixture_it_renders() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "storage": { "quotaBytes": 4096 }, "clipboard": ["watch"] }),
+        CLIPS,
+    );
+    let fixture = package.join("fixtures/history.json");
+    fs::write(
+        &fixture,
+        json!({
+            "fixture": 1,
+            "replies": { "storage": [{ "text": "from the fixture" }] },
+            "steps": [{ "query": "" }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let extension = load_folder(&package).unwrap();
+    let headless = services::Headless::open(services::HeadlessFixture {
+        fixture,
+        package: extension.package.to_string(),
+    })
+    .unwrap();
+    let bridge = dupin_extension_bridge::Bridge::new(
+        dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+        None,
+        headless.services(),
+    );
+    bridge.install(
+        &extension.package,
+        extension.revision.clone(),
+        extension.capabilities.clone(),
+    );
+    headless.grant(&bridge, &extension);
+    let call = bridge.call(&extension.package, Trigger::Query);
+    let batches = extension
+        .catalogue(
+            "",
+            10,
+            Instant::now() + QUERY_DEADLINE,
+            &call,
+            crate::extensions::Role::Keyword,
+        )
+        .unwrap();
+    let titles: Vec<&str> = batches
+        .iter()
+        .flat_map(|batch| &batch.items)
+        .map(|item| item.display_title())
+        .collect();
+    assert_eq!(titles, ["from the fixture"]);
 }
 
 #[test]
@@ -481,17 +669,27 @@ fn a_linked_fixture_is_refused() {
 
 #[test]
 fn snap_scripts_type_each_query_and_move_to_each_selection() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
+    fs::write(
+        package.join("main.js"),
+        "export function search(query) { return [1, 2, 3].map((n) => ({ title: `${query} ${n}`, text: query || '-' })); }",
+    )
+    .unwrap();
+    let extension = load_folder(&package).unwrap();
     let fixture = dupin_ext_sdk::fixture::parse(
         "fixtures/x.json",
         json!({
             "fixture": 1,
-            "steps": [{ "query": "a" }, { "select": 2 }, { "activate": "Copy" }, { "query": "b c" }, { "select": 1 }, { "select": 0 }],
+            "steps": [{ "query": "a" }, { "select": 2 }, { "activate": "Copy" }, { "query": "b c" }, { "select": 1 }, { "select": 0 }, { "query": "" }, { "query": "d" }],
         })
         .to_string()
         .as_bytes(),
     )
     .unwrap();
-    let events = script_for("kw", &fixture, 6)["events"].clone();
+    let replayed = replay(&extension, "fixtures/x.json", &fixture, &|| false).unwrap();
+    assert!(replayed.steps.iter().all(|step| step.problem.is_none()));
+    let events = script_for(&replayed.steps)["events"].clone();
     let kinds: Vec<String> = events
         .as_array()
         .unwrap()
@@ -506,13 +704,17 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
     assert_eq!(
         kinds,
         [
-            "type kw a",
+            "type greeter a",
             "Down",
             "Down",
             "cmd+a",
-            "type kw b c",
+            "Backspace",
+            "type b c",
             "Down",
             "Up",
+            "cmd+a",
+            "Backspace",
+            "type d",
             "mark"
         ]
     );
@@ -524,7 +726,188 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         .collect();
     assert!(times.windows(2).all(|pair| pair[0] < pair[1]), "{times:?}");
     assert_eq!(
-        script_for("kw", &fixture, 1)["events"].as_array().unwrap().len(),
+        script_for(&replayed.steps[..1])["events"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
+}
+
+#[test]
+fn a_query_matches_the_items_catalogue_as_the_launcher_does() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(
+        json!({ "clipboard": ["paste"] }),
+        "export function items(ctx) {\n\
+         \tconst rows = [\n\
+         \t\t{ id: 'tea', title: 'Green tea', keywords: ['matcha'], actions: [{ title: 'Paste', paste: 'tea' }] },\n\
+         \t\t{ id: 'coffee', title: 'Coffee', keywords: ['espresso'] },\n\
+         \t];\n\
+         \treturn ctx.reason === 'more'\n\
+         \t\t? { type: 'update', append: [{ id: 'cocoa', title: 'Cocoa' }] }\n\
+         \t\t: { items: rows, cursor: '2', more: true };\n\
+         }\n",
+    );
+    write_fixture(
+        &package,
+        "items.json",
+        json!({ "fixture": 1, "steps": [
+            { "query": "" },
+            { "query": "matcha" },
+            { "activate": "paste" },
+            { "query": "coco" },
+        ] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    let steps = steps(&report, 0);
+    let titles = |step: usize| -> Vec<&str> {
+        steps[step]["outcome"]["rows"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{}", report.text))
+            .iter()
+            .map(|row| row["title"].as_str().unwrap())
+            .collect()
+    };
+    assert_eq!(titles(0), ["Green tea", "Coffee", "Cocoa"]);
+    assert_eq!(titles(1), ["Green tea"]);
+    assert_eq!(steps[1]["outcome"]["rows"][0]["keywords"], json!(["matcha"]));
+    assert_eq!(steps[2]["outcome"], json!({ "effect": { "paste": "tea" } }));
+    assert_eq!(titles(3), ["Cocoa"]);
+}
+
+#[test]
+fn a_paste_the_package_may_not_make_copies_instead_and_says_why() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let main = "export function search() { return [{ title: 'Tea', actions: [{ title: 'Paste', paste: 'tea' }] }]; }\n";
+    for (capabilities, consent, code) in [
+        (json!({}), json!({}), "undeclared"),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "deny" }),
+            "revoked",
+        ),
+        (
+            json!({ "clipboard": ["paste"] }),
+            json!({ "clipboard:paste": "pending" }),
+            "needs-consent",
+        ),
+    ] {
+        let (_root, package) = capable(capabilities, main);
+        write_fixture(
+            &package,
+            "paste.json",
+            json!({ "fixture": 1, "replies": { "consent": consent }, "steps": [{ "query": "tea" }, { "activate": "paste" }] }),
+        );
+        let report = test(&package, false, &|| false).unwrap();
+        let outcome = &steps(&report, 0)[1]["outcome"];
+        assert_eq!(outcome["effect"], json!({ "copy": "tea" }), "{}", report.text);
+        assert_eq!(outcome["error"]["code"], code, "{}", report.text);
+    }
+}
+
+#[test]
+fn the_notes_example_passes_its_fixtures() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/notes-js");
+    let report = test(&package, false, &|| false).unwrap();
+    assert!(report.passed, "{}", report.text);
+}
+
+/// A package whose views and actions misbehave in every way a page can.
+const ADVERSARY: &str = r#"
+export const search = () => [{ title: 'Start', actions: [
+    { title: 'Deeper', run: 'deeper' },
+    { title: 'Bloat', run: 'bloat' },
+    { title: 'Errors', run: 'errors' },
+    { title: 'Shape', run: 'shape' },
+] }];
+export const views = {
+    page: (ctx) => [{ title: `Page ${ctx.state.depth}`, actions: [
+        { title: 'Deeper', run: 'deeper' },
+        { title: 'Bloat', run: 'bloat' },
+        { title: 'Replace', run: 'replace' },
+    ] }],
+};
+export const actions = {
+    deeper: (data, ctx) => ({ type: 'push', view: 'page', state: { depth: (ctx.state?.depth ?? 0) + 1 } }),
+    bloat: () => ({ type: 'replaceState', state: 'x'.repeat(17 * 1024) }),
+    errors: () => ({ type: 'fieldErrors', errors: { title: 'No' } }),
+    shape: () => ({ type: 'push', view: 'page', state: { depth: 1 }, extra: true }),
+    replace: (data, ctx) => ({ type: 'replaceState', state: { depth: ctx.state.depth * 10 }, toast: 'Replaced' }),
+};
+"#;
+
+#[test]
+fn deep_pushes_oversized_state_and_malformed_effects_are_refused() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(json!({}), ADVERSARY);
+    let mut steps_json = vec![json!({ "query": "x" })];
+    steps_json.extend((0..9).map(|_| json!({ "activate": "Deeper" })));
+    steps_json.extend([
+        json!({ "activate": "Replace" }),
+        json!({ "activate": "Bloat" }),
+        json!({ "back": true }),
+    ]);
+    write_fixture(
+        &package,
+        "deep.json",
+        json!({ "fixture": 1, "steps": steps_json }),
+    );
+    write_fixture(
+        &package,
+        "root.json",
+        json!({ "fixture": 1, "steps": [
+            { "query": "x" },
+            { "activate": "Errors" },
+            { "activate": "Bloat" },
+            { "activate": "Shape" },
+            { "fill": { "title": "x" } },
+        ] }),
+    );
+    write_fixture(
+        &package,
+        "back.json",
+        json!({ "fixture": 1, "steps": [{ "query": "x" }, { "back": true }] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    let names: Vec<&str> = report.json["fixtures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|fixture| fixture["file"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["fixtures/back.json", "fixtures/deep.json", "fixtures/root.json"]
+    );
+
+    let back = steps(&report, 0);
+    assert_eq!(back[1]["problem"], "there is no page to close");
+
+    let deep = steps(&report, 1);
+    for (depth, step) in deep.iter().enumerate().take(9).skip(1) {
+        assert_eq!(step["outcome"]["view"]["depth"], depth, "{}", report.text);
+    }
+    assert_eq!(
+        deep[9]["outcome"]["error"]["code"], "too-deep",
+        "a ninth view is refused: {}",
+        report.text
+    );
+    assert_eq!(deep[10]["outcome"]["view"]["state"], json!({ "depth": 80 }));
+    assert_eq!(deep[10]["outcome"]["toasts"], json!(["Replaced"]));
+    assert_eq!(deep[11]["outcome"]["error"]["code"], "invalid-effect");
+    assert_eq!(
+        deep[11]["outcome"]["error"]["field"], "state",
+        "an oversized state never reaches the page"
+    );
+    assert_eq!(deep[12]["outcome"]["view"]["depth"], 7);
+    assert_eq!(deep[12]["outcome"]["view"]["state"], json!({ "depth": 7 }));
+
+    let root = steps(&report, 2);
+    assert_eq!(root[1]["outcome"]["error"]["code"], "invalid-effect");
+    assert!(root[1]["outcome"]["view"].is_null(), "no form showed the errors");
+    assert_eq!(root[2]["outcome"]["error"]["field"], "state");
+    assert_eq!(root[3]["outcome"]["error"]["field"], "extra");
+    assert_eq!(root[4]["problem"], "there is no form on screen to fill in");
 }

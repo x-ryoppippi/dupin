@@ -93,6 +93,20 @@ source-edit builds against the original builder. `dupin.baseline` exposes that
 builder. The non-flake `default.nix` build uses it too, with crane at the rev
 `flake.lock` pins.
 
+### Rune updates
+
+Rune has no releases, so `Cargo.toml` pins every Rune crate, and every crate Rune's own workspace patches, at one commit of Rune's default branch, `dev`. An update flows through three steps:
+
+1. Renovate proposes the newest `dev` commit once a week (Mondays, 00:00–06:00 UTC) as one pull request that rewrites every rev. A Git commit has no release timestamp, so the three-day release age can't apply; instead the pull request never automerges, and a person merges it.
+2. On that pull request, the `autofix.ci` workflow runs `scripts/update-rune.nu`. It relocks Rune's packages in `Cargo.lock`, along with any crate `[patch.crates-io]` takes from Rune that the lock still takes from elsewhere, and recomputes Rune's source hash in `nix/cargo-vendor.nix`, and autofix.ci commits the result. If a patch still doesn't apply after that, because Dupin's own requirement rules out the version Rune patches, the script fails rather than leave the crate unpatched. When the lock and the hash already match the pinned rev, the script changes nothing and reaches no network, so the workflow runs it on every pull request.
+3. CI builds and tests the result like any other change.
+
+Before merging, read Rune's changelog (`changelog/unreleased/` in its repository) between the two revs. Renovate can't add a crate Rune's workspace newly patches, and an item in [Working around Rune](./rune-workarounds.md) may no longer be needed. To bump Rune by hand, change every rev and run the script; the dev shell doesn't evaluate until the hash matches, so take its tools from nixpkgs:
+
+```sh
+nix shell --inputs-from . nixpkgs#nushell nixpkgs#cargo --command nu scripts/update-rune.nu
+```
+
 ## Build caching
 
 The [crate boundary experiment](../experiments/crate-boundaries/README.md)
@@ -140,11 +154,13 @@ RUSTC_WRAPPER="$PWD/target/sccache/bin/sccache" cargo build
 
 ## Formatting
 
-`nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
+`nix fmt` runs treefmt with nixfmt, deadnix and statix for Nix, rustfmt, oxfmt (configured in `.oxfmtrc.json`) for JSON, YAML, TOML and Markdown, nufmt for Nushell, typos (`typos.toml`; it only reports, since a typo's fix needs a person), and actionlint and zizmor for the workflows. `nix flake check` fails on anything left unformatted.
+
+On every pull request, the `autofix.ci` workflow runs `nix fmt` after the [Rune step](#rune-updates), and autofix.ci commits both fixes in one commit, so unformatted files come back formatted instead of failing CI. The flake targets only aarch64-darwin, but it exports the same treefmt configuration as `formatter.x86_64-linux`, so the workflow runs on a cheap Linux runner. The `treefmt` check in CI still fails where autofix.ci can't commit, such as a pull request from a fork that hasn't installed the app, and on what the formatters report but can't fix, such as a typo, an actionlint error or a zizmor finding. The workflow also runs on every push to `main`, without formatting or committing anything, because Blacksmith saves the job's Nix store only from `main`; without it, every pull request would download the formatter, Nushell and cargo again.
 
 ## Headless renders
 
-Debug builds take Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
+Every build of Dupin, the released app included, takes Rune's headless flags (`--snap`, `--tree`, `--script`, `--realtime`, ...; see Rune's `crates/rune/README.md`, "Agent tooling"). `scripts/snap.nu` renders every scenario in `scripts/headless/` to `target/screenshots/`:
 
 ```sh
 cargo build -p dupin
@@ -152,7 +168,7 @@ nu scripts/snap.nu
 nu scripts/snap.nu --only calendar --theme dark # one scenario, in one appearance
 ```
 
-`--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead. Headless renders draw the panel's plain card where a window shows Liquid Glass.
+`--theme light` or `--theme dark` fixes the appearance and adds it to each file name; without it the renders follow the Mac's. The renders show real results from the machine, file paths included, so they stay out of the repository. Calendar and dictionary scenarios use fixed fixtures instead, and clipboard scenarios the history in `scripts/fixtures/clipboard.json`, or a scenario's own in `<name>.clipboard/history.json`, whose `image` entries name PNG files beside it. Headless renders draw the panel's plain card where a window shows Liquid Glass.
 
 ## Native E2E evidence
 
@@ -222,16 +238,16 @@ nu scripts/footprint.nu
 `scripts/latency.nu` measures how long Dupin takes from a typed key to the first frame that shows every provider's results for the new query. It drives a headless `--realtime` run with Rune's scripted keys, which reach the query field and the session as a window's keys do, against the same fixtures as the headless renders (calendar, dictionary, clipboard), so it needs no permissions. `DUPIN_LATENCY=<file>` makes a headless run write one JSON line per edit of the query; a window never writes it.
 
 ```sh
-cargo build --profile latency -p dupin --features tooling   # target/latency/dupin
+cargo build --profile latency -p dupin                       # target/latency/dupin
 nu scripts/latency.nu run                                    # target/latency/results.json
 nu scripts/latency.nu run --only calendar --runs 1           # a quick look at one feature
 nu scripts/latency.nu compare main.json pr.json              # fails on a p95 regression
 nu scripts/latency.nu parity target/latency/results.json     # extensions against native
 ```
 
-`nix build .#dupin-latency` builds the same binary. The `latency` profile is the release profile with thin LTO and Rune's headless tooling, so numbers are only comparable between builds of that profile on one machine.
+`nix build .#dupin-latency` builds the same binary, inside a `Dupin.app` whose Resources hold the repository's `extensions/`, so it runs the bundled extensions as the released app does; outside one, a binary built away from the source tree finds none. The `latency` profile is the release profile with thin LTO and symbols kept, so numbers are only comparable between builds of that profile on one machine.
 
-Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it; the run fails when a measured keypress does not search that provider, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
+Each scenario in `scripts/latency/scenarios.toml` names a feature, an unmeasured prefix (`cal `) and the characters measured one keypress at a time (`rev`). Each implementation of a feature names the provider that answers it and, for an extension, the `package` behind it (`bundled:<name>` for one that ships with Dupin); the run fails when a measured keypress does not search that provider answered by that package, or by Dupin itself for an implementation without one, or the whole of the measured characters shows no rows from it, so a scenario that never reaches its feature cannot pass as a measurement of it. For a built-in command a bundled extension answers, only the rows from that package count as the provider's: the command shows a row of its own when its package is off, missing or failing, and that row is cheap enough to pass any budget. A run types the scenario `--warmup` times unmeasured, then until `--samples` keypresses (210 by default) are measured, `--gap` apart. Each scenario runs `--runs` times (three by default), each in a fresh process, and every reported figure is the median of the runs' own, so one run disturbed by the rest of a shared machine does not move the result. A keypress typed over before its results were drawn has no latency; the run fails when more than 1% are, as the gap is then too short.
 
 For each scenario the results give p50, p95 and p99 of the total, and p50 and p95 of each stage, which add up to it:
 
@@ -242,18 +258,65 @@ For each scenario the results give p50, p95 and p99 of the total, and p50 and p9
 
 `compare` holds a candidate result set against a baseline, scenario by scenario, and fails when the candidate's p95 exceeds the baseline's by more than `--tolerance` percent (10 by default) or `--floor` (1 ms), whichever is larger. `--report` prints the comparison without failing. `--baseline-implementation` and `--candidate-implementation` compare two implementations across result sets.
 
-A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it and its extensions directory:
+A scenario's id names what a person types, not the code that answers it. When a bundled extension replaces a native feature, declare it beside the native implementation under the same feature, with the config that enables it:
 
 ```toml
-[features.calendar.extension]
-config = "scripts/latency/calendar-extension.toml"
+[features.clipboard.extension]
+config = "scripts/latency/clipboard-extension.toml"
 provider = "<the extension's command id>"
-extensions = "scripts/latency/calendar-extension.extensions"
+package = "<its package id>"
+extensions = "scripts/latency/clipboard-extension.extensions"
 ```
 
-Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's beyond the same tolerance. That is the gate for deleting the native implementation.
+Every scenario of that feature then also runs with the extension, under the same id, and `parity` fails when its p95 exceeds native's by more than 10% or 0.5 ms, whichever is larger. Its floor is half `compare`'s because native's p95 varies by only about a quarter of a millisecond between CI runs, and 1 ms would let a port of a 1.4 ms scenario be 70% slower. That is the gate for deleting the native implementation. Once it is deleted, the extension keeps the scenarios as the feature's only implementation, as Calendar search's, Clipboard history's, Dictionary's and Snippets' do. A port can instead `extend` the native implementation and name only what it changes; `settings` is merged over the config it starts from:
 
-The Latency workflow runs on pull requests that touch `crates/`, `extensions/` or the benchmark, and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those.
+```toml
+[features.notes.extension]
+extends = "native"
+settings = { extensions = true, notes = { enabled = false } }
+provider = "extension.notes"
+package = "notes"
+extensions = "scripts/latency/notes.extensions"
+```
+
+A bundled extension that adds a feature Dupin never had natively has no native implementation to keep parity with. It declares `budget_ms` instead, and `parity` fails when its p95 exceeds it; Emoji & Symbols is held to 5 ms:
+
+```toml
+[features.emoji.extension]
+config = "scripts/headless/config/dupin/config.toml"
+provider = "extension.emoji"
+package = "bundled:emoji"
+budget_ms = 5.0
+```
+
+The latency gate has a behavioral twin in the `dupin` crate's tests: `extensions::parity::Parity` holds the native provider and the port's to the same rows, sections, details and actions for a list of queries. `scripts/latency/catalogue.extensions` holds a 5,000-item `items()` package, measured under its keyword (`catalogue`) and in the main search (`search-catalogue`); neither replaces a built-in, so neither has a native implementation to hold to parity, and both are held to a 5 ms budget.
+
+### Native baselines
+
+Once a port lands and its native implementation is deleted, CI has no native run to hold it to. `parity` then holds each scenario to the native results recorded in `scripts/latency/native-baseline.json`, which come from the last commit that had the native implementation, with the same tolerance. A scenario recorded there that the run doesn't measure fails the check, so a port can't go unmeasured by dropping or renaming its scenario. Likewise an implementation besides native with no native result in the run, no recorded baseline and no `budget_ms` fails it, so deleting a native implementation without recording its baseline can't take the port out of the gate.
+
+Each recorded result also carries the `benchmark` fingerprint of what measured it: `scripts/latency/measure.nu` (its code, not its comments), the shared clipboard fixture, the scenario's `prefix` and `typed`, and the run's settings. Every `run` result carries the fingerprint of the benchmark it ran, and `parity` refuses a recorded baseline whose fingerprint differs from the port's, so changing how scenarios are measured can't leave a port held to a figure the new benchmark would not reproduce. Each implementation's own config is not part of it, since that is what parity compares.
+
+A recorded figure comes from another run, and machines of one runner class differ in speed by more than the tolerance: the same native scenario's p95 has differed by a quarter between runs, which on its own decides whether a port passes. So each entry also records its `control`: the p95 of each native `search` scenario (`CONTROL` in `scripts/latency.nu`) in the same results, and the median of those. `parity` multiplies the recorded p95 by this run's median control p95 over the recorded one before applying the tolerance, and its table shows the recorded p95, that `scale` and the resulting `limit_ms`. The control is the median of every `search` scenario rather than one, since each has its own noise. An entry recorded without a control, or a run missing one of its control scenarios, fails `parity`, as does a control scenario measured by another benchmark than the recorded one. A pair held to its run's own native result is not scaled.
+
+Record a feature's baseline in the pull request that deletes its native implementation, and re-record it when `parity` reports it stale, or when the runner class or what a fair comparison means changes:
+
+```sh
+# Measure the last commit with the native implementation; each run is the median of three.
+# `ref` may be a short SHA, a branch or a tag; each dispatch runs to completion on its own.
+gh workflow run latency.yml --ref <your branch> -f ref=<last native commit>
+gh run download <run id> --name latency --dir target/latency/native-1
+# Repeat for more runs if you like, then record the median of each figure:
+nu scripts/latency.nu baseline dictionary target/latency/native-*/results.json
+```
+
+A Blacksmith Testbox measures the same way: warm a box up, check out the commit there, build `.#dupin-latency` and run `nu scripts/latency.nu run --implementation native` once per result. The control makes either machine's figures usable, so long as each result measures the feature and the control together.
+
+`baseline` replaces only that feature's entries and records the commit, fingerprint and control they came from; `parity` names the commit in its table. It refuses results that carry no fingerprint, or more than one for a scenario, and results that do not all measure the feature and the same `search` scenarios. Commit the file with the change that needs it.
+
+A baseline goes stale when the benchmark changes after the native implementation is gone, so the last commit that had it measures with the old benchmark. Branch from that commit, check out `scripts/latency.nu`, `scripts/latency/measure.nu` and `scripts/fixtures/clipboard.json` from your branch, give the feature's scenarios and the native `search` scenarios (the control) your branch's `prefix` and `typed` while keeping their native implementations, then commit, push, and dispatch the workflow with that commit as `ref`.
+
+CI runs the Latency workflow as its `latency` job whenever the app could have changed (any pull request that touches more than `website/`), and on `main`. It uploads `results.json` as the `latency` artifact; a pull request's summary compares it with the latest from a successful CI run on `main` but does not fail on it, since a shared runner's noise is larger than many real changes. The parity check does fail the job, and the required `e2e` job fails unless `latency` passed, so a port that falls behind its native implementation can't merge. To see whether a reported regression is real, re-run the job, or run both commits on one quiet machine and compare those. Dispatch `latency.yml` on its own only to record a baseline, as above.
 
 Scripts in this repository are written in Nushell.
 

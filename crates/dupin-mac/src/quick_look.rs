@@ -5,7 +5,6 @@ use std::ffi::c_void;
 use std::path::Path;
 use std::ptr::NonNull;
 
-use dupin_core::{Action, Item, ItemAction};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -15,17 +14,6 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString, NSURL};
 use objc2_quick_look_ui::{QLPreviewItem, QLPreviewPanel, QLPreviewPanelDataSource, QLPreviewPanelDelegate};
-
-pub const ACTION_ID: &str = "quick-look";
-
-/// Add Quick Look to a result created by `Item::path`.
-pub(crate) fn add_action(item: &mut Item) {
-    let Some(Action::Open(path)) = item.action("open") else {
-        return;
-    };
-    item.actions
-        .push(ItemAction::new(ACTION_ID, "Quick Look", Action::Preview(path.clone())).keep_open());
-}
 
 struct ControllerState {
     item: RefCell<Option<Retained<NSURL>>>,
@@ -492,36 +480,5 @@ mod tests {
                 FocusTransfer::Dismiss
             );
         }
-    }
-
-    #[test]
-    fn adds_quick_look_to_path_results() {
-        let path = Path::new("/tmp/brief.md").to_path_buf();
-        let mut item = Item::path(path.clone(), "brief.md".into(), Vec::new());
-
-        add_action(&mut item);
-
-        assert_eq!(
-            item.actions
-                .iter()
-                .map(|action| action.id.as_str())
-                .collect::<Vec<_>>(),
-            ["open", "reveal", ACTION_ID]
-        );
-        assert_eq!(item.action(ACTION_ID), Some(&Action::Preview(path)));
-    }
-
-    #[test]
-    fn does_not_add_quick_look_when_a_result_cannot_be_opened_as_a_path() {
-        let mut item = Item::path(
-            Path::new("/tmp/brief.md").to_path_buf(),
-            "brief.md".into(),
-            Vec::new(),
-        );
-        item.actions.retain(|action| action.id != "open");
-
-        add_action(&mut item);
-
-        assert!(item.item_action(ACTION_ID).is_none());
     }
 }

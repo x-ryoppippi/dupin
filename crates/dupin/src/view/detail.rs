@@ -3,7 +3,7 @@ use dupin_core::detail::{Block, Detail, Inline};
 use rune::tok::{Family, type_};
 use rune::{Color, El, Link, ScrollSpec, Span, TextStyle, col, el, rich, row, text};
 
-use crate::ui::Ui;
+use crate::ui::{Preview, Ui};
 
 use super::results::{card, card_slot, row_key};
 use super::theme::ResolvedTheme;
@@ -22,6 +22,21 @@ pub(super) fn detail_card(
 ) -> El {
     let key = row_key(&s.session.layout_key(index));
     let mut content = col().key(format!("{key}-detail")).w_full().gap(14.0);
+    if let Some(image) = &detail.image {
+        let slot = || {
+            el().key(format!("{key}-image"))
+                .w_full()
+                .h(crate::ui::PREVIEW_HEIGHT)
+                .radius(6.0)
+        };
+        match s.thumbnails.preview(image) {
+            Preview::Ready(preview) => {
+                content = content.child(slot().pixels_fit(preview.pixels(), rune::SurfaceFit::Fit));
+            }
+            Preview::Loading => content = content.child(slot()),
+            Preview::Failed => {}
+        }
+    }
     if !detail.metadata.is_empty() {
         content = content.child(
             col()

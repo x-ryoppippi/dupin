@@ -3,7 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::scope::{ClipboardAccess, FilesAccess, FilesKind, Method, Origin, Scope, ScopeKey, ScopeName};
+use crate::scope::{
+    ClipboardAccess, FilesAccess, FilesKind, Method, Origin, RowKind, Scope, ScopeKey, ScopeName,
+    WindowsAccess,
+};
 
 const MAX_HTTP: usize = 32;
 const MAX_NAMED: usize = 16;
@@ -48,12 +51,17 @@ impl Capabilities {
                     "clipboard" => parser.clipboard(value, &field),
                     "dictionary" => parser.dictionary(value, &field),
                     "calendar" => parser.calendar(value, &field),
+                    "windows" => parser.windows(value, &field),
+                    "rows" => parser.rows(value, &field),
+                    "query" => parser.query(value, &field),
                     _ => {
                         parser.report(
                             "unknown-capability",
                             field,
                             format!("`{name}` isn't a capability"),
-                            Some("Use http, files, exec, storage, clipboard, dictionary or calendar."),
+                            Some(
+                                "Use http, files, exec, storage, clipboard, dictionary, calendar, windows, rows or query.",
+                            ),
                         );
                         Vec::new()
                     }
@@ -465,11 +473,13 @@ impl Parser {
                 self.wrong_type(&field, "a string", item);
                 continue;
             };
-            if arg.len() > MAX_ARG_BYTES || arg.contains('\0') {
+            if arg.len() > MAX_ARG_BYTES || !crate::displayable(arg) {
                 self.report(
                     "invalid-value",
                     field,
-                    format!("must be at most {MAX_ARG_BYTES} bytes with no NUL"),
+                    format!(
+                        "must be at most {MAX_ARG_BYTES} bytes with no control or invisible formatting characters"
+                    ),
                     None,
                 );
                 continue;
@@ -516,12 +526,13 @@ impl Parser {
             "read" => Some(ClipboardAccess::Read),
             "write" => Some(ClipboardAccess::Write),
             "watch" => Some(ClipboardAccess::Watch),
+            "paste" => Some(ClipboardAccess::Paste),
             _ => {
                 parser.report(
                     "invalid-value",
                     field,
                     format!("`{text}` isn't a clipboard access"),
-                    Some("Use read, write or watch."),
+                    Some("Use read, write, watch or paste."),
                 );
                 None
             }
@@ -530,6 +541,73 @@ impl Parser {
         .flatten()
         .map(|access| Scope::Clipboard { access })
         .collect()
+    }
+
+    /// `{ "<kind>": ["<field>", …] }`: the fields of each kind of row the package's filters
+    /// and kind actions may receive.
+    fn rows(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        let Some(object) = self.object(value, field) else {
+            return Vec::new();
+        };
+        if object.is_empty() {
+            self.report(
+                "empty",
+                field,
+                "must declare at least one kind of row",
+                Some("Remove the field to declare nothing."),
+            );
+        }
+        let mut scopes = Vec::new();
+        for (name, fields) in object {
+            let field = format!("{field}.{name}");
+            let Some(kind) = RowKind::ALL.into_iter().find(|kind| kind.as_str() == name) else {
+                self.report(
+                    "invalid-value",
+                    field,
+                    format!("`{name}` isn't a kind of row"),
+                    Some("Use text, url, file or app."),
+                );
+                continue;
+            };
+            let fields = self.set(fields, &field, |parser, text, field| {
+                let found = kind.fields().iter().copied().find(|known| known.as_str() == text);
+                if found.is_none() {
+                    let known: Vec<_> = kind.fields().iter().map(|known| known.as_str()).collect();
+                    parser.report(
+                        "invalid-value",
+                        field,
+                        format!(
+                            "{} rows have no `{text}`; they have {}",
+                            kind.as_str(),
+                            known.join(", ")
+                        ),
+                        None,
+                    );
+                }
+                found
+            });
+            if let Some(fields) = fields {
+                scopes.push(Scope::Rows { kind, fields });
+            }
+        }
+        scopes
+    }
+
+    /// `["read"]`: what the user types where the package's matchers are composed.
+    fn query(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| {
+            (text == "read").then_some(()).or_else(|| {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't a query access"),
+                    Some("Use read."),
+                );
+                None
+            })
+        })
+        .map(|_| vec![Scope::Query])
+        .unwrap_or_default()
     }
 
     fn dictionary(&mut self, value: &Value, field: &str) -> Vec<Scope> {
@@ -584,6 +662,26 @@ impl Parser {
             }],
             _ => Vec::new(),
         }
+    }
+
+    fn windows(&mut self, value: &Value, field: &str) -> Vec<Scope> {
+        self.set(value, field, |parser, text, field| match text {
+            "read" => Some(WindowsAccess::Read),
+            "arrange" => Some(WindowsAccess::Arrange),
+            _ => {
+                parser.report(
+                    "invalid-value",
+                    field,
+                    format!("`{text}` isn't a windows access"),
+                    Some("Use read or arrange."),
+                );
+                None
+            }
+        })
+        .into_iter()
+        .flatten()
+        .map(|access| Scope::Windows { access })
+        .collect()
     }
 }
 

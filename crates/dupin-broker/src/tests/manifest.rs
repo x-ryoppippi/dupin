@@ -171,10 +171,13 @@ fn exec_profiles_need_well_formed_argument_templates() {
         problem(json!({ "exec": { "run": { "output": true } } })),
         ("missing-field", "capabilities.exec.run.args".into())
     );
-    assert_eq!(
-        problem(json!({ "exec": { "run": { "args": ["a\u{0}b"] } } })),
-        ("invalid-value", "capabilities.exec.run.args[0]".into())
-    );
+    for bad in ["a\u{0}b", "line\nbreak", "\u{202e}gnirts", "zero\u{200b}width"] {
+        assert_eq!(
+            problem(json!({ "exec": { "run": { "args": ["ok", bad] } } })),
+            ("invalid-value", "capabilities.exec.run.args[1]".into()),
+            "{bad:?}: consent would show what doesn't run"
+        );
+    }
     assert_eq!(
         problem(json!({ "exec": { "@script:open": { "args": [] } } })),
         ("unknown-field", "capabilities.exec.@script:open.args".into())
@@ -217,7 +220,7 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
         })
     );
     assert_eq!(
-        problem(json!({ "clipboard": ["paste"] })),
+        problem(json!({ "clipboard": ["type"] })),
         ("invalid-value", "capabilities.clipboard[0]".into())
     );
     assert_eq!(
@@ -243,10 +246,30 @@ fn storage_clipboard_dictionary_and_calendar_are_bounded() {
 }
 
 #[test]
+fn windows_declares_read_and_arrange_only() {
+    assert_eq!(
+        problem(json!({ "windows": ["move"] })),
+        ("invalid-value", "capabilities.windows[0]".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": [] })),
+        ("empty", "capabilities.windows".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": ["read", "read"] })),
+        ("duplicate", "capabilities.windows[1]".into())
+    );
+    assert_eq!(
+        problem(json!({ "windows": "arrange" })),
+        ("invalid-type", "capabilities.windows".into())
+    );
+}
+
+#[test]
 fn every_problem_is_reported_at_once_with_hints_where_useful() {
     let diagnostics = Capabilities::parse(&json!({
         "http": [{ "origin": "http://a.example", "methods": ["GET"] }],
-        "clipboard": ["paste"],
+        "clipboard": ["type"],
         "calendar": { "access": ["read"] }
     }))
     .unwrap_err();
@@ -279,4 +302,59 @@ fn every_problem_is_reported_at_once_with_hints_where_useful() {
             "message": "`pastDays` is required"
         })
     );
+}
+
+#[test]
+fn rows_name_a_kind_and_its_own_fields_and_the_query_is_read() {
+    let parsed = Capabilities::parse(&json!({
+        "rows": { "file": ["path", "title"], "text": ["text"] },
+        "query": ["read"]
+    }))
+    .unwrap();
+    let scopes: Vec<_> = parsed.scopes().cloned().collect();
+    assert_eq!(
+        scopes,
+        [
+            Scope::Rows {
+                kind: RowKind::Text,
+                fields: [RowField::Text].into()
+            },
+            Scope::Rows {
+                kind: RowKind::File,
+                fields: [RowField::Title, RowField::Path].into()
+            },
+            Scope::Query,
+        ]
+    );
+    assert_eq!(
+        scopes[1].to_string(),
+        "see the titles and full paths of files and folders Dupin finds, where you compose its filters or actions"
+    );
+    for (value, expected) in [
+        (
+            json!({ "rows": { "folder": ["title"] } }),
+            ("invalid-value", "capabilities.rows.folder"),
+        ),
+        (
+            json!({ "rows": { "app": ["url"] } }),
+            ("invalid-value", "capabilities.rows.app[0]"),
+        ),
+        (
+            json!({ "rows": { "app": [] } }),
+            ("empty", "capabilities.rows.app"),
+        ),
+        (json!({ "rows": {} }), ("empty", "capabilities.rows")),
+        (
+            json!({ "query": ["write"] }),
+            ("invalid-value", "capabilities.query[0]"),
+        ),
+        (json!({ "query": true }), ("invalid-type", "capabilities.query")),
+    ] {
+        let (code, field) = problem(value.clone());
+        assert_eq!((code, field.as_str()), expected, "{value}");
+    }
+    for text in ["rows:app", "rows:file", "query"] {
+        assert_eq!(key(text).to_string(), text);
+    }
+    assert!("rows:folder".parse::<ScopeKey>().is_err());
 }

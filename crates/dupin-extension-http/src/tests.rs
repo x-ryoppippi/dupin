@@ -802,3 +802,34 @@ fn request_headers_and_the_url_stay_out_of_curl_s_arguments() {
         "{config}"
     );
 }
+
+#[test]
+fn curl_starts_without_forking_the_host() {
+    use std::sync::Once;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // On macOS a fork() child of a multithreaded process runs libSystem's atfork handlers, which
+    // abort it with SIGKILL when another thread held a lazy-initialization gate at fork time.
+    static FORKS: AtomicUsize = AtomicUsize::new(0);
+    static COUNT_FORKS: Once = Once::new();
+    extern "C" fn count_fork() {
+        FORKS.fetch_add(1, Ordering::SeqCst);
+    }
+    COUNT_FORKS.call_once(|| {
+        // SAFETY: the handler only touches an atomic, which is safe in a fork prepare handler.
+        assert_eq!(unsafe { libc::pthread_atfork(Some(count_fork), None, None) }, 0);
+    });
+
+    let server = Server::respond(OK_JSON);
+    let scope = scope(&[(&server.origin(), &[Method::Get, Method::Post])]);
+    let service = service(Limits::default());
+    let before = FORKS.load(Ordering::SeqCst);
+    fetch(&service, Request::get(server.origin()), &scope).unwrap();
+    let post = Request {
+        method: Method::Post,
+        body: Some(b"hello".to_vec()),
+        ..Request::get(server.origin())
+    };
+    fetch(&service, post, &scope).unwrap();
+    assert_eq!(FORKS.load(Ordering::SeqCst), before);
+}

@@ -36,8 +36,11 @@ fn scope_keys_round_trip_through_their_written_form() {
         "clipboard:read",
         "clipboard:write",
         "clipboard:watch",
+        "clipboard:paste",
         "dictionary",
         "calendar",
+        "windows:read",
+        "windows:arrange",
     ] {
         assert_eq!(key(written).to_string(), written);
     }
@@ -45,7 +48,9 @@ fn scope_keys_round_trip_through_their_written_form() {
         "http:http://a.example",
         "http:https://a.example/",
         "files:",
-        "clipboard:paste",
+        "clipboard:type",
+        "windows:move",
+        "windows",
         "network",
         "storage:x",
     ] {
@@ -151,6 +156,50 @@ fn only_calendar_and_clipboard_reads_need_an_os_permission() {
 }
 
 #[test]
+fn windows_scopes_need_accessibility_and_describe_themselves() {
+    let windows = caps(json!({ "windows": ["read", "arrange"] }));
+    let described: Vec<_> = windows
+        .scopes()
+        .map(|scope| (scope.key().to_string(), scope.to_string(), scope.os_permission()))
+        .collect();
+    assert_eq!(
+        described,
+        [
+            (
+                "windows:read".to_string(),
+                "see your displays and the focused window".to_string(),
+                Some(OsPermission::Accessibility)
+            ),
+            (
+                "windows:arrange".to_string(),
+                "move and resize the focused window".to_string(),
+                Some(OsPermission::Accessibility)
+            ),
+        ]
+    );
+    let scope = |access| Scope::Windows { access };
+    assert!(scope(WindowsAccess::Read).covers(&scope(WindowsAccess::Read)));
+    assert!(!scope(WindowsAccess::Arrange).covers(&scope(WindowsAccess::Read)));
+}
+
+#[test]
+fn exec_consent_shows_where_each_argument_starts_and_ends() {
+    let exec = |args: &[&str]| {
+        Scope::Exec {
+            name: ScopeName::new("run").unwrap(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            output: false,
+        }
+        .to_string()
+    };
+    assert_ne!(exec(&["a b"]), exec(&["a", "b"]));
+    assert_eq!(
+        exec(&["a`, and nothing else", "--install-extension", "x"]),
+        "run the program you pick for “run” with \"a`, and nothing else\" \"--install-extension\" \"x\""
+    );
+}
+
+#[test]
 fn scopes_describe_themselves_for_consent() {
     let described: Vec<_> = everything().scopes().map(ToString::to_string).collect();
     assert_eq!(
@@ -158,7 +207,7 @@ fn scopes_describe_themselves_for_consent() {
         [
             "GET and POST requests to https://api.github.com",
             "read and list the folder you pick for “notes”",
-            "run the program you pick for “git-status” with `status --short {path}` and read its output",
+            "run the program you pick for “git-status” with \"status\" \"--short\" \"{path}\" and read its output",
             "run your script command “open-in-zed”",
             "keep up to 1024 bytes of encrypted data for 30 days",
             "read the clipboard",

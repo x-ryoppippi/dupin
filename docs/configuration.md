@@ -6,7 +6,7 @@ When `config.toml` is read-only, Dupin saves edits to `~/Library/Application Sup
 
 Saves merge the edited keys into the latest valid configuration, preserving unrelated external edits. If the same key changed differently on disk, or an active file is invalid, Dupin reports the problem and leaves both files untouched. An editor that writes between the final source check and the atomic replacement can still have its edit overwritten. Dupin reloads changes while it runs, including atomic replacements and symlink retargets.
 
-Enabling Calendar search, Window Management or Paste snippets, or setting a Selection hotkey for the first time in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
+Enabling Calendar search or Paste snippets, setting a Selection hotkey for the first time, or turning on an extension such as Window Management in Settings, requests the required macOS access when needed. Startup, opening Settings and edits to `config.toml` only read access status. You can request access before using a feature in Settings → Permissions. See [Permissions](./features/permissions.md).
 
 ```toml
 display = "mouse" # "mouse", "main", or "active"
@@ -43,10 +43,11 @@ The flake's home-manager module installs Dupin and writes `config.toml` from `se
 
 With `settings` set, `config.toml` links into the Nix store. Settings marks those keys **Managed by Nix** and saves edits to the other keys locally. To change a locked key, edit its Nix value and activate the new generation. To manage it from Settings, remove the key from Nix and activate the new generation.
 
-`extensions` declares extension packages and their grants; see [Extensions › Declaring them with Nix](./features/extensions.md#declaring-them-with-nix).
+`extensions` declares extension packages and their grants, and `bundledExtensions` switches the extensions that ship with Dupin on or off and denies their scopes; see [Extensions › Declaring them with Nix](./features/extensions.md#declaring-them-with-nix).
 
 ## Feature configuration
 
+- [Advanced composition](./features/advanced.md): `[advanced]`, recomposing sources, filters and kinds
 - [Appearance](./features/appearance.md)
 - [Calculator](./features/calculator.md#configuration)
 - [Calendar](./features/calendar.md#configuration)

@@ -9,7 +9,9 @@ homepage.workspace = true
 license.workspace = true
 
 [features]
-# Rune's headless runs outside a debug build, for the latency benchmark (scripts/latency.nu).
+# Rune's headless runs outside a debug build: `dupin ext snap` from the shipped app, and the
+# latency benchmark (scripts/latency.nu). It adds about 33 KB to the release binary.
+default = ["tooling"]
 tooling = ["rune/tooling"]
 
 [dependencies]
@@ -26,6 +28,7 @@ dupin-extension-http = { path = "../dupin-extension-http" }
 dupin-extension-install = { path = "../dupin-extension-install" }
 dupin-ext-sdk = { path = "../dupin-ext-sdk" }
 dupin-host-services = { path = "../dupin-host-services" }
+dupin-storage = { workspace = true }
 dupin-core = { workspace = true }
 dupin-mac = { workspace = true }
 libc = { workspace = true }
@@ -42,13 +45,7 @@ naga = { workspace = true }
 # Metal's own compiler and pipeline builder, which Rune links, to check a backdrop shader as
 # Rune's backend will draw it.
 objc2 = { workspace = true }
-objc2-foundation = { workspace = true, features = [
-	"std",
-	"NSError",
-	"NSProcessInfo",
-	"NSString",
-	"NSURL",
-] }
+objc2-foundation = { workspace = true, features = ["std", "NSError", "NSProcessInfo", "NSString"] }
 objc2-metal = { workspace = true, features = [
 	"std",
 	"MTLDevice",
@@ -56,6 +53,9 @@ objc2-metal = { workspace = true, features = [
 	"MTLPixelFormat",
 	"MTLRenderPipeline",
 ] }
+
+[build-dependencies]
+dupin-extension-install = { path = "../dupin-extension-install" }
 
 [dev-dependencies]
 dupin-extension-host = { path = "../dupin-extension-host", features = ["testing"] }

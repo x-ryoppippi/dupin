@@ -4,12 +4,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
-use dupin_extension_bridge::services::{self, Services, Subscription, Unavailable};
-use dupin_extension_bridge::{Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, Scope, Trigger};
+use dupin_extension_bridge::services::{self, Services, Subscription};
+use dupin_extension_bridge::{
+    Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
+};
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
-use dupin_host_services::{calendar, clipboard, dictionary, exec};
+use dupin_host_services::{calendar, clipboard, dictionary, exec, windows};
 use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
@@ -29,26 +31,66 @@ pub fn local_path() -> Option<PathBuf> {
     crate::store::data_dir().map(|dir| dir.join(LOCAL_FILE))
 }
 
+/// The root of every `dupin-storage` namespace, in Dupin's data directory.
+pub fn storage_path() -> Option<PathBuf> {
+    crate::store::data_dir().map(|dir| dir.join("storage"))
+}
+
+/// Encrypted storage under the data key in the user's Keychain, which is read only when a
+/// namespace is first opened.
+pub fn storage() -> Option<dupin_storage::Storage> {
+    Some(dupin_storage::Storage::new(
+        storage_path()?,
+        dupin_mac::keychain::KeychainKey,
+    ))
+}
+
 /// What the platform services need from the launcher.
 pub struct Platform {
     pub scripts: Arc<RwLock<Catalog>>,
     pub runner: Runner,
     pub calendar_access: CalendarAccess,
-    /// Clipboard history's policy, whose ignored apps extensions never see copies from either.
-    pub history: Arc<Mutex<dupin_core::clipboard::History>>,
+    /// Clipboard history's settings, whose ignored apps and limits every extension follows.
+    pub clipboard: Arc<RwLock<dupin_core::config::Clipboard>>,
+    /// The app the panel opened over, whose focused window the `windows` capability moves.
+    pub front: Arc<dupin_mac::window_management::Front>,
 }
 
 /// The bridge the launcher's guest calls go through, with the user's grant files and the
 /// services that act on the Mac. Tests and headless runs get one that keeps grants in memory
-/// and reaches no service; a headless render may still declare a base beside its own config.
+/// and reaches no service of the Mac's but a headless run's fixture calendar, as the built-in
+/// Calendar search reads it, and fixed definitions, as the bundled Dictionary renders them; a
+/// headless render may still declare a base beside its own config, and one `dupin ext snap`
+/// starts answers from the fixture it renders.
 pub fn open(platform: Platform) -> Bridge {
-    if cfg!(test) || rune::tooling::is_headless() {
-        let base = base_path()
-            .filter(|_| !cfg!(test))
-            .and_then(|path| std::fs::read_to_string(path).ok())
-            .and_then(|source| Base::parse(&source).ok())
-            .unwrap_or_default();
-        return Bridge::new(Broker::new(base, Local::default()), None, Services::none());
+    if cfg!(test) {
+        return Bridge::new(
+            Broker::new(Base::default(), Local::default()),
+            None,
+            Services::none(),
+        );
+    }
+    if rune::tooling::is_headless() {
+        let base = base_path().map(|path| Base::read(&path)).unwrap_or_default();
+        if let Some(fixture) = super::fixtures::headless() {
+            return Bridge::new(Broker::new(base, Local::default()), None, fixture.services());
+        }
+        let services = Services {
+            calendar: Box::new(Calendars(calendar::Calendar::new(
+                dupin_mac::EventStore::fixtures(),
+            ))),
+            dictionary: fixed_dictionary(),
+            storage: match crate::clipboard::headless_storage() {
+                Some(storage) => Box::new(storage),
+                None => Box::new(services::Unavailable(
+                    "a headless run couldn't make scratch storage",
+                )),
+            },
+            ..Services::none()
+        };
+        let bridge = Bridge::new(Broker::new(base, Local::default()), None, services);
+        bridge.set_os_access(OsPermission::Calendars, OsAccess::Allowed);
+        return bridge;
     }
     let services = Services {
         http: Box::new(HttpService::new(HttpConfig {
@@ -63,16 +105,26 @@ pub fn open(platform: Platform) -> Bridge {
             scripts: platform.scripts,
             runner: platform.runner,
         }),
-        storage: Box::new(Unavailable("extension storage isn't available in this build yet")),
+        storage: match storage() {
+            Some(storage) => Box::new(PackageStorage::new(storage).on_error(|namespace, error| {
+                crate::log::warn(&format!("extension storage {namespace}: {error}"));
+            })),
+            None => Box::new(services::Unavailable(
+                "extension storage needs XDG_DATA_HOME or HOME",
+            )),
+        },
         clipboard: Box::new(Pasteboard {
-            history: platform.history,
+            settings: platform.clipboard,
             service: OnceLock::new(),
         }),
         dictionary: Box::new(Dictionaries(dictionary::Dictionary::new(
-            dupin_mac::DictionaryProvider::default(),
+            dupin_mac::SystemDictionary::default(),
         ))),
-        calendar: Box::new(Calendars(calendar::Calendar::new(
-            dupin_mac::CalendarProvider::new(platform.calendar_access),
+        calendar: Box::new(Calendars(calendar::Calendar::new(dupin_mac::EventStore::new(
+            platform.calendar_access,
+        )))),
+        windows: Box::new(Windows(windows::Service::new(
+            dupin_mac::window_management::Windows(platform.front),
         ))),
     };
     let bridge = match (base_path(), local_path()) {
@@ -107,6 +159,17 @@ pub fn os_access(permission: OsPermission, calendar: &CalendarAccess) -> OsAcces
     }
 }
 
+/// Asks macOS to trust Dupin with Accessibility, which pasting or arranging windows for an
+/// extension needs, on a deliberate press. macOS shows its prompt only while it hasn't been asked.
+pub fn request_accessibility() {
+    if cfg!(test) || rune::tooling::is_headless() {
+        return;
+    }
+    if dupin_mac::privacy::Permission::Accessibility.status() == dupin_mac::privacy::Access::NotDetermined {
+        dupin_mac::accessibility::request_once();
+    }
+}
+
 fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
     serde_json::to_value(value).map_err(|error| Failure::new("failed", error.to_string()))
 }
@@ -114,24 +177,20 @@ fn encoded(value: impl serde::Serialize) -> Result<Value, Failure> {
 /// The general pasteboard, read only while macOS allows it and never from an ignored app's
 /// copy. It is opened on first use, since opening it keeps the clipboard monitor running.
 struct Pasteboard {
-    history: Arc<Mutex<dupin_core::clipboard::History>>,
+    settings: Arc<RwLock<dupin_core::config::Clipboard>>,
     service: OnceLock<clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard>>,
 }
 
 impl Pasteboard {
     fn service(&self) -> &clipboard::Clipboard<dupin_mac::clipboard::GeneralPasteboard> {
         self.service.get_or_init(|| {
-            let history = self.history.clone();
+            let settings = self.settings.clone();
             clipboard::Clipboard::new(dupin_mac::clipboard::GeneralPasteboard::default(), move || {
-                let ignored_apps = history
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .policy()
-                    .ignored_apps()
-                    .to_vec();
+                let settings = settings.read().unwrap_or_else(|poisoned| poisoned.into_inner());
                 clipboard::Policy {
-                    ignored_apps,
-                    ..clipboard::Policy::default()
+                    ignored_apps: settings.ignored_apps().to_vec(),
+                    max_text_bytes: settings.max_entry_bytes(),
+                    max_image_bytes: settings.max_image_bytes(),
                 }
             })
         })
@@ -152,11 +211,28 @@ impl services::Clipboard for Pasteboard {
             .map_err(Failure::from)
     }
 
+    fn write_image(&self, png: &[u8]) -> Result<(), Failure> {
+        let content = clipboard::Write::image(png.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
+    fn write_files(&self, paths: &[PathBuf]) -> Result<(), Failure> {
+        let content = clipboard::Write::copied_files(paths.to_vec()).map_err(Failure::from)?;
+        self.service()
+            .write(Trigger::Activation, &content)
+            .map_err(Failure::from)
+    }
+
     fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
         let watch = self
             .service()
             .watch(move |clip| {
-                if let Ok(value) = serde_json::to_value(&clip.content) {
+                if let Ok(mut value) = serde_json::to_value(&clip.content) {
+                    if let Some(source) = &clip.source {
+                        value["source"] = source.clone().into();
+                    }
                     changed(value);
                 }
             })
@@ -165,7 +241,15 @@ impl services::Clipboard for Pasteboard {
     }
 }
 
-struct Dictionaries(dictionary::Dictionary<dupin_mac::DictionaryProvider>);
+struct Dictionaries(dictionary::Dictionary<dupin_mac::SystemDictionary>);
+
+/// Fixed definitions in Dictionary Services' layout, for renders and tests that must not
+/// depend on the dictionaries this Mac has.
+fn fixed_dictionary() -> Box<dyn services::Dictionary> {
+    Box::new(Dictionaries(dictionary::Dictionary::new(
+        dupin_mac::SystemDictionary::fixtures(),
+    )))
+}
 
 impl services::Dictionary for Dictionaries {
     fn lookup(&self, word: &str) -> Result<Value, Failure> {
@@ -174,7 +258,7 @@ impl services::Dictionary for Dictionaries {
     }
 }
 
-struct Calendars(calendar::Calendar<dupin_mac::CalendarProvider>);
+struct Calendars(calendar::Calendar<dupin_mac::EventStore>);
 
 impl services::Calendar for Calendars {
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure> {
@@ -183,11 +267,37 @@ impl services::Calendar for Calendars {
         Ok((bounds.past_days, bounds.future_days))
     }
 
-    fn events(&self, from: i64, to: i64, limit: usize, scope: &Scope) -> Result<Value, Failure> {
-        let query = calendar::Query::new(from, to, None, None, Some(limit)).map_err(Failure::from)?;
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        order: calendar::Order,
+        scope: &Scope,
+    ) -> Result<Value, Failure> {
+        let query = calendar::Query::new(from, to, None, query, Some(limit))
+            .map_err(Failure::from)?
+            .ordered(order);
         let bounds = calendar::Bounds::of(scope)
             .ok_or_else(|| Failure::new("failed", "the permit isn't for calendars"))?;
         encoded(self.0.events(&query, bounds).map_err(Failure::from)?)
+    }
+}
+
+struct Windows(windows::Service<dupin_mac::window_management::Windows>);
+
+impl services::Windows for Windows {
+    fn displays(&self) -> Result<Value, Failure> {
+        encoded(self.0.displays().map_err(Failure::from)?)
+    }
+
+    fn focused(&self) -> Result<Value, Failure> {
+        encoded(self.0.focused().map_err(Failure::from)?)
+    }
+
+    fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
+        encoded(self.0.set_frame(frame).map_err(Failure::from)?)
     }
 }
 

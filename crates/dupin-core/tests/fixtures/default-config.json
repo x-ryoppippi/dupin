@@ -6,27 +6,8 @@
 	"file_limit": 200,
 	"file_demotions": ["~/Library", "Caches", "node_modules", ".git", "target", "build", "dist"],
 	"dictionary_keywords": ["define", "d"],
-	"window_management": false,
 	"calculator": true,
 	"calculator_currency": false,
-	"web_searches": {
-		"g": {
-			"name": "Google",
-			"url": "https://www.google.com/search?q={query}"
-		},
-		"gh": {
-			"name": "GitHub",
-			"url": "https://github.com/search?q={query}"
-		},
-		"maps": {
-			"name": "Apple Maps",
-			"url": "maps://?q={query}"
-		},
-		"yt": {
-			"name": "YouTube",
-			"url": "https://www.youtube.com/results?search_query={query}"
-		}
-	},
 	"web_fallbacks": [],
 	"snippets": {},
 	"snippet_keywords": ["snip"],

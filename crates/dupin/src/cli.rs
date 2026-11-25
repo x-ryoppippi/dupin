@@ -1,10 +1,18 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin mcp [--workspace DIR]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+/// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
+fn ext_help() -> String {
+    HELP.lines()
+        .filter(|line| line.starts_with("dupin ext "))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 #[derive(Debug, PartialEq)]
 enum Action {
     Help,
+    ExtHelp,
     Version,
     Open(Option<String>),
     Pick(bool),
@@ -29,6 +37,10 @@ enum Action {
     ExtNew(String, dupin_ext_sdk::Template),
     ExtBuild(String, dupin_ext_sdk::BuildOptions),
     ExtDev(String, dupin_ext_sdk::BuildOptions),
+    /// Copy a bundled extension into the extensions folder.
+    ExtEject(String),
+    /// List the GitHub repositories tagged `dupin-extension` that match the words.
+    ExtSearch(Option<String>),
     Mcp(Option<String>),
 }
 
@@ -128,6 +140,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["mcp"] if !json && !build_flags && !update && step.is_none() => Ok(Action::Mcp(workspace)),
         _ if build_flags || other_flags => Err("invalid arguments; use dupin --help".into()),
         ["--help" | "-h"] => Ok(Action::Help),
+        ["ext", "--help" | "-h" | "help"] => Ok(Action::ExtHelp),
         ["--version" | "-V"] => Ok(Action::Version),
         ["open"] => Ok(Action::Open(None)),
         ["open", "--query", q] => Ok(Action::Open(Some(q.to_string()))),
@@ -149,6 +162,9 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "install", source] if !source.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Install(source.to_string())))
         }
+        ["ext", "search", words @ ..] if words.iter().all(|word| !word.starts_with('-')) => {
+            Ok(Action::ExtSearch((!words.is_empty()).then(|| words.join(" "))))
+        }
         ["ext", "list"] => Ok(Action::ExtPackages(Packages::List)),
         ["ext", "sync"] => Ok(Action::ExtPackages(Packages::Sync)),
         ["ext", "update"] => Ok(Action::ExtPackages(Packages::Update(None))),
@@ -158,6 +174,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
         ["ext", "remove", name] if !name.starts_with('-') => {
             Ok(Action::ExtPackages(Packages::Remove(name.to_string())))
         }
+        ["ext", "eject", name] if !name.starts_with('-') => Ok(Action::ExtEject(name.to_string())),
         ["ext", "check", folder] if !folder.starts_with('-') => Ok(Action::ExtCheck(folder.to_string())),
         ["ext", "revision", folder] if !folder.starts_with('-') => {
             Ok(Action::ExtRevision(folder.to_string()))
@@ -322,6 +339,14 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             println!("{HELP}");
             Ok(Value::Null)
         }
+        Action::ExtHelp => {
+            let help = ext_help();
+            if json {
+                return Ok(serde_json::json!({"help": help}));
+            }
+            println!("{help}");
+            Ok(Value::Null)
+        }
         Action::Version => {
             let version = include_str!("../../../VERSION").trim();
             if json {
@@ -377,26 +402,51 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         }
         Action::ExtCheck(folder) => {
             let extension = crate::extensions::check_folder(std::path::Path::new(&folder))?;
+            // Kept from the check above, so this asks the package nothing.
+            let exports = extension.check(std::time::Instant::now() + crate::extensions::QUERY_DEADLINE)?;
+            let mut exported: Vec<&str> = Vec::new();
+            if exports.search {
+                exported.push("search");
+            }
+            if exports.items {
+                exported.push("items");
+            }
             if json {
                 return Ok(serde_json::json!({
                     "id": extension.id,
                     "name": extension.name,
                     "version": extension.version,
                     "keyword": extension.keyword,
+                    "exports": exported,
+                    "defaultSearch": extension.default_search,
                 }));
             }
             println!(
-                "{} {} answers `{}`",
-                extension.name, extension.version, extension.keyword
+                "{} {} answers `{}` with {}{}",
+                extension.name,
+                extension.version,
+                extension.keyword,
+                exported.join(" and "),
+                if extension.default_search {
+                    ", and the main search with its items"
+                } else {
+                    ""
+                }
             );
             Ok(Value::Null)
         }
         Action::ExtRevision(folder) => {
-            let (package, revision, _) = crate::extensions::declaration_of(std::path::Path::new(&folder))?;
+            let (package, revision, capabilities) =
+                crate::extensions::declaration_of(std::path::Path::new(&folder))?;
             if json {
+                let scopes: Vec<_> = capabilities
+                    .scopes()
+                    .map(|scope| scope.key().to_string())
+                    .collect();
                 return Ok(serde_json::json!({
                     "package": package.to_string(),
                     "revision": revision.to_string(),
+                    "scopes": scopes,
                 }));
             }
             println!("{revision}");
@@ -404,19 +454,19 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
         }
         Action::ExtRun(folder, query) => {
             let extension = crate::extensions::load_folder(std::path::Path::new(&folder))?;
-            let items = extension.query(
+            let batches = crate::extensions::answer(
+                &extension,
                 &query,
                 None,
                 dupin_js_runtime::MAX_ROWS,
                 std::time::Instant::now() + crate::extensions::QUERY_DEADLINE,
                 || false,
-                &(std::sync::Arc::new(dupin_extension_host::NoServices) as _),
+                &dupin_extension_bridge::Call::none(),
             )?;
             if json {
-                return serde_json::to_value(protocol::Outcome::Results { items, state: None })
-                    .map_err(|_| "could not encode the answer".into());
+                return Ok(answer_json(&batches));
             }
-            print!("{}", describe_rows(&items));
+            print!("{}", describe_answer(&batches));
             Ok(Value::Null)
         }
         Action::ExtTest(folder, update) => {
@@ -448,6 +498,28 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             Ok(Value::Null)
         }
         Action::ExtPackages(command) => Ok(crate::extension_install::run(command, json)?),
+        Action::ExtSearch(query) => Ok(crate::extension_install::search(query.as_deref(), json)?),
+        Action::ExtEject(name) => {
+            let copy = crate::extension_install::eject(&name)?;
+            let (config, ..) = crate::settings::load(&crate::settings::Paths::discover());
+            if json {
+                return Ok(serde_json::json!({
+                    "name": name,
+                    "path": copy,
+                    "extensions": config.extensions,
+                }));
+            }
+            println!(
+                "Copied the bundled {name} to {}. It replaces the bundled one while the extensions folder is on, without the bundled grants once you change it; delete it to go back.",
+                copy.display()
+            );
+            if !config.extensions {
+                println!(
+                    "The extensions folder is off: turn it on in Settings → Extensions to use your copy."
+                );
+            }
+            Ok(Value::Null)
+        }
         Action::ExtNew(folder, template) => {
             let files = dupin_ext_sdk::scaffold(std::path::Path::new(&folder), template)?;
             let files: Vec<String> = files.iter().map(|file| file.display().to_string()).collect();
@@ -558,29 +630,123 @@ fn report_dev(outcome: Result<dupin_ext_sdk::dev::Published, dupin_js_runtime::D
     }
 }
 
-/// An answer as plain text: each row's text, then its actions, indented.
-fn describe_rows(items: &[dupin_plugin_protocol::PluginItem]) -> String {
-    use dupin_plugin_protocol::{Effect, View};
-    if items.is_empty() {
-        return "No results\n".into();
+/// An action's effect as `dupin ext run --json` shows it: the protocol's effects, and `run` for
+/// a package's own handler.
+fn effect_json(action: &dupin_core::Action) -> Value {
+    use dupin_core::Action;
+    match action {
+        Action::Copy(text) => serde_json::json!({"kind": "copy", "text": text}),
+        Action::OpenUrl(url) => serde_json::json!({"kind": "open_url", "url": url}),
+        Action::Push(page) => serde_json::json!({
+            "kind": "push", "view": page.view, "title": page.title, "context": page.context,
+        }),
+        Action::Extension {
+            request: dupin_core::ExtensionRequest::Run { action, data },
+            ..
+        } => serde_json::json!({"kind": "run", "handler": action, "data": data}),
+        Action::Extension {
+            request: dupin_core::ExtensionRequest::Paste { text, template },
+            ..
+        } => serde_json::json!({"kind": "paste", "text": text, "template": template}),
+        other => serde_json::json!({"kind": format!("{other:?}")}),
     }
+}
+
+/// The rows an extension answered with, in the protocol's `results` shape, with each row's
+/// section and detail beside it.
+pub(crate) fn answer_json(batches: &[dupin_core::Batch]) -> Value {
+    let items: Vec<Value> = batches
+        .iter()
+        .flat_map(|batch| batch.items.iter().map(move |item| (batch, item)))
+        .map(|(batch, item)| {
+            let mut row = serde_json::json!({
+                "id": item.id,
+                "view": item.view,
+                "actions": item.actions.iter().map(|action| serde_json::json!({
+                    "id": action.id,
+                    "title": action.title,
+                    "effect": effect_json(item.action(&action.id).expect("listed")),
+                })).collect::<Vec<_>>(),
+            });
+            if let Some(section) = &batch.section {
+                row["section"] = section.as_str().into();
+            }
+            match &item.icon {
+                Some(dupin_core::Icon::Host(image)) => row["image"] = host_image_json(image),
+                Some(icon) => {
+                    if let Some(path) = icon.path() {
+                        row["icon"] = path.to_string_lossy().into_owned().into();
+                    }
+                }
+                None => {}
+            }
+            if let Some(detail) = batch.details.get(&item.id) {
+                row["detail"] = serde_json::json!({
+                    "title": detail.title,
+                    "metadata": detail.metadata.iter().map(|entry| serde_json::json!({
+                        "label": entry.label, "text": entry.value,
+                    })).collect::<Vec<_>>(),
+                    "blocks": detail.body.blocks.len(),
+                });
+                if let Some(image) = &detail.image {
+                    row["detail"]["image"] = host_image_json(image);
+                }
+            }
+            row
+        })
+        .collect();
+    serde_json::json!({"kind": "results", "items": items})
+}
+
+/// An image a row names, as its package gave it.
+fn host_image_json(image: &dupin_core::HostImage) -> Value {
+    match &image.source {
+        dupin_core::HostImageSource::Blob(handle) => handle.as_str().into(),
+        dupin_core::HostImageSource::File { path, handle } => {
+            serde_json::json!({ "path": path, "handle": handle })
+        }
+    }
+}
+
+/// An answer as plain text: each section's heading, each row's text, then its actions,
+/// indented.
+fn describe_answer(batches: &[dupin_core::Batch]) -> String {
+    use dupin_core::View;
     let mut out = String::new();
-    for item in items {
-        match &item.view {
-            View::Text { title, subtitle } if subtitle.is_empty() => out.push_str(&format!("{title}\n")),
-            View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
-            View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
-            View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
+    let mut section = None;
+    for batch in batches {
+        if batch.section.is_some() && batch.section != section {
+            out.push_str(&format!("# {}\n", batch.section.as_deref().unwrap_or_default()));
         }
-        for action in &item.actions {
-            let target = match &action.effect {
-                Effect::Copy { text } => text.clone(),
-                Effect::OpenUrl { url } => url.clone(),
-                Effect::Push { view, .. } => format!("view {view}"),
-                Effect::Run { action, .. } => format!("action {action}"),
-            };
-            out.push_str(&format!("  {}: {target}\n", action.title));
+        section.clone_from(&batch.section);
+        for item in &batch.items {
+            match &item.view {
+                View::Text { title, subtitle } if subtitle.is_empty() => out.push_str(&format!("{title}\n")),
+                View::Text { title, subtitle } => out.push_str(&format!("{title}\n  {subtitle}\n")),
+                View::Detail { title, body } => out.push_str(&format!("{title}\n  {body}\n")),
+                View::Pair { source, result } => out.push_str(&format!("{source} → {result}\n")),
+            }
+            for action in &item.actions {
+                let target = match item.action(&action.id).expect("listed") {
+                    dupin_core::Action::Copy(text) => text.clone(),
+                    dupin_core::Action::OpenUrl(url) => url.clone(),
+                    dupin_core::Action::Push(page) => format!("view {}", page.view),
+                    dupin_core::Action::Extension {
+                        request: dupin_core::ExtensionRequest::Run { action, .. },
+                        ..
+                    } => format!("runs {action}"),
+                    dupin_core::Action::Extension {
+                        request: dupin_core::ExtensionRequest::Paste { text, .. },
+                        ..
+                    } => format!("paste {text}"),
+                    other => format!("{other:?}"),
+                };
+                out.push_str(&format!("  {}: {target}\n", action.title));
+            }
         }
+    }
+    if out.is_empty() {
+        out.push_str("No results\n");
     }
     out
 }
@@ -842,34 +1008,61 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_answers_list_rows_and_actions() {
-        use dupin_plugin_protocol::{Effect, PluginAction, PluginItem, View};
-        let items = vec![PluginItem {
-            id: "docs".into(),
+    fn plain_text_answers_list_sections_rows_and_actions() {
+        use dupin_core::{Action, Batch, ExtensionRequest, Item, ItemAction, Payload, View};
+        let item = |title: &str, actions: Vec<ItemAction>| Item {
+            id: title.into(),
             view: View::Text {
-                title: "Docs".into(),
+                title: title.into(),
                 subtitle: "Read them".into(),
             },
-            actions: vec![
-                PluginAction {
-                    id: "open".into(),
-                    title: "Open URL".into(),
-                    effect: Effect::OpenUrl {
-                        url: "https://example.com/".into(),
-                    },
-                },
-                PluginAction {
-                    id: "copy".into(),
-                    title: "Copy".into(),
-                    effect: Effect::Copy { text: "docs".into() },
-                },
-            ],
-        }];
+            payload: Payload::default(),
+            record_usage: false,
+            icon: None,
+            matched: Vec::new(),
+            completion: None,
+            score: None,
+            primary: None,
+            alternate: None,
+            actions,
+        };
+        let batches = [
+            Batch::from(vec![item(
+                "Docs",
+                vec![
+                    ItemAction::new("open", "Open URL", Action::OpenUrl("https://example.com/".into())),
+                    ItemAction::new("copy", "Copy", Action::Copy("docs".into())),
+                ],
+            )]),
+            Batch::section(
+                "Recent",
+                vec![item(
+                    "Notes",
+                    vec![ItemAction::new(
+                        "action-0",
+                        "Forget",
+                        Action::Extension {
+                            extension: "notes".into(),
+                            request: ExtensionRequest::Run {
+                                action: "forget".into(),
+                                data: None,
+                            },
+                        },
+                    )],
+                )],
+            ),
+        ];
         assert_eq!(
-            describe_rows(&items),
-            "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n"
+            describe_answer(&batches),
+            "Docs\n  Read them\n  Open URL: https://example.com/\n  Copy: docs\n# Recent\nNotes\n  Read them\n  Forget: runs forget\n"
         );
-        assert_eq!(describe_rows(&[]), "No results\n");
+        let json = answer_json(&batches);
+        assert_eq!(json["items"][1]["section"], "Recent");
+        assert_eq!(
+            json["items"][1]["actions"][0]["effect"],
+            serde_json::json!({"kind": "run", "handler": "forget", "data": null})
+        );
+        assert_eq!(describe_answer(&[]), "No results\n");
     }
 
     #[test]
@@ -882,6 +1075,27 @@ mod tests {
         assert_eq!(crate::ui::pick_indices(&values, "OTHER"), vec![1]);
         assert!(crate::ui::pick_indices(&values, "missing").is_empty());
         assert_eq!(values[0]["action"], "execute");
+    }
+    #[test]
+    fn ext_help_prints_the_ext_usage() {
+        for help in ["--help", "-h", "help"] {
+            assert_eq!(
+                parse(&["ext".into(), help.into()]).unwrap(),
+                Action::ExtHelp,
+                "dupin ext {help}"
+            );
+        }
+        let usage = ext_help();
+        assert!(usage.starts_with("dupin ext check DIR"), "{usage}");
+        assert!(usage.ends_with("dupin ext eject NAME [--json]"), "{usage}");
+        assert!(
+            usage.lines().all(|line| line.starts_with("dupin ext ")),
+            "{usage}"
+        );
+        assert_eq!(
+            execute(Action::ExtHelp, true).unwrap(),
+            serde_json::json!({ "help": usage })
+        );
     }
     #[test]
     fn arguments_and_selection() {
@@ -966,6 +1180,17 @@ mod tests {
             );
             assert!(parse(&args(&["ext", "install", "--upload-pack=x"])).is_err());
         }
+        assert_eq!(
+            parse(&args(&["ext", "eject", "dupin", "--json"])).unwrap(),
+            Action::ExtEject("dupin".into())
+        );
+        assert!(parse(&args(&["ext", "eject"])).is_err());
+        assert_eq!(parse(&args(&["ext", "search"])).unwrap(), Action::ExtSearch(None));
+        assert_eq!(
+            parse(&args(&["ext", "search", "clip", "board", "--json"])).unwrap(),
+            Action::ExtSearch(Some("clip board".into()))
+        );
+        assert!(parse(&args(&["ext", "search", "--limit"])).is_err());
         assert_eq!(parse(&["mcp".into()]).unwrap(), Action::Mcp(None));
         assert_eq!(
             parse(&args(&["mcp", "--workspace", "packages"])).unwrap(),

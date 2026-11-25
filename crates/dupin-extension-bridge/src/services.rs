@@ -3,10 +3,11 @@
 //! checks authority, prompts or knows which package asked.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use dupin_extension_http as http;
-use dupin_host_services::exec;
+use dupin_host_services::{calendar, exec, windows};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -37,6 +38,11 @@ impl Failure {
         }
     }
 
+    /// What went wrong, as `DupinError.code` names it, such as `needs-consent`.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
     pub(crate) fn invalid(message: impl Into<String>) -> Self {
         Self::new("invalid", message)
     }
@@ -44,6 +50,12 @@ impl Failure {
     pub(crate) fn scope(mut self, scope: impl Into<String>) -> Self {
         self.scope = Some(scope.into());
         self
+    }
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
     }
 }
 
@@ -80,27 +92,31 @@ pub trait Exec: Send + Sync {
     ) -> Result<exec::Outcome, exec::ExecError>;
 }
 
-/// One package's private key-value data. The app's implementation keeps it encrypted at rest;
-/// the bridge has already checked the package's quota against [`Storage::size`].
+/// Packages' encrypted namespaces. The app's and the tests' implementation is
+/// [`crate::PackageStorage`]; the bridge picks the namespace and the limits from the permit.
 pub trait Storage: Send + Sync {
-    fn get(&self, package: &str, key: &str) -> Result<Option<Value>, Failure>;
-    /// `retention_days` is how long the value may be kept unread.
-    fn set(
+    /// `namespace`, open with `limits`, which apply at once if they changed since it opened.
+    fn open(
         &self,
-        package: &str,
-        key: &str,
-        value: &Value,
-        retention_days: Option<u32>,
-    ) -> Result<(), Failure>;
-    fn delete(&self, package: &str, key: &str) -> Result<(), Failure>;
-    fn keys(&self, package: &str) -> Result<Vec<String>, Failure>;
-    /// The bytes the package stores, counted as each key plus its value encoded as JSON.
-    fn size(&self, package: &str) -> Result<u64, Failure>;
+        namespace: &str,
+        limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure>;
+    /// Deletes `namespace` and everything in it.
+    fn discard(&self, namespace: &str) -> Result<(), Failure>;
 }
 
-/// The bytes one entry counts toward a package's quota.
-pub(crate) fn entry_size(key: &str, value: &Value) -> u64 {
-    (key.len() + value.to_string().len()) as u64
+impl<T: Storage> Storage for Arc<T> {
+    fn open(
+        &self,
+        namespace: &str,
+        limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
+        T::open(self, namespace, limits)
+    }
+
+    fn discard(&self, namespace: &str) -> Result<(), Failure> {
+        T::discard(self, namespace)
+    }
 }
 
 /// Keeps a watch going while it is held.
@@ -111,6 +127,15 @@ pub trait Clipboard: Send + Sync {
     /// none when it is empty or withheld.
     fn read(&self) -> Result<Option<Value>, Failure>;
     fn write_text(&self, text: &str) -> Result<(), Failure>;
+    /// Puts a PNG on the clipboard.
+    fn write_image(&self, _png: &[u8]) -> Result<(), Failure> {
+        Err(Failure::new("unavailable", "images can't be copied here"))
+    }
+    /// Puts files on the clipboard as Finder's Copy does. The bridge has checked that a watch
+    /// delivered them to the package.
+    fn write_files(&self, _paths: &[std::path::PathBuf]) -> Result<(), Failure> {
+        Err(Failure::new("unavailable", "files can't be copied here"))
+    }
     /// Calls `changed` with each copy, shaped as [`Clipboard::read`] returns it.
     fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure>;
 }
@@ -124,13 +149,30 @@ pub trait Calendar: Send + Sync {
     /// The whole local days before and after today that `[from, to)` (milliseconds since the
     /// epoch) reaches, which the broker checks against the declared window.
     fn window(&self, from: i64, to: i64) -> Result<(u32, u32), Failure>;
-    /// Events overlapping `[from, to)`, at most `limit`, inside `scope`'s window, as a JSON
-    /// array whose `start` and `end` are milliseconds since the epoch.
-    fn events(&self, from: i64, to: i64, limit: usize, scope: &dupin_broker::Scope)
-    -> Result<Value, Failure>;
+    /// Events overlapping `[from, to)` whose title or location holds every word of `query`, at
+    /// most `limit` from the end `order` names, inside `scope`'s window, as a JSON array whose
+    /// `start` and `end` are milliseconds since the epoch.
+    fn events(
+        &self,
+        from: i64,
+        to: i64,
+        query: Option<&str>,
+        limit: usize,
+        order: calendar::Order,
+        scope: &dupin_broker::Scope,
+    ) -> Result<Value, Failure>;
 }
 
-/// What a host service is missing, such as the encrypted store before it exists.
+pub trait Windows: Send + Sync {
+    /// Every display, the primary one first, as a JSON array.
+    fn displays(&self) -> Result<Value, Failure>;
+    /// The focused window of the app in front of Dupin and that app, or `null`.
+    fn focused(&self) -> Result<Value, Failure>;
+    /// Moves and resizes that window to `frame`, returning the frame it took.
+    fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure>;
+}
+
+/// What a host service is missing, such as one a headless run has no use for.
 pub struct Unavailable(pub &'static str);
 
 impl Unavailable {
@@ -162,25 +204,14 @@ impl Exec for Unavailable {
 }
 
 impl Storage for Unavailable {
-    fn get(&self, _package: &str, _key: &str) -> Result<Option<Value>, Failure> {
-        Err(self.failure())
-    }
-    fn set(
+    fn open(
         &self,
-        _package: &str,
-        _key: &str,
-        _value: &Value,
-        _retention: Option<u32>,
-    ) -> Result<(), Failure> {
+        _namespace: &str,
+        _limits: dupin_storage::Limits,
+    ) -> Result<Arc<crate::storage::Namespace>, Failure> {
         Err(self.failure())
     }
-    fn delete(&self, _package: &str, _key: &str) -> Result<(), Failure> {
-        Err(self.failure())
-    }
-    fn keys(&self, _package: &str) -> Result<Vec<String>, Failure> {
-        Err(self.failure())
-    }
-    fn size(&self, _package: &str) -> Result<u64, Failure> {
+    fn discard(&self, _namespace: &str) -> Result<(), Failure> {
         Err(self.failure())
     }
 }
@@ -211,9 +242,23 @@ impl Calendar for Unavailable {
         &self,
         _from: i64,
         _to: i64,
+        _query: Option<&str>,
         _limit: usize,
+        _order: calendar::Order,
         _scope: &dupin_broker::Scope,
     ) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+}
+
+impl Windows for Unavailable {
+    fn displays(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn focused(&self) -> Result<Value, Failure> {
+        Err(self.failure())
+    }
+    fn set_frame(&self, _frame: windows::Frame) -> Result<Value, Failure> {
         Err(self.failure())
     }
 }
@@ -235,6 +280,7 @@ pub struct Services {
     pub clipboard: Box<dyn Clipboard>,
     pub dictionary: Box<dyn Dictionary>,
     pub calendar: Box<dyn Calendar>,
+    pub windows: Box<dyn Windows>,
 }
 
 impl Services {
@@ -247,14 +293,15 @@ impl Services {
             clipboard: Box::new(Unavailable("the clipboard isn't available")),
             dictionary: Box::new(Unavailable("the dictionary isn't available")),
             calendar: Box::new(Unavailable("calendars aren't available")),
+            windows: Box::new(Unavailable("windows aren't available")),
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod fixture {
-    //! In-memory services for tests: nothing here touches the network, the clipboard, calendars
-    //! or the file system.
+    //! In-memory services for tests: nothing here touches the network, the clipboard, calendars,
+    //! windows or the file system.
 
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -329,61 +376,6 @@ pub(crate) mod fixture {
         }
     }
 
-    #[derive(Default)]
-    pub(crate) struct Storage {
-        pub(crate) data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
-    }
-
-    impl super::Storage for Arc<Storage> {
-        fn get(&self, package: &str, key: &str) -> Result<Option<Value>, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .and_then(|entries| entries.get(key).cloned()))
-        }
-        fn set(
-            &self,
-            package: &str,
-            key: &str,
-            value: &Value,
-            _retention: Option<u32>,
-        ) -> Result<(), Failure> {
-            self.data
-                .lock()
-                .unwrap()
-                .entry(package.into())
-                .or_default()
-                .insert(key.into(), value.clone());
-            Ok(())
-        }
-        fn delete(&self, package: &str, key: &str) -> Result<(), Failure> {
-            if let Some(entries) = self.data.lock().unwrap().get_mut(package) {
-                entries.remove(key);
-            }
-            Ok(())
-        }
-        fn keys(&self, package: &str) -> Result<Vec<String>, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .map(|entries| entries.keys().cloned().collect())
-                .unwrap_or_default())
-        }
-        fn size(&self, package: &str) -> Result<u64, Failure> {
-            Ok(self
-                .data
-                .lock()
-                .unwrap()
-                .get(package)
-                .map(|entries| entries.iter().map(|(key, value)| entry_size(key, value)).sum())
-                .unwrap_or(0))
-        }
-    }
-
     /// A clipboard holding `text`, whose watchers [`Clipboard::copy`] notifies.
     #[derive(Default)]
     pub(crate) struct Clipboard {
@@ -435,6 +427,15 @@ pub(crate) mod fixture {
             *self.text.lock().unwrap() = Some(text.into());
             Ok(())
         }
+        fn write_image(&self, png: &[u8]) -> Result<(), Failure> {
+            *self.text.lock().unwrap() = Some(format!("image of {} bytes", png.len()));
+            Ok(())
+        }
+        fn write_files(&self, paths: &[std::path::PathBuf]) -> Result<(), Failure> {
+            let paths: Vec<_> = paths.iter().map(|path| path.display().to_string()).collect();
+            *self.text.lock().unwrap() = Some(paths.join("\n"));
+            Ok(())
+        }
         fn watch(&self, changed: Box<dyn Fn(Value) + Send + Sync>) -> Result<Subscription, Failure> {
             let id = self.next.fetch_add(1, Ordering::Relaxed) as u64;
             self.watchers.lock().unwrap().push((id, Arc::from(changed)));
@@ -457,6 +458,32 @@ pub(crate) mod fixture {
         }
     }
 
+    /// One display, and a focused window that each move records.
+    #[derive(Default)]
+    pub(crate) struct Windows {
+        pub(crate) moves: Mutex<Vec<super::windows::Frame>>,
+    }
+
+    impl super::Windows for Arc<Windows> {
+        fn displays(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!([{
+                "frame": { "x": 0, "y": 0, "width": 1440, "height": 900 },
+                "visibleFrame": { "x": 0, "y": 25, "width": 1440, "height": 875 },
+                "scale": 2,
+            }]))
+        }
+        fn focused(&self) -> Result<Value, Failure> {
+            Ok(serde_json::json!({
+                "frame": { "x": 10, "y": 40, "width": 300, "height": 200 },
+                "app": { "name": "Notes", "bundleId": "com.apple.Notes" },
+            }))
+        }
+        fn set_frame(&self, frame: super::windows::Frame) -> Result<Value, Failure> {
+            self.moves.lock().unwrap().push(frame);
+            Ok(serde_json::to_value(frame).unwrap())
+        }
+    }
+
     /// Today starts at `today`; one event a day at noon.
     pub(crate) struct Calendar {
         pub(crate) today: i64,
@@ -474,9 +501,14 @@ pub(crate) mod fixture {
             &self,
             from: i64,
             to: i64,
+            query: Option<&str>,
             limit: usize,
+            _order: calendar::Order,
             _scope: &dupin_broker::Scope,
         ) -> Result<Value, Failure> {
+            if query.is_some_and(|query| !"standup".contains(&query.trim().to_lowercase())) {
+                return Ok(Value::Array(Vec::new()));
+            }
             let first = (from - self.today).div_euclid(DAY);
             let events: Vec<_> = (first..)
                 .map(|day| self.today + day * DAY + DAY / 2)
@@ -484,7 +516,7 @@ pub(crate) mod fixture {
                 .filter(|start| *start >= from)
                 .take(limit)
                 .map(|start| {
-                    serde_json::json!({ "id": format!("standup-{start}"), "title": "Standup", "start": start, "end": start + DAY / 24, "allDay": false, "calendar": { "name": "Work", "color": null }, "location": null, "url": null })
+                    serde_json::json!({ "id": format!("standup-{start}"), "title": "Standup", "start": start, "end": start + DAY / 24, "allDay": false, "calendar": { "name": "Work", "color": null }, "location": null, "url": null, "link": format!("ical://ekevent/standup-{start}?method=show&options=more") })
                 })
                 .collect();
             Ok(Value::Array(events))

@@ -230,6 +230,8 @@ pub enum ClipboardAccess {
     Read,
     Write,
     Watch,
+    /// Pasting a row's text into the app in front of Dupin, which Dupin does by posting ⌘V.
+    Paste,
 }
 
 impl ClipboardAccess {
@@ -238,6 +240,101 @@ impl ClipboardAccess {
             Self::Read => "read",
             Self::Write => "write",
             Self::Watch => "watch",
+            Self::Paste => "paste",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowsAccess {
+    /// Listing displays and reading the focused window's frame and app.
+    Read,
+    /// Moving and resizing the focused window.
+    Arrange,
+}
+
+impl WindowsAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Arrange => "arrange",
+        }
+    }
+}
+
+/// A kind of row Dupin's own sources show, whose fields a package may be let see.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowKind {
+    Text,
+    Url,
+    File,
+    App,
+}
+
+impl RowKind {
+    pub const ALL: [Self; 4] = [Self::Text, Self::Url, Self::File, Self::App];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::File => "file",
+            Self::App => "app",
+        }
+    }
+
+    /// The fields a row of this kind has: its title, and the value it stands for.
+    pub fn fields(self) -> &'static [RowField] {
+        match self {
+            Self::Text => &[RowField::Title, RowField::Text],
+            Self::Url => &[RowField::Title, RowField::Url],
+            Self::File | Self::App => &[RowField::Title, RowField::Name, RowField::Path],
+        }
+    }
+
+    fn plural(self) -> &'static str {
+        match self {
+            Self::Text => "text results",
+            Self::Url => "links",
+            Self::File => "files and folders",
+            Self::App => "apps",
+        }
+    }
+}
+
+/// One field of a row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RowField {
+    Title,
+    Text,
+    Url,
+    /// A file's or app's name in its folder.
+    Name,
+    /// A file's or app's full path.
+    Path,
+}
+
+impl RowField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Title => "title",
+            Self::Text => "text",
+            Self::Url => "url",
+            Self::Name => "name",
+            Self::Path => "path",
+        }
+    }
+
+    fn described(self) -> &'static str {
+        match self {
+            Self::Title => "titles",
+            Self::Text => "text",
+            Self::Url => "addresses",
+            Self::Name => "names",
+            Self::Path => "full paths",
         }
     }
 }
@@ -258,16 +355,20 @@ pub enum OsPermission {
     Calendars,
     /// Reading the general pasteboard without the system's paste prompt.
     Pasteboard,
+    /// Posting key events, such as ⌘V into the front app, and reading and moving other apps'
+    /// windows.
+    Accessibility,
 }
 
 impl OsPermission {
-    pub const ALL: [Self; 2] = [Self::Calendars, Self::Pasteboard];
+    pub const ALL: [Self; 3] = [Self::Calendars, Self::Pasteboard, Self::Accessibility];
 
     /// The name System Settings lists it under.
     pub fn name(self) -> &'static str {
         match self {
             Self::Calendars => "Calendars",
             Self::Pasteboard => "Paste from Other Apps",
+            Self::Accessibility => "Accessibility",
         }
     }
 }
@@ -306,6 +407,17 @@ pub enum Scope {
         past_days: u32,
         future_days: u32,
     },
+    Windows {
+        access: WindowsAccess,
+    },
+    /// Fields of the rows of one kind that Dupin's own sources show, which the package's
+    /// filters and kind actions receive. Another package's rows never reach it.
+    Rows {
+        kind: RowKind,
+        fields: BTreeSet<RowField>,
+    },
+    /// What the user types in the searches the package's matchers are composed into.
+    Query,
 }
 
 impl Scope {
@@ -319,6 +431,9 @@ impl Scope {
             Self::Clipboard { access } => ScopeKey::Clipboard(*access),
             Self::Dictionary => ScopeKey::Dictionary,
             Self::Calendar { .. } => ScopeKey::Calendar,
+            Self::Windows { access } => ScopeKey::Windows(*access),
+            Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
+            Self::Query => ScopeKey::Query,
         }
     }
 
@@ -381,6 +496,11 @@ impl Scope {
                     future_days: f,
                 },
             ) => past_days >= p && future_days >= f,
+            (Self::Windows { access }, Self::Windows { access: a }) => access == a,
+            (Self::Rows { kind, fields }, Self::Rows { kind: k, fields: f }) => {
+                kind == k && fields.is_superset(f)
+            }
+            (Self::Query, Self::Query) => true,
             _ => false,
         }
     }
@@ -391,6 +511,10 @@ impl Scope {
             Self::Clipboard {
                 access: ClipboardAccess::Read | ClipboardAccess::Watch,
             } => Some(OsPermission::Pasteboard),
+            Self::Clipboard {
+                access: ClipboardAccess::Paste,
+            }
+            | Self::Windows { .. } => Some(OsPermission::Accessibility),
             _ => None,
         }
     }
@@ -434,8 +558,9 @@ impl fmt::Display for Scope {
             }
             Self::Exec { name, args, output } => {
                 write!(f, "run the program you pick for “{name}”")?;
-                if !args.is_empty() {
-                    write!(f, " with `{}`", args.join(" "))?;
+                for (index, arg) in args.iter().enumerate() {
+                    f.write_str(if index == 0 { " with " } else { " " })?;
+                    write!(f, "{arg:?}")?;
                 }
                 if *output {
                     f.write_str(" and read its output")?;
@@ -463,6 +588,7 @@ impl fmt::Display for Scope {
                 ClipboardAccess::Read => f.write_str("read the clipboard"),
                 ClipboardAccess::Write => f.write_str("write to the clipboard"),
                 ClipboardAccess::Watch => f.write_str("see each new clipboard entry"),
+                ClipboardAccess::Paste => f.write_str("paste into the app you were using"),
             },
             Self::Dictionary => f.write_str("look words up in the system dictionaries"),
             Self::Calendar {
@@ -474,14 +600,25 @@ impl fmt::Display for Scope {
                 days(*past_days),
                 days(*future_days)
             ),
+            Self::Windows { access } => match access {
+                WindowsAccess::Read => f.write_str("see your displays and the focused window"),
+                WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
+            },
+            Self::Rows { kind, fields } => write!(
+                f,
+                "see the {} of {} Dupin finds, where you compose its filters or actions",
+                list(fields, |field| field.described()),
+                kind.plural()
+            ),
+            Self::Query => f.write_str("see what you type in the searches you compose its matchers into"),
         }
     }
 }
 
 /// The name of one grant: an HTTP origin, a named files or exec scope, a script target, or a
 /// single-valued capability. Written as `http:https://example.com`, `files:notes`,
-/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary` or
-/// `calendar` in grant files.
+/// `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`,
+/// `calendar` or `windows:arrange` in grant files.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum ScopeKey {
@@ -493,6 +630,9 @@ pub enum ScopeKey {
     Clipboard(ClipboardAccess),
     Dictionary,
     Calendar,
+    Windows(WindowsAccess),
+    Rows(RowKind),
+    Query,
 }
 
 impl fmt::Display for ScopeKey {
@@ -506,6 +646,9 @@ impl fmt::Display for ScopeKey {
             Self::Clipboard(access) => write!(f, "clipboard:{}", access.as_str()),
             Self::Dictionary => f.write_str("dictionary"),
             Self::Calendar => f.write_str("calendar"),
+            Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
+            Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
+            Self::Query => f.write_str("query"),
         }
     }
 }
@@ -520,6 +663,7 @@ impl FromStr for ScopeKey {
                 "storage" => Self::Storage,
                 "dictionary" => Self::Dictionary,
                 "calendar" => Self::Calendar,
+                "query" => Self::Query,
                 _ => return Err(unknown()),
             },
             Some(("http", origin)) => Self::Http(Origin::parse(origin)?),
@@ -529,6 +673,15 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "read")) => Self::Clipboard(ClipboardAccess::Read),
             Some(("clipboard", "write")) => Self::Clipboard(ClipboardAccess::Write),
             Some(("clipboard", "watch")) => Self::Clipboard(ClipboardAccess::Watch),
+            Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
+            Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
+            Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
+            Some(("rows", kind)) => Self::Rows(
+                RowKind::ALL
+                    .into_iter()
+                    .find(|known| known.as_str() == kind)
+                    .ok_or_else(unknown)?,
+            ),
             Some(_) => return Err(unknown()),
         })
     }
@@ -545,4 +698,35 @@ impl From<ScopeKey> for String {
     fn from(value: ScopeKey) -> String {
         value.to_string()
     }
+}
+
+/// Whether `text` shows as itself in the consent text: control, line-separator and invisible
+/// formatting characters such as bidi overrides could forge or reorder the lines a user approves.
+pub fn displayable(text: &str) -> bool {
+    !text.chars().any(|ch| {
+        ch.is_control()
+            || matches!(
+                ch,
+                '\u{ad}'
+                    | '\u{600}'..='\u{605}'
+                    | '\u{61c}'
+                    | '\u{6dd}'
+                    | '\u{70f}'
+                    | '\u{890}'..='\u{891}'
+                    | '\u{8e2}'
+                    | '\u{180e}'
+                    | '\u{200b}'..='\u{200f}'
+                    | '\u{2028}'..='\u{202e}'
+                    | '\u{2060}'..='\u{206f}'
+                    | '\u{feff}'
+                    | '\u{fff9}'..='\u{fffb}'
+                    | '\u{110bd}'
+                    | '\u{110cd}'
+                    | '\u{13430}'..='\u{1343f}'
+                    | '\u{1bca0}'..='\u{1bca3}'
+                    | '\u{1d173}'..='\u{1d17a}'
+                    | '\u{e0001}'
+                    | '\u{e0020}'..='\u{e007f}'
+            )
+    })
 }

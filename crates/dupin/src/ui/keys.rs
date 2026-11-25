@@ -9,6 +9,10 @@ impl Ui {
         if self.picker.is_some() {
             return self.key(ev, tx);
         }
+        if self.form_draft().is_some() {
+            // A focused field had the key first and passed it on.
+            return tx.focused().is_none() && self.form_key(ev, tx);
+        }
         if self.action_screen.is_some() {
             return self.key(ev, tx);
         }
@@ -34,6 +38,9 @@ impl Ui {
 
     /// Keys the field sees first. True consumes the key.
     pub fn key(&mut self, ev: &KeyEvent, tx: &mut Tx) -> bool {
+        if !self.session.command().private_results {
+            crate::trace::key(ev);
+        }
         if self.picker.is_some() {
             return self.picker_key(ev, tx);
         }
@@ -53,9 +60,6 @@ impl Ui {
         if ev.mods.cmd && ev.mods.shift && matches!(ev.key, Key::Command('o') | Key::Command('O')) {
             self.show_snapshots(tx);
             return true;
-        }
-        if !self.session.command().private_results {
-            crate::trace::key(ev);
         }
         if let Some(preview) = self.quick_look.borrow().as_ref() {
             preview.trace_picker_input();
@@ -87,14 +91,12 @@ impl Ui {
             if !self
                 .session
                 .selected_item()
-                .is_some_and(|item| item.item_action(dupin_mac::quick_look::ACTION_ID).is_some())
+                .is_some_and(|item| item.item_action(dupin_core::kind::QUICK_LOOK).is_some())
             {
                 return false;
             }
             let key = self.session.result_key(self.session.selected());
-            let effects = self
-                .session
-                .run_key_action(&key, dupin_mac::quick_look::ACTION_ID);
+            let effects = self.session.run_key_action(&key, dupin_core::kind::QUICK_LOOK);
             self.apply(effects, tx);
             return true;
         }

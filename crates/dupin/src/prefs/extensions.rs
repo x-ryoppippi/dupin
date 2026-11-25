@@ -1,6 +1,7 @@
-//! Settings → Extensions: each installed package's declared capabilities and where each stands,
-//! with Allow, Revoke and Request Access. Opening the page only reads; macOS is asked only when
-//! the user presses Request Access.
+//! Settings → Extensions: the extensions folder's switch, then each loaded package, bundled or
+//! the user's, with its switch, its declared capabilities and where each stands, with Allow,
+//! Revoke, Request Access and, for storage, Delete Data. Opening the page only reads; macOS is
+//! asked only when the user presses Request Access.
 
 use dupin_extension_bridge::{
     Bridge, ConsentReason, ConsentRequest, ConsentState, GrantSource, OsAccess, OsPermission, PackageId,
@@ -10,22 +11,16 @@ use rune::{El, Icon, col, row, text};
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, Kit, Switch};
 
 use super::Prefs;
-use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, tilde};
+use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, setting_with_lock, tilde};
+use crate::extensions::packages::{Kind, Listed};
 use crate::icons;
 
-/// A loaded JavaScript package, as the panel's catalogue reports it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct InstalledExtension {
-    pub package: PackageId,
-    pub name: String,
-    pub keyword: String,
-}
-
 pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
+    let mut rows = vec![card(k, hair, vec![folder_setting(s, k)])];
+    rows.extend(skipped(s, k));
     let Some(bridge) = &s.access else {
-        return vec![note(k, "Turn on Extensions in Search to list them here.")];
+        return rows;
     };
-    let mut rows = Vec::new();
     let pending = bridge.pending(None);
     if !pending.is_empty() {
         rows.push(heading(k, "waiting", "Waiting for you"));
@@ -39,16 +34,27 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
                 .collect(),
         ));
     }
-    for (index, extension) in s.installed.iter().enumerate() {
+    let (listed, _) = &s.extensions;
+    for (index, extension) in listed.iter().enumerate() {
         rows.push(heading(
             k,
             &format!("extension-{index}"),
-            &format!("{} ({})", extension.name, extension.keyword),
+            &format!(
+                "{} ({}{})",
+                extension.title,
+                if extension.built_in {
+                    "a built-in command"
+                } else {
+                    &extension.keyword
+                },
+                if extension.main_search {
+                    ", in the main search"
+                } else {
+                    ""
+                }
+            ),
         ));
         rows.push(card(k, hair, package_rows(bridge, k, index, extension)));
-    }
-    if s.installed.is_empty() {
-        rows.push(note(k, "No loaded extension declares capabilities."));
     }
     for problem in bridge.problems() {
         rows.push(note(k, &problem));
@@ -59,7 +65,62 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
          Allowing runs nothing it asked for before. Revoking takes effect at once and drops \
          work it was doing.",
     ));
+    rows.push(note(
+        k,
+        "Bundled extensions ship with Dupin and are on until you turn them off, except Window \
+         Management, which waits for you to turn it on. \
+         One that answers a built-in command needs both that command's setting and its switch \
+         here on. Run dupin ext eject NAME to copy one into the extensions folder and edit it \
+         there; delete the copy to go back to the bundled one.",
+    ));
     rows
+}
+
+fn folder_setting(s: &Prefs, k: &Kit) -> El {
+    let locked = s.locked("extensions");
+    let enabled = s.config.extensions;
+    let switch = Switch::new(enabled)
+        .label("Extensions folder")
+        .hide_label()
+        .disabled(locked)
+        .on_toggle(move |s: &mut Prefs| s.set(|c| c.extensions = !enabled))
+        .build(k);
+    let folder = crate::extensions::directory()
+        .map(|path| tilde(&path.to_string_lossy()))
+        .unwrap_or_else(|| "the extensions folder".into());
+    let status = if enabled {
+        format!("Extensions in {folder} answer their keywords")
+    } else {
+        format!("Off. Extensions in {folder} are third-party code; when on, they answer their keywords")
+    };
+    setting_with_lock(
+        k,
+        &icons::FOLDER,
+        "Extensions folder",
+        Some(&status),
+        switch,
+        s.lock_note(locked),
+    )
+}
+
+/// Each folder that was skipped, with why.
+fn skipped(s: &Prefs, k: &Kit) -> Option<El> {
+    let (_, problems) = &s.extensions;
+    (!problems.is_empty()).then(|| {
+        col()
+            .key("extension-problems")
+            .w_full()
+            .px(ROW_PX)
+            .gap(4.0)
+            .child(text("Skipped extensions").font(k.ty.ui).color(k.c.text_base))
+            .children(problems.iter().map(|problem| {
+                text(problem.clone())
+                    .font(DESCRIPTION)
+                    .color(k.c.text_muted)
+                    .wrap()
+                    .w_full()
+            }))
+    })
 }
 
 fn heading(k: &Kit, key: &str, title: &str) -> El {
@@ -73,10 +134,11 @@ fn heading(k: &Kit, key: &str, title: &str) -> El {
 }
 
 fn name_of(s: &Prefs, id: &PackageId) -> String {
-    s.installed
+    s.extensions
+        .0
         .iter()
         .find(|extension| extension.package == *id)
-        .map_or_else(|| id.to_string(), |extension| extension.name.clone())
+        .map_or_else(|| id.to_string(), |extension| extension.title.clone())
 }
 
 fn pending_row(s: &Prefs, k: &Kit, index: usize, request: &ConsentRequest) -> El {
@@ -125,21 +187,18 @@ fn pending_row(s: &Prefs, k: &Kit, index: usize, request: &ConsentRequest) -> El
     )
 }
 
-fn package_rows(bridge: &Bridge, k: &Kit, index: usize, extension: &InstalledExtension) -> Vec<El> {
+fn package_rows(bridge: &Bridge, k: &Kit, index: usize, extension: &Listed) -> Vec<El> {
     let enabled = bridge.is_enabled(&extension.package);
+    let runs = !bridge.is_turned_off(&extension.package);
     let id = extension.package.clone();
     let switch = Switch::new(enabled)
-        .label(format!("Let {} use what you allow", extension.name))
+        .label(extension.title.clone())
         .hide_label()
         .on_toggle(move |s: &mut Prefs| s.set_extension_enabled(&id, !enabled))
         .build(k)
         .key(format!("extension-{index}-enabled"));
-    let status = if enabled {
-        "On: it can use each thing below that you allow"
-    } else {
-        "Off: it can't use anything below, and asking turns nothing on"
-    };
-    let mut rows = vec![setting(k, &icons::PUZZLE, "Access", Some(status), switch)];
+    let status = status(extension, enabled, runs);
+    let mut rows = vec![setting(k, &icons::PUZZLE, "On", Some(&status), switch)];
     let scopes = bridge.scopes(&extension.package);
     if scopes.is_empty() {
         rows.push(setting(
@@ -162,7 +221,7 @@ fn package_rows(bridge: &Bridge, k: &Kit, index: usize, extension: &InstalledExt
     rows
 }
 
-fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &InstalledExtension, entry: ScopeEntry) -> El {
+fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &Listed, entry: ScopeEntry) -> El {
     let ScopeEntry {
         scope,
         state,
@@ -214,6 +273,16 @@ fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &InstalledExtension
             .key(format!("{key}-allow")),
         );
     }
+    if matches!(scope, Scope::Storage { .. }) {
+        let id = extension.package.clone();
+        controls = controls.child(
+            Button::new("Delete Data")
+                .variant(ButtonVariant::Outline)
+                .on_press(move |s: &mut Prefs| s.delete_extension_data(&id))
+                .build(k)
+                .key(format!("{key}-delete-data")),
+        );
+    }
     let mut detail = scope.key().to_string();
     if let Some(permission) = permission {
         detail.push_str(&format!(" · Also needs macOS {} access", permission.name()));
@@ -228,6 +297,39 @@ fn scope_row(bridge: &Bridge, k: &Kit, key: &str, extension: &InstalledExtension
         Some(&detail),
         controls,
     )
+}
+
+/// Where the extension came from, and whether its keyword reaches it and what it may use.
+fn status(extension: &Listed, enabled: bool, runs: bool) -> String {
+    let origin = match extension.kind {
+        Kind::Bundled => "Bundled with Dupin",
+        Kind::Copy => "Your copy of a bundled extension, unchanged",
+        Kind::Modified => "Replaces a bundled extension of the same name, without its grants",
+        Kind::User => "From the extensions folder",
+    };
+    let keyword = &extension.keyword;
+    if extension.built_in {
+        return match (runs, extension.registered, enabled) {
+            (false, ..) => format!("{origin}. Off, so its built-in command isn't available."),
+            (true, false, _) => format!("{origin}. Not answering: its built-in command is off in Settings."),
+            (true, true, true) => {
+                format!("{origin}. Answers its built-in command; it can use what you allow below.")
+            }
+            (true, true, false) => format!(
+                "{origin}. Answers its built-in command; it can use nothing below until you turn it on."
+            ),
+        };
+    }
+    match (runs, extension.registered, enabled) {
+        (false, ..) => format!("{origin}. Off."),
+        (true, false, _) => format!("{origin}. Not answering: another command already uses {keyword}."),
+        (true, true, true) => {
+            format!("{origin}. Type {keyword} then Space; it can use what you allow below.")
+        }
+        (true, true, false) => {
+            format!("{origin}. Type {keyword} then Space; it can use nothing below until you turn it on.")
+        }
+    }
 }
 
 fn request_access_button(k: &Kit, key: &str, permission: OsPermission) -> El {
@@ -246,6 +348,8 @@ fn glyph(scope: &Scope) -> &'static Icon {
         Scope::Clipboard { .. } => &icons::CLIPBOARD,
         Scope::Dictionary => &icons::LANGUAGES,
         Scope::Calendar { .. } => &icons::CALENDAR,
+        Scope::Windows { .. } => &icons::PANEL,
+        Scope::Rows { .. } | Scope::Query => &icons::SEARCH,
     }
 }
 
@@ -263,9 +367,8 @@ pub(super) fn shown_path(path: &std::path::Path) -> String {
 }
 
 impl Prefs {
-    pub fn reflect_extension_access(&mut self, bridge: Bridge, installed: Vec<InstalledExtension>) {
+    pub fn reflect_extension_access(&mut self, bridge: Bridge) {
         self.access = Some(bridge);
-        self.installed = installed;
     }
 
     /// The installed extensions that declare a scope needing `permission`, for its row in
@@ -329,15 +432,41 @@ impl Prefs {
 
     fn revoke(&mut self, id: &PackageId, key: &dupin_extension_bridge::ScopeKey) {
         let Some(bridge) = self.access.clone() else { return };
-        self.extension_problem = bridge.revoke(id, key).err().map(|error| error.to_string());
+        self.extension_problem = match bridge.revoke(id, key) {
+            Ok(()) if *key == dupin_extension_bridge::ScopeKey::Storage => Some(format!(
+                "Revoked. {}'s stored data is kept until you delete it or remove the extension.",
+                name_of(self, id)
+            )),
+            Ok(()) => None,
+            Err(error) => Some(error.to_string()),
+        };
     }
 
+    /// Deletes what the package stored, off the UI thread, since it removes files.
+    fn delete_extension_data(&mut self, id: &PackageId) {
+        let Some(bridge) = self.access.clone() else { return };
+        let (id, origin) = (id.clone(), bridge.origin(id));
+        self.extension_problem = Some(format!("Deleting {}'s stored data.", name_of(self, &id)));
+        std::thread::spawn(move || {
+            if let Err(failure) = bridge.delete_data(&id, origin) {
+                crate::log::warn(&format!("couldn't delete {id}'s stored data: {failure}"));
+            }
+        });
+    }
+
+    /// Turning on a bundled package that ships off is turning on its feature, so it may ask
+    /// macOS for what its scopes need, as turning on a built-in feature does.
     fn set_extension_enabled(&mut self, id: &PackageId, enabled: bool) {
         let Some(bridge) = self.access.clone() else { return };
         self.extension_problem = bridge
             .set_enabled(id, enabled)
             .err()
             .map(|error| error.to_string());
+        if enabled && self.extension_problem.is_none() {
+            for permission in os_access_to_request(&bridge, id) {
+                self.request_os_access(permission);
+            }
+        }
     }
 
     /// The deliberate press that may ask macOS, never anything Settings does on its own.
@@ -350,9 +479,29 @@ impl Prefs {
             OsPermission::Pasteboard => {
                 std::thread::spawn(dupin_mac::clipboard::request_access);
             }
+            OsPermission::Accessibility => crate::extensions::access::request_accessibility(),
         }
         self.refresh_permissions();
     }
+}
+
+/// The macOS access that turning `id` on asks for: what its granted scopes need that macOS hasn't
+/// been asked for yet, only for a package whose switch is its feature's. A built-in command's
+/// setting asks for its own package, and any other extension asks only through Request Access.
+fn os_access_to_request(bridge: &Bridge, id: &PackageId) -> Vec<OsPermission> {
+    if !bridge.ships_off(id) {
+        return Vec::new();
+    }
+    let mut permissions: Vec<_> = bridge
+        .scopes(id)
+        .into_iter()
+        .filter(|entry| matches!(entry.state, ConsentState::Granted(_)))
+        .filter_map(|entry| entry.permission)
+        .filter(|permission| bridge.os_access(*permission) == OsAccess::NotDetermined)
+        .collect();
+    permissions.sort();
+    permissions.dedup();
+    permissions
 }
 
 fn pick(kind: dupin_mac::pick::Kind, message: &str) -> Option<std::path::PathBuf> {
@@ -371,4 +520,132 @@ pub(super) fn problem(s: &Prefs, k: &Kit) -> Option<El> {
                 .wrap(),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_row_says_whether_its_keyword_reaches_it_and_what_it_may_use() {
+        let listed = |registered| Listed {
+            package: PackageId::new("help").unwrap(),
+            title: "Help".into(),
+            keyword: "help".into(),
+            kind: Kind::User,
+            registered,
+            main_search: false,
+            built_in: false,
+        };
+        assert_eq!(
+            status(&listed(true), true, true),
+            "From the extensions folder. Type help then Space; it can use what you allow below."
+        );
+        assert_eq!(
+            status(&listed(true), false, true),
+            "From the extensions folder. Type help then Space; it can use nothing below until you turn it on."
+        );
+        assert_eq!(
+            status(&listed(false), true, true),
+            "From the extensions folder. Not answering: another command already uses help."
+        );
+        assert_eq!(
+            status(&listed(false), false, false),
+            "From the extensions folder. Off."
+        );
+    }
+
+    #[test]
+    fn only_turning_on_a_package_that_ships_off_asks_macos_for_what_its_grants_need() {
+        let bridge = Bridge::new(
+            dupin_extension_bridge::Broker::new(Default::default(), Default::default()),
+            None,
+            dupin_extension_bridge::Services::none(),
+        );
+        let capabilities = |value| dupin_extension_bridge::Capabilities::parse(&value).unwrap();
+        let revision = dupin_extension_bridge::Revision::new("blake3:fixture").unwrap();
+        let bundled = PackageId::new("bundled:window-management").unwrap();
+        bridge.set_bundled(&bundled, revision.clone(), false);
+        bridge.install(
+            &bundled,
+            revision.clone(),
+            capabilities(serde_json::json!({ "windows": ["read", "arrange"], "dictionary": ["lookup"] })),
+        );
+        let calendar = PackageId::new("bundled:calendar").unwrap();
+        bridge.set_bundled(&calendar, revision.clone(), true);
+        bridge.install(
+            &calendar,
+            revision.clone(),
+            capabilities(
+                serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 1, "futureDays": 1 } }),
+            ),
+        );
+        let user = PackageId::new("arranger").unwrap();
+        bridge.install(
+            &user,
+            revision.clone(),
+            capabilities(serde_json::json!({ "windows": ["arrange"] })),
+        );
+        let granted = PackageId::new("reader").unwrap();
+        bridge.install(
+            &granted,
+            revision.clone(),
+            capabilities(
+                serde_json::json!({ "calendar": { "access": ["read"], "pastDays": 1, "futureDays": 1 } }),
+            ),
+        );
+        for entry in bridge.scopes(&granted) {
+            bridge.allow(&granted, &revision, &entry.scope, None).unwrap();
+        }
+        assert_eq!(
+            os_access_to_request(&bridge, &bundled),
+            [OsPermission::Accessibility]
+        );
+        assert!(
+            os_access_to_request(&bridge, &user).is_empty(),
+            "an extension that holds no grant asks for nothing"
+        );
+        assert!(
+            os_access_to_request(&bridge, &calendar).is_empty(),
+            "a built-in command's own setting asks for its package"
+        );
+        assert!(
+            os_access_to_request(&bridge, &granted).is_empty(),
+            "any other extension asks through Request Access"
+        );
+        bridge.set_os_access(OsPermission::Accessibility, OsAccess::Denied);
+        assert!(
+            os_access_to_request(&bridge, &bundled).is_empty(),
+            "a decision macOS already holds is changed in System Settings"
+        );
+    }
+
+    #[test]
+    fn a_built_in_row_says_its_command_is_what_answers() {
+        let listed = |kind, registered| Listed {
+            package: PackageId::new("bundled:calendar").unwrap(),
+            title: "Calendar".into(),
+            keyword: "cal".into(),
+            kind,
+            registered,
+            main_search: false,
+            built_in: true,
+        };
+        assert_eq!(
+            status(&listed(Kind::Bundled, true), true, true),
+            "Bundled with Dupin. Answers its built-in command; it can use what you allow below."
+        );
+        assert_eq!(
+            status(&listed(Kind::Copy, false), true, true),
+            "Your copy of a bundled extension, unchanged. Not answering: its built-in command is off in Settings."
+        );
+        assert_eq!(
+            status(&listed(Kind::Modified, true), false, true),
+            "Replaces a bundled extension of the same name, without its grants. Answers its built-in command; it can use nothing below until you turn it on."
+        );
+        assert_eq!(
+            status(&listed(Kind::Bundled, true), true, false),
+            "Bundled with Dupin. Off, so its built-in command isn't available."
+        );
+    }
 }

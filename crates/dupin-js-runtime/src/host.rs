@@ -3,13 +3,14 @@
 //! queue through a [`Bridge`] and settles each promise with Dupin's reply. The guest never
 //! learns why a call ran (typing, an action, an event): Dupin attaches that itself.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
-use rquickjs::{Ctx, Function, Persistent, Promise};
+use rquickjs::{Context, Ctx, Function, Module, Persistent, Promise, Runtime, WriteOptions};
 
-use crate::Diagnostic;
+use crate::{Diagnostic, HOST_MODULE};
 
 /// Requests one call may have waiting for a reply at once.
 pub const MAX_PENDING: usize = 16;
@@ -20,13 +21,24 @@ pub const MAX_OP_BYTES: usize = 64;
 pub const MAX_ARGS_BYTES: usize = 2 * 1024 * 1024;
 
 const NATIVE: &str = "__dupinHost";
+const INVALIDATE: &str = "__dupinInvalidate";
 
 /// What the `dupin` module exports. `host` is captured and deleted before any package module
-/// that imports `dupin` runs.
+/// runs.
 pub(crate) const SOURCE: &str = r#"const host = globalThis.__dupinHost;
 delete globalThis.__dupinHost;
+const invalidate = globalThis.__dupinInvalidate;
+delete globalThis.__dupinInvalidate;
 
-export const apiVersion = 2;
+export const apiVersion = 4;
+
+export const items = Object.freeze({
+	invalidate() {
+		if (typeof invalidate !== 'function' || !invalidate()) {
+			throw new Error('items.invalidate() works only in an action or event handler');
+		}
+	},
+});
 
 export class DupinError extends Error {
 	constructor(error) {
@@ -97,18 +109,89 @@ export const exec = Object.freeze({
 	},
 });
 
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64_VALUES = new Uint8Array(128).fill(255);
+for (let index = 0; index < 64; index++) BASE64_VALUES[BASE64.charCodeAt(index)] = index;
+
+function toBase64(bytes) {
+	const chunks = [];
+	for (let start = 0; start < bytes.length; start += 3 * 4096) {
+		const end = Math.min(start + 3 * 4096, bytes.length);
+		const codes = [];
+		for (let index = start; index < end; index += 3) {
+			const left = end - index;
+			const n = (bytes[index] << 16) | ((left > 1 ? bytes[index + 1] : 0) << 8) | (left > 2 ? bytes[index + 2] : 0);
+			codes.push(
+				BASE64.charCodeAt(n >> 18),
+				BASE64.charCodeAt((n >> 12) & 63),
+				left > 1 ? BASE64.charCodeAt((n >> 6) & 63) : 61,
+				left > 2 ? BASE64.charCodeAt(n & 63) : 61,
+			);
+		}
+		chunks.push(String.fromCharCode(...codes));
+	}
+	return chunks.join('');
+}
+
+function fromBase64(text) {
+	const padding = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+	const bytes = new Uint8Array((text.length / 4) * 3 - padding);
+	let at = 0;
+	for (let index = 0; index < text.length; index += 4) {
+		const n =
+			(BASE64_VALUES[text.charCodeAt(index)] << 18) |
+			(BASE64_VALUES[text.charCodeAt(index + 1)] << 12) |
+			((BASE64_VALUES[text.charCodeAt(index + 2)] & 63) << 6) |
+			(BASE64_VALUES[text.charCodeAt(index + 3)] & 63);
+		bytes[at++] = n >> 16;
+		if (at < bytes.length) bytes[at++] = (n >> 8) & 255;
+		if (at < bytes.length) bytes[at++] = n & 255;
+	}
+	return bytes;
+}
+
+function blobBytes(blob) {
+	if (blob instanceof ArrayBuffer) return new Uint8Array(blob);
+	if (ArrayBuffer.isView(blob)) return new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+	throw new DupinError({ code: 'invalid', message: 'a blob is a Uint8Array, another typed array or an ArrayBuffer' });
+}
+
+function stored(record) {
+	if (record === null) return undefined;
+	return Object.freeze({
+		id: record.id,
+		createdAt: new Date(record.createdAt).toISOString(),
+		data: record.data,
+		blobs: Object.freeze(record.blobs.map((blob) => Object.freeze(blob))),
+	});
+}
+
 export const storage = Object.freeze({
-	async get(key) {
-		return (await call('storage.get', { key })).value;
+	async put(data, options = {}) {
+		const blobs = Array.from(options.blobs ?? [], (blob) =>
+			typeof blob === 'string' ? { clip: blob } : toBase64(blobBytes(blob)),
+		);
+		return stored(await call('storage.put', { data, blobs, key: options.key }));
 	},
-	async set(key, value) {
-		await call('storage.set', { key, value });
+	async get(id) {
+		return stored(await call('storage.get', { id }));
 	},
-	async delete(key) {
-		await call('storage.delete', { key });
+	async list(options = {}) {
+		const page = await call('storage.list', { before: options.before, limit: options.limit });
+		return Object.freeze({ records: Object.freeze(page.records.map(stored)), next: page.next ?? undefined });
 	},
-	async keys() {
-		return (await call('storage.keys', {})).keys;
+	async readBlob(handle) {
+		return fromBase64((await call('storage.readBlob', { handle })).data);
+	},
+	async delete(id) {
+		return (await call('storage.delete', { id })).deleted;
+	},
+	async clear() {
+		await call('storage.clear', {});
+	},
+	async usage() {
+		const usage = await call('storage.usage', {});
+		return Object.freeze({ ...usage, retentionDays: usage.retentionDays ?? undefined });
 	},
 });
 
@@ -122,6 +205,21 @@ export const clipboard = Object.freeze({
 	},
 	async writeText(text) {
 		await call('clipboard.write', { text });
+	},
+	async write(clip) {
+		switch (clip?.type) {
+			case 'text':
+				return void (await call('clipboard.write', { type: 'text', text: clip.text }));
+			case 'image':
+				return void (await call('clipboard.write', { type: 'image', blob: clip.blob }));
+			case 'files':
+				return void (await call('clipboard.write', {
+					type: 'files',
+					files: Array.from(clip.files ?? [], (file) => ({ path: file.path, handle: file.handle })),
+				}));
+			default:
+				throw new DupinError({ code: 'invalid', message: 'write a copy of type "text", "image" or "files"' });
+		}
 	},
 });
 
@@ -140,9 +238,24 @@ export const calendar = Object.freeze({
 		const { events } = await call('calendar.events', {
 			from: time(range.from),
 			to: time(range.to),
+			query: range.query,
 			limit: range.limit,
+			order: range.order,
 		});
 		return events.map((event) => Object.freeze({ ...event, start: iso(event.start), end: iso(event.end) }));
+	},
+});
+
+export const windows = Object.freeze({
+	async displays() {
+		return (await call('windows.displays', {})).displays;
+	},
+	async focused() {
+		return (await call('windows.focused', {})).window;
+	},
+	async setFrame(frame) {
+		const { x, y, width, height } = frame ?? {};
+		return (await call('windows.setFrame', { x, y, width, height })).frame;
 	},
 });
 "#;
@@ -197,8 +310,48 @@ pub(crate) struct Calls {
 
 pub(crate) type Shared = Rc<RefCell<Calls>>;
 
-/// Installs the native function the `dupin` module captures.
-pub(crate) fn install<'js>(ctx: &Ctx<'js>, calls: &Shared) -> rquickjs::Result<()> {
+/// The `dupin` module as bytecode, which this process compiles from [`SOURCE`] once and every
+/// engine then loads.
+pub(crate) fn bytecode() -> rquickjs::Result<&'static [u8]> {
+    static BYTECODE: OnceLock<Box<[u8]>> = OnceLock::new();
+    if let Some(bytecode) = BYTECODE.get() {
+        return Ok(bytecode);
+    }
+    let runtime = Runtime::new()?;
+    let context = Context::full(&runtime)?;
+    let bytecode = context.with(|ctx| {
+        Module::declare(ctx, HOST_MODULE, SOURCE)?.write(WriteOptions {
+            // Nothing reads the host module's own source back.
+            strip_source: true,
+            ..WriteOptions::default()
+        })
+    })?;
+    Ok(BYTECODE.get_or_init(|| bytecode.into_boxed_slice()))
+}
+
+/// Whether the running call may call `items.invalidate()`, which only an action or event
+/// handler may, and whether it did.
+#[derive(Default)]
+pub(crate) struct Invalidation {
+    pub(crate) allowed: Cell<bool>,
+    pub(crate) called: Cell<bool>,
+}
+
+/// Installs the native functions the `dupin` module captures. `items.invalidate()` throws in the
+/// guest unless `invalidation` allows it.
+pub(crate) fn install<'js>(
+    ctx: &Ctx<'js>,
+    calls: &Shared,
+    invalidation: &Rc<Invalidation>,
+) -> rquickjs::Result<()> {
+    let invalidation = invalidation.clone();
+    let invalidate = Function::new(ctx.clone(), move || {
+        if invalidation.allowed.get() {
+            invalidation.called.set(true);
+        }
+        invalidation.allowed.get()
+    })?;
+    ctx.globals().set(INVALIDATE, invalidate)?;
     let calls = calls.clone();
     let native = Function::new(
         ctx.clone(),

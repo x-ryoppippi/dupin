@@ -23,6 +23,7 @@ oxc_parser = { version = "=0.157.0", default-features = false }
 oxc_span = "=0.157.0"
 
 [dev-dependencies]
+base64 = "0.22"
 tempfile = "3"
 
 [lints]

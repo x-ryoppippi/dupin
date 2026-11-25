@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use dupin_js_runtime::Diagnostic;
-use dupin_plugin_protocol::{Effect, PluginItem, View};
+use dupin_js_runtime::row::{Row, RowAction, RowEffect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -21,16 +21,18 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 9] = [
+const EXPECTATIONS: [&str; 11] = [
     "rows",
+    "view",
     "selected",
     "effect",
     "toasts",
+    "panel",
     "clipboard",
     "error",
-    "sections",
-    "detail",
     "storage",
+    "invalidated",
+    "windows",
 ];
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -43,6 +45,10 @@ pub struct Fixture {
     pub environment: Environment,
     #[serde(default, skip_serializing_if = "Replies::is_empty")]
     pub replies: Replies,
+    /// What the package's feature chose, which `ctx.preferences` holds in place of declared
+    /// defaults.
+    #[serde(default, skip_serializing_if = "Map::is_empty")]
+    pub preferences: Map<String, Value>,
     pub steps: Vec<Step>,
 }
 
@@ -108,11 +114,13 @@ impl Default for Window {
     }
 }
 
-/// One thing the user does. Exactly one of `query`, `select` and `activate` is given.
+/// One thing the user does. Exactly one of `query`, `select`, `activate`, `event`, `back`,
+/// `fill` and `submit` is given.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
-    /// Typed after the keyword, replacing the query; the step waits for the answer.
+    /// Typed after the keyword, or on the page a view opened, replacing the query; the step
+    /// waits for the answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     query: Option<String>,
     /// Moves the selection to this row, counting from 0.
@@ -127,6 +135,16 @@ pub struct Step {
     event: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     data: Option<Value>,
+    /// `true`: closes the page on top, as Esc does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    back: Option<bool>,
+    /// Fills in the form on screen: a field's text, a checkbox's `true` or `false`, or the
+    /// `value` of a select's option, by field ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<Map<String, Value>>,
+    /// `true`: submits the form on screen, as ⌘Enter does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    submit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect: Option<Map<String, Value>>,
 }
@@ -137,10 +155,22 @@ pub enum Action<'a> {
     Select(usize),
     Activate(&'a str),
     Event(&'a str, &'a Value),
+    Back,
+    Fill(&'a Map<String, Value>),
+    Submit,
 }
 
 impl Step {
     pub fn action(&self) -> Action<'_> {
+        if self.back.is_some() {
+            return Action::Back;
+        }
+        if let Some(fill) = &self.fill {
+            return Action::Fill(fill);
+        }
+        if self.submit.is_some() {
+            return Action::Submit;
+        }
         match (&self.query, self.select, &self.activate, &self.event) {
             (Some(query), None, None, None) => Action::Query(query),
             (None, Some(row), None, None) => Action::Select(row),
@@ -161,6 +191,12 @@ impl Action<'_> {
             Action::Select(row) => format!("select {row}"),
             Action::Activate(action) => format!("activate {}", Value::from(*action)),
             Action::Event(event, _) => format!("event {}", Value::from(*event)),
+            Action::Back => "back".into(),
+            Action::Fill(fields) => format!(
+                "fill {}",
+                fields.keys().map(String::as_str).collect::<Vec<_>>().join(", ")
+            ),
+            Action::Submit => "submit".into(),
         }
     }
 }
@@ -179,9 +215,10 @@ pub struct Replies {
     pub files: BTreeMap<String, FilesReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exec: Vec<ExecReply>,
-    /// The package's storage when the fixture starts, key by key.
-    #[serde(skip_serializing_if = "Map::is_empty")]
-    pub storage: Map<String, Value>,
+    /// The data of each record the package's storage holds when the fixture starts, oldest
+    /// first.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub storage: Vec<Value>,
     /// What a clipboard read returns: content such as `{ "type": "text", "text": … }`, or
     /// `null` for an empty clipboard. Left out, reading fails as `unavailable`.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "present")]
@@ -192,6 +229,10 @@ pub struct Replies {
     /// The events a calendar read sees, in the calendar service's shape.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub calendar: Vec<Value>,
+    /// The displays and the focused window the windows service reports. Left out, reading or
+    /// moving a window fails as `unavailable`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<WindowsReply>,
     /// Your decision on each declared scope, named as grant files name it, such as
     /// `http:https://api.github.com` or `clipboard:read`. A scope left out is allowed.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -255,6 +296,16 @@ impl HttpResponse {
             (None, None) => Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WindowsReply {
+    /// Each display in the windows service's shape, the primary one first.
+    pub displays: Vec<Value>,
+    /// The focused window and its app in the windows service's shape, which a move updates,
+    /// or `null` for none.
+    pub focused: Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -372,11 +423,31 @@ pub fn parse(name: &str, bytes: &[u8]) -> Result<Fixture, Diagnostic> {
             step.select.is_some(),
             step.activate.is_some(),
             step.event.is_some(),
+            step.back.is_some(),
+            step.fill.is_some(),
+            step.submit.is_some(),
         ];
         if given.iter().filter(|given| **given).count() != 1 {
             return Err(at(
-                "must have exactly one of `query`, `select`, `activate` and `event`".into(),
+                "must have exactly one of `query`, `select`, `activate`, `event`, `back`, `fill` and `submit`"
+                    .into(),
             ));
+        }
+        if step.back == Some(false) || step.submit == Some(false) {
+            return Err(at("`back` and `submit` are `true` when given".into()));
+        }
+        if let Some((id, _)) = step
+            .fill
+            .iter()
+            .flatten()
+            .find(|(_, value)| !matches!(value, Value::String(_) | Value::Bool(_)))
+        {
+            return Err(at(format!(
+                "`fill.{id}` must be a field's text, a checkbox's `true` or `false`, or an option's value"
+            )));
+        }
+        if step.fill.as_ref().is_some_and(Map::is_empty) {
+            return Err(at("`fill` names no field".into()));
         }
         if step.data.is_some() && step.event.is_none() {
             return Err(at("`data` goes with an `event`".into()));
@@ -580,53 +651,85 @@ pub fn to_json(fixture: &Fixture) -> String {
 }
 
 /// The rows of an answer as fixtures state them: what Dupin shows and what each action does.
-pub fn rows(items: &[PluginItem]) -> Value {
-    items
-        .iter()
-        .map(|item| {
-            let mut row = Map::new();
-            row.insert("id".into(), item.id.clone().into());
-            match &item.view {
-                View::Text { title, subtitle } => {
-                    row.insert("title".into(), title.clone().into());
-                    if !subtitle.is_empty() {
-                        row.insert("subtitle".into(), subtitle.clone().into());
-                    }
-                }
-                View::Detail { title, body } => {
-                    row.insert("title".into(), title.clone().into());
-                    row.insert("detail".into(), body.clone().into());
-                }
-                View::Pair { source, result } => {
-                    row.insert("source".into(), source.clone().into());
-                    row.insert("result".into(), result.clone().into());
-                }
+pub fn rows(rows: &[Row]) -> Value {
+    rows.iter()
+        .map(|row| {
+            let mut out = Map::new();
+            out.insert("id".into(), row.id.clone().into());
+            out.insert("title".into(), row.title.clone().into());
+            if !row.subtitle.is_empty() {
+                out.insert("subtitle".into(), row.subtitle.clone().into());
             }
-            let actions: Vec<Value> = item
+            if let Some(answer) = &row.answer {
+                out.insert("answer".into(), answer.clone().into());
+            }
+            if !row.accessories.is_empty() {
+                out.insert(
+                    "accessories".into(),
+                    serde_json::to_value(&row.accessories).expect("accessories always serialize"),
+                );
+            }
+            if !row.aliases.is_empty() {
+                out.insert("aliases".into(), row.aliases.clone().into());
+            }
+            if !row.keywords.is_empty() {
+                out.insert("keywords".into(), row.keywords.clone().into());
+            }
+            if let Some(icon) = &row.icon {
+                out.insert("icon".into(), icon.clone().into());
+            }
+            if let Some(image) = &row.image {
+                out.insert(
+                    "image".into(),
+                    serde_json::to_value(image).expect("an image always serializes"),
+                );
+            }
+            if let Some(section) = &row.section {
+                out.insert("section".into(), section.clone().into());
+            }
+            if let Some(detail) = &row.detail {
+                out.insert(
+                    "detail".into(),
+                    serde_json::to_value(detail).expect("a detail always serializes"),
+                );
+            }
+            let actions: Vec<Value> = row
                 .actions
                 .iter()
                 .map(|action| {
-                    let mut entry = effect(&action.effect);
+                    let mut entry = chosen(action);
                     entry.insert("title".into(), action.title.clone().into());
                     Value::Object(entry)
                 })
                 .collect();
-            row.insert("actions".into(), actions.into());
-            Value::Object(row)
+            out.insert("actions".into(), actions.into());
+            Value::Object(out)
         })
         .collect()
 }
 
-/// What choosing an action does, as `{ "copy": … }`, `{ "url": … }`, `{ "push": … }` or
+/// What choosing an action does, as `{ "copy": … }`, `{ "paste": … }`, `{ "url": … }` or
 /// `{ "run": … }`.
-pub fn effect(effect: &Effect) -> Map<String, Value> {
+fn effect(effect: &RowEffect) -> Map<String, Value> {
     let (key, value) = match effect {
-        Effect::Copy { text } => ("copy", Value::from(text.clone())),
-        Effect::OpenUrl { url } => ("url", Value::from(url.clone())),
-        Effect::Push { view, title, .. } => ("push", json!({"view": view, "title": title})),
-        Effect::Run { action, data } => ("run", json!({"action": action, "data": data})),
+        RowEffect::Copy { text } => ("copy", Value::from(text.clone())),
+        RowEffect::Paste { text } => ("paste", Value::from(text.clone())),
+        RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
+        RowEffect::Reveal { path } => ("reveal", Value::from(path.clone())),
+        RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
+        RowEffect::Push { view, state } => ("push", json!({"view": view, "state": state})),
     };
     Map::from_iter([(key.to_owned(), value)])
+}
+
+/// What choosing `action` does, as [`effect`] states it, with `"template": true` when Dupin
+/// fills its placeholders.
+pub fn chosen(action: &RowAction) -> Map<String, Value> {
+    let mut entry = effect(&action.effect);
+    if action.template {
+        entry.insert("template".into(), true.into());
+    }
+    entry
 }
 
 /// The error an answer failed with, as fixtures state it.

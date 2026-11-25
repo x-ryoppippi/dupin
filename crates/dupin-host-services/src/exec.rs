@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use dupin_broker::displayable;
+
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_OUTPUT_BYTES: usize = 64 * 1024;
@@ -50,37 +52,6 @@ impl std::error::Error for ExecError {}
 
 fn invalid(problem: impl Into<String>) -> ExecError {
     ExecError::InvalidProfile(problem.into())
-}
-
-/// Whether `text` shows as itself in the consent text: control, line-separator and invisible
-/// formatting characters such as bidi overrides could forge or reorder the lines a user approves.
-fn displayable(text: &str) -> bool {
-    !text.chars().any(|ch| {
-        ch.is_control()
-            || matches!(
-                ch,
-                '\u{ad}'
-                    | '\u{600}'..='\u{605}'
-                    | '\u{61c}'
-                    | '\u{6dd}'
-                    | '\u{70f}'
-                    | '\u{890}'..='\u{891}'
-                    | '\u{8e2}'
-                    | '\u{180e}'
-                    | '\u{200b}'..='\u{200f}'
-                    | '\u{2028}'..='\u{202e}'
-                    | '\u{2060}'..='\u{206f}'
-                    | '\u{feff}'
-                    | '\u{fff9}'..='\u{fffb}'
-                    | '\u{110bd}'
-                    | '\u{110cd}'
-                    | '\u{13430}'..='\u{1343f}'
-                    | '\u{1bca0}'..='\u{1bca3}'
-                    | '\u{1d173}'..='\u{1d17a}'
-                    | '\u{e0001}'
-                    | '\u{e0020}'..='\u{e007f}'
-            )
-    })
 }
 
 fn valid_name(name: &str) -> bool {

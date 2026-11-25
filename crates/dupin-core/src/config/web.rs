@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
-pub const MAPS_SEARCH_TEMPLATE: &str = "maps://?q={query}";
-
+/// One entry of `web_searches`. The bundled web-search extension lists the defaults and these
+/// replace them.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct WebSearch {
@@ -11,53 +9,14 @@ pub struct WebSearch {
     pub url: String,
 }
 
-pub(super) fn default_searches() -> BTreeMap<String, WebSearch> {
-    BTreeMap::from([
-        (
-            "g".into(),
-            WebSearch {
-                name: "Google".into(),
-                url: "https://www.google.com/search?q={query}".into(),
-            },
-        ),
-        (
-            "gh".into(),
-            WebSearch {
-                name: "GitHub".into(),
-                url: "https://github.com/search?q={query}".into(),
-            },
-        ),
-        (
-            "maps".into(),
-            WebSearch {
-                name: "Apple Maps".into(),
-                url: MAPS_SEARCH_TEMPLATE.into(),
-            },
-        ),
-        (
-            "yt".into(),
-            WebSearch {
-                name: "YouTube".into(),
-                url: "https://www.youtube.com/results?search_query={query}".into(),
-            },
-        ),
-    ])
-}
-
 #[cfg(test)]
 mod tests {
     use crate::config::Config;
 
     #[test]
-    fn web_search_defaults_and_custom_entries_round_trip() {
+    fn web_searches_are_unset_until_written_and_custom_entries_round_trip() {
         let defaults = Config::default();
-        assert_eq!(defaults.web_searches["g"].name, "Google");
-        assert_eq!(
-            defaults.web_searches["g"].url,
-            "https://www.google.com/search?q={query}"
-        );
-        assert_eq!(defaults.web_searches["gh"].name, "GitHub");
-        assert_eq!(defaults.web_searches["yt"].name, "YouTube");
+        assert_eq!(defaults.web_searches, None);
         assert!(defaults.web_fallbacks.is_empty());
 
         let config = Config::parse(
@@ -68,13 +27,12 @@ web_fallbacks = ["docs", "g"]
 "#,
         )
         .unwrap();
-        assert_eq!(config.web_searches["docs"].name, "Docs");
-        assert_eq!(config.web_searches.len(), 1);
-        assert!(
-            Config::parse("web_searches = {}")
-                .unwrap()
-                .web_searches
-                .is_empty()
+        let searches = config.web_searches.as_ref().unwrap();
+        assert_eq!(searches["docs"].name, "Docs");
+        assert_eq!(searches.len(), 1);
+        assert_eq!(
+            Config::parse("web_searches = {}").unwrap().web_searches,
+            Some(Default::default())
         );
         assert_eq!(config.web_fallbacks, ["docs", "g"]);
 
@@ -92,5 +50,7 @@ unexpected = true
 
         let encoded = serde_json::to_string(&config).unwrap();
         assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), config);
+        let encoded = serde_json::to_string(&defaults).unwrap();
+        assert_eq!(serde_json::from_str::<Config>(&encoded).unwrap(), defaults);
     }
 }

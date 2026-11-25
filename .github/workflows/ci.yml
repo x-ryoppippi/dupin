@@ -99,7 +99,8 @@ jobs:
 
   # The extension host confines itself with sandbox_init, which macOS refuses inside the Nix
   # build sandbox, so lint-and-test skips the tests that start it. They run here natively, where
-  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure.
+  # DUPIN_REQUIRE_EXTENSION_HOST turns any such skip into a failure. Every crate with such a test
+  # runs, found by skip_inside_a_sandbox!, so a crate that gains one can't stay untested.
   extension-host:
     needs: changes
     if: needs.changes.outputs.app == 'true'
@@ -117,24 +118,39 @@ jobs:
       - name: Test the extension host outside the Nix sandbox
         env:
           DUPIN_REQUIRE_EXTENSION_HOST: '1'
-        run: nix develop --command cargo test --locked -p dupin-extension-host -p dupin
+        run: |
+          while IFS= read -r crate; do
+            set -- "$@" "--package=$crate"
+          done < <(git grep -l 'skip_inside_a_sandbox!' -- 'crates/*.rs' | cut -d/ -f2 | sort -u)
+          test "$#" -gt 0
+          echo "Testing $*"
+          nix develop --command cargo test --locked "$@"
+
+  # Keypress latency, and the bundled extensions' parity with native (latency.yml).
+  latency:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    uses: ./.github/workflows/latency.yml
 
   # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
   # a required check, so e2e runs whenever the app could have changed and fails itself when the
-  # build or the extension host tests did.
+  # build, the extension host tests or the latency parity check did.
   e2e:
-    needs: [changes, build, extension-host]
+    needs: [changes, build, extension-host, latency]
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 20
     steps:
-      - name: Require the build and the extension host tests
-        if: needs.build.result != 'success' || needs.extension-host.result != 'success'
+      - name: Require the build, the extension host tests and latency parity
+        if: >-
+          needs.build.result != 'success' || needs.extension-host.result != 'success' ||
+          needs.latency.result != 'success'
         env:
           BUILD: ${{ needs.build.result }}
           EXTENSION_HOST: ${{ needs.extension-host.result }}
+          LATENCY: ${{ needs.latency.result }}
         run: |
-          echo "build: $BUILD, extension-host: $EXTENSION_HOST"
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

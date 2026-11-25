@@ -24,12 +24,17 @@ const MAX_API_BYTES: u64 = 8 * 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How many annotated tags may point at each other before a commit.
 const MAX_TAG_DEPTH: usize = 8;
+/// The most tags GitHub lists in one page.
+const TAGS_PER_PAGE: usize = 100;
 
 /// How Dupin talks to GitHub.
 #[derive(Clone)]
 pub struct GitHub {
     /// The REST API root, without a trailing slash.
     pub api: String,
+    /// Where `dupin ext search` reads each listed repository's package.json, without a trailing
+    /// slash. It never gets the token.
+    pub raw: String,
     pub curl: PathBuf,
     /// For each request, the tarball download included.
     pub timeout: Duration,
@@ -42,12 +47,14 @@ impl Default for GitHub {
     fn default() -> Self {
         Self {
             api: "https://api.github.com".to_owned(),
+            raw: "https://raw.githubusercontent.com".to_owned(),
             curl: PathBuf::from("/usr/bin/curl"),
             timeout: Duration::from_secs(120),
             max_download_bytes: 4 * MAX_TOTAL_BYTES,
-            token: std::env::var("GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty()),
+            token: ["GITHUB_TOKEN", "GH_TOKEN"]
+                .into_iter()
+                .filter_map(|name| std::env::var(name).ok())
+                .find(|token| !token.is_empty()),
         }
     }
 }
@@ -56,6 +63,7 @@ impl fmt::Debug for GitHub {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GitHub")
             .field("api", &self.api)
+            .field("raw", &self.raw)
             .field("curl", &self.curl)
             .field("timeout", &self.timeout)
             .field("max_download_bytes", &self.max_download_bytes)
@@ -86,6 +94,17 @@ struct Object {
 #[derive(Deserialize)]
 struct Reference {
     object: Object,
+}
+
+#[derive(Deserialize)]
+struct Comparison {
+    status: String,
+}
+
+/// One entry of the tag list, which names the commit each tag peels to.
+#[derive(Deserialize)]
+struct Tag {
+    commit: Object,
 }
 
 #[derive(Deserialize)]
@@ -124,9 +143,15 @@ impl Repo<'_> {
 
 impl GitHub {
     /// The commit `rev` names: a tag, branch or full commit SHA, or, with none, the newest version
-    /// tag, or the default branch when there is no version tag. It answers as Git would.
-    pub(crate) fn resolve(&self, repo: &Repo<'_>, rev: Option<&str>) -> Result<Fetched, Error> {
-        if rev.is_some_and(|rev| !valid_rev(rev)) {
+    /// tag, or the default branch when there is no version tag. It answers as Git would. `on` is
+    /// the branch or tag a pinned commit was installed from, as extensions.lock records it.
+    pub(crate) fn resolve(
+        &self,
+        repo: &Repo<'_>,
+        rev: Option<&str>,
+        on: Option<&str>,
+    ) -> Result<Fetched, Error> {
+        if rev.into_iter().chain(on).any(|rev| !valid_rev(rev)) {
             return Err(Error::new(
                 "invalid-source",
                 "is not a GitHub source Dupin can fetch",
@@ -140,16 +165,27 @@ impl GitHub {
             Some(commit) if is_full_commit(commit) => {
                 let found: Option<Object> =
                     self.api(repo, &format!("{}/git/commits/{commit}", repo.path()))?;
-                match found {
-                    Some(found) if found.sha.eq_ignore_ascii_case(commit) => Ok(Fetched {
-                        commit: found.sha.to_ascii_lowercase(),
-                        rev: None,
-                    }),
-                    _ => Err(Error::new(
+                let commit = match found {
+                    Some(found) if found.sha.eq_ignore_ascii_case(commit) => found.sha.to_ascii_lowercase(),
+                    _ => {
+                        return Err(Error::new(
+                            "unknown-ref",
+                            format!("commit {commit} isn't in {}", repo.locator()),
+                        ));
+                    }
+                };
+                if !self.publishes(repo, on, &repository.default_branch, &commit)? {
+                    let refs = match on {
+                        Some(on) => format!("`{on}`, the default branch or a tag"),
+                        None => "the default branch or a tag".to_owned(),
+                    };
+                    return Err(Error::new(
                         "unknown-ref",
-                        format!("commit {commit} isn't in {}", repo.locator()),
-                    )),
+                        format!("commit {commit} isn't on {refs} of {}", repo.locator()),
+                    )
+                    .hint("Install the branch or tag the commit is on by name."));
                 }
+                Ok(Fetched { commit, rev: None })
             }
             Some(name) => {
                 let candidates = match name.strip_prefix("refs/") {
@@ -255,13 +291,57 @@ impl GitHub {
         }
         let archive = repo.scratch.join("archive.tar.gz");
         let url = format!("{}{}/tarball/{commit}", self.api, repo.path());
-        let status = self.get(&url, &archive, self.max_download_bytes)?;
+        let status = self.get(&url, &archive, self.max_download_bytes, true)?;
         if status != 200 {
             return Err(self.refused(status, repo));
         }
         let file = std::fs::File::open(&archive)
             .map_err(|error| Error::io("io-error", "read the downloaded archive", error))?;
         tarball::extract(std::io::BufReader::new(file), &expected, stage)
+    }
+
+    /// Whether the repository's own history holds `commit`: the branch or tag `on`, or the
+    /// default branch, reaches it, or a tag names it. GitHub serves every commit of a fork
+    /// network through each repository in it, so a commit pushed only to a fork would otherwise
+    /// install as this repository's.
+    fn publishes(
+        &self,
+        repo: &Repo<'_>,
+        on: Option<&str>,
+        default_branch: &str,
+        commit: &str,
+    ) -> Result<bool, Error> {
+        let on = on.map(|name| {
+            name.strip_prefix("refs/heads/")
+                .or_else(|| name.strip_prefix("refs/tags/"))
+                .unwrap_or(name)
+        });
+        for base in on.into_iter().chain([default_branch]) {
+            let compared: Option<Comparison> = self.api(
+                repo,
+                &format!("{}/compare/{}...{commit}", repo.path(), escape(base)),
+            )?;
+            if compared.is_some_and(|compared| matches!(compared.status.as_str(), "identical" | "behind")) {
+                return Ok(true);
+            }
+        }
+        // The tag list names the commit behind each tag, where the ref listing would take a
+        // request per annotated tag to peel.
+        for page in 1.. {
+            let tags: Vec<Tag> = self
+                .api(
+                    repo,
+                    &format!("{}/tags?per_page={TAGS_PER_PAGE}&page={page}", repo.path()),
+                )?
+                .unwrap_or_default();
+            if tags.iter().any(|tag| tag.commit.sha.eq_ignore_ascii_case(commit)) {
+                return Ok(true);
+            }
+            if tags.len() < TAGS_PER_PAGE {
+                break;
+            }
+        }
+        Ok(false)
     }
 
     /// Every tag of the repository, as `ls-remote --tags` lists them: GitHub answers this listing
@@ -318,7 +398,7 @@ impl GitHub {
     /// A JSON response from the API, or `None` when GitHub says there is no such thing.
     fn api<T: DeserializeOwned>(&self, repo: &Repo<'_>, path: &str) -> Result<Option<T>, Error> {
         let out = repo.scratch.join("response.json");
-        let status = self.get(&format!("{}{path}", self.api), &out, MAX_API_BYTES)?;
+        let status = self.get(&format!("{}{path}", self.api), &out, MAX_API_BYTES, true)?;
         match status {
             200 => {}
             404 | 409 | 422 => return Ok(None),
@@ -358,11 +438,18 @@ impl GitHub {
         }
     }
 
-    /// Downloads `url` into `out` with the system curl, following redirects on the API's own
-    /// scheme, and returns the final status. The options, the token among them, go through stdin
-    /// so no other process can read them from curl's arguments.
-    fn get(&self, url: &str, out: &Path, max_bytes: u64) -> Result<u16, Error> {
-        let scheme = self.api.split_once("://").map_or("https", |(scheme, _)| scheme);
+    /// Downloads `url` into `out` with the system curl, following redirects on the URL's own
+    /// scheme, and returns the final status. The options, the token among them when
+    /// `authenticate` is set, go through stdin so no other process can read them from curl's
+    /// arguments.
+    pub(crate) fn get(
+        &self,
+        url: &str,
+        out: &Path,
+        max_bytes: u64,
+        authenticate: bool,
+    ) -> Result<u16, Error> {
+        let scheme = url.split_once("://").map_or("https", |(scheme, _)| scheme);
         let mut config = Config::default();
         for flag in ["silent", "show-error", "globoff", "location"] {
             config.flag(flag);
@@ -377,7 +464,7 @@ impl GitHub {
         config.option("user-agent", "Dupin");
         config.option("header", "Accept: application/vnd.github+json");
         config.option("header", "X-GitHub-Api-Version: 2022-11-28");
-        if let Some(token) = &self.token {
+        if let Some(token) = self.token.as_ref().filter(|_| authenticate) {
             // curl drops a custom Authorization header when a redirect leaves the API host, so
             // the token never reaches the archive host.
             config.option("header", &format!("Authorization: Bearer {token}"));
@@ -464,7 +551,7 @@ fn full_commit(sha: &str) -> Result<String, Error> {
 }
 
 /// A ref name as one URL path, its `/` kept as separators.
-fn escape(name: &str) -> String {
+pub(crate) fn escape(name: &str) -> String {
     let mut escaped = String::new();
     for byte in name.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {

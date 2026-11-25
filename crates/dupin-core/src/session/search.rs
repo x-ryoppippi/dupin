@@ -3,8 +3,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::file_query::{FileKind, FileQuery};
+use crate::form::Form;
 use crate::searcher::Delivery;
-use crate::{Batch, CommandId, Detail, Item};
+use crate::{Accessory, Batch, CommandId, Detail, Item};
 
 use super::{Effect, Results, SearchState, Session};
 
@@ -16,12 +17,17 @@ pub(super) struct ProviderState {
     pub(super) fallback: bool,
     candidate_limit: usize,
     pub(super) result_limit: usize,
+    /// What the provider said to show when it finds nothing.
+    pub(super) empty_text: Option<String>,
 }
 
 #[derive(Debug)]
 pub(super) struct Presentation {
     pub(super) section: Option<Arc<str>>,
     pub(super) detail: Option<Arc<Detail>>,
+    pub(super) detail_when_selected: bool,
+    pub(super) accessories: Vec<Accessory>,
+    pub(super) form: Option<Arc<Form>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -239,11 +245,18 @@ impl Session {
                 Batch::default()
             }
         };
+        if batch.empty_text.is_some() {
+            state.empty_text.clone_from(&batch.empty_text);
+        }
         if !batch.items.is_empty() {
             let Batch {
                 items,
                 section,
                 mut details,
+                details_when_selected,
+                mut accessories,
+                empty_text: _,
+                form,
             } = batch;
             let section: Option<Arc<str>> = section.map(Into::into);
             let shown = self.search.presentations.entry(origin.clone()).or_default();
@@ -253,10 +266,15 @@ impl Session {
                 }
                 if state.ids.insert(item.id.clone()) {
                     let detail = details.remove(&item.id);
-                    if section.is_some() || detail.is_some() {
+                    let accessories = accessories.remove(&item.id).unwrap_or_default();
+                    let form = form.clone().filter(|_| state.items.is_empty());
+                    if section.is_some() || detail.is_some() || !accessories.is_empty() || form.is_some() {
                         let presentation = Presentation {
                             section: section.clone(),
                             detail,
+                            detail_when_selected: details_when_selected,
+                            accessories,
+                            form,
                         };
                         shown.insert(item.id.clone(), presentation);
                     } else {
@@ -401,6 +419,7 @@ impl Session {
                         fallback: !self.search.explicit && self.commands.command(id).unwrap().is_fallback(),
                         candidate_limit: self.commands.command(id).unwrap().candidate_limit(),
                         result_limit: self.commands.command(id).unwrap().result_limit,
+                        empty_text: None,
                     },
                 )
             })

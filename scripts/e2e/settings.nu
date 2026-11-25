@@ -1,8 +1,11 @@
 use driver.nu [
+    DUPIN
     ad
     log-count
     poll
+    press
     snap
+    type-text
     wait-for-log
     wait-frontmost
 ]
@@ -14,9 +17,9 @@ export def settings-stage [out: path] {
     # Calculator can still be coming forward; summoned before then, the panel would lose focus
     # to it and hide before ⌘, arrives.
     wait-frontmost Calculator
-    ad $out press-hotkey-again press alt+space | ignore
-    poll $out field-again $focused find --app Dupin --role textfield --first
-    ^osascript -e 'tell application "System Events" to keystroke "," using command down'
+    press $out press-hotkey-again alt+space | ignore
+    poll $out field-again $focused find --app $DUPIN --role textfield --first
+    press $out open-settings 'cmd+,' | ignore
     let page = {|r| $r.ok and $r.data?.match?.ref_id? != null }
     let appearance = (poll
         $out
@@ -24,7 +27,7 @@ export def settings-stage [out: path] {
         $page
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Appearance
         --exact
@@ -35,14 +38,14 @@ export def settings-stage [out: path] {
         $r.data
         | any {|window| $window.title == 'Dupin Settings' and $window.is_focused }
     ) }
-    poll $out settings-window $settings list-windows --app Dupin
+    poll $out settings-window $settings list-windows --app $DUPIN
     snap $out settings-created
     let before_key = (ad
         $out
         settings-before-key
         find
         --app
-        Dupin
+        $DUPIN
         --role
         group
         --name
@@ -53,14 +56,14 @@ export def settings-stage [out: path] {
     if not $before_key.ok or $before_key.data?.match? == null or 'focused' in ($before_key.data?.match?.states? | default []) {
         error make {msg: 'General must exist without keyboard focus before the Tab test'}
     }
-    ad $out settings-tab press tab | ignore
+    press $out settings-tab tab | ignore
     (poll
         $out
         settings-keyboard-focused
         $focused
         find
         --app
-        Dupin
+        $DUPIN
         --role
         group
         --name
@@ -71,7 +74,7 @@ export def settings-stage [out: path] {
     snap $out settings-general
     # Each page in the sidebar in turn: a ref from before a click goes stale once the page
     # changes, so find the next one afresh.
-    let search = poll $out search $page find --app Dupin --name Search --exact --first
+    let search = poll $out search $page find --app $DUPIN --name Search --exact --first
     ad $out open-search click $search.data.match.ref_id | ignore
     (poll
         $out
@@ -79,7 +82,7 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         'Files shown'
         --exact
@@ -92,7 +95,7 @@ export def settings-stage [out: path] {
         $page
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Appearance
         --exact
@@ -105,41 +108,36 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         Backdrop
         --exact
         --first
     )
-    poll $out settings-window-again $settings list-windows --app Dupin
+    poll $out settings-window-again $settings list-windows --app $DUPIN
     snap $out settings-appearance
 
-    ad $out close-settings press cmd+w | ignore
-    ad $out settings-search-hotkey press alt+space | ignore
+    press $out close-settings cmd+w | ignore
+    press $out settings-search-hotkey alt+space | ignore
     (poll
         $out
         settings-search-field
         $focused
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
     )
-    ^osascript -e 'tell application "System Events"
-        repeat with typedKey in characters of "dupin settings"
-            keystroke (typedKey as text)
-            delay 0.12
-        end repeat
-    end tell'
+    type-text $out type-dupin-settings 'dupin settings' | ignore
     (poll
         $out
         settings-search-query
         {|r| $r.ok and $r.data?.match?.value? == 'dupin settings' }
         find
         --app
-        Dupin
+        $DUPIN
         --role
         textfield
         --first
@@ -150,7 +148,7 @@ export def settings-stage [out: path] {
         $found
         find
         --app
-        Dupin
+        $DUPIN
         --name
         'Dupin Settings Preferences'
         --exact
@@ -159,9 +157,9 @@ export def settings-stage [out: path] {
     let log = $out | path join dupin.log
     let requests_before = log-count $log 'dupin-trace: settings requested '
     let closed_before = log-count $log 'dupin-trace: settings panel closed '
-    ad $out open-settings-result press return | ignore
+    press $out open-settings-result return | ignore
     wait-for-log --after $requests_before $log 'dupin-trace: settings requested '
     wait-for-log --after $closed_before $log 'dupin-trace: settings panel closed '
-    poll $out settings-from-result $settings list-windows --app Dupin
+    poll $out settings-from-result $settings list-windows --app $DUPIN
     snap $out settings-from-result
 }

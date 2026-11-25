@@ -142,7 +142,7 @@ pub(super) fn setting_with_lock(
         .grow(1.0)
         .min_w(100.0)
         .gap(2.0)
-        .child(text(label.to_owned()).font(k.ty.ui).color(k.c.text_base));
+        .child(text(label.to_owned()).font(k.ty.ui).color(k.c.text_base).wrap());
     if let Some(detail) = detail {
         words = words.child(
             text(detail.to_owned())

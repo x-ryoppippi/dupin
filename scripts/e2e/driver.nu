@@ -1,6 +1,12 @@
 use ../e2e-recording.nu record
 use ../e2e-script-fixtures.nu [prepare-scripts cleanup-scripts]
-use ../e2e-file-fixtures.nu [prepare cleanup viewer-running readable-trash]
+use ../e2e-file-fixtures.nu [prepare cleanup viewer-running]
+use keys.nu key-script
+
+# agent-desktop takes every process run from Dupin.app/Contents/MacOS for an instance of the app
+# named Dupin, the extension host and a waiting CLI included. Only the resident launcher is an
+# application to AppKit, so only it answers to the bundle ID.
+export const DUPIN = 'app.dupin.Dupin'
 
 export def run-suite [
     app: path
@@ -11,6 +17,10 @@ export def run-suite [
     mkdir $out
     let out = $out | path expand
     let app = $app | path expand
+    let bundle_id = ^plutil -extract CFBundleIdentifier raw -o - ($app | path join Contents Info.plist) | str trim
+    if $bundle_id != $DUPIN {
+        error make {msg: $"($app) is ($bundle_id), not ($DUPIN)"}
+    }
 
     for command in [version status] {
         ad $out $command $command | to json | print
@@ -32,12 +42,8 @@ export def run-suite [
     if (viewer-running) {
         error make {msg: 'Cannot establish ownership of the file-action viewer'}
     }
-    readable-trash
     if ($out | path join fixtures | path exists) {
         error make {msg: 'File-action fixtures already exist'}
-    }
-    if (glob ($env.HOME | path join '.Trash/trash-me*.dupine2e') | is-not-empty) {
-        error make {msg: 'File-action Trash fixtures already exist'}
     }
     try { prepare $out } catch {|failure|
         try { cleanup $out }
@@ -61,11 +67,6 @@ export def run-suite [
     mkdir $runtime
     ^chmod 700 $runtime
     let binary = $app | path join Contents MacOS dupin
-    let control = $out | path join cli dupin-control-e2e
-    mkdir ($control | path dirname)
-    # A waiting CLI inside the bundle shares the resident's AX application name.
-    cp $binary $control
-    ^chmod +x $control
     let dupin = job spawn {
         with-env {
             XDG_CONFIG_HOME: $config
@@ -87,7 +88,7 @@ export def run-suite [
             (do
                 $suite
                 $out
-                {binary: $control, runtime: $runtime, data: $data}
+                {binary: $binary, runtime: $runtime, data: $data}
             )
         }
         if $record {
@@ -162,6 +163,50 @@ export def --wrapped ad [out: path, name: string, ...args: string]: nothing -> r
     }
 }
 
+# Press chords such as `cmd+shift+s`, `alt+space` or `down` in turn through System Events, keeping
+# its reply in <out>/<name>.json. `agent-desktop press` posts a lone key event carrying the modifier flags from
+# a process that exits straight after, and on the runner such a press sometimes never reached
+# Dupin: not as a key, and not as the hotkey.
+export def press [out: path, name: string, ...chords: string]: nothing -> record {
+    let result = ^osascript -e (key-script ...$chords) | complete
+    system-events-reply $out $name {chords: $chords} $result
+}
+
+# Type `text` one character at a time through System Events, as `press` does, keeping its reply
+# in <out>/<name>.json. Characters go through the keyboard layout, as a person's typing does.
+export def type-text [out: path, name: string, text: string]: nothing -> record {
+    let result = (
+        ^osascript -e 'on run argv
+            tell application "System Events"
+                repeat with typedKey in characters of (item 1 of argv)
+                    keystroke (typedKey as text)
+                    delay 0.12
+                end repeat
+            end tell
+        end run' $text
+        | complete
+    )
+    system-events-reply $out $name {text: $text} $result
+}
+
+def system-events-reply [
+    out: path
+    name: string
+    sent: record
+    result: record
+]: nothing -> record {
+    let reply = {
+        ok: ($result.exit_code == 0)
+        ...$sent
+        stderr: $result.stderr
+    }
+    $reply | to json | save --force ($out | path join $'($name).json')
+    if not $reply.ok {
+        error make {msg: $'System Events could not send ($name): ($result.stderr)'}
+    }
+    $reply
+}
+
 # Retry an agent-desktop command once a second until `done` accepts its reply.
 export def --wrapped poll [
     out: path
@@ -196,7 +241,7 @@ export def mentions [reply: record, name: string]: nothing -> bool {
     $reply.data? | to json --raw | str contains $'"($name)"'
 }
 
-export def snap [out: path, name: string, --app: string = 'Dupin'] {
+export def snap [out: path, name: string, --app: string = $DUPIN] {
     ad $out $'($name)-snapshot' snapshot --app $app | ignore
     let shot = ^screencapture -x ($out | path join $'($name).png') | complete
     if $shot.exit_code != 0 {

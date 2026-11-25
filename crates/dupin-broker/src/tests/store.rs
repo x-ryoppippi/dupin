@@ -128,10 +128,26 @@ fn declared_grants_are_validated() {
             "version = 1\n[packages.a]\nrevision = \"r\"\nallow = []",
             "unknown field",
         ),
-        ("[packages.a]\nrevision = \"r\"", "missing field"),
+        (
+            "version = 1\n[packages.a]\ndeny = [\"calender\"]",
+            "isn't a scope",
+        ),
     ] {
-        let error = Base::parse(source).unwrap_err().to_string();
-        assert!(error.contains(problem), "{source}: {error}");
+        let base = Base::parse(&format!("{source}\n[packages.b]\ndeny = [\"dictionary\"]")).unwrap();
+        let [error] = base.problems().try_into().unwrap();
+        assert!(
+            error.contains("for a ") && error.contains(problem),
+            "{source}: {error}"
+        );
+        assert!(base.rejects(&id("a")));
+        assert!(
+            base.package(&id("b")).is_some(),
+            "{source}: an invalid entry leaves the others in force"
+        );
     }
+    let error = Base::parse("[packages.a]\nrevision = \"r\"")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("missing field"), "{error}");
     assert_eq!(Base::parse("version = 1").unwrap(), Base::default());
 }
