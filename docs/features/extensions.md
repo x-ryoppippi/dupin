@@ -937,7 +937,7 @@ The installer reads the package as the [extension platform design](../design/ext
 
 Installing never runs anything from the package, and there is no package manager, install script or build. How Dupin fetches depends on the source:
 
-- **`github:`** needs no developer tools. Dupin asks GitHub's REST API which commit the ref names, downloads GitHub's tarball of exactly that commit with the macOS system curl (`/usr/bin/curl`, ignoring `~/.curlrc`), and unpacks it itself. Every file must match the commit's tree, read from the API first: the same path, mode, size and Git blob id, so a package locks the same as it would from Git. A file that `.gitattributes` drops from archives (`export-ignore`) or rewrites in them (`export-subst`, line endings) fails the install, as does a Git LFS file when the repository's "Include Git LFS objects in archives" setting is on, because the archive then holds the object where the commit holds its pointer. If `GITHUB_TOKEN` is set, Dupin sends it to the API, for a private repository or a higher rate limit than GitHub's 60 requests an hour; it is never required, and never sent to the host the archive comes from.
+- **`github:`** needs no developer tools. Dupin asks GitHub's REST API which commit the ref names, downloads GitHub's tarball of exactly that commit with the macOS system curl (`/usr/bin/curl`, ignoring `~/.curlrc`), and unpacks it itself. Every file must match the commit's tree, read from the API first: the same path, mode, size and Git blob id, so a package locks the same as it would from Git. A file that `.gitattributes` drops from archives (`export-ignore`) or rewrites in them (`export-subst`, line endings) fails the install, as does a Git LFS file when the repository's "Include Git LFS objects in archives" setting is on, because the archive then holds the object where the commit holds its pointer. If `GITHUB_TOKEN` (or else `GH_TOKEN`) is set, Dupin sends it to the API, for a private repository or a higher rate limit than GitHub's 60 requests an hour; it is never required, and never sent to the host the archive comes from.
 - **A Git URL** runs `git` to fetch the one commit into a scratch repository, and Dupin reads that commit's files itself: nothing is checked out, so hooks, filters, Git LFS and submodules never run. It needs Git. Without it, the install fails with a message instead of running `/usr/bin/git`, which on a Mac without the Command Line Tools only opens their installer.
 - **A folder** needs neither.
 
@@ -960,6 +960,21 @@ A folder source skips `.git` and its top-level `node_modules`. The package is wr
 | `dupin ext sync`          | Reinstalls every package that is missing or modified from its locked commit, and checks it has the locked content hash.                                          |
 
 Each takes `--json`. Two commands that change extensions at the same time run one after the other.
+
+### Finding packages
+
+`dupin ext search [QUERY]` lists the public GitHub repositories with the `dupin-extension` topic, most stars first, through GitHub's search API. Words after `search` narrow it, as GitHub's repository search reads them:
+
+```sh
+dupin ext search            # every tagged repository, the 20 with the most stars
+dupin ext search clipboard  # those that also match "clipboard"
+```
+
+Each listing shows the repository's owner and name, description, stars, the day of its last push, what its `package.json` on the default branch declares (title, version, name, keyword and the capability scopes it requests) and the exact `dupin ext install github:owner/repo` line to install it. Listings are not reviewed: anyone can add the topic, and there is no store, hosted index or publishing account. A package's requests are shown because the [capability broker](#asking-for-more), not a review, decides what it can reach, and installing asks nothing on your behalf: you choose what to grant when you turn it on. The listing reads the default branch, and an install without a ref takes the newest version tag, so check what `dupin ext install` reports it requests.
+
+Searching never installs anything. Dupin treats everything GitHub and the repositories send as untrusted text: control characters, terminal escape sequences and bidirectional or invisible formatting characters are dropped, each field is one line of bounded length, and a `package.json` larger than 64 KiB isn't read. A repository GitHub lists without the topic, or under a name `dupin ext install` wouldn't take, is left out. `--json` returns the same listing with `"reviewed": false`.
+
+The search goes through the macOS system curl, as a `github:` install does. GitHub allows 10 searches a minute without a token; if `GITHUB_TOKEN` (or else `GH_TOKEN`) is set, Dupin sends it to the API host for a higher limit, and never prints it. Each `package.json` is read from `raw.githubusercontent.com` without the token.
 
 ### The lock file
 

@@ -108,7 +108,7 @@ impl Source {
     }
 }
 
-fn github_name(name: &str) -> bool {
+pub(crate) fn github_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
         && name != "."
