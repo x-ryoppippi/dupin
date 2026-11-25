@@ -13,6 +13,7 @@ mod updates;
 pub mod welcome;
 
 use std::cell::RefCell;
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -459,6 +460,8 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
             std::thread::spawn(move || dupin_mac::workspace::open(&path));
         }
     });
+    let folder = footer_link(k, "open-config-folder", "Open Config Folder")
+        .on_press(|_: &mut Prefs| open_config_folder());
     col()
         .key("sidebar")
         .role("navigation")
@@ -480,7 +483,23 @@ fn sidebar(s: &Prefs, k: &Kit) -> El {
                 .on_press(|s: &mut Prefs| s.panel.update(crate::ui::Ui::show_snapshots)),
         )
         .child(config)
+        .child(folder)
         .children(s.updater.available().then(|| updates::footer(s, k)))
+}
+
+/// Open the folder holding config.toml, `extensions/` and `shaders/` in Finder, making it
+/// first so a fresh install has somewhere to put them.
+fn open_config_folder() {
+    let Some(dir) = crate::settings::path().and_then(|path| path.parent().map(Path::to_path_buf)) else {
+        return;
+    };
+    std::thread::spawn(move || {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            crate::log::warn(&format!("couldn't create {}: {e}", dir.display()));
+            return;
+        }
+        _ = dupin_mac::workspace::open(&dir);
+    });
 }
 
 /// A quiet link at the foot of the sidebar.
