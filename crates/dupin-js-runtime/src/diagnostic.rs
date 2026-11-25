@@ -136,6 +136,28 @@ fn one_line(text: String, max: usize) -> String {
     line
 }
 
+impl Diagnostic {
+    /// The diagnostic as a log file may keep it: the kind of problem and its line, never the
+    /// text. A guest chooses the message, the hint, a field's name and, through a thrown
+    /// error's stack, the file, and may fill any of them with the query, results or clipboard.
+    pub fn for_log(&self) -> impl fmt::Display + '_ {
+        Logged(self)
+    }
+}
+
+struct Logged<'a>(&'a Diagnostic);
+
+impl fmt::Display for Logged<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.code)?;
+        match (self.0.line, self.0.column) {
+            (Some(line), Some(column)) => write!(f, " at line {line}, column {column}"),
+            (Some(line), None) => write!(f, " at line {line}"),
+            _ => Ok(()),
+        }
+    }
+}
+
 impl fmt::Display for Diagnostic {
     /// One line: where, then what. The hint is left to callers with room for it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
