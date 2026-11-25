@@ -424,6 +424,19 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
                             .wrap()
                     }),
                 )
+                .children(
+                    crate::stored::problems()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, problem)| {
+                            text(problem)
+                                .key(format!("storage-problem-{index}"))
+                                .w_full()
+                                .font(DESCRIPTION)
+                                .color(k.c.text_base)
+                                .wrap()
+                        }),
+                )
                 .children(rows),
         )
         .children(s.welcome.map(|step| welcome::footer(k, step)));
@@ -686,6 +699,30 @@ mod tests {
             s.remove_alias("d");
             assert!(!s.config.aliases.0.contains_key("d"));
         });
+    }
+
+    #[test]
+    fn a_store_that_failed_closed_is_named_on_every_page() {
+        const STORE: &str = "A store under test";
+        let shown = |runtime: &mut rune::Runtime<Prefs>| {
+            runtime.frame(0.0);
+            runtime.accessibility_tree().nodes.iter().any(|(_, node)| {
+                node.value()
+                    .is_some_and(|text| text.starts_with(STORE) && text.contains("storage key"))
+            })
+        };
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        crate::stored::report(STORE, Some("couldn't get the storage key: locked"));
+        let mut runtime =
+            rune::Runtime::new(state(current, settings, false), view, SIZE, rune::Env::default());
+        for page in [Page::General, Page::Keywords, Page::Extensions] {
+            runtime.update(move |s, _| s.page = page);
+            assert!(shown(&mut runtime), "{}", page.title());
+        }
+        crate::stored::report(STORE, None);
+        runtime.update(|_, _| {});
+        assert!(!shown(&mut runtime));
     }
 
     #[test]

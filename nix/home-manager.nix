@@ -218,7 +218,7 @@
           description = ''
             Written to {file}`$XDG_CONFIG_HOME/dupin/config.toml`. Leave it empty to keep the
             file out of Nix, so Dupin's Settings window can change it. When set, the keys it
-            contains are locked in Settings and other edits are saved to `settings.toml` in
+            contains are locked in Settings and other edits are saved, encrypted, in
             Dupin's data directory. `aliases` maps shorthands to commands, apps, web searches and
             files; see <https://github.com/x-ryoppippi/dupin/blob/main/docs/features/keywords.md>.
             `advanced` recomposes the built-in sources, filters and kinds; see
@@ -307,7 +307,7 @@
               XDG_CONFIG_HOME = config.xdg.configHome;
             }
             // lib.optionalAttrs config.xdg.enable {
-              # The settings.toml overlay lives under XDG_DATA_HOME when the shell exports it.
+              # Dupin keeps its data, Settings edits included, under XDG_DATA_HOME when the shell exports it.
               XDG_DATA_HOME = config.xdg.dataHome;
             };
           };

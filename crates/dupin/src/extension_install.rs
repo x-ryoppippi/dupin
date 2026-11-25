@@ -20,7 +20,7 @@ pub enum Command {
     Sync,
 }
 
-/// `extensions.lock` in Dupin's data directory, beside settings.toml.
+/// `extensions.lock` in Dupin's data directory, beside `storage/`.
 pub fn lock_path() -> Option<PathBuf> {
     crate::store::data_dir().map(|dir| dir.join(LOCK_FILE))
 }
@@ -104,7 +104,7 @@ pub fn run(command: Command, json: bool) -> Result<Value, Diagnostic> {
         return Ok(value);
     }
     for line in lines {
-        println!("{line}");
+        crate::out::outln!("{line}");
     }
     Ok(Value::Null)
 }
@@ -432,7 +432,7 @@ pub fn search(query: Option<&str>, json: bool) -> Result<Value, Diagnostic> {
         return Ok(found_json(&found));
     }
     for line in found_lines(&found) {
-        println!("{line}");
+        crate::out::outln!("{line}");
     }
     Ok(Value::Null)
 }

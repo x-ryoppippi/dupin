@@ -147,6 +147,23 @@ export def file-proof [file: path]: nothing -> record {
     }
 }
 
+# Each file below `dir`, by its path relative to it, with its digest, so any write shows.
+export def dir-proof [dir: path]: nothing -> list<record> {
+    if not ($dir | path exists) { return [] }
+    glob ($dir | path join '**' '*') --no-dir
+    | sort
+    | each {|file| {path: ($file | path relative-to $dir), sha256: (open --raw $file | hash sha256)} }
+}
+
+# Fails when any file below `dir` holds `text` as it was typed.
+export def assert-sealed [dir: path, text: string] {
+    let clear = glob ($dir | path join '**' '*') --no-dir
+    | where {|file| open --raw $file | into binary | bytes index-of ($text | into binary) | $in >= 0 }
+    if ($clear | is-not-empty) {
+        error make {msg: $'($text) is on disk in the clear: ($clear | str join ", ")'}
+    }
+}
+
 export def log-count [log: path, text: string]: nothing -> int {
     open --raw $log | lines | where {|line| $line | str contains $text } | length
 }

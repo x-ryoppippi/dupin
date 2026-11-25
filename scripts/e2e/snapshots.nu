@@ -1,6 +1,8 @@
 use driver.nu [
     DUPIN
     ad
+    assert-sealed
+    dir-proof
     file-proof
     log-count
     poll
@@ -14,11 +16,12 @@ use ../e2e-state.nu [has-match is-focused-query]
 export def snapshot-stage [out: path] {
     let found = {|r| has-match $r }
     let log = $out | path join dupin.log
-    let archive = $out | path join data dupin snapshots archive.json
+    let data = $out | path join data
+    let archive = $data | path join dupin storage snapshots
     let history = $env.HOME | path join 'Library/Application Support/Dupin/history.json'
     let before = file-proof $history
     $before | to json | save --force ($out | path join snapshots-history-before.json)
-    if ($archive | path exists) { error make {msg: 'Snapshot archive was not isolated'} }
+    if ($archive | path exists) { error make {msg: 'Snapshot storage was not isolated'} }
     try {
         let done = log-count $log 'dupin-trace: results done query="calculator"'
         type-text $out snapshots-type-calculator calculator | ignore
@@ -49,12 +52,14 @@ export def snapshot-stage [out: path] {
         press $out snapshots-save cmd+shift+s | ignore
         wait-for-log $log 'dupin-trace: snapshot capture accepted'
         wait-for-log $log 'dupin-trace: snapshot saved'
-        let saved = open $archive
-        if ($saved.entries | length) != 1 or $saved.entries.0.mode != 'apps.search' or $saved.entries.0.query != calculator {
-            error make {msg: 'Snapshot did not capture the settled Apps query'}
+        let saved = glob ($archive | path join records '*.rec')
+        if ($saved | length) != 1 {
+            error make {msg: 'Snapshot did not save one sealed record'}
         }
-        let archive_before = file-proof $archive
-        cp $archive ($out | path join snapshots-archive-after-save.json)
+        assert-sealed $data calculator
+        assert-sealed $data 'Calculator /System/Applications'
+        let archive_before = dir-proof $archive
+        $archive_before | to json | save --force ($out | path join snapshots-archive-after-save.json)
         snap $out snapshots-saved
 
         let closed = log-count $log 'dupin-trace: panel closed '
@@ -148,7 +153,7 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        if (file-proof $archive) != $archive_before { error make {msg: 'Editing snapshot search changed the archive'} }
+        if (dir-proof $archive) != $archive_before { error make {msg: 'Editing snapshot search changed the archive'} }
         snap $out snapshots-search-cleared
 
         let delete = (poll
@@ -220,8 +225,8 @@ export def snapshot-stage [out: path] {
             --exact
             --first
         ) | ignore
-        if (file-proof $archive) != $archive_before { error make {msg: 'Cancelling snapshot deletion changed the archive'} }
-        cp $archive ($out | path join snapshots-archive-after-cancel.json)
+        if (dir-proof $archive) != $archive_before { error make {msg: 'Cancelling snapshot deletion changed the archive'} }
+        dir-proof $archive | to json | save --force ($out | path join snapshots-archive-after-cancel.json)
         for event in ['capture accepted' saved] {
             if (log-count $log $'dupin-trace: snapshot ($event)') != 1 {
                 error make {msg: $'Expected exactly one snapshot ($event)'}

@@ -31,7 +31,7 @@ With the Nix package or the home-manager module, `dupin` is on `PATH`, so `"comm
 | `open_panel`        | Yes                | Shows the panel, optionally with a `query` typed in, as `dupin open --query` does. Nothing is activated, and Enter does nothing for half a second after the panel appears. |
 | `pick`              | Yes                | Shows `values` (1 to 1000 JSON values) in the panel and waits up to five minutes for the user to choose one, as `dupin pick` does.                                         |
 
-`read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay` has the same fields plus `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
+`read_config` reports the base's `path`, `exists`, `readOnly` and TOML `source` at the top level. The `overlay`, what Settings saved over a read-only base, has `exists`, its TOML `source`, read from encrypted storage or from the running launcher that holds it, and `active`, which is true when the base is read-only. `lockedKeys` is empty for a writable base and null if the read-only base has invalid TOML syntax.
 
 `validate_config` answers `{"valid": true, "config": {...}}` with the resulting values, or `{"valid": false, "problem": "line 2, column 1: ..."}`. `pick` answers `{"value": ...}` with the chosen value unchanged.
 
