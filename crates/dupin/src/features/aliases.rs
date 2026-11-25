@@ -280,11 +280,11 @@ mod tests {
 
         let config =
             Config::parse("[aliases]\nwc = \"word-count\"\nwords = \"word-count\"\nwc2 = \"other\"").unwrap();
-        let mut configured = configured(&config).unwrap();
-        let added = add_extensions(&mut configured, &[Arc::new(extension("Word Count", "wc"))]);
+        let mut commands = configured(&config).unwrap();
+        let added = add_extensions(&mut commands, &[Arc::new(extension("Word Count", "wc"))]);
         let words = id("extension.word-count");
-        assert_eq!(configured.registry.keyword("wc"), Some(&words));
-        assert_eq!(configured.registry.keyword("words"), Some(&words));
+        assert_eq!(commands.registry.keyword("wc"), Some(&words));
+        assert_eq!(commands.registry.keyword("words"), Some(&words));
         assert_eq!(added.problems.len(), 1, "{:?}", added.problems);
         assert!(
             added
