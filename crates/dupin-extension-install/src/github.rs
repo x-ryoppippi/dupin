@@ -32,6 +32,9 @@ const TAGS_PER_PAGE: usize = 100;
 pub struct GitHub {
     /// The REST API root, without a trailing slash.
     pub api: String,
+    /// Where `dupin ext search` reads each listed repository's package.json, without a trailing
+    /// slash. It never gets the token.
+    pub raw: String,
     pub curl: PathBuf,
     /// For each request, the tarball download included.
     pub timeout: Duration,
@@ -44,12 +47,14 @@ impl Default for GitHub {
     fn default() -> Self {
         Self {
             api: "https://api.github.com".to_owned(),
+            raw: "https://raw.githubusercontent.com".to_owned(),
             curl: PathBuf::from("/usr/bin/curl"),
             timeout: Duration::from_secs(120),
             max_download_bytes: 4 * MAX_TOTAL_BYTES,
-            token: std::env::var("GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty()),
+            token: ["GITHUB_TOKEN", "GH_TOKEN"]
+                .into_iter()
+                .filter_map(|name| std::env::var(name).ok())
+                .find(|token| !token.is_empty()),
         }
     }
 }
@@ -58,6 +63,7 @@ impl fmt::Debug for GitHub {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GitHub")
             .field("api", &self.api)
+            .field("raw", &self.raw)
             .field("curl", &self.curl)
             .field("timeout", &self.timeout)
             .field("max_download_bytes", &self.max_download_bytes)
@@ -285,7 +291,7 @@ impl GitHub {
         }
         let archive = repo.scratch.join("archive.tar.gz");
         let url = format!("{}{}/tarball/{commit}", self.api, repo.path());
-        let status = self.get(&url, &archive, self.max_download_bytes)?;
+        let status = self.get(&url, &archive, self.max_download_bytes, true)?;
         if status != 200 {
             return Err(self.refused(status, repo));
         }
@@ -392,7 +398,7 @@ impl GitHub {
     /// A JSON response from the API, or `None` when GitHub says there is no such thing.
     fn api<T: DeserializeOwned>(&self, repo: &Repo<'_>, path: &str) -> Result<Option<T>, Error> {
         let out = repo.scratch.join("response.json");
-        let status = self.get(&format!("{}{path}", self.api), &out, MAX_API_BYTES)?;
+        let status = self.get(&format!("{}{path}", self.api), &out, MAX_API_BYTES, true)?;
         match status {
             200 => {}
             404 | 409 | 422 => return Ok(None),
@@ -432,11 +438,18 @@ impl GitHub {
         }
     }
 
-    /// Downloads `url` into `out` with the system curl, following redirects on the API's own
-    /// scheme, and returns the final status. The options, the token among them, go through stdin
-    /// so no other process can read them from curl's arguments.
-    fn get(&self, url: &str, out: &Path, max_bytes: u64) -> Result<u16, Error> {
-        let scheme = self.api.split_once("://").map_or("https", |(scheme, _)| scheme);
+    /// Downloads `url` into `out` with the system curl, following redirects on the URL's own
+    /// scheme, and returns the final status. The options, the token among them when
+    /// `authenticate` is set, go through stdin so no other process can read them from curl's
+    /// arguments.
+    pub(crate) fn get(
+        &self,
+        url: &str,
+        out: &Path,
+        max_bytes: u64,
+        authenticate: bool,
+    ) -> Result<u16, Error> {
+        let scheme = url.split_once("://").map_or("https", |(scheme, _)| scheme);
         let mut config = Config::default();
         for flag in ["silent", "show-error", "globoff", "location"] {
             config.flag(flag);
@@ -451,7 +464,7 @@ impl GitHub {
         config.option("user-agent", "Dupin");
         config.option("header", "Accept: application/vnd.github+json");
         config.option("header", "X-GitHub-Api-Version: 2022-11-28");
-        if let Some(token) = &self.token {
+        if let Some(token) = self.token.as_ref().filter(|_| authenticate) {
             // curl drops a custom Authorization header when a redirect leaves the API host, so
             // the token never reaches the archive host.
             config.option("header", &format!("Authorization: Bearer {token}"));
@@ -538,7 +551,7 @@ fn full_commit(sha: &str) -> Result<String, Error> {
 }
 
 /// A ref name as one URL path, its `/` kept as separators.
-fn escape(name: &str) -> String {
+pub(crate) fn escape(name: &str) -> String {
     let mut escaped = String::new();
     for byte in name.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~' | b'/') {
