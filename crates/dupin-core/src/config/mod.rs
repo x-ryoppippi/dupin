@@ -129,6 +129,29 @@ impl Config {
     }
 }
 
+/// The top-level keys whose value is the same choice on every Mac, which sync carries
+/// (docs/design/sync.md#settings). Any other key is device-local: hotkeys, display choices, keys
+/// whose enabling asks for access on this Mac, updates, snippets (kept apart from settings) and
+/// any key added later, so a new key never syncs by accident.
+pub const SHARED_KEYS: &[&str] = &[
+    "show_recent",
+    "file_limit",
+    "file_demotions",
+    "dictionary_keywords",
+    "calculator",
+    "calculator_currency",
+    "web_searches",
+    "web_fallbacks",
+    "snippet_keywords",
+    "theme",
+    "aliases",
+    "advanced",
+];
+
+pub fn is_shared(key: &str) -> bool {
+    SHARED_KEYS.contains(&key)
+}
+
 /// A key Dupin no longer reads. Settings wrote every key to each config.toml it saved, so a
 /// retired one is still accepted, whatever its value, and is dropped at the next save.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -155,5 +178,40 @@ mod tests {
         assert!(!config.show_recent);
         assert_eq!(config, Config::parse("show_recent = false").unwrap());
         assert!(!toml::to_string(&config).unwrap().contains("window_management"));
+    }
+
+    #[test]
+    fn every_shared_key_is_a_key_and_the_device_local_ones_stay_local() {
+        let written = toml::Table::try_from(Config {
+            web_searches: Some(Default::default()),
+            aliases: super::Aliases::default(),
+            ..Config::default()
+        })
+        .unwrap();
+        for key in super::SHARED_KEYS {
+            assert!(
+                written.contains_key(*key) || ["aliases", "advanced"].contains(key),
+                "{key} isn't a key of config.toml"
+            );
+        }
+        for key in [
+            "hotkey",
+            "selection_hotkey",
+            "bindings",
+            "display",
+            "position",
+            "input_source",
+            "backdrop",
+            "calendar",
+            "system_automation",
+            "snippet_paste",
+            "extensions",
+            "clipboard",
+            "auto_update",
+            "snippets",
+            "a key added later",
+        ] {
+            assert!(!super::is_shared(key), "{key} must stay on this Mac");
+        }
     }
 }

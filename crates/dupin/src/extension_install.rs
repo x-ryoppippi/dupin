@@ -20,7 +20,7 @@ pub enum Command {
     Sync,
 }
 
-/// `extensions.lock` in Dupin's data directory, beside settings.toml.
+/// `extensions.lock` in Dupin's data directory, beside `storage/`.
 pub fn lock_path() -> Option<PathBuf> {
     crate::store::data_dir().map(|dir| dir.join(LOCK_FILE))
 }

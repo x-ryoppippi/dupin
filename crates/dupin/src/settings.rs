@@ -6,7 +6,8 @@ use dupin_core::Config;
 
 mod layers;
 mod live;
-pub use layers::{LockedKeys, Paths, load, read_layer, top_level};
+pub mod overlay;
+pub use layers::{LockedKeys, Paths, load, read_layer, read_overlay, top_level};
 pub use live::{Service, Update, check_locked};
 
 /// `$XDG_CONFIG_HOME/dupin/config.toml`, else `~/.config/dupin/config.toml`.
