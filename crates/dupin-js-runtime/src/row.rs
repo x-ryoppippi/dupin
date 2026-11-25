@@ -71,7 +71,7 @@ pub struct Row {
     /// An absolute path whose Finder icon the row shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
-    /// A package-relative image path.
+    /// A package-relative image path, or `sf:` and an SF Symbol's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     /// An image the package keeps, drawn scaled down in place of `icon` and `file`'s.
@@ -581,11 +581,22 @@ pub(crate) fn validate_actions(actions: &[RowAction], source: Source) -> Result<
     Ok(())
 }
 
-/// A path inside the package, to an image format the launcher draws.
-pub(crate) fn check_icon(icon: &str) -> Result<(), String> {
+/// `sf:` and an SF Symbol's name, or a path inside the package to an image format the launcher
+/// draws.
+pub fn check_icon(icon: &str) -> Result<(), String> {
+    use dupin_plugin_protocol::symbol::{MAX_SYMBOL_NAME, SYMBOL_PREFIX, is_symbol_name};
+    if let Some(name) = icon.strip_prefix(SYMBOL_PREFIX) {
+        return if is_symbol_name(name) {
+            Ok(())
+        } else {
+            Err(format!(
+                "`icon` must name an SF Symbol after `{SYMBOL_PREFIX}`: 1 to {MAX_SYMBOL_NAME} ASCII letters, digits and dots, such as `{SYMBOL_PREFIX}moon.fill`"
+            ))
+        };
+    }
     let invalid = || {
         Err(format!(
-            "`icon` must be a path inside the package to a {} file",
+            "`icon` must be a path inside the package to a {} file, or `{SYMBOL_PREFIX}` and an SF Symbol's name",
             ICON_EXTENSIONS.join(", ")
         ))
     };

@@ -7,7 +7,7 @@ use dupin_extension_bridge::{
     Bridge, ConsentReason, ConsentRequest, ConsentState, GrantSource, OsAccess, OsPermission, PackageId,
     Scope, ScopeEntry,
 };
-use rune::{El, Icon, col, row, text};
+use rune::{El, Icon, col, el, row, text};
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant, Kit, Switch};
 
 use super::Prefs;
@@ -36,9 +36,10 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     }
     let (listed, _) = &s.extensions;
     for (index, extension) in listed.iter().enumerate() {
-        rows.push(heading(
+        rows.push(package_heading(
             k,
-            &format!("extension-{index}"),
+            index,
+            extension.icon.as_ref(),
             &format!(
                 "{} ({}{})",
                 extension.title,
@@ -131,6 +132,32 @@ fn heading(k: &Kit, key: &str, title: &str) -> El {
         .color(k.c.text_base)
         .mx(ROW_PX)
         .mt(8.0)
+}
+
+/// An extension's heading: its name, after its own icon when it has one.
+fn package_heading(k: &Kit, index: usize, icon: Option<&dupin_core::Icon>, title: &str) -> El {
+    let size = crate::symbols::INLINE;
+    let icon = icon
+        .and_then(|icon| crate::symbols::icon(icon, size, k.c.text_base))
+        .map(|pixels| {
+            el().key(format!("extension-{index}-icon"))
+                .size(size.square, size.square)
+                .pixels(&pixels)
+        });
+    row()
+        .key(format!("extension-{index}-heading"))
+        .gap(6.0)
+        .center_y()
+        .mx(ROW_PX)
+        .mt(8.0)
+        .children(icon)
+        .child(
+            text(title.to_owned())
+                .key(format!("extension-{index}"))
+                .role("heading")
+                .font(k.ty.ui_medium)
+                .color(k.c.text_base),
+        )
 }
 
 fn name_of(s: &Prefs, id: &PackageId) -> String {
@@ -533,6 +560,7 @@ mod tests {
             package: PackageId::new("help").unwrap(),
             title: "Help".into(),
             keyword: "help".into(),
+            icon: None,
             kind: Kind::User,
             registered,
             main_search: false,
@@ -627,6 +655,7 @@ mod tests {
             package: PackageId::new("bundled:calendar").unwrap(),
             title: "Calendar".into(),
             keyword: "cal".into(),
+            icon: None,
             kind,
             registered,
             main_search: false,

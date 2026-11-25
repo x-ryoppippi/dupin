@@ -153,7 +153,7 @@ fn javascript_scaffold_checks_and_answers_its_fixture() {
     assert_eq!(manifest["keywords"], json!(["dupin-extension"]));
     assert_eq!(
         manifest["dupin"],
-        json!({ "title": "Hello World", "keyword": "hello-world" })
+        json!({ "title": "Hello World", "keyword": "hello-world", "icon": "sf:puzzlepiece.extension" })
     );
     assert!(manifest.get("source").is_none());
     assert_eq!(

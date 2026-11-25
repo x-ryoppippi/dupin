@@ -109,6 +109,9 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
         // extension answers that command only while the feature is on.
         if let Some(command) = super::ported_command(&extension.id) {
             if configured.registry.ids().iter().any(|id| id == command) {
+                if let Some(icon) = &extension.icon {
+                    let _ = configured.registry.set_icon(&id(command), icon.clone());
+                }
                 added
                     .registered
                     .push((id(command), extension.clone(), super::ported_role(&extension.id)));
@@ -148,6 +151,9 @@ pub fn add_extensions(configured: &mut ConfiguredCommands, extensions: &[Arc<Ext
             // An `items()` catalogue lists itself before anything is typed; `search` still only
             // runs for a query.
             .with_query_eligibility(QueryEligibility::Any);
+            if let Some(icon) = &extension.icon {
+                spec = spec.with_icon(icon.clone());
+            }
             spec.deadline = QUERY_DEADLINE + std::time::Duration::from_secs(1);
             if configured.registry.register(spec).is_ok()
                 && configured.registry.add_keyword(&command, keyword.clone()).is_ok()

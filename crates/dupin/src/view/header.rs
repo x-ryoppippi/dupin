@@ -1,6 +1,6 @@
 use dupin_core::session::Results;
 use rune::tok::type_;
-use rune::{Color, El, TextStyle, row, text, text_input};
+use rune::{Color, El, TextStyle, el, row, text, text_input};
 
 use crate::ui::Ui;
 
@@ -66,26 +66,36 @@ pub(super) fn header(s: &Ui, t: &ResolvedTheme, accent: Color) -> El {
         .folder()
         .map(|folder| folder.file_name().unwrap_or(folder.as_os_str()).to_string_lossy());
     let page_chip = page.map(|page| page_chip(page, presentation.chip.as_deref()));
-    let chip = if let Some(chip) = destination_chip.as_deref() {
-        Some(chip)
+    // The command's icon shows only beside the command's own name.
+    let (chip, icon) = if let Some(chip) = destination_chip.as_deref() {
+        (Some(chip), None)
     } else if renaming {
-        Some("Rename")
+        (Some("Rename"), None)
+    } else if let Some(folder) = folder.as_deref() {
+        (Some(folder), None)
     } else {
-        folder
-            .as_deref()
-            .or(page_chip.as_deref())
-            .or(presentation.chip.as_deref())
+        let chip = page_chip.as_deref().or(presentation.chip.as_deref());
+        (chip, chip.and(s.session.command().icon()))
     };
     bar = if let Some(chip) = chip {
+        let icon = icon
+            .and_then(|icon| crate::symbols::icon(icon, crate::symbols::INLINE, accent))
+            .map(|pixels| {
+                el().key("mode-icon")
+                    .size(crate::symbols::INLINE.square, crate::symbols::INLINE.square)
+                    .pixels(&pixels)
+            });
         bar.child(
             row()
                 .key("mode")
                 .max_w(280.0)
                 .h(28.0)
                 .px(10.0)
+                .gap(6.0)
                 .radius(7.0)
                 .center_y()
                 .fill(accent.alpha(0.16))
+                .children(icon)
                 .child(text(chip).font(t.font(type_::TITLE)).color(accent).truncate()),
         )
     } else {

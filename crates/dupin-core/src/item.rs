@@ -240,7 +240,12 @@ pub enum Icon {
     Image(PathBuf),
     /// An image an extension keeps, drawn scaled down.
     Host(HostImage),
+    /// An SF Symbol, by a name [`Icon::symbol`] accepted, drawn in the colour of the text beside
+    /// it.
+    Symbol(String),
 }
+
+pub use dupin_plugin_protocol::symbol::{MAX_SYMBOL_NAME, SYMBOL_PREFIX, is_symbol_name};
 
 /// An image an extension's row names by a handle only Dupin resolves, within that package's
 /// own storage, so its bytes never travel with the row.
@@ -287,11 +292,17 @@ impl Icon {
         }
     }
 
-    /// The file the icon is drawn from, unless it is an extension's stored image.
+    /// The SF Symbol `name`, when [`is_symbol_name`] accepts it. A name the system has no symbol
+    /// for draws nothing.
+    pub fn symbol(name: &str) -> Option<Self> {
+        is_symbol_name(name).then(|| Self::Symbol(name.to_owned()))
+    }
+
+    /// The file the icon is drawn from, unless it is an extension's stored image or a symbol.
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::File(path) | Self::Image(path) => Some(path),
-            Self::Host(_) => None,
+            Self::Host(_) | Self::Symbol(_) => None,
         }
     }
 }
@@ -392,5 +403,35 @@ pub fn tilde(path: &str) -> String {
             }
         }
         _ => path.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_names_are_ascii_words_joined_by_dots() {
+        for name in ["moon.fill", "lock", "circle.lefthalf.filled", "1.circle", "a"] {
+            assert_eq!(Icon::symbol(name), Some(Icon::Symbol(name.into())), "{name}");
+        }
+        let long = "a".repeat(MAX_SYMBOL_NAME + 1);
+        for name in [
+            "",
+            ".moon",
+            "moon.",
+            "moon..fill",
+            "moon fill",
+            "moon/fill",
+            "../moon",
+            "moon-fill",
+            "moon_fill",
+            "\u{ff4d}oon",
+            long.as_str(),
+        ] {
+            assert_eq!(Icon::symbol(name), None, "{name:?}");
+        }
+        assert!(Icon::symbol(&"a".repeat(MAX_SYMBOL_NAME)).is_some());
+        assert_eq!(Icon::Symbol("moon".into()).path(), None);
     }
 }

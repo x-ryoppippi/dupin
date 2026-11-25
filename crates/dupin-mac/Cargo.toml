@@ -51,7 +51,11 @@ objc2-foundation = { workspace = true, features = [
 objc2-app-kit = { workspace = true, features = [
 	"std",
 	"NSEvent",
+	"NSFontDescriptor",
 	"NSGraphics",
+	"NSGraphicsContext",
+	"NSImage",
+	"NSImageRep",
 	"NSApplication",
 	"NSOpenPanel",
 	"NSPanel",
@@ -67,6 +71,8 @@ objc2-app-kit = { workspace = true, features = [
 	"NSRunningApplication",
 	"block2",
 	"libc",
+	"objc2-core-foundation",
+	"objc2-core-graphics",
 ] }
 objc2-quick-look-ui = { workspace = true }
 objc2-event-kit = { version = "0.3", default-features = false, features = [
@@ -108,7 +114,9 @@ objc2-security = { version = "0.3", default-features = false, features = [
 ] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = [
 	"std",
+	"CGBitmapContext",
 	"CGColorSpace",
+	"CGContext",
 	"CGDataProvider",
 	"CGImage",
 ] }

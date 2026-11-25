@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Snippets",
 		"keyword": "snip",
+		"icon": "sf:text.quote",
 		"main": "main.ts",
 		"capabilities": {
 			"clipboard": [

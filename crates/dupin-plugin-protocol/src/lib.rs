@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{collections::HashSet, fmt, io};
 
+pub mod symbol;
 pub mod web_search;
 
 pub const VERSION: u32 = 1;

@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Dictionary",
 		"keyword": "define",
+		"icon": "sf:character.book.closed",
 		"main": "main.ts",
 		"capabilities": {
 			"dictionary": [

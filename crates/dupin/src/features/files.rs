@@ -57,7 +57,8 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
                 1.0,
             ),
         )
-        .with_candidate_limit(file_limit.saturating_mul(4).min(MAX_FILE_CANDIDATES)),
+        .with_candidate_limit(file_limit.saturating_mul(4).min(MAX_FILE_CANDIDATES))
+        .with_icon(dupin_core::Icon::Symbol("folder".into())),
         CommandSpec::new(
             contents_id.clone(),
             file_limit,
@@ -70,7 +71,8 @@ fn configure(config: &Config, commands: &mut Configure) -> Result<(), CommandErr
                 2.0,
             ),
         )
-        .with_title("File Contents"),
+        .with_title("File Contents")
+        .with_icon(dupin_core::Icon::Symbol("doc.text.magnifyingglass".into())),
         CommandSpec::new(
             id(BROWSE),
             file_limit,

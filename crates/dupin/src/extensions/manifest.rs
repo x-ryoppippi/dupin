@@ -14,7 +14,20 @@ pub const PACKAGE_JSON: &str = "package.json";
 pub const WASM_MANIFEST: &str = "extension.toml";
 /// package.json also carries the author's tooling: scripts, dependencies and the like.
 const MAX_PACKAGE_JSON_BYTES: usize = 64 * 1024;
-const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `main`, `defaultSearch`, `emptyQuery`, `match`, `preferences`, `capabilities` and `provides`";
+const DUPIN_KEYS: &str = "`title`, `keyword`, and optionally `icon`, `main`, `defaultSearch`, `emptyQuery`, `match`, `preferences`, `capabilities` and `provides`";
+/// Every key the `dupin` object may hold, as sdk/dupin.d.ts declares them.
+const DUPIN_KEY_NAMES: [&str; 10] = [
+    "title",
+    "keyword",
+    "icon",
+    "main",
+    "defaultSearch",
+    "emptyQuery",
+    "match",
+    "preferences",
+    "capabilities",
+    "provides",
+];
 const PROVIDES_HINT: &str = "`provides` takes `filters`, as `{ \"<name>\": { \"stage\": \"matcher\" | \"sorter\" } }`, and `kinds`, as `{ \"<kind>\": { \"<action>\": { \"field\": \"<field>\" } } }`; see docs/features/advanced.md.";
 /// Filters, and kind actions for each kind, one package may provide.
 const MAX_CONTRIBUTIONS: usize = 8;
@@ -29,6 +42,8 @@ pub(super) struct Manifest {
     pub name: String,
     pub version: String,
     pub keyword: String,
+    /// What its keyword chip, Settings and its rows without an icon of their own show.
+    pub icon: Option<PackageIcon>,
     /// Relative to the folder: a JavaScript or TypeScript module.
     pub entry: String,
     /// The package's `items()` catalogue also answers the default search.
@@ -41,6 +56,31 @@ pub(super) struct Manifest {
     /// The most the package may do; the user grants each scope.
     pub capabilities: dupin_broker::Capabilities,
     pub provides: Provides,
+}
+
+/// A package's own icon, as its manifest names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PackageIcon {
+    /// An SF Symbol, by its name.
+    Symbol(String),
+    /// An image file, relative to the folder, which may not have been found yet.
+    File(String),
+}
+
+const ICON_HINT: &str =
+    "Name an image in the package, such as `assets/icon.png`, or an SF Symbol, such as `sf:puzzlepiece`.";
+
+fn parse_icon(icon: &str) -> Result<PackageIcon, Diagnostic> {
+    dupin_js_runtime::row::check_icon(icon).map_err(|message| {
+        Diagnostic::new("invalid-manifest", message.replace("`icon` must", "must"))
+            .file(PACKAGE_JSON)
+            .field("dupin.icon")
+            .hint(ICON_HINT)
+    })?;
+    Ok(match icon.strip_prefix(dupin_core::item::SYMBOL_PREFIX) {
+        Some(name) => PackageIcon::Symbol(name.to_owned()),
+        None => PackageIcon::File(icon.to_owned()),
+    })
 }
 
 /// What a package offers `[advanced]` to compose onto Dupin's own sources and kinds.
@@ -326,20 +366,7 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
             &format!("Give `dupin` {DUPIN_KEYS}."),
         ));
     };
-    if let Some(key) = dupin.keys().find(|key| {
-        !matches!(
-            key.as_str(),
-            "title"
-                | "keyword"
-                | "main"
-                | "defaultSearch"
-                | "emptyQuery"
-                | "match"
-                | "preferences"
-                | "capabilities"
-                | "provides"
-        )
-    }) {
+    if let Some(key) = dupin.keys().find(|key| !DUPIN_KEY_NAMES.contains(&key.as_str())) {
         return Err(field(
             &format!("dupin.{key}"),
             "is not a key Dupin reads",
@@ -351,6 +378,9 @@ fn javascript(package: &Map<String, Value>, dupin: &Value) -> Result<Manifest, D
         name: required(dupin, "title", "dupin.title", TITLE_HINT)?,
         version: required(package, "version", "version", VERSION_HINT)?,
         keyword: required(dupin, "keyword", "dupin.keyword", KEYWORD_HINT)?,
+        icon: string(dupin, "icon", "dupin.icon", ICON_HINT)?
+            .map(|icon| parse_icon(&icon))
+            .transpose()?,
         entry: string(dupin, "main", "dupin.main", MAIN_HINT)?.unwrap_or_else(|| DEFAULT_ENTRY.into()),
         default_search: flag(dupin, "defaultSearch", DEFAULT_SEARCH_HINT)?,
         empty_query: flag(dupin, "emptyQuery", EMPTY_QUERY_HINT)?,
@@ -636,6 +666,63 @@ mod tests {
 
         let oversized = problem(&[(PACKAGE_JSON, &" ".repeat(MAX_PACKAGE_JSON_BYTES + 1))]);
         assert!(oversized.message.contains("larger than 64 KiB"), "{oversized}");
+    }
+
+    #[test]
+    fn the_sdk_declares_every_manifest_key() {
+        let declarations = include_str!("../../../../sdk/dupin.d.ts");
+        let (_, body) = declarations
+            .split_once("export interface Manifest {\n")
+            .expect("dupin.d.ts declares the manifest");
+        let (body, _) = body.split_once("\n\t}\n").unwrap();
+        let declared: std::collections::BTreeSet<_> = body
+            .lines()
+            .filter_map(|line| line.strip_prefix("\t\t"))
+            .filter_map(|line| line.split_once(['?', ':']).map(|(key, _)| key))
+            .filter(|key| key.chars().all(|c| c.is_ascii_alphanumeric()))
+            .collect();
+        let read: std::collections::BTreeSet<_> = DUPIN_KEY_NAMES.into_iter().collect();
+        assert_eq!(declared, read);
+    }
+
+    #[test]
+    fn an_icon_is_an_image_in_the_folder_or_a_symbol_name() {
+        let icon = |value: &str| {
+            read_folder(&[(
+                PACKAGE_JSON,
+                &package(&format!(r#"{{"title": "W", "keyword": "wc", "icon": {value}}}"#)),
+            )])
+            .map(|manifest| manifest.icon)
+        };
+        assert_eq!(
+            icon(r#""sf:textformat.123""#).unwrap(),
+            Some(PackageIcon::Symbol("textformat.123".into()))
+        );
+        assert_eq!(
+            icon(r#""assets/icon.png""#).unwrap(),
+            Some(PackageIcon::File("assets/icon.png".into()))
+        );
+        for (value, message) in [
+            ("1", "must be a string"),
+            (r#""sf:""#, "must name an SF Symbol"),
+            (r#""sf:moon fill""#, "must name an SF Symbol"),
+            (r#""sf:../moon""#, "must name an SF Symbol"),
+            (r#""sf:moon/fill""#, "must name an SF Symbol"),
+            (r#""../icon.png""#, "must be a path inside the package"),
+            (r#""/tmp/icon.png""#, "must be a path inside the package"),
+            (r#""assets\\icon.png""#, "must be a path inside the package"),
+            (r#""icon.gif""#, "must be a path inside the package"),
+            (r#""""#, "must be a path inside the package"),
+        ] {
+            let diagnostic = icon(value).unwrap_err();
+            assert_eq!(
+                (diagnostic.code.as_ref(), diagnostic.field.as_deref()),
+                ("invalid-manifest", Some("dupin.icon")),
+                "{value}"
+            );
+            assert!(diagnostic.message.starts_with(message), "{value}: {diagnostic}");
+            assert!(diagnostic.hint.is_some(), "{value}");
+        }
     }
 
     #[test]

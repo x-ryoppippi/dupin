@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Clipboard",
 		"keyword": "clip",
+		"icon": "sf:doc.on.clipboard",
 		"main": "main.ts",
 		"match": "words",
 		"preferences": {

@@ -74,12 +74,14 @@ fn parse(package: &Map<String, Value>) -> Result<Package, Error> {
             key.as_str(),
             "title"
                 | "keyword"
+                | "icon"
                 | "main"
                 | "defaultSearch"
                 | "emptyQuery"
                 | "match"
                 | "preferences"
                 | "capabilities"
+                | "provides"
         )
     }) {
         return Err(invalid(&format!("dupin.{key}"), "is not a key Dupin reads"));
@@ -197,7 +199,9 @@ mod tests {
             "dupin": {
                 "title": "Word Count",
                 "keyword": "wc",
+                "icon": "sf:textformat.123",
                 "main": "./dist/main.js",
+                "provides": {},
                 "capabilities": {
                     "http": [
                         {"origin": "https://b.example", "methods": ["GET"]},

@@ -10,6 +10,8 @@ use crate::manifest::MANIFEST_FILE;
 const TS_SOURCE: &str = "src/main.ts";
 const TS_MAIN: &str = "dist/main.js";
 const TS_MAIN_DIR: &str = "dist";
+/// The icon a new package starts with, which its author swaps for one of their own.
+const DEFAULT_ICON: &str = "sf:puzzlepiece.extension";
 /// The version Dupin's own checks bundle the scaffold with.
 const ROLLDOWN_VERSION: &str = "1.3.2";
 
@@ -85,9 +87,10 @@ fn files(name: &str, title: &str, template: Template) -> Vec<(&'static str, Stri
         ),
     };
     let manifest = format!(
-        "{{\n\t\"name\": {name},\n\t\"version\": \"0.1.0\",\n\t\"private\": true,\n\t\"type\": \"module\",\n\t\"keywords\": [\"dupin-extension\"],{source}\n\t\"dupin\": {{\n\t\t\"title\": {title},\n\t\t\"keyword\": {name}{main}\n\t}}\n}}\n",
+        "{{\n\t\"name\": {name},\n\t\"version\": \"0.1.0\",\n\t\"private\": true,\n\t\"type\": \"module\",\n\t\"keywords\": [\"dupin-extension\"],{source}\n\t\"dupin\": {{\n\t\t\"title\": {title},\n\t\t\"keyword\": {name},\n\t\t\"icon\": {icon}{main}\n\t}}\n}}\n",
         name = string(name),
         title = string(title),
+        icon = string(DEFAULT_ICON),
     );
 
     let (build_note, build_command, build_section) = match template {

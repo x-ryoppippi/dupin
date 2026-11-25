@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Calendar",
 		"keyword": "cal",
+		"icon": "sf:calendar",
 		"main": "main.ts",
 		"emptyQuery": true,
 		"capabilities": {

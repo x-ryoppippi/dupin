@@ -844,7 +844,7 @@ impl<'a> Reader<'a> {
         if let Some(icon) = &icon {
             row::check_icon(icon).map_err(|message| {
                 self.invalid("invalid-field", field("icon"), message.replace("`icon` must", "must"))
-                    .hint("Ship the image in the package and name it relative to `package.json`, such as `assets/icon.png`.")
+                    .hint("Ship the image in the package and name it relative to `package.json`, such as `assets/icon.png`, or name an SF Symbol, such as `sf:star.fill`.")
             })?;
         }
         let image = self.image(&item, &field("image"))?;

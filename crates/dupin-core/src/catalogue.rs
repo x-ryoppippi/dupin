@@ -568,6 +568,7 @@ fn entry_bytes(entry: &Entry) -> usize {
         + entry.file.as_ref().map_or(0, |file| file.as_os_str().len())
         + match &item.icon {
             Some(crate::Icon::Host(image)) => image.text_bytes(),
+            Some(crate::Icon::Symbol(name)) => name.len(),
             _ => 0,
         }
 }

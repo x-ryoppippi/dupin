@@ -32,7 +32,8 @@ fn configure(_: &Config, commands: &mut Configure) -> Result<(), CommandError> {
             0.0,
         ),
     )
-    .with_query_eligibility(QueryEligibility::Any);
+    .with_query_eligibility(QueryEligibility::Any)
+    .with_icon(dupin_core::Icon::Symbol(dupin_mac::SNAPSHOTS_SYMBOL.into()));
     spec.private_results = true;
     commands.registry.register(spec)?;
     if commands.registry.add_keyword(&command, KEYWORD).is_err() {
@@ -127,7 +128,7 @@ fn item(summary: SnapshotSummary, matched: Vec<usize>, sources: &[String]) -> It
         },
         payload: Payload::default(),
         record_usage: false,
-        icon: None,
+        icon: Some(dupin_core::Icon::Symbol(dupin_mac::SNAPSHOTS_SYMBOL.into())),
         matched,
         completion: None,
         score: None,

@@ -6,6 +6,7 @@
 	"dupin": {
 		"title": "Web Search",
 		"keyword": "web",
+		"icon": "sf:globe",
 		"main": "main.ts",
 		"defaultSearch": true
 	}

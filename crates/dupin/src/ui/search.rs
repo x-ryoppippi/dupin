@@ -185,6 +185,8 @@ impl Ui {
             let image = match icon {
                 dupin_core::Icon::File(path) => cache.app_icon(path, ICON_SIZE),
                 dupin_core::Icon::Image(path) => cache.file(path, ICON_SIZE, 2.0),
+                // Drawn in the colour of the row's text, which only the view knows.
+                dupin_core::Icon::Symbol(_) => continue,
                 dupin_core::Icon::Host(image) => {
                     if let Some(package) = self.extension_package(&image.extension) {
                         jobs.push(super::thumbnails::Job {

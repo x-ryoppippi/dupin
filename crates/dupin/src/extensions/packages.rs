@@ -33,6 +33,8 @@ pub struct Listed {
     pub package: PackageId,
     pub title: String,
     pub keyword: String,
+    /// The package's own icon.
+    pub icon: Option<dupin_core::Icon>,
     pub kind: Kind,
     /// Whether its keyword reaches it now; one that runs can lose its keyword to another
     /// command.
@@ -135,6 +137,7 @@ impl Packages {
                 package: extension.package.clone(),
                 title: extension.name.clone(),
                 keyword: extension.keyword.clone(),
+                icon: extension.icon.clone(),
                 kind,
                 registered: registered(&extension),
                 main_search: extension.default_search,

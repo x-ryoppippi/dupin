@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Window Management",
 		"keyword": "window",
+		"icon": "sf:macwindow",
 		"main": "main.ts",
 		"defaultSearch": true,
 		"capabilities": {

@@ -34,8 +34,12 @@ declare module 'dupin' {
 		url?: string;
 		/** Non-empty, up to 16 KiB. */
 		text?: string;
-		/** An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to `package.json`. */
-		icon?: string;
+		/**
+		 * An image in the package (`.png`, `.jpg`, `.jpeg`, `.svg`, `.pdf` or `.icns`), relative to
+		 * `package.json`, or an SF Symbol: `sf:` and its name, drawn in the colour of the row's
+		 * text. Without one, the row shows the package's own `icon`.
+		 */
+		icon?: Icon;
 		/** An image the package keeps, drawn scaled down as the row's icon in place of `icon`. */
 		image?: HostImage;
 		/** The heading the item is listed under; a section's items get its title. Up to 128 bytes. */
@@ -480,12 +484,32 @@ declare module 'dupin' {
 		readonly permission?: string;
 	}
 
+	/**
+	 * An image file in the package, relative to `package.json`, or `sf:` and an SF Symbol's name:
+	 * 1 to 64 ASCII letters, digits and dots, such as `sf:moon.fill`. A name macOS has no symbol
+	 * for draws nothing.
+	 */
+	export type Icon =
+		| `sf:${string}`
+		| `${string}.png`
+		| `${string}.jpg`
+		| `${string}.jpeg`
+		| `${string}.svg`
+		| `${string}.pdf`
+		| `${string}.icns`;
+
 	/** The `dupin` key of `package.json`, which Dupin reads as plain JSON before running code. */
 	export interface Manifest {
 		/** Shown on the keyword chip and in Settings, up to 80 characters. */
 		title: string;
 		/** Typed before a space to reach the extension. Up to 32 bytes, no spaces. */
 		keyword: string;
+		/**
+		 * The package's own icon, on its keyword chip, in Settings and on each of its rows that
+		 * names none: an image file inside the package, as an item's `icon`, or `sf:` and an SF
+		 * Symbol's name, such as `sf:puzzlepiece`.
+		 */
+		icon?: Icon;
 		/** The module that exports `search` or `items`, inside the package. Defaults to `main.js`. */
 		main?: `${string}.js` | `${string}.mjs` | `${string}.ts` | `${string}.mts` | `${string}.tsx`;
 		/** List the `items` catalogue in the main search too, ranked with apps. The package never sees what is typed there. */

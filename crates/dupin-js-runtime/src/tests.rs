@@ -476,6 +476,16 @@ fn package_and_result_problems_carry_codes_fields_and_hints() {
             Some("items[0].icon"),
         ),
         (
+            "export function search() { return [{ title: 'a', icon: 'sf:../moon' }]; }",
+            "invalid-field",
+            Some("items[0].icon"),
+        ),
+        (
+            "export function search() { return [{ title: 'a', icon: 'sf:' }]; }",
+            "invalid-field",
+            Some("items[0].icon"),
+        ),
+        (
             "export function search() { return [{ title: 'a', keywords: ['b'] }]; }",
             "unknown-field",
             Some("items[0].keywords"),

@@ -673,6 +673,9 @@ pub(crate) fn answer_json(batches: &[dupin_core::Batch]) -> Value {
             }
             match &item.icon {
                 Some(dupin_core::Icon::Host(image)) => row["image"] = host_image_json(image),
+                Some(dupin_core::Icon::Symbol(name)) => {
+                    row["icon"] = format!("{}{name}", dupin_core::item::SYMBOL_PREFIX).into();
+                }
                 Some(icon) => {
                     if let Some(path) = icon.path() {
                         row["icon"] = path.to_string_lossy().into_owned().into();
@@ -910,7 +913,7 @@ mod tests {
                 r#""keyword": "greeter", "capabilities": { "http": {} }"#,
                 "invalid-type",
             ),
-            (r#""keyword": "greeter", "icon": "x""#, "invalid-manifest"),
+            (r#""keyword": "greeter", "colour": "x""#, "invalid-manifest"),
         ] {
             std::fs::write(&manifest, original.replace(r#""keyword": "greeter""#, edit)).unwrap();
             assert_eq!(publish().unwrap_err().code, code);

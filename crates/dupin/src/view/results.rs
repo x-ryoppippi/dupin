@@ -365,7 +365,12 @@ fn result_row(
     let View::Text { subtitle, .. } = &item.view else {
         unreachable!("text row")
     };
-    let icon = item_icon(s, item.icon.as_ref(), gutter);
+    let icon = item_icon(
+        s,
+        item.icon.as_ref(),
+        gutter,
+        if on { t.selected_text } else { t.text },
+    );
     let id = s.session.result_key(index);
     text_row(
         t,
@@ -388,12 +393,15 @@ fn result_row(
 }
 
 /// The icon, an empty slot while it loads, or nothing when there is no icon and `gutter` is
-/// false.
-pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool) -> Option<El> {
+/// false. A symbol is drawn in `ink`, the colour of the row's title.
+pub(super) fn item_icon(s: &Ui, icon: Option<&dupin_core::Icon>, gutter: bool, ink: Color) -> Option<El> {
     if icon.is_none() && !gutter {
         return None;
     }
     let slot = el().size(ICON_SIZE, ICON_SIZE);
+    if let Some(dupin_core::Icon::Symbol(name)) = icon {
+        return Some(slot.pixels(&crate::symbols::symbol(name, crate::symbols::ROW, ink)));
+    }
     Some(match (icon, icon.and_then(|icon| s.icons.get(icon))) {
         // A picture keeps its own shape inside the icon's square, as Finder's thumbnails do.
         (Some(dupin_core::Icon::Host(_)), Some(image)) => {

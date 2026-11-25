@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Dupin",
 		"keyword": "help",
+		"icon": "sf:questionmark.circle",
 		"main": "main.ts"
 	}
 }

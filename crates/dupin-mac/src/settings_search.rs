@@ -89,6 +89,9 @@ fn valid_identifier(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
+/// What Snapshots' rows show, here and in its own keyword's list.
+pub const SNAPSHOTS_SYMBOL: &str = "camera.viewfinder";
+
 fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
     let mut items = Vec::new();
     for pane in panes {
@@ -97,7 +100,7 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
                 format!("settings:{}", pane.id),
                 &pane.title,
                 "System Settings",
-                Some(pane.bundle.clone()),
+                Some(dupin_core::Icon::File(pane.bundle.clone())),
                 Action::OpenUrl(format!("x-apple.systempreferences:{}", pane.id)),
                 found,
             ));
@@ -108,7 +111,7 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
             "settings:dupin".into(),
             "Dupin Settings",
             "Preferences",
-            None,
+            dupin_core::Icon::symbol("gearshape"),
             Action::OpenPreferences,
             found,
         ));
@@ -118,7 +121,7 @@ fn rank(panes: &[Pane], query: &str, limit: usize) -> Vec<Item> {
             "settings:snapshots".into(),
             "Snapshots",
             "Dupin",
-            None,
+            dupin_core::Icon::symbol(SNAPSHOTS_SYMBOL),
             Action::OpenSnapshots(None),
             found,
         ));
@@ -132,7 +135,7 @@ fn item(
     id: String,
     title: &str,
     subtitle: &str,
-    icon: Option<PathBuf>,
+    icon: Option<dupin_core::Icon>,
     action: Action,
     found: fuzzy::Match,
 ) -> Item {
@@ -144,7 +147,7 @@ fn item(
             subtitle: subtitle.into(),
         },
         record_usage: true,
-        icon: icon.map(dupin_core::Icon::File),
+        icon,
         matched: found.positions,
         completion: None,
         score: Some(found.score),

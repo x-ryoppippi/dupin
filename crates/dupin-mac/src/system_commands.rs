@@ -44,6 +44,21 @@ fn labels(command: SystemCommand) -> (&'static str, &'static str, Option<&'stati
     }
 }
 
+/// The SF Symbol each command's row shows.
+fn symbol(command: SystemCommand) -> &'static str {
+    use SystemCommand::*;
+    match command {
+        Sleep => "moon.fill",
+        LockScreen => "lock.fill",
+        SleepDisplays => "display",
+        Restart => "arrow.clockwise",
+        ShutDown => "power",
+        LogOut => "rectangle.portrait.and.arrow.right",
+        EmptyTrash => "trash",
+        ToggleDarkMode => "circle.lefthalf.filled",
+    }
+}
+
 fn needs_automation(command: SystemCommand) -> bool {
     matches!(
         command,
@@ -105,7 +120,7 @@ impl Provider for SystemProvider {
                         subtitle: subtitle.into(),
                     },
                     record_usage: false,
-                    icon: None,
+                    icon: dupin_core::Icon::symbol(symbol(command)),
                     matched: found.positions,
                     completion: None,
                     score: Some(found.score),
@@ -148,6 +163,28 @@ mod tests {
         assert_eq!(
             results.iter().map(Item::display_title).collect::<Vec<_>>(),
             ["Sleep", "Sleep Displays"]
+        );
+    }
+
+    #[test]
+    fn every_command_shows_a_symbol_the_system_draws() {
+        for command in COMMANDS {
+            let name = symbol(command);
+            assert!(dupin_core::Icon::symbol(name).is_some(), "{command:?}");
+            assert!(
+                crate::symbol::rgba(name, 32, 20, [0, 0, 0, 255]).is_some(),
+                "{name}"
+            );
+        }
+        let mut results = Vec::new();
+        SystemProvider::new(false)
+            .search(&Request::detached("lock", COMMANDS.len()), &mut |items| {
+                results.extend(items);
+            })
+            .unwrap();
+        assert_eq!(
+            results[0].icon,
+            Some(dupin_core::Icon::Symbol("lock.fill".into()))
         );
     }
 

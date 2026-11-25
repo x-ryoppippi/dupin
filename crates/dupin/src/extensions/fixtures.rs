@@ -583,10 +583,11 @@ pub fn snap(
     })
 }
 
-/// The package's manifest and modules, which are all the launcher reads, copied so the render
-/// never sees the author's other files.
+/// The package's manifest, modules and own icon, which are all the launcher reads, copied so
+/// the render never sees the author's other files.
 fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
-    let entry = manifest::read(&manifest::Stamps::read(folder)?)?.entry;
+    let manifest = manifest::read(&manifest::Stamps::read(folder)?)?;
+    let entry = manifest.entry;
     let unwritable = |error: std::io::Error| {
         Diagnostic::new("render-failed", format!("couldn't copy the package: {error}"))
     };
@@ -602,6 +603,16 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
             std::fs::create_dir_all(parent).map_err(unwritable)?;
         }
         std::fs::copy(path, target).map_err(unwritable)?;
+    }
+    if let (Some(manifest::PackageIcon::File(name)), Some(dupin_core::Icon::Image(image))) = (
+        &manifest.icon,
+        super::package_icon(folder, manifest.icon.as_ref())?,
+    ) {
+        let target = into.join(name);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(unwritable)?;
+        }
+        std::fs::copy(image, target).map_err(unwritable)?;
     }
     Ok(())
 }

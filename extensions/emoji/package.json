@@ -5,6 +5,7 @@
 	"dupin": {
 		"title": "Emoji & Symbols",
 		"keyword": "emoji",
+		"icon": "sf:face.smiling",
 		"main": "main.ts",
 		"capabilities": {
 			"clipboard": [

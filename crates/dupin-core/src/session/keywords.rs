@@ -154,7 +154,7 @@ fn row(suggestion: Suggestion) -> (Item, Vec<Accessory>) {
         },
         payload: Payload::default(),
         record_usage: false,
-        icon: None,
+        icon: entry.icon,
         matched: Vec::new(),
         completion: None,
         score: None,

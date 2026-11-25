@@ -591,8 +591,9 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
         record_usage: catalogue && extension.matching == dupin_core::catalogue::Matching::Fuzzy,
         icon: image
             .map(|image| Icon::Host(host_image(extension, image)))
-            .or_else(|| icon.map(|icon| Icon::Image(extension.root.join(icon))))
-            .or_else(|| file.map(|file| Icon::File(file.into()))),
+            .or_else(|| icon.map(|icon| row_icon(extension, icon)))
+            .or_else(|| file.map(|file| Icon::File(file.into())))
+            .or_else(|| extension.icon.clone()),
         matched: Vec::new(),
         completion: None,
         score: None,
@@ -612,6 +613,15 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
         detail,
         section,
         accessories,
+    }
+}
+
+/// The icon a row names, which the row's check found to be a symbol's name or a path inside
+/// the package.
+fn row_icon(extension: &Extension, icon: String) -> Icon {
+    match icon.strip_prefix(dupin_core::item::SYMBOL_PREFIX) {
+        Some(name) => Icon::Symbol(name.to_owned()),
+        None => Icon::Image(extension.root.join(icon)),
     }
 }
 

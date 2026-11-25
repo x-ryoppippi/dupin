@@ -53,6 +53,9 @@ pub struct Extension {
     pub keyword: String,
     /// The package's folder, which row icons are relative to.
     pub root: PathBuf,
+    /// The package's own icon: its keyword chip's, its heading's in Settings and that of each
+    /// row that names none.
+    pub icon: Option<dupin_core::Icon>,
     /// The package asked for its catalogue to answer the default search too.
     pub default_search: bool,
     /// The package's `search` answers its keyword before anything is typed.
@@ -597,6 +600,7 @@ fn load_with(
     };
 
     let manifest = manifest::read(&manifests)?;
+    let icon = package_icon(folder, manifest.icon.as_ref())?;
     let files = revision(folder, &manifest.entry)?;
     let (compiled, content) = compile(folder, &manifest.entry, previous.as_ref())?;
     let package = package_id(&manifest, bundled)?;
@@ -613,6 +617,7 @@ fn load_with(
             version: manifest.version,
             keyword: manifest.keyword,
             root: folder.to_path_buf(),
+            icon,
             default_search: manifest.default_search,
             empty_query: manifest.empty_query,
             matching: manifest.matching,
@@ -627,6 +632,47 @@ fn load_with(
             compiled,
         }),
     })
+}
+
+/// The icon `declared` names, with an image file found inside the package folder: a path that
+/// leads out of it, as through a symlink, or to anything but a file, fails the package, as a
+/// module would.
+fn package_icon(
+    folder: &Path,
+    declared: Option<&manifest::PackageIcon>,
+) -> Result<Option<dupin_core::Icon>, Diagnostic> {
+    let file = match declared {
+        None => return Ok(None),
+        Some(manifest::PackageIcon::Symbol(name)) => return Ok(Some(dupin_core::Icon::Symbol(name.clone()))),
+        Some(manifest::PackageIcon::File(file)) => file,
+    };
+    let problem = |code: &'static str, message: String| {
+        Diagnostic::new(code, message)
+            .file(manifest::PACKAGE_JSON)
+            .field("dupin.icon")
+            .hint("Ship the image inside the package folder, or name an SF Symbol, such as `sf:puzzlepiece`.")
+    };
+    let unreadable = |error: std::io::Error| {
+        problem(
+            "invalid-manifest",
+            format!("names `{file}`, which can't be read: {error}"),
+        )
+    };
+    let root = folder.canonicalize().map_err(unreadable)?;
+    let image = folder.join(file).canonicalize().map_err(unreadable)?;
+    if !image.starts_with(&root) {
+        return Err(problem(
+            "symlink-escape",
+            format!("names `{file}`, a symlink to something outside the package folder"),
+        ));
+    }
+    if !std::fs::metadata(&image).map_err(unreadable)?.is_file() {
+        return Err(problem(
+            "invalid-manifest",
+            format!("names `{file}`, which isn't a file"),
+        ));
+    }
+    Ok(Some(dupin_core::Icon::Image(image)))
 }
 
 /// The revision grants are for: package.json and every module Dupin runs (`content`), so a
@@ -788,6 +834,49 @@ pub(crate) mod tests {
 
     pub(super) const EXTENSION_HOST_ENV: &str = "DUPIN_EXTENSION_HOST_TEST";
 
+    #[test]
+    fn a_package_icon_file_must_be_a_file_inside_the_package() {
+        use manifest::PackageIcon;
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.png"), b"png").unwrap();
+        let package = tempfile::tempdir().unwrap();
+        let root = package.path();
+        fs::create_dir_all(root.join("assets/folder.png")).unwrap();
+        fs::write(root.join("assets/icon.png"), b"png").unwrap();
+        symlink(root.join("assets/icon.png"), root.join("inside.png")).unwrap();
+        symlink(outside.path().join("secret.png"), root.join("escape.png")).unwrap();
+        symlink(outside.path(), root.join("linked")).unwrap();
+        let file = |name: &str| package_icon(root, Some(&PackageIcon::File(name.into())));
+
+        let canonical = root.canonicalize().unwrap().join("assets/icon.png");
+        assert_eq!(
+            file("assets/icon.png").unwrap(),
+            Some(dupin_core::Icon::Image(canonical.clone()))
+        );
+        assert_eq!(
+            file("inside.png").unwrap(),
+            Some(dupin_core::Icon::Image(canonical))
+        );
+        assert_eq!(
+            package_icon(root, Some(&PackageIcon::Symbol("star".into()))).unwrap(),
+            Some(dupin_core::Icon::Symbol("star".into()))
+        );
+        assert_eq!(package_icon(root, None).unwrap(), None);
+        for (name, code) in [
+            ("escape.png", "symlink-escape"),
+            ("linked/secret.png", "symlink-escape"),
+            ("missing.png", "invalid-manifest"),
+            ("assets/folder.png", "invalid-manifest"),
+        ] {
+            let diagnostic = file(name).unwrap_err();
+            assert_eq!(
+                (diagnostic.code.as_ref(), diagnostic.field.as_deref()),
+                (code, Some("dupin.icon")),
+                "{name}: {diagnostic}"
+            );
+        }
+    }
+
     /// Not a test: [`helper_command`] starts this test binary, running only this function, as
     /// the extension host.
     #[test]
@@ -808,6 +897,7 @@ pub(crate) mod tests {
             version: "1.0.0".into(),
             keyword: keyword.into(),
             root: PathBuf::from("/fixture"),
+            icon: None,
             default_search: false,
             empty_query: false,
             matching: Default::default(),
