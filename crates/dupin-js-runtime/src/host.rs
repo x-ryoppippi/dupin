@@ -30,7 +30,7 @@ delete globalThis.__dupinHost;
 const invalidate = globalThis.__dupinInvalidate;
 delete globalThis.__dupinInvalidate;
 
-export const apiVersion = 2;
+export const apiVersion = 3;
 
 export const items = Object.freeze({
 	invalidate() {

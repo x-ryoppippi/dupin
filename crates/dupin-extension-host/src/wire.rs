@@ -10,13 +10,15 @@ use std::io::{self, IoSlice, Read, Write};
 use std::sync::Arc;
 
 use dupin_js_runtime::row::MAX_PAGE_BYTES;
-use dupin_js_runtime::{Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, Reason, Row};
+use dupin_js_runtime::{
+    Acted, CataloguePage, Diagnostic, Environment, Exports, Handled, PageContext, Reason, Row, ViewAnswer,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::value::RawValue;
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -76,10 +78,17 @@ pub enum Call {
         /// `ctx.preferences`: what the user chose for each preference the package declares.
         preferences: Preferences,
     },
-    /// `actions[name](data)`, which the user chose.
+    /// `views[name](ctx)`, for a page the user opened.
+    View {
+        name: String,
+        page: Box<PageContext>,
+        preferences: Preferences,
+    },
+    /// `actions[name](data)`, which the user chose on `page`.
     Action {
         name: String,
         data: serde_json::Value,
+        page: Box<PageContext>,
         preferences: Preferences,
     },
     /// `events[name](event)`, for something Dupin watched on the package's behalf.
@@ -170,6 +179,9 @@ pub enum Answer {
     },
     Catalogue {
         page: CataloguePage,
+    },
+    View {
+        view: ViewAnswer,
     },
     Acted {
         acted: Acted,
@@ -414,6 +426,8 @@ mod tests {
                     8
                 ],
                 web_search: None,
+                accessories: Vec::new(),
+                answer: None,
             })
             .collect();
         let mut left = MAX_PAGE_BYTES - rows.iter().map(Row::text_bytes).sum::<usize>();
@@ -473,6 +487,8 @@ mod tests {
             detail: None,
             actions: Vec::new(),
             web_search: None,
+            accessories: Vec::new(),
+            answer: None,
         };
         let web_search = Row {
             web_search: Some(dupin_js_runtime::web_search::WebSearch {
@@ -499,9 +515,18 @@ mod tests {
                 reason: Reason::Invalidated,
                 preferences: Preferences::encode(&serde_json::json!({"a": true})),
             },
+            Call::View {
+                name: "note".into(),
+                page: Box::new(dupin_js_runtime::PageContext {
+                    query: "q".into(),
+                    state: serde_json::json!({"id": 7}),
+                }),
+                preferences: Preferences::encode(&serde_json::json!({})),
+            },
             Call::Action {
                 name: "run".into(),
                 data: serde_json::Value::Null,
+                page: Box::default(),
                 preferences: Preferences::encode(&serde_json::json!({})),
             },
             Call::Event {
@@ -562,10 +587,56 @@ mod tests {
                     more: true,
                 },
             },
+            Answer::View {
+                view: ViewAnswer::List {
+                    rows: vec![Row {
+                        accessories: vec![dupin_js_runtime::row::Accessory::Tag("t".into())],
+                        answer: Some("1".into()),
+                        actions: vec![dupin_js_runtime::row::RowAction::new(
+                            "Open",
+                            dupin_js_runtime::row::RowEffect::Push {
+                                view: "note".into(),
+                                state: Some(serde_json::json!(1)),
+                            },
+                        )],
+                        ..row.clone()
+                    }],
+                    empty_text: Some("none".into()),
+                },
+            },
+            Answer::View {
+                view: ViewAnswer::Form(dupin_js_runtime::view::Form {
+                    title: "F".into(),
+                    fields: vec![dupin_js_runtime::view::Field {
+                        id: "a".into(),
+                        title: "A".into(),
+                        kind: dupin_js_runtime::view::FieldKind::Select {
+                            options: vec![dupin_js_runtime::view::SelectOption {
+                                value: "x".into(),
+                                title: "X".into(),
+                            }],
+                            default: "x".into(),
+                        },
+                    }],
+                    submit: "save".into(),
+                    submit_title: None,
+                }),
+            },
             Answer::Acted {
                 acted: Acted {
                     invalidated: true,
                     effect: Some(dupin_js_runtime::ActionEffect::Toast { text: "t".into() }),
+                },
+            },
+            Answer::Acted {
+                acted: Acted {
+                    invalidated: false,
+                    effect: Some(dupin_js_runtime::ActionEffect::Push {
+                        view: "note".into(),
+                        title: None,
+                        state: Some(serde_json::json!({"id": 7})),
+                        toast: Some("t".into()),
+                    }),
                 },
             },
             Answer::Handled {
@@ -600,17 +671,18 @@ mod tests {
         );
         assert_eq!(
             (VERSION, shapes),
-            (9, SHAPES.map(str::to_owned).to_vec()),
+            (10, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
 
-    const SHAPES: [&str; 21] = [
+    const SHAPES: [&str; 25] = [
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"compile"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"check"},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"search","query":"q","limit":1},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"items","cursor":"c","reason":"invalidated","preferences":{"a":true}},"environment":{"now":3,"seed":4}}"#,
-        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"view","name":"note","page":{"query":"q","state":{"id":7}},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
+        r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"action","name":"run","data":null,"page":{"query":"","state":null},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":[{"name":"main.js","len":1}],"call":{"kind":"event","name":"clipboard","event":{},"preferences":{}},"environment":{"now":3,"seed":4}}"#,
         r#"{"kind":"run","id":1,"deadline_ms":2,"entry":"main.js","package":5,"modules":null,"call":{"kind":"check"},"environment":null}"#,
         r#"{"kind":"cancel","id":1}"#,
@@ -622,7 +694,10 @@ mod tests {
         r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A","image":"h"}]}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A","image":"h"}],"replace":[{"id":"a","title":"A","image":"h","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"list","rows":[{"id":"a","title":"A","image":"h","actions":[{"title":"Open","effect":{"kind":"push","view":"note","state":1}}],"accessories":[{"tag":"t"}],"answer":"1"}],"empty_text":"none"}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"form","title":"F","fields":[{"id":"a","title":"A","kind":{"type":"select","options":[{"value":"x","title":"X"}],"default":"x"}}],"submit":"save"}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":false,"effect":{"type":"push","view":"note","state":{"id":7},"toast":"t"}}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
         r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,

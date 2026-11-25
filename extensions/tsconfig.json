@@ -20,6 +20,7 @@
 		"*/**/*.ts",
 		"*/**/*.mts",
 		"*/**/*.tsx",
-		"../sdk/dupin.d.ts"
+		"../sdk/dupin.d.ts",
+		"../examples/extensions/notes-js/main.js"
 	]
 }

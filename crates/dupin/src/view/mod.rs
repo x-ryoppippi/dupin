@@ -4,6 +4,7 @@ mod actions;
 mod detail;
 mod extensions;
 mod files;
+mod form;
 mod header;
 mod notices;
 mod picker;
@@ -80,7 +81,9 @@ fn launcher(s: &Ui, t: &ResolvedTheme, dark: bool) -> El {
     }
     panel = notices::search_notices(panel, s, t);
     let items = s.session.items();
-    if let Some(renaming) = s.session.renaming() {
+    if let Some(draft) = s.form_draft() {
+        panel = panel.child(divider(t)).child(form::form(draft, t, accent));
+    } else if let Some(renaming) = s.session.renaming() {
         panel = panel
             .child(divider(t))
             .child(files::rename_status(s, renaming, t));

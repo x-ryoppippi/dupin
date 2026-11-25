@@ -3,6 +3,8 @@ use std::fs;
 use serde_json::json;
 
 use super::*;
+use crate::extensions::ACTION_DEADLINE;
+use dupin_extension_bridge::Trigger;
 
 fn scaffolded(template: dupin_ext_sdk::Template) -> (tempfile::TempDir, PathBuf) {
     let root = tempfile::tempdir().unwrap();
@@ -667,6 +669,14 @@ fn a_linked_fixture_is_refused() {
 
 #[test]
 fn snap_scripts_type_each_query_and_move_to_each_selection() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = scaffolded(dupin_ext_sdk::Template::JavaScript);
+    fs::write(
+        package.join("main.js"),
+        "export function search(query) { return [1, 2, 3].map((n) => ({ title: `${query} ${n}`, text: query || '-' })); }",
+    )
+    .unwrap();
+    let extension = load_folder(&package).unwrap();
     let fixture = dupin_ext_sdk::fixture::parse(
         "fixtures/x.json",
         json!({
@@ -677,7 +687,9 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         .as_bytes(),
     )
     .unwrap();
-    let events = script_for("kw", &fixture, 8)["events"].clone();
+    let replayed = replay(&extension, "fixtures/x.json", &fixture, &|| false).unwrap();
+    assert!(replayed.steps.iter().all(|step| step.problem.is_none()));
+    let events = script_for(&replayed.steps)["events"].clone();
     let kinds: Vec<String> = events
         .as_array()
         .unwrap()
@@ -692,7 +704,7 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
     assert_eq!(
         kinds,
         [
-            "type kw a",
+            "type greeter a",
             "Down",
             "Down",
             "cmd+a",
@@ -714,7 +726,10 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         .collect();
     assert!(times.windows(2).all(|pair| pair[0] < pair[1]), "{times:?}");
     assert_eq!(
-        script_for("kw", &fixture, 1)["events"].as_array().unwrap().len(),
+        script_for(&replayed.steps[..1])["events"]
+            .as_array()
+            .unwrap()
+            .len(),
         2
     );
 }
@@ -789,4 +804,110 @@ fn a_paste_the_package_may_not_make_copies_instead_and_says_why() {
         assert_eq!(outcome["effect"], json!({ "copy": "tea" }), "{}", report.text);
         assert_eq!(outcome["error"]["code"], code, "{}", report.text);
     }
+}
+
+#[test]
+fn the_notes_example_passes_its_fixtures() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let package = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/extensions/notes-js");
+    let report = test(&package, false, &|| false).unwrap();
+    assert!(report.passed, "{}", report.text);
+}
+
+/// A package whose views and actions misbehave in every way a page can.
+const ADVERSARY: &str = r#"
+export const search = () => [{ title: 'Start', actions: [
+    { title: 'Deeper', run: 'deeper' },
+    { title: 'Bloat', run: 'bloat' },
+    { title: 'Errors', run: 'errors' },
+    { title: 'Shape', run: 'shape' },
+] }];
+export const views = {
+    page: (ctx) => [{ title: `Page ${ctx.state.depth}`, actions: [
+        { title: 'Deeper', run: 'deeper' },
+        { title: 'Bloat', run: 'bloat' },
+        { title: 'Replace', run: 'replace' },
+    ] }],
+};
+export const actions = {
+    deeper: (data, ctx) => ({ type: 'push', view: 'page', state: { depth: (ctx.state?.depth ?? 0) + 1 } }),
+    bloat: () => ({ type: 'replaceState', state: 'x'.repeat(17 * 1024) }),
+    errors: () => ({ type: 'fieldErrors', errors: { title: 'No' } }),
+    shape: () => ({ type: 'push', view: 'page', state: { depth: 1 }, extra: true }),
+    replace: (data, ctx) => ({ type: 'replaceState', state: { depth: ctx.state.depth * 10 }, toast: 'Replaced' }),
+};
+"#;
+
+#[test]
+fn deep_pushes_oversized_state_and_malformed_effects_are_refused() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_root, package) = capable(json!({}), ADVERSARY);
+    let mut steps_json = vec![json!({ "query": "x" })];
+    steps_json.extend((0..9).map(|_| json!({ "activate": "Deeper" })));
+    steps_json.extend([
+        json!({ "activate": "Replace" }),
+        json!({ "activate": "Bloat" }),
+        json!({ "back": true }),
+    ]);
+    write_fixture(
+        &package,
+        "deep.json",
+        json!({ "fixture": 1, "steps": steps_json }),
+    );
+    write_fixture(
+        &package,
+        "root.json",
+        json!({ "fixture": 1, "steps": [
+            { "query": "x" },
+            { "activate": "Errors" },
+            { "activate": "Bloat" },
+            { "activate": "Shape" },
+            { "fill": { "title": "x" } },
+        ] }),
+    );
+    write_fixture(
+        &package,
+        "back.json",
+        json!({ "fixture": 1, "steps": [{ "query": "x" }, { "back": true }] }),
+    );
+    let report = test(&package, false, &|| false).unwrap();
+    let names: Vec<&str> = report.json["fixtures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|fixture| fixture["file"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["fixtures/back.json", "fixtures/deep.json", "fixtures/root.json"]
+    );
+
+    let back = steps(&report, 0);
+    assert_eq!(back[1]["problem"], "there is no page to close");
+
+    let deep = steps(&report, 1);
+    for (depth, step) in deep.iter().enumerate().take(9).skip(1) {
+        assert_eq!(step["outcome"]["view"]["depth"], depth, "{}", report.text);
+    }
+    assert_eq!(
+        deep[9]["outcome"]["error"]["code"], "too-deep",
+        "a ninth view is refused: {}",
+        report.text
+    );
+    assert_eq!(deep[10]["outcome"]["view"]["state"], json!({ "depth": 80 }));
+    assert_eq!(deep[10]["outcome"]["toasts"], json!(["Replaced"]));
+    assert_eq!(deep[11]["outcome"]["error"]["code"], "invalid-effect");
+    assert_eq!(
+        deep[11]["outcome"]["error"]["field"], "state",
+        "an oversized state never reaches the page"
+    );
+    assert_eq!(deep[12]["outcome"]["view"]["depth"], 7);
+    assert_eq!(deep[12]["outcome"]["view"]["state"], json!({ "depth": 7 }));
+
+    let root = steps(&report, 2);
+    assert_eq!(root[1]["outcome"]["error"]["code"], "invalid-effect");
+    assert!(root[1]["outcome"]["view"].is_null(), "no form showed the errors");
+    assert_eq!(root[2]["outcome"]["error"]["field"], "state");
+    assert_eq!(root[3]["outcome"]["error"]["field"], "extra");
+    assert_eq!(root[4]["problem"], "there is no form on screen to fill in");
 }

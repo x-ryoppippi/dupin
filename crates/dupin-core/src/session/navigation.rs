@@ -33,7 +33,105 @@ impl Destination {
     }
 }
 
+/// The view an action was chosen on, so that what it asks for once it has run, such as opening
+/// another view, lands only while that view is still the one on screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Anchor {
+    command: CommandId,
+    /// The command whose row was selected, which searches a view the action opens.
+    origin: CommandId,
+    navigation: u64,
+}
+
+/// What became of an action's request to move between views or change one.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Navigated {
+    Done(Vec<Effect>),
+    /// The user has moved on from the view the action was chosen on.
+    Stale,
+    /// Opening another view would stack more than the session keeps.
+    TooDeep,
+    /// The action wasn't chosen on a view it could close or change.
+    NoPage,
+}
+
 impl Session {
+    /// Where an action chosen now was chosen.
+    pub fn anchor(&self) -> Anchor {
+        Anchor {
+            command: self.search.command.clone(),
+            origin: self
+                .search
+                .origins
+                .get(self.search.selected)
+                .cloned()
+                .unwrap_or_else(|| self.search.command.clone()),
+            navigation: self.navigation,
+        }
+    }
+
+    /// Whether `anchor`'s view is still the one on screen.
+    pub fn is_current(&self, anchor: &Anchor) -> bool {
+        anchor.navigation == self.navigation
+            && anchor.command == self.search.command
+            && self.renaming.is_none()
+            && self.destination.is_none()
+    }
+
+    /// How many views are open above the command's own results.
+    pub fn depth(&self) -> usize {
+        self.visits
+            .iter()
+            .filter(|visit| matches!(visit.location, SearchLocation::Page(_)))
+            .count()
+            + usize::from(self.page().is_some())
+    }
+
+    /// Opens `page` above `anchor`'s view, searched by the command whose row the action was
+    /// chosen from.
+    pub fn open_page(&mut self, anchor: &Anchor, page: Page) -> Navigated {
+        if !self.is_current(anchor) {
+            return Navigated::Stale;
+        }
+        if self.depth() >= MAX_PAGE_DEPTH {
+            return Navigated::TooDeep;
+        }
+        self.remember_query(true);
+        Navigated::Done(self.visit(anchor.origin.clone(), SearchLocation::Page(page)))
+    }
+
+    /// Closes `anchor`'s view, as Esc does.
+    pub fn close_page(&mut self, anchor: &Anchor) -> Navigated {
+        if !self.is_current(anchor) {
+            return Navigated::Stale;
+        }
+        if self.page().is_none() {
+            return Navigated::NoPage;
+        }
+        Navigated::Done(self.leave_view())
+    }
+
+    /// Gives `anchor`'s view `state` and searches it again.
+    pub fn replace_page_state(&mut self, anchor: &Anchor, state: serde_json::Value) -> Navigated {
+        if !self.is_current(anchor) {
+            return Navigated::Stale;
+        }
+        let SearchLocation::Page(page) = &mut self.search.location else {
+            return Navigated::NoPage;
+        };
+        page.context = Some(state);
+        self.navigation += 1;
+        Navigated::Done(self.refresh())
+    }
+
+    /// Searches `anchor`'s view again.
+    pub fn refresh_page(&mut self, anchor: &Anchor) -> Navigated {
+        if !self.is_current(anchor) {
+            return Navigated::Stale;
+        }
+        Navigated::Done(self.refresh())
+    }
+
     pub(super) fn begin_destination(&mut self, path: PathBuf, transfer: Transfer) -> Vec<Effect> {
         let Some(command) = self.commands.destination_search().cloned() else {
             return Vec::new();
@@ -173,6 +271,7 @@ impl Session {
         let selected = self
             .selected_item()
             .map(|item| (self.search.origins[self.search.selected].clone(), item.id.clone()));
+        self.navigation += 1;
         self.visits.push(Visit {
             location: std::mem::replace(&mut self.search.location, location),
             command: std::mem::replace(&mut self.search.command, command),
@@ -187,6 +286,7 @@ impl Session {
 
     pub(super) fn leave_view(&mut self) -> Vec<Effect> {
         let visit = self.visits.pop().expect("returning to a previous view");
+        self.navigation += 1;
         self.search.location = visit.location;
         self.search.command = visit.command;
         self.search.explicit = visit.explicit;

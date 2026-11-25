@@ -36,6 +36,11 @@ pub(crate) const MAX_ACTION_TITLE_BYTES: usize = 512;
 pub(crate) const MAX_HANDLER_BYTES: usize = 64;
 const MAX_DATA_BYTES: usize = 4096;
 const MAX_DATA_DEPTH: usize = 16;
+/// What a page holds for its view between calls.
+pub const MAX_STATE_BYTES: usize = 16 * 1024;
+/// Accessories one row shows at its end.
+pub(crate) const MAX_ACCESSORIES: usize = 3;
+pub(crate) const MAX_ACCESSORY_BYTES: usize = 64;
 
 /// Rows one `items()` answer may add or replace, and IDs it may remove.
 pub const MAX_PAGE_ROWS: usize = 500;
@@ -81,6 +86,28 @@ pub struct Row {
     /// Makes the catalogue row a web search, which Dupin fills and opens itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_search: Option<WebSearch>,
+    /// Shown at the row's end.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accessories: Vec<Accessory>,
+    /// Shown beside the title as the second of two values, as a calculation is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+}
+
+/// One line at a row's end: plain text, or a tag Dupin draws as a label.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Accessory {
+    Text(String),
+    Tag(String),
+}
+
+impl Accessory {
+    pub fn text(&self) -> &str {
+        match self {
+            Accessory::Text(text) | Accessory::Tag(text) => text,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +213,12 @@ pub enum RowEffect {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         data: Option<serde_json::Value>,
     },
+    /// Opens the package's `views[view]` on a page of its own, which holds `state` for it.
+    Push {
+        view: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<serde_json::Value>,
+    },
 }
 
 /// What one `items()` call answered.
@@ -252,16 +285,29 @@ pub enum Source {
     Items,
 }
 
-impl Source {
-    pub(crate) fn name(self) -> &'static str {
-        match self {
-            Source::Search => "search",
-            Source::Items => "items",
+impl Row {
+    /// A row with only an ID and a title.
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            title: title.into(),
+            subtitle: String::new(),
+            aliases: Vec::new(),
+            keywords: Vec::new(),
+            match_text: None,
+            time: None,
+            file: None,
+            icon: None,
+            image: None,
+            section: None,
+            detail: None,
+            actions: Vec::new(),
+            web_search: None,
+            accessories: Vec::new(),
+            answer: None,
         }
     }
-}
 
-impl Row {
     /// Checks every limit the reader enforced, for rows from another process.
     pub fn validate(&self, source: Source) -> Result<(), String> {
         let line = |name: &str, value: &str, cap: usize| -> Result<(), String> {
@@ -323,96 +369,34 @@ impl Row {
             line("section", section, MAX_SECTION_BYTES)?;
         }
         if let Some(detail) = &self.detail {
-            if let Some(image) = &detail.image {
-                check_image(image).map_err(|message| format!("`detail.image` {message}"))?;
-            }
-            if detail.markdown.len() > MAX_MARKDOWN_BYTES {
-                return Err("`detail.markdown` is too long".into());
-            }
-            if detail.metadata.len() > MAX_METADATA {
-                return Err("too many `detail.metadata` entries".into());
-            }
-            for entry in &detail.metadata {
-                line("detail.metadata.label", &entry.label, MAX_LABEL_BYTES)?;
-                line("detail.metadata.text", &entry.text, MAX_METADATA_TEXT_BYTES)?;
-            }
+            detail.validate()?;
         }
-        if self.actions.len() > MAX_ACTIONS {
-            return Err("too many `actions`".into());
+        if self.accessories.len() > MAX_ACCESSORIES {
+            return Err("too many `accessories`".into());
         }
-        if self.actions.iter().filter(|action| action.alternate).count() > 1 {
-            return Err("more than one `alternate` action".into());
+        for accessory in &self.accessories {
+            line("accessories", accessory.text(), MAX_ACCESSORY_BYTES)?;
         }
-        for action in &self.actions {
-            line("actions.title", &action.title, MAX_ACTION_TITLE_BYTES)?;
-            if action.template && !matches!(action.effect, RowEffect::Copy { .. } | RowEffect::Paste { .. }) {
-                return Err("only a copy or paste action can be a template".into());
+        if let Some(answer) = &self.answer {
+            if source == Source::Items {
+                return Err("`answer` belongs to search() and views".into());
             }
-            if (action.alternate || action.confirm.is_some() || action.needs_file)
-                && !matches!(action.effect, RowEffect::Run { .. })
-            {
-                return Err("only a `run` action is `alternate`, asks to `confirm` or `needsFile`".into());
-            }
-            if let Some(confirm) = &action.confirm {
-                line("actions.confirm", confirm, MAX_ACTION_TITLE_BYTES)?;
-            }
-            match &action.effect {
-                RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
-                    return Err("a copy action's text must be 1 byte to 64 KiB".into());
-                }
-                RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
-                    return Err("a paste action's text must be 1 byte to 64 KiB".into());
-                }
-                RowEffect::OpenUrl { url } if !is_openable(url, source) => {
-                    return Err(match source {
-                        Source::Items => "a catalogue's open action needs an http, https or dict URL",
-                        Source::Search => {
-                            "an open action needs an http, https or dict URL, or a calendar event's link"
-                        }
-                    }
-                    .into());
-                }
-                RowEffect::Run { handler, data } => {
-                    check_handler(handler)?;
-                    if let Some(data) = data {
-                        check_data(data)?;
-                    }
-                }
-                RowEffect::Reveal { path } => check_file(path)?,
-                RowEffect::Copy { .. } | RowEffect::Paste { .. } | RowEffect::OpenUrl { .. } => {}
-            }
+            line("answer", answer, MAX_TITLE_BYTES)?;
         }
-        Ok(())
+        validate_actions(&self.actions, source)
     }
 
     /// The text the row carries, counted toward an answer's limit.
     pub fn text_bytes(&self) -> usize {
-        let detail = self.detail.as_ref().map_or(0, |detail| {
-            detail.image.as_ref().map_or(0, RowImage::text_bytes)
-                + detail.markdown.len()
-                + detail
-                    .metadata
-                    .iter()
-                    .map(|entry| entry.label.len() + entry.text.len())
-                    .sum::<usize>()
-        });
-        let actions: usize = self
-            .actions
-            .iter()
-            .map(|action| {
-                action.title.len()
-                    + action.confirm.as_ref().map_or(0, String::len)
-                    + match &action.effect {
-                        RowEffect::Copy { text } | RowEffect::Paste { text } => text.len(),
-                        RowEffect::OpenUrl { url } => url.len(),
-                        RowEffect::Reveal { path } => path.len(),
-                        RowEffect::Run { handler, data } => {
-                            handler.len() + data.as_ref().map_or(0, |data| data.to_string().len())
-                        }
-                    }
-            })
-            .sum();
+        let detail = self.detail.as_ref().map_or(0, RowDetail::text_bytes);
+        let actions = actions_text_bytes(&self.actions);
         self.id.len()
+            + self
+                .accessories
+                .iter()
+                .map(|accessory| accessory.text().len())
+                .sum::<usize>()
+            + self.answer.as_ref().map_or(0, String::len)
             + self.title.len()
             + self.subtitle.len()
             + self.aliases.iter().map(String::len).sum::<usize>()
@@ -426,6 +410,57 @@ impl Row {
             + detail
             + actions
     }
+}
+
+impl RowDetail {
+    pub(crate) fn text_bytes(&self) -> usize {
+        self.image.as_ref().map_or(0, RowImage::text_bytes)
+            + self.markdown.len()
+            + self
+                .metadata
+                .iter()
+                .map(|entry| entry.label.len() + entry.text.len())
+                .sum::<usize>()
+    }
+
+    /// Checks the limits the reader enforced.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if let Some(image) = &self.image {
+            check_image(image).map_err(|message| format!("`detail.image` {message}"))?;
+        }
+        if self.markdown.len() > MAX_MARKDOWN_BYTES {
+            return Err("`detail.markdown` is too long".into());
+        }
+        if self.metadata.len() > MAX_METADATA {
+            return Err("too many `detail.metadata` entries".into());
+        }
+        for entry in &self.metadata {
+            line("detail.metadata.label", &entry.label, MAX_LABEL_BYTES)?;
+            line("detail.metadata.text", &entry.text, MAX_METADATA_TEXT_BYTES)?;
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn actions_text_bytes(actions: &[RowAction]) -> usize {
+    actions
+        .iter()
+        .map(|action| {
+            action.title.len()
+                + action.confirm.as_ref().map_or(0, String::len)
+                + match &action.effect {
+                    RowEffect::Copy { text } | RowEffect::Paste { text } => text.len(),
+                    RowEffect::OpenUrl { url } => url.len(),
+                    RowEffect::Reveal { path } => path.len(),
+                    RowEffect::Run { handler, data } => {
+                        handler.len() + data.as_ref().map_or(0, |data| data.to_string().len())
+                    }
+                    RowEffect::Push { view, state } => {
+                        view.len() + state.as_ref().map_or(0, |state| state.to_string().len())
+                    }
+                }
+        })
+        .sum()
 }
 
 impl CataloguePage {
@@ -468,6 +503,70 @@ impl CataloguePage {
         }
         Ok(())
     }
+}
+
+fn line(name: &str, value: &str, cap: usize) -> Result<(), String> {
+    if value.is_empty() || value.len() > cap || value.chars().any(char::is_control) {
+        Err(format!("`{name}` must be one line of 1 to {cap} bytes"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks a row's or a detail view's actions, as the reader did.
+pub(crate) fn validate_actions(actions: &[RowAction], source: Source) -> Result<(), String> {
+    if actions.len() > MAX_ACTIONS {
+        return Err("too many `actions`".into());
+    }
+    if actions.iter().filter(|action| action.alternate).count() > 1 {
+        return Err("more than one `alternate` action".into());
+    }
+    for action in actions {
+        line("actions.title", &action.title, MAX_ACTION_TITLE_BYTES)?;
+        if action.template && !matches!(action.effect, RowEffect::Copy { .. } | RowEffect::Paste { .. }) {
+            return Err("only a copy or paste action can be a template".into());
+        }
+        if (action.alternate || action.confirm.is_some() || action.needs_file)
+            && !matches!(action.effect, RowEffect::Run { .. })
+        {
+            return Err("only a `run` action is `alternate`, asks to `confirm` or `needsFile`".into());
+        }
+        if let Some(confirm) = &action.confirm {
+            line("actions.confirm", confirm, MAX_ACTION_TITLE_BYTES)?;
+        }
+        match &action.effect {
+            RowEffect::Copy { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
+                return Err("a copy action's text must be 1 byte to 64 KiB".into());
+            }
+            RowEffect::Paste { text } if text.is_empty() || text.len() > MAX_ACTION_TEXT_BYTES => {
+                return Err("a paste action's text must be 1 byte to 64 KiB".into());
+            }
+            RowEffect::OpenUrl { url } if !is_openable(url, source) => {
+                return Err(match source {
+                    Source::Items => "a catalogue's open action needs an http, https or dict URL",
+                    Source::Search => {
+                        "an open action needs an http, https or dict URL, or a calendar event's link"
+                    }
+                }
+                .into());
+            }
+            RowEffect::Run { handler, data } => {
+                check_handler(handler)?;
+                if let Some(data) = data {
+                    check_data(data)?;
+                }
+            }
+            RowEffect::Push { view, state } => {
+                check_name(view, "push.view")?;
+                if let Some(state) = state {
+                    check_state(state)?;
+                }
+            }
+            RowEffect::Reveal { path } => check_file(path)?,
+            RowEffect::Copy { .. } | RowEffect::Paste { .. } | RowEffect::OpenUrl { .. } => {}
+        }
+    }
+    Ok(())
 }
 
 /// A path inside the package, to an image format the launcher draws.
@@ -568,37 +667,55 @@ const CALENDAR_LINK_QUERY: &str = "?method=show&options=more";
 
 /// The name of an export in the package's `actions` object.
 pub(crate) fn check_handler(handler: &str) -> Result<(), String> {
-    let valid = !handler.is_empty()
-        && handler.len() <= MAX_HANDLER_BYTES
-        && !handler.starts_with(|c: char| c.is_ascii_digit())
-        && handler
+    check_name(handler, "run")
+}
+
+/// The name of a function in one of the package's exported maps, such as `actions` or `views`,
+/// which `field` gives.
+pub(crate) fn check_name(name: &str, field: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= MAX_HANDLER_BYTES
+        && !name.starts_with(|c: char| c.is_ascii_digit())
+        && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$');
     if valid {
         Ok(())
     } else {
+        let what = if field == "run" {
+            "an action handler"
+        } else {
+            "a view"
+        };
         Err(format!(
-            "`run` must name an action handler: up to {MAX_HANDLER_BYTES} letters, digits, `_` or `$`"
+            "`{field}` must name {what}: up to {MAX_HANDLER_BYTES} letters, digits, `_` or `$`"
         ))
     }
 }
 
+fn depth(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(values) => 1 + values.iter().map(depth).max().unwrap_or(0),
+        serde_json::Value::Object(values) => 1 + values.values().map(depth).max().unwrap_or(0),
+        _ => 0,
+    }
+}
+
 pub(crate) fn check_data(data: &serde_json::Value) -> Result<(), String> {
-    fn depth(value: &serde_json::Value) -> usize {
-        match value {
-            serde_json::Value::Array(values) => 1 + values.iter().map(depth).max().unwrap_or(0),
-            serde_json::Value::Object(values) => 1 + values.values().map(depth).max().unwrap_or(0),
-            _ => 0,
-        }
+    check_json(data, "data", MAX_DATA_BYTES)
+}
+
+/// A page's state, which Dupin holds for its view and hands back with every call there.
+pub fn check_state(state: &serde_json::Value) -> Result<(), String> {
+    check_json(state, "state", MAX_STATE_BYTES)
+}
+
+fn check_json(value: &serde_json::Value, name: &str, max: usize) -> Result<(), String> {
+    if value.to_string().len() > max {
+        return Err(format!("`{name}` is more than {} KiB of JSON", max / 1024));
     }
-    if data.to_string().len() > MAX_DATA_BYTES {
-        return Err(format!(
-            "`data` is more than {} KiB of JSON",
-            MAX_DATA_BYTES / 1024
-        ));
-    }
-    if depth(data) > MAX_DATA_DEPTH {
-        return Err(format!("`data` nests more than {MAX_DATA_DEPTH} levels deep"));
+    if depth(value) > MAX_DATA_DEPTH {
+        return Err(format!("`{name}` nests more than {MAX_DATA_DEPTH} levels deep"));
     }
     Ok(())
 }

@@ -93,7 +93,8 @@ in
               touch $out
             '';
         renovate = repoCheck "dupin-renovate" [ ] "nu scripts/tests/renovate.nu";
-        # The bundled extensions against sdk/dupin.d.ts, as their authors' editors see them.
+        # The bundled extensions and the notes example against sdk/dupin.d.ts, as their authors'
+        # editors see them.
         extensions-typecheck = repoCheck "dupin-extensions-typecheck" [ pkgs.typescript ] ''
           ^tsc --project extensions/tsconfig.json
         '';

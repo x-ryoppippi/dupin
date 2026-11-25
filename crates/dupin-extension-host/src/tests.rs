@@ -547,6 +547,7 @@ fn catalogues_and_action_handlers_run_in_the_helper() {
             &package,
             "refresh",
             &serde_json::Value::Null,
+            &dupin_js_runtime::PageContext::default(),
             &serde_json::json!({}),
             deadline(),
             &|| false,
@@ -589,6 +590,8 @@ fn rogue_helper_entry() {
             detail: None,
             actions: Vec::new(),
             web_search: None,
+            accessories: Vec::new(),
+            answer: None,
         }],
     };
     let hello = FromHelper::Hello {
@@ -1148,6 +1151,8 @@ fn forgetful_helper_entry() {
                     detail: None,
                     actions: Vec::new(),
                     web_search: None,
+                    accessories: Vec::new(),
+                    answer: None,
                 }],
             },
         };
@@ -1202,3 +1207,4 @@ fn packages_run_in_turn_past_what_the_helper_holds_are_never_named_alone() {
 }
 
 mod services;
+mod views;

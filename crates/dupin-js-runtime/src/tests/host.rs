@@ -291,6 +291,7 @@ fn act(source: &str, name: &str, data: &str, bridge: &mut Fixture) -> Result<Opt
             &engine(),
             name,
             data,
+            &crate::PageContext::default(),
             &serde_json::json!({}),
             timeout(DEADLINE),
             bridge,

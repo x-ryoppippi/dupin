@@ -9,6 +9,8 @@ mod search;
 mod selection;
 mod snapshots;
 
+pub use navigation::{Anchor, Navigated};
+
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -133,6 +135,9 @@ pub struct Session {
     renaming: Option<Renaming>,
     destination: Option<Destination>,
     visits: Vec<Visit>,
+    /// Counts every move between views, so an action's effect lands only on the view it was
+    /// chosen on.
+    navigation: u64,
 }
 
 #[derive(Debug)]
@@ -245,6 +250,7 @@ impl Session {
             renaming: None,
             destination: None,
             visits: Vec::new(),
+            navigation: 0,
         })
     }
 
@@ -371,6 +377,29 @@ impl Session {
         presentation.detail.as_deref()
     }
 
+    /// What row `index` shows at its end.
+    pub fn accessories(&self, index: usize) -> &[crate::Accessory] {
+        self.presentation(index)
+            .map_or(&[], |presentation| &presentation.accessories)
+    }
+
+    /// The form the page shows in place of a list, once its view answered with one.
+    pub fn form(&self) -> Option<&Arc<crate::form::Form>> {
+        self.page()?;
+        self.presentation(0)?.form.as_ref()
+    }
+
+    /// What the search said to show while it has no rows.
+    pub fn empty_text(&self) -> Option<&str> {
+        if !self.search.items.is_empty() {
+            return None;
+        }
+        self.search
+            .providers
+            .values()
+            .find_map(|provider| provider.empty_text.as_deref())
+    }
+
     pub fn renaming(&self) -> Option<&Renaming> {
         self.renaming.as_ref()
     }
@@ -404,6 +433,7 @@ impl Session {
         }
         self.remember_query(false);
         self.visits.clear();
+        self.navigation += 1;
         if let Some(commands) = commands {
             self.commands = commands;
         }

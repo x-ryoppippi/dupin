@@ -8,19 +8,34 @@ use rquickjs::{Array, Object, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::row::{
-    self, CataloguePage, CopiedFileImage, MAX_ACTION_TEXT_BYTES, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS,
-    MAX_CURSOR_BYTES, MAX_FILE_BYTES, MAX_ID_BYTES, MAX_IMAGE_HANDLE_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS,
-    MAX_LABEL_BYTES, MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA, MAX_METADATA_TEXT_BYTES,
-    MAX_PAGE_BYTES, MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES, MAX_TIME_MS,
-    MAX_TITLE_BYTES, MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, RowImage,
-    Source,
+    self, Accessory, CataloguePage, CopiedFileImage, MAX_ACCESSORIES, MAX_ACCESSORY_BYTES,
+    MAX_ACTION_TEXT_BYTES, MAX_ACTION_TITLE_BYTES, MAX_ACTIONS, MAX_CURSOR_BYTES, MAX_FILE_BYTES,
+    MAX_ID_BYTES, MAX_IMAGE_HANDLE_BYTES, MAX_KEYWORD_BYTES, MAX_KEYWORDS, MAX_LABEL_BYTES,
+    MAX_MARKDOWN_BYTES, MAX_MATCH_TEXT_BYTES, MAX_METADATA, MAX_METADATA_TEXT_BYTES, MAX_PAGE_BYTES,
+    MAX_PAGE_ROWS, MAX_SECTION_BYTES, MAX_SUBTITLE_BYTES, MAX_TEXT_BYTES, MAX_TIME_MS, MAX_TITLE_BYTES,
+    MAX_TTL_SECONDS, Metadata, PageChange, Row, RowAction, RowDetail, RowEffect, RowImage, Source,
+};
+use crate::view::{
+    self, Field, FieldKind, Form, MAX_EMPTY_TEXT_BYTES, MAX_FIELD_ID_BYTES, MAX_FIELD_TITLE_BYTES,
+    MAX_FIELDS, MAX_OPTION_BYTES, MAX_OPTIONS, MAX_TEXT_FIELD_BYTES, MAX_TEXTAREA_BYTES, SelectOption,
+    ViewAnswer,
 };
 use crate::web_search::{self, WebSearch};
 use crate::{Diagnostic, Failure, MAX_ROWS};
 
+/// `key` of the object at `field`, or `key` alone at the top of an answer.
+fn join(field: &str, key: &str) -> String {
+    if field.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{field}.{key}")
+    }
+}
+
 const MAX_TOAST_BYTES: usize = 512;
 
-/// What an action asks Dupin to do once it has run.
+/// What an action asks Dupin to do once it has run. The effects that move between pages or
+/// change one may carry a `toast` too, which Dupin shows once it has done so.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum ActionEffect {
@@ -30,7 +45,105 @@ pub enum ActionEffect {
     Hide,
     /// Hide the panel and paste what the action put on the clipboard into the app in front.
     Paste,
+    /// Open the package's `views[view]` on a new page above the one the action ran from.
+    Push {
+        view: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        state: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toast: Option<String>,
+    },
+    /// Close the page the action ran from.
+    Pop {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toast: Option<String>,
+    },
+    /// Ask the page's view, or the search, again.
+    Refresh {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toast: Option<String>,
+    },
+    /// Give the page the action ran from this state, and ask its view again.
+    ReplaceState {
+        state: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        toast: Option<String>,
+    },
+    /// What is wrong with a form's fields, by field ID, which Dupin shows under them.
+    FieldErrors {
+        errors: std::collections::BTreeMap<String, String>,
+    },
 }
+
+impl ActionEffect {
+    /// The line Dupin shows once the effect is carried out.
+    pub fn toast(&self) -> Option<&str> {
+        match self {
+            ActionEffect::Toast { text } => Some(text),
+            ActionEffect::Push { toast, .. }
+            | ActionEffect::Pop { toast }
+            | ActionEffect::Refresh { toast }
+            | ActionEffect::ReplaceState { toast, .. } => toast.as_deref(),
+            ActionEffect::Hide | ActionEffect::Paste | ActionEffect::FieldErrors { .. } => None,
+        }
+    }
+
+    /// Checks the limits the reader enforced, for an effect from another process.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(toast) = self.toast()
+            && (toast.is_empty() || toast.len() > MAX_TOAST_BYTES || printable(toast).is_err())
+        {
+            return Err(format!("a toast must be one line of 1–{MAX_TOAST_BYTES} bytes"));
+        }
+        match self {
+            ActionEffect::Push {
+                view, title, state, ..
+            } => {
+                row::check_name(view, "view")?;
+                if let Some(title) = title
+                    && (title.is_empty() || title.len() > MAX_ACTION_TITLE_BYTES || printable(title).is_err())
+                {
+                    return Err("a pushed page's `title` must be one line".into());
+                }
+                if let Some(state) = state {
+                    row::check_state(state)?;
+                }
+            }
+            ActionEffect::ReplaceState { state, .. } => row::check_state(state)?,
+            ActionEffect::FieldErrors { errors } => {
+                if errors.is_empty() || errors.len() > crate::view::MAX_FIELDS {
+                    return Err(format!(
+                        "`fieldErrors` names 1 to {} fields",
+                        crate::view::MAX_FIELDS
+                    ));
+                }
+                for (id, error) in errors {
+                    crate::view::check_field_id(id)
+                        .map_err(|message| format!("an error's field {message}"))?;
+                    if error.is_empty()
+                        || error.len() > crate::view::MAX_FIELD_ERROR_BYTES
+                        || printable(error).is_err()
+                    {
+                        return Err(format!(
+                            "a field's error must be one line of 1–{} bytes",
+                            crate::view::MAX_FIELD_ERROR_BYTES
+                        ));
+                    }
+                }
+            }
+            ActionEffect::Toast { .. }
+            | ActionEffect::Hide
+            | ActionEffect::Paste
+            | ActionEffect::Pop { .. }
+            | ActionEffect::Refresh { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+const EFFECT_HINT: &str = "Return nothing, or one of `{ type: \"toast\", text }`, `{ type: \"hide\" }`, `{ type: \"paste\" }`, `{ type: \"push\", view, title?, state? }`, `{ type: \"pop\" }`, `{ type: \"refresh\" }`, `{ type: \"replaceState\", state }` and `{ type: \"fieldErrors\", errors }`; the ones that move or change a page take a `toast` too.";
 
 /// Reads an action's answer: nothing, or one effect.
 pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffect>, Failure> {
@@ -42,7 +155,7 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
             Diagnostic::new("invalid-effect", message)
                 .file(entry)
                 .field(field)
-                .hint("Return nothing, `{ type: \"toast\", text: \"Saved\" }`, `{ type: \"hide\" }` or `{ type: \"paste\" }`."),
+                .hint(EFFECT_HINT),
         )
     };
     let Some(object) = plain_object(value) else {
@@ -51,44 +164,136 @@ pub(crate) fn effect(entry: &str, value: &Value<'_>) -> Result<Option<ActionEffe
             &format!("is {}, not an effect", describe(value)),
         ));
     };
-    for key in object.keys::<String>() {
-        let key = key?;
-        if key != "type" && key != "text" {
-            return Err(invalid(&key, "is not an effect field"));
-        }
-    }
     let kind: Value = object.get("type")?;
     let kind = kind.as_string().map(|kind| kind.to_string()).transpose()?;
-    let bare = match kind.as_deref() {
-        Some("toast") => None,
-        Some("hide") => Some(ActionEffect::Hide),
-        Some("paste") => Some(ActionEffect::Paste),
-        _ => return Err(invalid("type", "must be \"toast\", \"hide\" or \"paste\"")),
-    };
-    let text: Value = object.get("text")?;
-    if let Some(effect) = bare {
-        if !text.is_undefined() {
-            return Err(invalid("text", "only goes with \"toast\""));
+    let allowed: &[&str] = match kind.as_deref() {
+        Some("toast") => &["type", "text"],
+        Some("hide" | "paste") => &["type"],
+        Some("push") => &["type", "view", "title", "state", "toast"],
+        Some("pop" | "refresh") => &["type", "toast"],
+        Some("replaceState") => &["type", "state", "toast"],
+        Some("fieldErrors") => &["type", "errors"],
+        _ => {
+            return Err(invalid(
+                "type",
+                "must be \"toast\", \"hide\", \"paste\", \"push\", \"pop\", \"refresh\", \"replaceState\" or \"fieldErrors\"",
+            ));
         }
-        return Ok(Some(effect));
-    }
-    let Some(text) = text.as_string().map(|text| text.to_string()).transpose()? else {
-        return Err(invalid("text", "must be a string"));
     };
-    if text.is_empty() || text.len() > MAX_TOAST_BYTES || printable(&text).is_err() {
-        return Err(invalid(
-            "text",
-            &format!("must be one line of 1–{MAX_TOAST_BYTES} bytes"),
-        ));
+    for key in object.keys::<String>() {
+        let key = key?;
+        if !allowed.contains(&key.as_str()) {
+            return Err(invalid(&key, "is not a field of this effect"));
+        }
     }
-    Ok(Some(ActionEffect::Toast { text }))
+    let line = |key: &str, cap: usize| -> Result<Option<String>, Failure> {
+        let value: Value = object.get(key)?;
+        if value.is_undefined() {
+            return Ok(None);
+        }
+        let Some(text) = value.as_string().map(|text| text.to_string()).transpose()? else {
+            return Err(invalid(key, "must be a string"));
+        };
+        if text.is_empty() || text.len() > cap || printable(&text).is_err() {
+            return Err(invalid(key, &format!("must be one line of 1–{cap} bytes")));
+        }
+        Ok(Some(text))
+    };
+    let state = |required: bool| -> Result<Option<serde_json::Value>, Failure> {
+        let value: Value = object.get("state")?;
+        if value.is_undefined() {
+            return if required {
+                Err(invalid("state", "is required"))
+            } else {
+                Ok(None)
+            };
+        }
+        let state = json(&value).ok_or_else(|| {
+            invalid(
+                "state",
+                "must be JSON: strings, numbers, booleans, null, arrays or objects",
+            )
+        })?;
+        row::check_state(&state).map_err(|message| invalid("state", &message.replace("`state` ", "")))?;
+        Ok(Some(state))
+    };
+    let effect = match kind.as_deref().expect("matched above") {
+        "toast" => ActionEffect::Toast {
+            text: line("text", MAX_TOAST_BYTES)?.ok_or_else(|| invalid("text", "must be a string"))?,
+        },
+        "hide" => ActionEffect::Hide,
+        "paste" => ActionEffect::Paste,
+        "push" => {
+            let view = line("view", row::MAX_HANDLER_BYTES)?.ok_or_else(|| invalid("view", "is required"))?;
+            row::check_name(&view, "view")
+                .map_err(|message| invalid("view", &message.replace("`view` ", "")))?;
+            ActionEffect::Push {
+                view,
+                title: line("title", MAX_ACTION_TITLE_BYTES)?,
+                state: state(false)?,
+                toast: line("toast", MAX_TOAST_BYTES)?,
+            }
+        }
+        "pop" => ActionEffect::Pop {
+            toast: line("toast", MAX_TOAST_BYTES)?,
+        },
+        "refresh" => ActionEffect::Refresh {
+            toast: line("toast", MAX_TOAST_BYTES)?,
+        },
+        "replaceState" => ActionEffect::ReplaceState {
+            state: state(true)?.expect("required"),
+            toast: line("toast", MAX_TOAST_BYTES)?,
+        },
+        _ => {
+            let errors: Value = object.get("errors")?;
+            let Some(errors) = plain_object(&errors) else {
+                return Err(invalid("errors", "must be an object of messages by field ID"));
+            };
+            let mut read = std::collections::BTreeMap::new();
+            for key in errors.keys::<String>() {
+                let key = key?;
+                if read.len() == crate::view::MAX_FIELDS {
+                    return Err(invalid(
+                        "errors",
+                        &format!("names more than {} fields", crate::view::MAX_FIELDS),
+                    ));
+                }
+                let message: Value = errors.get(key.as_str())?;
+                let message = message.as_string().map(|text| text.to_string()).transpose()?;
+                read.insert(key, message.unwrap_or_default());
+            }
+            let effect = ActionEffect::FieldErrors { errors: read };
+            effect.validate().map_err(|message| invalid("errors", &message))?;
+            effect
+        }
+    };
+    Ok(Some(effect))
 }
 
-const ITEM_FIELDS: [&str; 10] = [
-    "id", "title", "subtitle", "text", "url", "icon", "image", "section", "detail", "actions",
+/// `value` as JSON, as `JSON.stringify` writes it, or none when it has no JSON form.
+fn json(value: &Value<'_>) -> Option<serde_json::Value> {
+    let ctx = value.ctx().clone();
+    let text = ctx.json_stringify(value.clone()).ok()??.to_string().ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+const ITEM_FIELDS: [&str; 12] = [
+    "id",
+    "title",
+    "subtitle",
+    "text",
+    "url",
+    "icon",
+    "image",
+    "section",
+    "detail",
+    "actions",
+    "accessories",
+    "answer",
 ];
-const ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `image`, `section`, `detail` and `actions`.";
-const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `aliases`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `image`, `section`, `detail`, `actions` and `webSearch`.";
+const ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `text`, `url`, `icon`, `image`, `section`, `detail`, `actions`, `accessories` and `answer`.";
+const CATALOGUE_ITEM_FIELDS_HINT: &str = "Items take `id`, `title`, `subtitle`, `aliases`, `keywords`, `matchText`, `time`, `file`, `text`, `url`, `icon`, `image`, `section`, `detail`, `actions`, `accessories` and `webSearch`.";
+const ACCESSORY_HINT: &str = "Give up to three `{ text: \"2 KB\" }` or `{ tag: \"New\" }`.";
 const IMAGE_HINT: &str = "Give a stored blob's `handle`, or a copied file's `{ path, handle }` as the clipboard watch delivered it.";
 const WEB_SEARCH_HINT: &str = "Give `webSearch` an `alias` such as `\"g\"`, a `url` such as `\"https://www.google.com/search?q={query}\"`, a `title` such as `\"Search Google for {query}\"` and optionally a `fallback` position.";
 /// Fields only an `items()` catalogue's items take.
@@ -98,6 +303,8 @@ pub(crate) struct Reader<'a> {
     pub entry: &'a str,
     pub limit: usize,
     source: Source,
+    /// What answered, as messages name it.
+    name: &'static str,
     bytes: usize,
 }
 
@@ -107,6 +314,7 @@ impl<'a> Reader<'a> {
             entry,
             limit,
             source: Source::Search,
+            name: "search",
             bytes: 0,
         }
     }
@@ -116,7 +324,16 @@ impl<'a> Reader<'a> {
             entry,
             limit: MAX_PAGE_ROWS,
             source: Source::Items,
+            name: "items",
             bytes: 0,
+        }
+    }
+
+    /// A view's list is read as `search`'s is.
+    pub fn view(entry: &'a str) -> Self {
+        Self {
+            name: "the view",
+            ..Self::search(entry, MAX_ROWS)
         }
     }
 
@@ -240,7 +457,7 @@ impl<'a> Reader<'a> {
     }
 
     fn not_a_list(&self, value: &Value<'_>) -> Failure {
-        let name = self.source.name();
+        let name = self.name;
         Diagnostic::new(
             "invalid-result",
             format!(
@@ -504,7 +721,7 @@ impl<'a> Reader<'a> {
 
     fn too_many_rows(&self, rows: usize) -> Failure {
         let max = self.max_rows();
-        let name = self.source.name();
+        let name = self.name;
         let hint = match self.source {
             Source::Search => format!("Return the best {max} matches, for example with `.slice(0, {max})`."),
             Source::Items => format!(
@@ -548,6 +765,12 @@ impl<'a> Reader<'a> {
         for key in item.keys::<String>() {
             let key = key?;
             let catalogue_only = CATALOGUE_ONLY_FIELDS.contains(&key.as_str());
+            if key == "answer" && self.source == Source::Items {
+                return Err(self
+                    .invalid("unknown-field", field(&key), "is not a field of a catalogue's items")
+                    .hint("An item shows its title and `answer` as two values only from `search` or a view, which compute it for the query.")
+                    .into());
+            }
             if !ITEM_FIELDS.contains(&key.as_str()) && !(catalogue_only && self.source == Source::Items) {
                 let hint = match self.source {
                     Source::Search if key == "webSearch" => {
@@ -649,7 +872,11 @@ impl<'a> Reader<'a> {
                 )
                 .into());
         }
+        let accessories = self.accessories(&item, &field("accessories"))?;
+        let answer = self.line(&item, &field("answer"), "answer", MAX_TITLE_BYTES)?;
         Ok(Row {
+            accessories,
+            answer,
             id,
             title,
             subtitle,
@@ -665,6 +892,61 @@ impl<'a> Reader<'a> {
             actions,
             web_search,
         })
+    }
+
+    /// Up to three `{ text }` or `{ tag }`, each one line.
+    fn accessories(&mut self, item: &Object<'_>, field: &str) -> Result<Vec<Accessory>, Failure> {
+        let value: Value = item.get("accessories")?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(Vec::new());
+        }
+        let Some(list) = value.into_array() else {
+            return Err(self
+                .invalid("invalid-field", field, "must be an array of accessories")
+                .hint(ACCESSORY_HINT)
+                .into());
+        };
+        if list.len() > MAX_ACCESSORIES {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    field,
+                    format!("has more than {MAX_ACCESSORIES} accessories"),
+                )
+                .hint(ACCESSORY_HINT)
+                .into());
+        }
+        let mut accessories = Vec::with_capacity(list.len());
+        for (index, accessory) in list.iter::<Value>().enumerate() {
+            let at = format!("{field}[{index}]");
+            let accessory = accessory?;
+            let shape = |reader: &Self| {
+                Failure::from(
+                    reader
+                        .invalid("invalid-field", &at, "must be `{ text }` or `{ tag }`")
+                        .hint(ACCESSORY_HINT),
+                )
+            };
+            let Some(object) = plain_object(&accessory) else {
+                return Err(shape(self));
+            };
+            let keys: Vec<String> = object.keys::<String>().collect::<rquickjs::Result<_>>()?;
+            let [key] = keys.as_slice() else {
+                return Err(shape(self));
+            };
+            if key != "text" && key != "tag" {
+                return Err(shape(self));
+            }
+            let Some(text) = self.line(&object, &format!("{at}.{key}"), key, MAX_ACCESSORY_BYTES)? else {
+                return Err(shape(self));
+            };
+            accessories.push(if key == "tag" {
+                Accessory::Tag(text)
+            } else {
+                Accessory::Text(text)
+            });
+        }
+        Ok(accessories)
     }
 
     fn web_search(&mut self, item: &Object<'_>, field: &str) -> Result<Option<WebSearch>, Failure> {
@@ -898,19 +1180,20 @@ impl<'a> Reader<'a> {
             "A detail takes `image`, `markdown` and `metadata`.",
         )
         .map_err(|failure| self.nested(failure, field))?;
-        let image = self.image(&detail, &format!("{field}.image"))?;
+        self.detail_parts(&detail, field).map(Some)
+    }
+
+    /// A detail's `image`, `markdown` and `metadata`, from `detail` at `field`, which is empty
+    /// for a detail view's own.
+    fn detail_parts(&mut self, detail: &Object<'_>, field: &str) -> Result<RowDetail, Failure> {
+        let image = self.image(detail, &join(field, "image"))?;
         let markdown = self
-            .string(
-                &detail,
-                &format!("{field}.markdown"),
-                "markdown",
-                MAX_MARKDOWN_BYTES,
-            )?
+            .string(detail, &join(field, "markdown"), "markdown", MAX_MARKDOWN_BYTES)?
             .unwrap_or_default();
         let value: Value = detail.get("metadata")?;
         let mut metadata = Vec::new();
         if !value.is_undefined() && !value.is_null() {
-            let at = format!("{field}.metadata");
+            let at = join(field, "metadata");
             let Some(list) = value.into_array() else {
                 return Err(self
                     .invalid("invalid-field", at, "must be an array of `{ label, text }`")
@@ -953,11 +1236,313 @@ impl<'a> Reader<'a> {
                 metadata.push(Metadata { label, text });
             }
         }
-        Ok(Some(RowDetail {
+        Ok(RowDetail {
             image,
             markdown,
             metadata,
-        }))
+        })
+    }
+
+    /// What `views[name]` returned: a list as `search` returns one, a detail or a form.
+    pub fn view_answer(&mut self, value: Value<'_>) -> Result<ViewAnswer, Failure> {
+        if value.is_array() {
+            return Ok(ViewAnswer::List {
+                rows: self.list_items(value, "items", None)?,
+                empty_text: None,
+            });
+        }
+        let not_a_view = |reader: &Self, value: &Value<'_>| -> Failure {
+            Diagnostic::new(
+                "invalid-result",
+                format!(
+                    "the view returned {}, not a list, a detail or a form",
+                    describe(value)
+                ),
+            )
+            .file(reader.entry)
+            .hint("Return `{ type: \"list\", items: [] }`, `{ type: \"detail\", title, markdown }` or `{ type: \"form\", title, fields, submit }`.")
+            .into()
+        };
+        let Some(view) = plain_object(&value) else {
+            return Err(not_a_view(self, &value));
+        };
+        let kind: Value = view.get("type")?;
+        let kind = if kind.is_undefined() {
+            None
+        } else {
+            kind.as_string().map(|kind| kind.to_string()).transpose()?
+        };
+        match kind.as_deref() {
+            None | Some("list") => {
+                self.only_keys(
+                    &view,
+                    &["type", "items", "sections", "emptyText"],
+                    "A list takes `items` or `sections`, and optionally `type: \"list\"` and `emptyText`.",
+                )?;
+                let empty_text = self.line(&view, "emptyText", "emptyText", MAX_EMPTY_TEXT_BYTES)?;
+                let items: Value = view.get("items")?;
+                let sections: Value = view.get("sections")?;
+                let rows = if items.is_undefined() && sections.is_undefined() {
+                    Vec::new()
+                } else {
+                    self.list(&view)?
+                };
+                Ok(ViewAnswer::List { rows, empty_text })
+            }
+            Some("detail") => {
+                self.only_keys(
+                    &view,
+                    &["type", "title", "markdown", "metadata", "image", "actions"],
+                    "A detail takes `title`, `markdown`, `metadata`, `image` and `actions`.",
+                )?;
+                let title = self
+                    .line(&view, "title", "title", MAX_TITLE_BYTES)?
+                    .ok_or_else(|| {
+                        self.invalid("missing-field", "title", "is required")
+                            .hint("Give the detail a `title`.")
+                    })?;
+                let detail = self.detail_parts(&view, "")?;
+                let mut actions = Vec::new();
+                self.actions(&view, "actions", &mut actions)?;
+                Ok(ViewAnswer::Detail {
+                    title,
+                    detail,
+                    actions,
+                })
+            }
+            Some("form") => self.form(&view).map(ViewAnswer::Form),
+            Some(_) => Err(self
+                .invalid(
+                    "invalid-field",
+                    "type",
+                    "must be \"list\", \"detail\" or \"form\"",
+                )
+                .hint("A view is a list, a detail or a form.")
+                .into()),
+        }
+    }
+
+    fn form(&mut self, view: &Object<'_>) -> Result<Form, Failure> {
+        const HINT: &str = "Give `{ type: \"form\", title, fields: [{ type: \"text\", id: \"name\", title: \"Name\" }], submit: \"save\" }`.";
+        self.only_keys(
+            view,
+            &["type", "title", "fields", "submit", "submitTitle"],
+            "A form takes `title`, `fields`, `submit` and `submitTitle`.",
+        )?;
+        let title = self
+            .line(view, "title", "title", MAX_TITLE_BYTES)?
+            .ok_or_else(|| self.invalid("missing-field", "title", "is required").hint(HINT))?;
+        let submit = self
+            .string(view, "submit", "submit", row::MAX_HANDLER_BYTES)?
+            .ok_or_else(|| {
+                self.invalid("missing-field", "submit", "is required")
+                    .hint("Name the function of the module's `actions` that takes the form's values.")
+            })?;
+        row::check_handler(&submit).map_err(|message| {
+            self.invalid("invalid-field", "submit", message.replace("`run` must", "must"))
+                .hint("Name the function of the module's `actions` that takes the form's values.")
+        })?;
+        let submit_title = self.line(view, "submitTitle", "submitTitle", MAX_FIELD_TITLE_BYTES)?;
+        let fields: Value = view.get("fields")?;
+        let Some(list) = fields.into_array() else {
+            return Err(self
+                .invalid("invalid-field", "fields", "must be an array of fields")
+                .hint(HINT)
+                .into());
+        };
+        if list.is_empty() || list.len() > MAX_FIELDS {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    "fields",
+                    format!("must have 1 to {MAX_FIELDS} fields"),
+                )
+                .hint(HINT)
+                .into());
+        }
+        let mut fields = Vec::with_capacity(list.len());
+        for (index, field) in list.iter::<Value>().enumerate() {
+            fields.push(self.field(&format!("fields[{index}]"), field?)?);
+        }
+        let form = Form {
+            title,
+            fields,
+            submit,
+            submit_title,
+        };
+        form.validate()
+            .map_err(|message| self.invalid("invalid-form", "fields", message).hint(HINT))?;
+        Ok(form)
+    }
+
+    fn field(&mut self, at: &str, value: Value<'_>) -> Result<Field, Failure> {
+        const HINT: &str = "A field is `{ type, id, title }` with `type` \"text\", \"textarea\", \"checkbox\" or \"select\"; text fields take `required`, `default` and `placeholder`, a checkbox `default` and a select `options` and `default`.";
+        let Some(field) = plain_object(&value) else {
+            return Err(self
+                .invalid("invalid-field", at, "must be an object")
+                .hint(HINT)
+                .into());
+        };
+        let kind: Value = field.get("type")?;
+        let kind = kind.as_string().map(|kind| kind.to_string()).transpose()?;
+        let allowed: &[&str] = match kind.as_deref() {
+            Some("text" | "textarea") => &["type", "id", "title", "required", "default", "placeholder"],
+            Some("checkbox") => &["type", "id", "title", "default"],
+            Some("select") => &["type", "id", "title", "options", "default"],
+            _ => {
+                return Err(self
+                    .invalid(
+                        "invalid-field",
+                        format!("{at}.type"),
+                        "must be \"text\", \"textarea\", \"checkbox\" or \"select\"",
+                    )
+                    .hint(HINT)
+                    .into());
+            }
+        };
+        self.only_keys(&field, allowed, HINT)
+            .map_err(|failure| self.nested(failure, at))?;
+        let id = self
+            .string(&field, &format!("{at}.id"), "id", MAX_FIELD_ID_BYTES)?
+            .ok_or_else(|| {
+                self.invalid("missing-field", format!("{at}.id"), "is required")
+                    .hint(HINT)
+            })?;
+        view::check_field_id(&id).map_err(|message| {
+            self.invalid("invalid-field", format!("{at}.id"), message)
+                .hint("Name the field as its value is named in what the submit receives, such as `title`.")
+        })?;
+        let title = self
+            .line(&field, &format!("{at}.title"), "title", MAX_FIELD_TITLE_BYTES)?
+            .ok_or_else(|| {
+                self.invalid("missing-field", format!("{at}.title"), "is required")
+                    .hint("Give the field a `title`, which Dupin shows beside it.")
+            })?;
+        let kind = match kind.as_deref().expect("matched above") {
+            "text" | "textarea" => {
+                let multiline = kind.as_deref() == Some("textarea");
+                let required = self
+                    .boolean(&field, "required")
+                    .map_err(|failure| self.nested(failure, at))?
+                    .unwrap_or(false);
+                let cap = if multiline {
+                    MAX_TEXTAREA_BYTES
+                } else {
+                    MAX_TEXT_FIELD_BYTES
+                };
+                let default = self
+                    .uncounted_text(&field, &format!("{at}.default"), cap)?
+                    .unwrap_or_default();
+                if !multiline && printable(&default).is_err() {
+                    return Err(self
+                        .invalid("invalid-field", format!("{at}.default"), "must be one line")
+                        .hint("Make the field a `textarea` to take several lines.")
+                        .into());
+                }
+                self.count(&format!("{at}.default"), &default, cap)?;
+                let placeholder = self.line(
+                    &field,
+                    &format!("{at}.placeholder"),
+                    "placeholder",
+                    MAX_FIELD_TITLE_BYTES,
+                )?;
+                if multiline {
+                    FieldKind::Textarea {
+                        required,
+                        default,
+                        placeholder,
+                    }
+                } else {
+                    FieldKind::Text {
+                        required,
+                        default,
+                        placeholder,
+                    }
+                }
+            }
+            "checkbox" => FieldKind::Checkbox {
+                default: self
+                    .boolean(&field, "default")
+                    .map_err(|failure| self.nested(failure, at))?
+                    .unwrap_or(false),
+            },
+            _ => {
+                let options: Value = field.get("options")?;
+                let Some(list) = options.into_array() else {
+                    return Err(self
+                        .invalid(
+                            "invalid-field",
+                            format!("{at}.options"),
+                            "must be an array of `{ value, title }`",
+                        )
+                        .hint("Give `options: [{ value: \"red\", title: \"Red\" }]`.")
+                        .into());
+                };
+                if list.is_empty() || list.len() > MAX_OPTIONS {
+                    return Err(self
+                        .invalid(
+                            "invalid-field",
+                            format!("{at}.options"),
+                            format!("must have 1 to {MAX_OPTIONS} options"),
+                        )
+                        .into());
+                }
+                let mut options = Vec::with_capacity(list.len());
+                for (index, option) in list.iter::<Value>().enumerate() {
+                    let at = format!("{at}.options[{index}]");
+                    let option = option?;
+                    let Some(option) = plain_object(&option) else {
+                        return Err(self
+                            .invalid("invalid-field", &at, "must be `{ value, title }`")
+                            .into());
+                    };
+                    self.only_keys(
+                        &option,
+                        &["value", "title"],
+                        "An option takes `value` and `title`.",
+                    )
+                    .map_err(|failure| self.nested(failure, &at))?;
+                    let value = self.line(&option, &format!("{at}.value"), "value", MAX_OPTION_BYTES)?;
+                    let title = self.line(&option, &format!("{at}.title"), "title", MAX_OPTION_BYTES)?;
+                    let (Some(value), Some(title)) = (value, title) else {
+                        return Err(self
+                            .invalid("missing-field", &at, "needs both `value` and `title`")
+                            .into());
+                    };
+                    options.push(SelectOption { value, title });
+                }
+                let default = self
+                    .line(&field, &format!("{at}.default"), "default", MAX_OPTION_BYTES)?
+                    .unwrap_or_else(|| options[0].value.clone());
+                FieldKind::Select { options, default }
+            }
+        };
+        Ok(Field { id, title, kind })
+    }
+
+    /// An optional string field of up to `cap` bytes, which may hold several lines.
+    fn uncounted_text(
+        &self,
+        object: &Object<'_>,
+        field: &str,
+        cap: usize,
+    ) -> Result<Option<String>, Failure> {
+        let value: Value = object.get("default")?;
+        if value.is_undefined() || value.is_null() {
+            return Ok(None);
+        }
+        let Some(text) = value.as_string() else {
+            return Err(self
+                .invalid(
+                    "invalid-field",
+                    field,
+                    format!("must be a string, not {}", describe(&value)),
+                )
+                .into());
+        };
+        let text = text.to_string()?;
+        self.capped(field, &text, cap)?;
+        Ok(Some(text))
     }
 
     /// Reads the item's own `actions` after the ones `url` and `text` made.
@@ -1001,11 +1586,11 @@ impl<'a> Reader<'a> {
                 let key = key?;
                 match key.as_str() {
                     "title" | "data" | "alternate" | "confirm" | "needsFile" | "template" => {}
-                    "copy" | "paste" | "open" | "reveal" | "run" => kinds.push(key),
+                    "copy" | "paste" | "open" | "reveal" | "run" | "push" => kinds.push(key),
                     _ => {
                         return Err(self
                             .invalid("unknown-field", format!("{at}.{key}"), "is not an action field")
-                            .hint("An action takes `title` and one of `copy`, `paste`, `open`, `reveal` or `run`, with `data`, `alternate` and `confirm` for `run` and `template` for `copy` or `paste`.")
+                            .hint("An action takes `title` and one of `copy`, `paste`, `open`, `reveal`, `run` or `push`, with `data`, `alternate` and `confirm` for `run` and `template` for `copy` or `paste`.")
                             .into());
                     }
                 }
@@ -1018,7 +1603,7 @@ impl<'a> Reader<'a> {
                 })?;
             let [kind] = kinds.as_slice() else {
                 return Err(self
-                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open`, `reveal` or `run`")
+                    .invalid("invalid-field", &at, "must have exactly one of `copy`, `paste`, `open`, `reveal`, `run` or `push`")
                     .hint("Give `{ title: \"Open\", open: \"https://…\" }` or `{ title: \"Delete\", run: \"remove\" }`.")
                     .into());
             };
@@ -1087,6 +1672,7 @@ impl<'a> Reader<'a> {
                     })?;
                     RowEffect::Reveal { path }
                 }
+                "push" => self.push(&action, &format!("{at}.push"))?,
                 _ => {
                     let field = format!("{at}.run");
                     let handler = self
@@ -1110,6 +1696,52 @@ impl<'a> Reader<'a> {
             });
         }
         Ok(())
+    }
+
+    /// A `push` action's `{ view, state }`.
+    fn push(&mut self, action: &Object<'_>, field: &str) -> Result<RowEffect, Failure> {
+        const HINT: &str = "Give `push: { view: \"details\", state: { id: 7 } }`, naming a function the module's `views` export.";
+        let value: Value = action.get("push")?;
+        let Some(push) = plain_object(&value) else {
+            return Err(self
+                .invalid("invalid-field", field, "must be `{ view, state }`")
+                .hint(HINT)
+                .into());
+        };
+        self.only_keys(&push, &["view", "state"], HINT)
+            .map_err(|failure| self.nested(failure, field))?;
+        let at = format!("{field}.view");
+        let view = self
+            .string(&push, &at, "view", row::MAX_HANDLER_BYTES)?
+            .ok_or_else(|| self.invalid("missing-field", &at, "is required").hint(HINT))?;
+        row::check_name(&view, "view").map_err(|message| {
+            self.invalid("invalid-field", &at, message.replace("`view` must", "must"))
+                .hint(HINT)
+        })?;
+        let state: Value = push.get("state")?;
+        let state = if state.is_undefined() {
+            None
+        } else {
+            let at = format!("{field}.state");
+            let Some(state) = json(&state) else {
+                return Err(self
+                    .invalid(
+                        "invalid-field",
+                        &at,
+                        "must be JSON: strings, numbers, booleans, null, arrays or objects",
+                    )
+                    .hint("Keep plain data in a page's state, such as the id of what it shows.")
+                    .into());
+            };
+            row::check_state(&state).map_err(|message| {
+                self.invalid("invalid-field", &at, message.replace("`state` ", ""))
+                    .hint("Keep an id in the state and look the rest up in the view.")
+            })?;
+            self.bytes += state.to_string().len();
+            self.check_total(&at)?;
+            Some(state)
+        };
+        Ok(RowEffect::Push { view, state })
     }
 
     /// An action's `template`: a boolean, and only on a `copy` or `paste`.
@@ -1278,7 +1910,7 @@ impl<'a> Reader<'a> {
             "output-too-large",
             format!(
                 "{} returned more than {} KiB of text",
-                self.source.name(),
+                self.name,
                 self.max_bytes() / 1024
             ),
         )

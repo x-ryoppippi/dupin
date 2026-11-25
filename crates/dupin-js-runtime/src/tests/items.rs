@@ -296,6 +296,7 @@ fn an_action_handler_runs_with_its_data_and_may_invalidate_the_catalogue() {
             &engine(),
             name,
             data,
+            &crate::PageContext::default(),
             &serde_json::json!({}),
             timeout(DEADLINE),
             &mut Unavailable::default(),
@@ -335,7 +336,7 @@ fn the_host_hook_is_gone_before_package_code_runs() {
         "",
     )
     .unwrap();
-    assert_eq!(rows[0].title, "2 undefined undefined");
+    assert_eq!(rows[0].title, "3 undefined undefined");
 }
 
 #[test]
@@ -424,6 +425,8 @@ fn rows_from_another_process_are_checked_again() {
             detail: None,
             actions: Vec::new(),
             web_search: None,
+            accessories: Vec::new(),
+            answer: None,
         };
         edit(&mut row);
         row

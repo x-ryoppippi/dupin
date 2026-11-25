@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use dupin_core::{CommandId, ExtensionRequest, Provider};
+use dupin_core::{Anchor, CommandId, ExtensionRequest, Navigated, Page, Provider};
 use dupin_extension_bridge::{Bridge, Notice, PackageId, ScopeKey, Trigger};
-use dupin_js_runtime::{Acted, RunError};
+use dupin_extension_host::ActionEffect;
+use dupin_js_runtime::{Acted, PageContext, RunError};
 use rune::Tx;
 
 use super::{Busy, Ui, search::spawn_searcher};
@@ -416,64 +417,149 @@ impl Ui {
         request: ExtensionRequest,
         tx: &mut Tx,
     ) {
-        let Some(extension) = self.registered_extension(&extension) else {
-            return;
-        };
         let (action, data) = match request {
             ExtensionRequest::Run { action, data } => (action, data),
             ExtensionRequest::Paste { text, template } => {
+                let Some(extension) = self.registered_extension(&extension) else {
+                    return;
+                };
                 return self.run_paste(&extension, text, template, tx);
             }
-            request => return self.answer_extension_row(None, extension, request, tx),
+            request => {
+                let Some(extension) = self.registered_extension(&extension) else {
+                    return;
+                };
+                return self.answer_extension_row(None, extension, request, tx);
+            }
         };
+        self.run_extension_action(extension, action, data.unwrap_or_default());
+    }
+
+    /// What `ctx.query` and `ctx.state` hand an action of `extension` chosen now: those of
+    /// the page on screen when it is one of the package's own, and nothing otherwise, so a
+    /// package never sees what is typed in the main search.
+    fn page_context(&self, extension: &Extension) -> PageContext {
+        let own = self.extensions.package(self.session.command_id()) == Some(extension.package.as_str());
+        match self.session.page() {
+            Some(page) if own => PageContext {
+                query: self.session.query().to_owned(),
+                state: page.context.clone().unwrap_or_default(),
+            },
+            _ => PageContext::default(),
+        }
+    }
+
+    /// Runs `extension`'s `actions[action](data)`, which the user chose, or a form's submit,
+    /// and carries out the effect it returns on the page it was chosen on.
+    pub(super) fn run_extension_action(
+        &mut self,
+        extension: String,
+        action: String,
+        data: serde_json::Value,
+    ) {
+        let Some(extension) = self.registered_extension(&extension) else {
+            let anchor = self.session.anchor();
+            self.form_answered(&anchor);
+            return;
+        };
+        let anchor = self.session.anchor();
+        let page = self.page_context(&extension);
         let bridge = self.extensions.bridge.clone();
         let me = self.me.clone();
         let busy = Busy::new(self.running.clone());
         std::thread::spawn(move || {
             let call = bridge.call(&extension.package, Trigger::Activation);
-            let data = data.unwrap_or(serde_json::Value::Null);
-            let result = extension.act(&action, &data, Instant::now() + ACTION_DEADLINE, &call.services);
+            let result = extension.act(
+                &action,
+                &data,
+                &page,
+                Instant::now() + ACTION_DEADLINE,
+                &call.services,
+            );
             let stale = !bridge.is_current(&extension.package, call.generation);
-            let name = extension.name.clone();
             me.update(move |ui, tx| {
-                let notice = match result {
-                    _ if stale => Some(format!(
-                        "{name}'s access changed while it ran, so its result was dropped."
-                    )),
-                    Ok(Acted {
-                        effect: Some(dupin_extension_host::ActionEffect::Toast { text }),
-                        ..
-                    }) => {
-                        ui.timed_notice(text, tx);
-                        None
-                    }
-                    Ok(Acted {
-                        effect:
-                            Some(
-                                effect @ (dupin_extension_host::ActionEffect::Hide
-                                | dupin_extension_host::ActionEffect::Paste),
-                            ),
-                        ..
-                    }) => {
-                        let paste = effect == dupin_extension_host::ActionEffect::Paste;
-                        ui.close_after_copy(&extension, paste, tx);
-                        return;
-                    }
-                    Ok(Acted { effect: None, .. }) | Err(RunError::Cancelled) => None,
-                    Err(RunError::Failed(diagnostic)) => {
-                        crate::log::warn(&format!("extension {name}: {diagnostic}"));
-                        Some(format!("{name} failed: {}", diagnostic.message))
-                    }
-                };
-                if let Some(notice) = notice {
-                    ui.show_notice(notice, tx);
+                ui.form_answered(&anchor);
+                if stale {
+                    ui.show_notice(
+                        format!(
+                            "{}'s access changed while it ran, so its result was dropped.",
+                            extension.name
+                        ),
+                        tx,
+                    );
+                    let effects = ui.session.refresh();
+                    ui.apply(effects, tx);
+                } else {
+                    ui.extension_acted(&extension, &anchor, result, tx);
                 }
-                // A refused request may have left a consent row to show.
-                let effects = ui.session.refresh();
-                ui.apply(effects, tx);
             });
             drop(busy);
         });
+    }
+
+    /// Carries out what an action returned, on the page it was chosen on while that page is
+    /// still the one on screen; a toast shows either way, since the action ran.
+    fn extension_acted(
+        &mut self,
+        extension: &Extension,
+        anchor: &Anchor,
+        result: Result<Acted, RunError>,
+        tx: &mut Tx,
+    ) {
+        let name = &extension.name;
+        let effect = match result {
+            Ok(acted) => acted.effect,
+            Err(RunError::Cancelled) => None,
+            Err(RunError::Failed(diagnostic)) => {
+                crate::log::warn(&format!("extension {name}: {diagnostic}"));
+                self.show_notice(format!("{name} failed: {}", diagnostic.message), tx);
+                None
+            }
+        };
+        if let Some(text) = effect.as_ref().and_then(ActionEffect::toast) {
+            self.timed_notice(text.to_owned(), tx);
+        }
+        let navigated = match effect {
+            None | Some(ActionEffect::Toast { .. }) => {
+                // A refused request may have left a consent row to show.
+                Navigated::Done(self.session.refresh())
+            }
+            Some(effect @ (ActionEffect::Hide | ActionEffect::Paste)) => {
+                self.close_after_copy(extension, effect == ActionEffect::Paste, tx);
+                return;
+            }
+            Some(ActionEffect::Push {
+                view, title, state, ..
+            }) => self.session.open_page(
+                anchor,
+                Page {
+                    view,
+                    title: title.unwrap_or_else(|| name.clone()),
+                    context: state,
+                },
+            ),
+            Some(ActionEffect::Pop { .. }) => self.session.close_page(anchor),
+            Some(ActionEffect::Refresh { .. }) => self.session.refresh_page(anchor),
+            Some(ActionEffect::ReplaceState { state, .. }) => self.session.replace_page_state(anchor, state),
+            Some(ActionEffect::FieldErrors { errors }) => match self.show_field_errors(anchor, errors, tx) {
+                Navigated::NoPage => {
+                    self.show_notice(
+                        format!("{name} failed: it returned field errors, which only a form's submit may"),
+                        tx,
+                    );
+                    Navigated::Done(Vec::new())
+                }
+                navigated => navigated,
+            },
+        };
+        match navigated {
+            Navigated::Done(effects) => self.apply(effects, tx),
+            Navigated::Stale | Navigated::NoPage => {}
+            Navigated::TooDeep => self.show_notice(
+                format!("{name} failed: it opened more views than Dupin keeps open; close one first"),
+                tx,
+            ),
+        }
     }
 
     /// Answers a consent row: Allow, Deny, Request Access, Turn On or Open Settings. Answering

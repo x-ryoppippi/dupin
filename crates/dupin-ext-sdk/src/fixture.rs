@@ -21,16 +21,15 @@ const MAX_FIXTURES: usize = 64;
 pub const MAX_STEPS: usize = 64;
 pub const MAX_QUERY_BYTES: usize = 4096;
 /// What a step may expect, as keys of its outcome.
-const EXPECTATIONS: [&str; 12] = [
+const EXPECTATIONS: [&str; 11] = [
     "rows",
+    "view",
     "selected",
     "effect",
     "toasts",
     "panel",
     "clipboard",
     "error",
-    "sections",
-    "detail",
     "storage",
     "invalidated",
     "windows",
@@ -115,11 +114,13 @@ impl Default for Window {
     }
 }
 
-/// One thing the user does. Exactly one of `query`, `select` and `activate` is given.
+/// One thing the user does. Exactly one of `query`, `select`, `activate`, `event`, `back`,
+/// `fill` and `submit` is given.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Step {
-    /// Typed after the keyword, replacing the query; the step waits for the answer.
+    /// Typed after the keyword, or on the page a view opened, replacing the query; the step
+    /// waits for the answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     query: Option<String>,
     /// Moves the selection to this row, counting from 0.
@@ -134,6 +135,16 @@ pub struct Step {
     event: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     data: Option<Value>,
+    /// `true`: closes the page on top, as Esc does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    back: Option<bool>,
+    /// Fills in the form on screen: a field's text, a checkbox's `true` or `false`, or the
+    /// `value` of a select's option, by field ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fill: Option<Map<String, Value>>,
+    /// `true`: submits the form on screen, as ⌘Enter does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    submit: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect: Option<Map<String, Value>>,
 }
@@ -144,10 +155,22 @@ pub enum Action<'a> {
     Select(usize),
     Activate(&'a str),
     Event(&'a str, &'a Value),
+    Back,
+    Fill(&'a Map<String, Value>),
+    Submit,
 }
 
 impl Step {
     pub fn action(&self) -> Action<'_> {
+        if self.back.is_some() {
+            return Action::Back;
+        }
+        if let Some(fill) = &self.fill {
+            return Action::Fill(fill);
+        }
+        if self.submit.is_some() {
+            return Action::Submit;
+        }
         match (&self.query, self.select, &self.activate, &self.event) {
             (Some(query), None, None, None) => Action::Query(query),
             (None, Some(row), None, None) => Action::Select(row),
@@ -168,6 +191,12 @@ impl Action<'_> {
             Action::Select(row) => format!("select {row}"),
             Action::Activate(action) => format!("activate {}", Value::from(*action)),
             Action::Event(event, _) => format!("event {}", Value::from(*event)),
+            Action::Back => "back".into(),
+            Action::Fill(fields) => format!(
+                "fill {}",
+                fields.keys().map(String::as_str).collect::<Vec<_>>().join(", ")
+            ),
+            Action::Submit => "submit".into(),
         }
     }
 }
@@ -394,11 +423,31 @@ pub fn parse(name: &str, bytes: &[u8]) -> Result<Fixture, Diagnostic> {
             step.select.is_some(),
             step.activate.is_some(),
             step.event.is_some(),
+            step.back.is_some(),
+            step.fill.is_some(),
+            step.submit.is_some(),
         ];
         if given.iter().filter(|given| **given).count() != 1 {
             return Err(at(
-                "must have exactly one of `query`, `select`, `activate` and `event`".into(),
+                "must have exactly one of `query`, `select`, `activate`, `event`, `back`, `fill` and `submit`"
+                    .into(),
             ));
+        }
+        if step.back == Some(false) || step.submit == Some(false) {
+            return Err(at("`back` and `submit` are `true` when given".into()));
+        }
+        if let Some((id, _)) = step
+            .fill
+            .iter()
+            .flatten()
+            .find(|(_, value)| !matches!(value, Value::String(_) | Value::Bool(_)))
+        {
+            return Err(at(format!(
+                "`fill.{id}` must be a field's text, a checkbox's `true` or `false`, or an option's value"
+            )));
+        }
+        if step.fill.as_ref().is_some_and(Map::is_empty) {
+            return Err(at("`fill` names no field".into()));
         }
         if step.data.is_some() && step.event.is_none() {
             return Err(at("`data` goes with an `event`".into()));
@@ -611,6 +660,15 @@ pub fn rows(rows: &[Row]) -> Value {
             if !row.subtitle.is_empty() {
                 out.insert("subtitle".into(), row.subtitle.clone().into());
             }
+            if let Some(answer) = &row.answer {
+                out.insert("answer".into(), answer.clone().into());
+            }
+            if !row.accessories.is_empty() {
+                out.insert(
+                    "accessories".into(),
+                    serde_json::to_value(&row.accessories).expect("accessories always serialize"),
+                );
+            }
             if !row.aliases.is_empty() {
                 out.insert("aliases".into(), row.aliases.clone().into());
             }
@@ -659,6 +717,7 @@ fn effect(effect: &RowEffect) -> Map<String, Value> {
         RowEffect::OpenUrl { url } => ("url", Value::from(url.clone())),
         RowEffect::Reveal { path } => ("reveal", Value::from(path.clone())),
         RowEffect::Run { handler, data } => ("run", json!({"action": handler, "data": data})),
+        RowEffect::Push { view, state } => ("push", json!({"view": view, "state": state})),
     };
     Map::from_iter([(key.to_owned(), value)])
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Detail, Item, Page};
+use crate::{Accessory, Detail, Item, Page, form::Form};
 
 /// A source of candidates. Apps, files and (later) extensions all take this shape.
 ///
@@ -32,6 +32,12 @@ pub struct Batch {
     pub details: HashMap<String, Arc<Detail>>,
     /// Show a row's detail only while it is selected, so a long list stays a list.
     pub details_when_selected: bool,
+    /// What rows show at their end, by item ID.
+    pub accessories: HashMap<String, Vec<Accessory>>,
+    /// What the search shows when it finds nothing, which a batch without rows may carry.
+    pub empty_text: Option<String>,
+    /// A form the batch's one row stands for, which the page shows in place of a list.
+    pub form: Option<Arc<Form>>,
 }
 
 impl Batch {
@@ -50,7 +56,11 @@ impl Batch {
     }
 
     pub(crate) fn is_plain(&self) -> bool {
-        self.section.is_none() && self.details.is_empty()
+        self.section.is_none()
+            && self.details.is_empty()
+            && self.accessories.is_empty()
+            && self.empty_text.is_none()
+            && self.form.is_none()
     }
 }
 

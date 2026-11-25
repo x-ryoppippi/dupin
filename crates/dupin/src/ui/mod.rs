@@ -9,6 +9,7 @@ mod control;
 mod effects;
 mod extensions;
 mod files;
+mod form;
 mod hotkeys;
 mod keys;
 mod lifecycle;
@@ -45,6 +46,7 @@ pub use thumbnails::{PREVIEW_HEIGHT, Preview};
 use action_screen::ActionScreen;
 use control::{CallerHold, Picker};
 pub(crate) use extensions::Extensions;
+pub(crate) use form::{Draft, Entry, field_key};
 use lifecycle::Restart;
 use notices::Notices;
 use reload::backdrop_source;
@@ -93,6 +95,13 @@ pub struct Ui {
     runner: crate::scripts::runner::Runner,
     _scripts_watcher: Option<crate::catalog_watch::Watch>,
     pub action_screen: Option<ActionScreen>,
+    /// The drafts of the forms on the stack of pages, the deepest last.
+    forms: Vec<form::Draft>,
+    /// Edited in place of a form field that has gone, so a late edit lands nowhere.
+    form_scratch: TextEdit,
+    /// Whether the panel showed a form when it last changed, so the query takes focus back
+    /// once it closes.
+    showing_form: bool,
     next_lookup: u64,
     notices: Notices,
     pub session: Session,
@@ -263,6 +272,9 @@ impl Ui {
             theme: config.theme.clone(),
             active_radius: config.theme.corner_radius as f32,
             action_screen: None,
+            forms: Vec::new(),
+            form_scratch: TextEdit::new(""),
+            showing_form: false,
             next_lookup: 0,
             notices: Notices::default(),
             acknowledged_config: config.clone(),
