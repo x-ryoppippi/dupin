@@ -1,14 +1,45 @@
 {
 	"fixture": 1,
-	"description": "Snippets from config.toml are listed by keyword, found by name or keyword, and copied with their placeholders left for Dupin to fill.",
+	"description": "Snippets from config.toml are listed by keyword, marked as config.toml's, found by name or keyword, and copied with their placeholders left for Dupin to fill.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
 	"preferences": {
+		"paste": false,
 		"snippets": [
-			{ "keyword": "addr", "name": "Home address", "text": "221B Baker Street, London NW1 6XE" },
-			{ "keyword": "quote", "name": "Quote the clipboard", "text": "> {clipboard}" },
-			{ "keyword": "sig", "name": "Email signature", "text": "Best wishes,\nSherlock" },
-			{ "keyword": "today", "name": null, "text": "{date}" }
-		],
-		"paste": false
+			{
+				"keyword": "addr",
+				"name": "Home address",
+				"source": "config",
+				"text": "221B Baker Street, London NW1 6XE"
+			},
+			{
+				"keyword": "quote",
+				"name": "Quote the clipboard",
+				"source": "config",
+				"text": "> {clipboard}"
+			},
+			{
+				"keyword": "sig",
+				"name": "Email signature",
+				"source": "config",
+				"text": "Best wishes,\nSherlock"
+			},
+			{
+				"keyword": "today",
+				"name": null,
+				"source": "config",
+				"text": "{date}"
+			}
+		]
 	},
 	"steps": [
 		{
@@ -16,41 +47,121 @@
 			"expect": {
 				"rows": [
 					{
-						"id": "snippet:addr",
-						"title": "Home address",
-						"subtitle": "addr  ·  221B Baker Street, London NW1 6XE",
-						"aliases": ["addr"],
 						"actions": [
 							{
-								"title": "Copy to Clipboard",
-								"copy": "221B Baker Street, London NW1 6XE",
-								"template": true
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
 							}
-						]
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
 					},
 					{
-						"id": "snippet:quote",
-						"title": "Quote the clipboard",
-						"subtitle": "quote  ·  > {clipboard}",
-						"aliases": ["quote"],
-						"actions": [{ "title": "Copy to Clipboard", "copy": "> {clipboard}", "template": true }]
-					},
-					{
-						"id": "snippet:sig",
-						"title": "Email signature",
-						"subtitle": "sig  ·  Best wishes, Sherlock",
-						"aliases": ["sig"],
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
 						"actions": [
-							{ "title": "Copy to Clipboard", "copy": "Best wishes,\nSherlock", "template": true }
-						]
+							{
+								"copy": "221B Baker Street, London NW1 6XE",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["addr"],
+						"id": "snippet:addr",
+						"subtitle": "addr  ·  221B Baker Street, London NW1 6XE",
+						"title": "Home address"
 					},
 					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "> {clipboard}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["quote"],
+						"id": "snippet:quote",
+						"subtitle": "quote  ·  > {clipboard}",
+						"title": "Quote the clipboard"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "{date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
 						"id": "snippet:today",
-						"title": "today",
 						"subtitle": "today  ·  {date}",
-						"actions": [{ "title": "Copy to Clipboard", "copy": "{date}", "template": true }]
+						"title": "today"
 					}
-				]
+				],
+				"selected": 0
 			}
 		},
 		{
@@ -58,13 +169,29 @@
 			"expect": {
 				"rows": [
 					{
-						"id": "snippet:sig",
-						"title": "Email signature",
-						"subtitle": "sig  ·  Best wishes, Sherlock",
-						"aliases": ["sig"],
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
 						"actions": [
-							{ "title": "Copy to Clipboard", "copy": "Best wishes,\nSherlock", "template": true }
-						]
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
 					}
 				],
 				"selected": 0
@@ -73,7 +200,10 @@
 		{
 			"activate": "Copy to Clipboard",
 			"expect": {
-				"effect": { "copy": "Best wishes,\nSherlock", "template": true }
+				"effect": {
+					"copy": "Best wishes,\nSherlock",
+					"template": true
+				}
 			}
 		},
 		{
@@ -81,12 +211,31 @@
 			"expect": {
 				"rows": [
 					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "{date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
 						"id": "snippet:today",
-						"title": "today",
 						"subtitle": "today  ·  {date}",
-						"actions": [{ "title": "Copy to Clipboard", "copy": "{date}", "template": true }]
+						"title": "today"
 					}
-				]
+				],
+				"selected": 0
 			}
 		}
 	]

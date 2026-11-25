@@ -3,6 +3,10 @@
 //! nowhere, so the file is what makes a startup problem findable.
 //!
 //! Only for rare events (startup problems), never from the frame loop.
+//!
+//! The file is not encrypted, so a message never carries what the user typed, a result's title
+//! or path, clipboard contents or snippet text. A guest's diagnostic is logged through
+//! `Diagnostic::for_log`, since its text is the guest's and may quote any of them.
 
 use std::io::Write;
 use std::path::PathBuf;

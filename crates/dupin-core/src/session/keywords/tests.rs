@@ -139,6 +139,30 @@ fn an_exact_keyword_leads_and_the_start_of_one_follows_the_best_app() {
 }
 
 #[test]
+fn an_unhinted_command_is_never_suggested_but_its_keyword_still_enters_it() {
+    let mut registry = registry();
+    let mut presentation = QueryPresentation::new("Search snippets");
+    presentation.chip = Some("Snippets".into());
+    registry
+        .register(
+            CommandSpec::new(id("snippets.search"), 10, presentation)
+                .with_query_eligibility(crate::QueryEligibility::Any)
+                .unhinted(),
+        )
+        .unwrap();
+    registry.add_keyword(&id("snippets.search"), "snip").unwrap();
+    assert!(
+        registry.entries().iter().any(|entry| entry.title == "Snippets"),
+        "Settings still lists it"
+    );
+    let mut s = Session::new(History::default(), registry).unwrap();
+    assert_eq!(titles(&shown(&mut s, "snip", &[])), Vec::<&str>::new());
+    assert!(!titles(&shown(&mut s, "?", &[])).contains(&"Snippets"));
+    s.set_query("snip ");
+    assert_eq!(s.command_id().as_str(), "snippets.search");
+}
+
+#[test]
 fn a_web_alias_adds_no_second_row_for_itself() {
     let mut s = session();
     let rows = shown(&mut s, "g", &["Grapher"]);

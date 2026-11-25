@@ -315,10 +315,8 @@ impl BatchStage for GuestFilter {
         let hits = match extension.filter(&self.filter, &input, Instant::now() + FILTER_DEADLINE) {
             Ok(hits) => hits,
             Err(dupin_js_runtime::RunError::Failed(diagnostic)) => {
-                self.guests.note(format!(
-                    "{reference} failed: {} ({})",
-                    diagnostic.message, diagnostic.code
-                ));
+                self.guests
+                    .note(format!("{reference} failed: {}", diagnostic.for_log()));
                 return None;
             }
             Err(dupin_js_runtime::RunError::Cancelled) => return None,

@@ -1556,3 +1556,34 @@ fn calculations_need_their_own_grant_and_stop_when_it_is_revoked() {
         Denial::Revoked(ScopeKey::Calculator)
     );
 }
+
+#[test]
+fn writing_snippets_needs_its_own_grant_and_an_action_the_user_chose() {
+    let write = Request::SnippetsWrite;
+    let (broker, package) = enabled(github());
+    assert_eq!(
+        denial(check(&broker, &package, &write, Trigger::Activation)),
+        Denial::Undeclared(ScopeKey::Snippets),
+        "no package reaches the user's snippets without declaring it"
+    );
+    let (mut broker, package) = enabled(caps(json!({ "snippets": ["write"] })));
+    assert!(matches!(
+        check(&broker, &package, &write, Trigger::Activation),
+        Decision::NeedsConsent(_)
+    ));
+    broker.approve(&package, &ScopeKey::Snippets, None).unwrap();
+    for trigger in [Trigger::Query, Trigger::Background] {
+        assert_eq!(
+            denial(check(&broker, &package, &write, trigger)),
+            Denial::NeedsActivation,
+            "a search, view or event handler never changes a snippet"
+        );
+    }
+    let held = permit(check(&broker, &package, &write, Trigger::Activation));
+    broker.revoke(&package, &ScopeKey::Snippets).unwrap();
+    assert!(!broker.validate(&held));
+    assert_eq!(
+        denial(check(&broker, &package, &write, Trigger::Activation)),
+        Denial::Revoked(ScopeKey::Snippets)
+    );
+}

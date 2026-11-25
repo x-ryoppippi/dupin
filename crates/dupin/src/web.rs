@@ -219,7 +219,7 @@ impl WebSearches {
             }
             listed.unwrap_or_else(|error| {
                 if let dupin_js_runtime::RunError::Failed(diagnostic) = error {
-                    crate::log::warn(&format!("extension {}: {diagnostic}", extension.id));
+                    crate::log::warn(&format!("extension {}: {}", extension.id, diagnostic.for_log()));
                 }
                 Vec::new()
             })

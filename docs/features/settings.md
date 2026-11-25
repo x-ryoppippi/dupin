@@ -2,7 +2,7 @@
 
 Search for a macOS settings pane, such as `bluetooth`, `displays` or `keyboard`, alongside apps. Enter opens the pane in System Settings. Dupin discovers panes that the installed macOS declares as settings extensions and explicitly allows opening through its settings URL scheme; availability and names follow that macOS version. Searching does not open or change settings.
 
-Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,. Settings → Keywords lists every keyword and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords.
+Type `dupin settings` to open Dupin's own preferences. This uses the same window handoff as ⌘,. Settings → Keywords lists every keyword and edits your [aliases](./keywords.md#aliases) and the Dictionary and snippet keywords. Settings → Snippets lists every [snippet](./snippets.md#adding-and-editing), adds, edits and deletes the ones stored in Dupin, and shows `config.toml`'s read-only.
 
 Settings saves to `config.toml` when it is writable. With a read-only file, the keys it sets are locked: rows show **Managed by Nix** when the file links into the Nix store, and **Set in config.toml** otherwise. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
 

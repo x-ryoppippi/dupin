@@ -1,0 +1,878 @@
+{
+	"fixture": 1,
+	"description": "Adds a snippet in a form, refusing a keyword another snippet or config.toml has, then renames it and deletes it; config.toml's snippet is listed but never offered for editing.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"preferences": {
+		"paste": false,
+		"snippets": [
+			{
+				"keyword": "addr",
+				"name": "Home address",
+				"source": "config",
+				"text": "221B Baker Street"
+			},
+			{
+				"keyword": "sig",
+				"name": "Email signature",
+				"source": "stored",
+				"text": "Best wishes,\nSherlock"
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "221B Baker Street",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["addr"],
+						"id": "snippet:addr",
+						"subtitle": "addr  ·  221B Baker Street",
+						"title": "Home address"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "sig"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "sig"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Add Snippet",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": null,
+						"view": "edit"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": ""
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"keyword": "sig",
+				"name": "Signature",
+				"text": "Cheers"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": "Signature"
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "sig"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Cheers"
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": "Signature"
+						},
+						{
+							"error": "Another snippet has this keyword",
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "sig"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Cheers"
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"keyword": "addr"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": "Signature"
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "addr"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Cheers"
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": "Signature"
+						},
+						{
+							"error": "config.toml already has a snippet with this keyword",
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "addr"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Cheers"
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"keyword": "today",
+				"name": "",
+				"text": "Checked on {date}"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "today"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Checked on {date}"
+						}
+					],
+					"name": "edit",
+					"submit": "Save Snippet",
+					"title": "Add Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "221B Baker Street",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["addr"],
+						"id": "snippet:addr",
+						"subtitle": "addr  ·  221B Baker Street",
+						"title": "Home address"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "sig"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "sig"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Checked on {date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "today"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "today"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"id": "snippet:today",
+						"subtitle": "today  ·  Checked on {date}",
+						"title": "today"
+					}
+				],
+				"selected": 0,
+				"toasts": ["Added the snippet"]
+			}
+		},
+		{
+			"query": "today",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "Checked on {date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "today"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "today"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"id": "snippet:today",
+						"subtitle": "today  ·  Checked on {date}",
+						"title": "today"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Edit Snippet",
+			"expect": {
+				"effect": {
+					"push": {
+						"state": {
+							"keyword": "today"
+						},
+						"view": "edit"
+					}
+				},
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "today"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Checked on {date}"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"keyword": "today"
+					},
+					"submit": "Save Snippet",
+					"title": "Edit Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"fill": {
+				"keyword": "checked"
+			},
+			"expect": {
+				"rows": [],
+				"view": {
+					"depth": 1,
+					"fields": [
+						{
+							"id": "name",
+							"title": "Name",
+							"type": "text",
+							"value": ""
+						},
+						{
+							"id": "keyword",
+							"required": true,
+							"title": "Keyword",
+							"type": "text",
+							"value": "checked"
+						},
+						{
+							"id": "text",
+							"required": true,
+							"title": "Text",
+							"type": "textarea",
+							"value": "Checked on {date}"
+						}
+					],
+					"name": "edit",
+					"state": {
+						"keyword": "today"
+					},
+					"submit": "Save Snippet",
+					"title": "Edit Snippet",
+					"type": "form"
+				}
+			}
+		},
+		{
+			"submit": true,
+			"expect": {
+				"rows": [],
+				"toasts": ["Saved the snippet"]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "221B Baker Street",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["addr"],
+						"id": "snippet:addr",
+						"subtitle": "addr  ·  221B Baker Street",
+						"title": "Home address"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Checked on {date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "checked"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "checked"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"id": "snippet:checked",
+						"subtitle": "checked  ·  Checked on {date}",
+						"title": "checked"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "sig"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "sig"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"query": "checked",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "Checked on {date}",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "checked"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "checked"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"id": "snippet:checked",
+						"subtitle": "checked  ·  Checked on {date}",
+						"title": "checked"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Delete Snippet",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "remove",
+						"data": {
+							"keyword": "checked"
+						}
+					}
+				},
+				"toasts": ["Deleted the snippet"]
+			}
+		},
+		{
+			"query": "",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"icon": "sf:plus",
+						"id": "add-snippet",
+						"subtitle": "Store a new snippet in Dupin, encrypted",
+						"title": "Add Snippet"
+					},
+					{
+						"accessories": [
+							{
+								"tag": "config.toml"
+							}
+						],
+						"actions": [
+							{
+								"copy": "221B Baker Street",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["addr"],
+						"id": "snippet:addr",
+						"subtitle": "addr  ·  221B Baker Street",
+						"title": "Home address"
+					},
+					{
+						"actions": [
+							{
+								"copy": "Best wishes,\nSherlock",
+								"template": true,
+								"title": "Copy to Clipboard"
+							},
+							{
+								"push": {
+									"state": {
+										"keyword": "sig"
+									},
+									"view": "edit"
+								},
+								"title": "Edit Snippet"
+							},
+							{
+								"run": {
+									"action": "remove",
+									"data": {
+										"keyword": "sig"
+									}
+								},
+								"title": "Delete Snippet"
+							},
+							{
+								"push": {
+									"state": null,
+									"view": "edit"
+								},
+								"title": "Add Snippet"
+							}
+						],
+						"aliases": ["sig"],
+						"id": "snippet:sig",
+						"subtitle": "sig  ·  Best wishes, Sherlock",
+						"title": "Email signature"
+					}
+				],
+				"selected": 0
+			}
+		}
+	]
+}
