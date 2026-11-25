@@ -240,7 +240,7 @@ pub struct KeywordEntry {
     pub subtitle: String,
     /// What the row naming it shows: the command's own icon, a globe for a web search, or the
     /// Finder icon of the app, file or folder.
-    pub icon: Option<crate::Icon>,
+    pub(crate) icon: Option<crate::Icon>,
     pub keywords: Vec<String>,
 }
 
