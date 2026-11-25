@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-use headless-config.nu scenario-env
+use headless-config.nu [scenario-env panel-height headless]
 
 # Render each headless scenario in scripts/headless to <out>/<name>.png.
 #
@@ -48,21 +48,4 @@ def main [
     } }
     rm --recursive $tmp
     $shots
-}
-
-# The panel's height in points, rounded up, from a `--tree` dump.
-def panel-height []: record -> int {
-    let panel = $in.elements | where key? == "panel" and rect != null
-    if ($panel | is-empty) {
-        error make {msg: "the tree has no laid-out element keyed `panel`"}
-    }
-    $panel | first | get rect.3 | math ceil
-}
-
-# Run Dupin headless, quietly unless it fails.
-def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
-    let result = ^$bin ...$args | complete
-    if $result.exit_code != 0 {
-        error make {msg: $"($bin) ($args | str join ' ') failed:\n($result.stderr)"}
-    }
 }

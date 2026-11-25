@@ -39,3 +39,20 @@ export def scenario-env [script: path, tmp: path]: nothing -> record {
         {XDG_CONFIG_HOME: $config_dir} | merge $data
     }
 }
+
+# The panel's height in points, rounded up, from a `--tree` dump.
+export def panel-height []: record -> int {
+    let panel = $in.elements | where key? == "panel" and rect != null
+    if ($panel | is-empty) {
+        error make {msg: "the tree has no laid-out element keyed `panel`"}
+    }
+    $panel | first | get rect.3 | math ceil
+}
+
+# Run Dupin headless, quietly unless it fails.
+export def --wrapped headless [bin: path, ...args: string]: nothing -> nothing {
+    let result = ^$bin ...$args | complete
+    if $result.exit_code != 0 {
+        error make {msg: $"($bin) ($args | str join ' ') failed:\n($result.stderr)"}
+    }
+}
