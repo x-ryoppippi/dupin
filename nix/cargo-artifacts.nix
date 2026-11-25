@@ -189,7 +189,7 @@ pkgs.stdenv.mkDerivation (
         latencyBinary
         ;
       inherit (commonArgs) cargoDeps;
-      inherit (native) bundledExtensions;
+      inherit (native) bundledExtensions thirdPartyNotices;
       baseline = native;
     };
   }

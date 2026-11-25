@@ -7,6 +7,8 @@
   oxipng,
   python3Packages,
   inter,
+  cargo-about,
+  nushell,
 }:
 let
   root = ./.;
@@ -100,6 +102,33 @@ let
     ];
   };
 
+  # The licences and copyright notices of every crate the binary links and of the third-party
+  # data and code in packaging/third-party.toml, as the app's Resources carry them. It fails when
+  # a crate's licence isn't on deny.toml's allow-list, so the build can't ship one unchecked.
+  thirdPartyNotices =
+    runCommand "dupin-third-party-notices"
+      {
+        src = lib.fileset.toSource {
+          inherit root;
+          fileset = lib.fileset.unions [
+            cargoFiles
+            bundleFiles
+            (root + /deny.toml)
+          ];
+        };
+        nativeBuildInputs = [
+          rustPlatform.rust.cargo
+          cargo-about
+          nushell
+        ];
+      }
+      ''
+        export HOME=$TMPDIR CARGO_HOME=$TMPDIR/cargo
+        mkdir -p $CARGO_HOME
+        cp ${cargoVendorDir}/config.toml $CARGO_HOME/config.toml
+        nu --no-config-file $src/packaging/notices.nu generate $out
+      '';
+
   # cargoSetupHook's layout over nix/cargo-vendor.nix: config.toml with `@vendor@` for the
   # copy it makes, and the Cargo.lock it checks the source's against.
   cargoDeps = runCommand "dupin-vendor" { } ''
@@ -159,6 +188,7 @@ let
       icns assets/logo/dupin.svg $app/Resources/dupin.icns
       # scripts/package-app.nu points a nightly build at this one.
       icns packaging/nightly-icon.svg $app/Resources/dupin-nightly.icns
+      cp ${thirdPartyNotices} $app/Resources/ThirdPartyNotices.txt
       # Each package folder, without extensions/tsconfig.json, which only the type check reads.
       mkdir $app/Resources/extensions
       for package in extensions/*/; do
@@ -193,6 +223,7 @@ rustPlatform.buildRustPackage (
         cargoSrc
         bundleSrc
         bundledExtensions
+        thirdPartyNotices
         ;
     };
   }

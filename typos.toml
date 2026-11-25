@@ -9,6 +9,8 @@ extend-ignore-re = [
 centre = "centre"
 centred = "centred"
 colour = "colour"
+licence = "licence"
+licences = "licences"
 maximise = "maximise"
 
 [files]

@@ -1,0 +1,101 @@
+# Third-party code and data Dupin.app ships that isn't a Cargo crate. packaging/notices.nu adds
+# each entry to the app's third-party notices; checks.licences holds `licence` to deny.toml's
+# allow-list (or `data-licences` below), `text` and `files` to files that exist, and every
+# shipped file that names a copyright holder or licence other than Dupin's to an entry here.
+
+# Licences for data rather than code, which the app reads but never runs or links.
+data-licences = ["CC-BY-3.0-US", "CC-BY-4.0"]
+
+[[material]]
+name = "Unicode Emoji 15.1 and Unicode CLDR 45.0.0"
+use = "Emoji names, sections, skin tones and English and Japanese keywords in the emoji extension"
+source = "https://unicode.org/Public/emoji/15.1/ and https://github.com/unicode-org/cldr-json"
+licence = "Unicode-3.0"
+text = "extensions/emoji/LICENSE-UNICODE"
+files = ["extensions/emoji/catalogue.ts", "extensions/emoji/fixtures"]
+
+[[material]]
+name = "aurora-shimmer.glsl and campfire-embers.glsl from snedea/ghostty-themes"
+use = "The Aurora and Embers backdrop shaders, ported to WGSL"
+source = "https://github.com/snedea/ghostty-themes"
+licence = "MIT"
+copyright = ["Copyright (c) 2026 snedea"]
+text = "packaging/licences/MIT.txt"
+files = ["examples/shaders/aurora.wgsl", "examples/shaders/embers.wgsl"]
+
+[[material]]
+name = "snow.glsl from an0sunshy/ghostty-shaders"
+use = "The Snow backdrop shader, ported to WGSL"
+source = "https://github.com/an0sunshy/ghostty-shaders"
+licence = "MIT"
+copyright = ["Copyright (c) 2026 an0sunshy"]
+text = "packaging/licences/MIT.txt"
+files = ["examples/shaders/snow.wgsl"]
+
+# Crates whose package carries no licence text cargo-about can identify, so it falls back to the
+# licence's template, without the copyright line the licence asks to be kept. Each names the
+# holders the crate's repository's licence file names; `[]` where that file names none.
+[[crate]]
+names = [
+	"rune",
+	"rune-core",
+	"rune-edit",
+	"rune-gpu",
+	"rune-image",
+	"rune-kit",
+	"rune-media",
+	"rune-notify",
+	"rune-spell",
+	"rune-taffy",
+	"rune-text",
+]
+copyright = ["Copyright (c) 2026 Anomaly"]
+
+# Rune's theme crate carries OpenCode's icons and tokens.
+[[crate]]
+names = ["rune-theme-opencode"]
+copyright = ["Copyright (c) 2026 Anomaly", "Copyright (c) 2025 opencode"]
+
+[[crate]]
+names = ["objc2", "objc2-encode", "objc2-foundation", "objc2-app-kit", "objc-sys", "block2"]
+copyright = ["Copyright (c) Steven Sheldon", "Copyright 2026 Mads Marquart"]
+
+[[crate]]
+names = ["dispatch"]
+copyright = ["Copyright (c) Steven Sheldon"]
+
+[[crate]]
+names = [
+	"oxc_allocator",
+	"oxc_ast",
+	"oxc_ast_macros",
+	"oxc_ast_visit",
+	"oxc_data_structures",
+	"oxc_diagnostics",
+	"oxc_ecmascript",
+	"oxc_estree",
+	"oxc_parser",
+	"oxc_regular_expression",
+	"oxc_span",
+	"oxc_str",
+	"oxc_syntax",
+]
+copyright = ["Copyright (c) 2024-present VoidZero Inc. & Contributors", "Copyright (c) 2023 Boshen"]
+
+[[crate]]
+names = ["rquickjs-core"]
+copyright = ["Copyright (c) 2020 Mees Delzenne", "Copyright (c) 2025 Rquickjs Contributors"]
+
+[[crate]]
+names = ["taffy"]
+copyright = ["Copyright (c) 2018 Visly Inc.", "Copyright (c) 2026 Taffy Authors"]
+
+[[crate]]
+names = ["sha1_smol"]
+copyright = [
+	"Copyright (c) 2018, the respective contributors, as shown by the AUTHORS file of https://github.com/mitsuhiko/sha1-smol",
+]
+
+[[crate]]
+names = ["dpi", "libm"]
+copyright = []
