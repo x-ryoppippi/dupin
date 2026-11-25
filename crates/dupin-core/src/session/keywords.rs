@@ -178,7 +178,7 @@ fn row(suggestion: Suggestion) -> (Item, Vec<Accessory>) {
 /// How a row shows a keyword: what to type, then Space.
 pub fn keyword_tag(keyword: &str) -> String {
     if keyword.is_empty() {
-        "␣".into()
+        "Space".into()
     } else {
         format!("{keyword} ␣")
     }

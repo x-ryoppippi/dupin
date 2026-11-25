@@ -188,7 +188,7 @@ fn a_question_mark_lists_every_command_and_its_keywords() {
         ("Clipboard", &["clip ␣"]),
         ("Dictionary", &["d ␣", "define ␣"]),
         ("Emoji", &["emoji ␣"]),
-        ("Files", &["␣"]),
+        ("Files", &["Space"]),
         ("Search GitHub", &["gh ␣"]),
         ("Search Google", &["g ␣"]),
     ]
