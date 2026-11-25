@@ -261,6 +261,44 @@ fn a_catalogue_change_the_host_rejects_names_the_package() {
 }
 
 #[test]
+fn the_main_search_shows_the_package_icon_on_rows_without_one() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let (_folder, extension) = package(
+        r#", "defaultSearch": true, "icon": "sf:bookmark""#,
+        &[(
+            "main.js",
+            r#"export function items() {
+                 return [{ id: 'a', title: 'Alpha docs' }, { id: 'b', title: 'Alpha star', icon: 'sf:star.fill' }];
+               }"#,
+        )],
+    );
+    assert_eq!(extension.icon, Some(dupin_core::Icon::Symbol("bookmark".into())));
+    let icons = |provider: &ExtensionProvider| -> Vec<_> {
+        batches(provider, "alpha")
+            .into_iter()
+            .flat_map(|batch| batch.items)
+            .map(|item| (item.display_title().to_owned(), item.icon))
+            .collect()
+    };
+    let symbol = |name: &str| Some(dupin_core::Icon::Symbol(name.into()));
+    let main = ExtensionProvider::with_role(extension.clone(), Role::DefaultSearch);
+    assert_eq!(
+        icons(&main),
+        [
+            ("Alpha docs".to_owned(), symbol("bookmark")),
+            ("Alpha star".to_owned(), symbol("star.fill"))
+        ]
+    );
+    assert_eq!(
+        icons(&ExtensionProvider::new(extension)),
+        [
+            ("Alpha docs".to_owned(), None),
+            ("Alpha star".to_owned(), symbol("star.fill"))
+        ]
+    );
+}
+
+#[test]
 fn an_update_removes_rows_from_the_keyword_and_the_main_search() {
     dupin_extension_host::skip_inside_a_sandbox!();
     let (_folder, extension) = package(

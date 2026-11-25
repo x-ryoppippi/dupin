@@ -75,7 +75,9 @@ pub fn rgba(name: &str, canvas: u32, glyph: u32, ink: [u8; 4]) -> Option<Vec<u8>
 /// nothing and its alpha says where it is.
 fn tint(drawn: &[u8], [r, g, b, a]: [u8; 4]) -> Vec<u8> {
     drawn
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| {
             let alpha = (u16::from(pixel[3]) * u16::from(a) + 127) / 255;
             [r, g, b, alpha as u8]
@@ -88,7 +90,12 @@ mod tests {
     use super::*;
 
     fn coverage(pixels: &[u8]) -> usize {
-        pixels.chunks_exact(4).filter(|pixel| pixel[3] > 0).count()
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| pixel[3] > 0)
+            .count()
     }
 
     #[test]
@@ -99,7 +106,9 @@ mod tests {
         assert!(coverage(&pixels) > 100);
         assert!(
             pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .all(|pixel| pixel[..3] == ink[..3] || pixel[3] == 0)
         );
         let row = |y: usize| &pixels[y * 64 * 4..(y + 1) * 64 * 4];
@@ -111,7 +120,15 @@ mod tests {
     fn half_transparent_ink_halves_the_coverage() {
         let solid = rgba("lock.fill", 32, 32, [0, 0, 0, 255]).unwrap();
         let faint = rgba("lock.fill", 32, 32, [0, 0, 0, 128]).unwrap();
-        let most = |pixels: &[u8]| pixels.chunks_exact(4).map(|pixel| pixel[3]).max().unwrap();
+        let most = |pixels: &[u8]| {
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|pixel| pixel[3])
+                .max()
+                .unwrap()
+        };
         assert_eq!(most(&solid), 255);
         assert_eq!(most(&faint), 128);
     }
