@@ -1522,7 +1522,9 @@ pub(crate) mod tests {
         assert_eq!(retargeted.extension.icon, Some(image("assets/b.png")));
 
         fs::remove_file(folder.join("icon.png")).unwrap();
-        let gone = load(&folder, Some(retargeted), false).unwrap_err();
+        let Err(gone) = load(&folder, Some(retargeted), false) else {
+            panic!("a missing icon fails the package");
+        };
         assert_eq!(
             (gone.code.as_ref(), gone.field.as_deref()),
             ("package-unreadable", Some("dupin.icon"))
