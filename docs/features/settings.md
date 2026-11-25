@@ -6,6 +6,8 @@ Type `dupin settings` to open Dupin's own preferences. This uses the same window
 
 Settings saves to `config.toml` when it is writable. With a read-only file, the keys it sets are locked: rows show **Managed by Nix** when the file links into the Nix store, and **Set in config.toml** otherwise. Other edits are saved to `settings.toml` in Dupin's Application Support directory. See [Configuration](../configuration.md) for paths and precedence.
 
+**Open config.toml** at the foot of the Settings sidebar opens the file in its default editor, and **Open Config Folder** shows the folder that holds it, with `extensions/` and `shaders/`, in Finder, creating it first if it doesn't exist.
+
 ## First run
 
 The first launch opens Settings with a short welcome: choose the hotkey, turn on launch at login, and see which keys switch modes. ⌘Space is Spotlight's shortcut too; to give it to Dupin, turn off Show Spotlight search in System Settings → Keyboard → Keyboard Shortcuts → Spotlight, or choose another hotkey. When another app holds the chord you press, Dupin names it.
