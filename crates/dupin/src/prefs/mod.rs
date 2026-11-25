@@ -697,6 +697,30 @@ mod tests {
     }
 
     #[test]
+    fn a_store_that_failed_closed_is_named_on_every_page() {
+        const STORE: &str = "A store under test";
+        let shown = |runtime: &mut rune::Runtime<Prefs>| {
+            runtime.frame(0.0);
+            runtime.accessibility_tree().nodes.iter().any(|(_, node)| {
+                node.value()
+                    .is_some_and(|text| text.starts_with(STORE) && text.contains("storage key"))
+            })
+        };
+        let current = Rc::new(RefCell::new(Config::default()));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        crate::stored::report(STORE, Some("couldn't get the storage key: locked"));
+        let mut runtime =
+            rune::Runtime::new(state(current, settings, false), view, SIZE, rune::Env::default());
+        for page in [Page::General, Page::Extensions, Page::Updates] {
+            runtime.update(move |s, _| s.show(page));
+            assert!(shown(&mut runtime), "{}", page.title());
+        }
+        crate::stored::report(STORE, None);
+        runtime.update(|_, _| {});
+        assert!(!shown(&mut runtime));
+    }
+
+    #[test]
     fn the_snippets_page_lists_config_toml_snippets_read_only_and_adds_stored_ones() {
         use rune::accesskit::Role;
 

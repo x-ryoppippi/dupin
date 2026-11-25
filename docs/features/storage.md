@@ -4,10 +4,11 @@
 
 ## What Dupin keeps where
 
-Everything Dupin learns about its user lives in encrypted storage, in the namespace the [sync design](../design/sync.md#what-syncs) assigns it. A built-in store that can't be opened, because the key is missing or the data was sealed with another, keeps what it holds untouched, saves nothing until it opens and says why on every Settings page; it never falls back to a file in the clear.
+What Dupin learns about its user belongs in encrypted storage, in the namespace the [sync design](../design/sync.md#what-syncs) assigns it; the table lists every file that holds such data and where each stands. A built-in store that can't be opened, because the key is missing or the data was sealed with another, keeps what it holds untouched, saves nothing until it opens and says why on every Settings page; it never falls back to a file in the clear.
 
 | What                                   | Where                                                                              | Form                                                   | Syncs                                                    |
 | -------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------------------------------- |
+| Snippets added in Dupin                | `snippets` namespace, one record per snippet                                       | Encrypted                                              | `snippets`, last writer wins, when it ships              |
 | Saved snapshots                        | `snapshots` namespace, one record per snapshot                                     | Encrypted                                              | Never                                                    |
 | Clipboard history                      | The bundled clipboard history package's namespace                                  | Encrypted                                              | Opt-in, when clipboard sync ships                        |
 | An extension's stored data             | `ext-u-…` or `ext-b-…`, its own namespace                                          | Encrypted                                              | Only with `storage.sync`, when it ships                  |
@@ -47,6 +48,7 @@ The broker bridge names an extension's namespace `ext-u-<hash>` for a package th
 A native feature opens its namespace by the name the [sync design](../design/sync.md#what-syncs) gives it, so sync can later carry its records without a migration. Each shares the launcher's one `Storage` with the extensions' namespaces, so all of them follow one device clock.
 
 - **`snippets`**: the [snippets](./snippets.md) you add in Dupin, one record per snippet upserted under its keyword, holding `{ keyword, name, text }`. A record whose keyword doesn't name it is left out. Its limits leave room for every snippet Dupin lists (10,000), and writes use `upsert_within_limits`, so storing one never evicts another. Dupin opens it on a worker thread at launch only when the directory exists, so the data key is first read when you store a snippet, and a failure to open it is reported in the panel and retried on the next edit, never answered by deleting anything. It doesn't sync yet.
+- **`snapshots`**: [saved snapshots](./snapshots.md), one record per snapshot upserted under its ID, holding the snapshot as the Snapshots window shows it. A record whose ID doesn't name it is left out. Its limits are the feature's own (100 snapshots, 512 KiB each, 8 MiB in all), and writes use `upsert_within_limits`, so a full store refuses a save rather than evicting one. One store per process owns it, on the snapshot writer's thread and the `snap` keyword's worker; it opens only when the directory exists, and a failure to open it is shown in the Snapshots window and on every Settings page and retried on the next save. It never syncs.
 
 ## On disk
 
