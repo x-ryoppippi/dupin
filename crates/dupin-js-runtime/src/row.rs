@@ -381,12 +381,18 @@ impl Row {
             if source == Source::Items {
                 return Err("`answer` belongs to search() and views".into());
             }
-            let (first, second) = answer.split_once('\n').unwrap_or((answer, ""));
-            line("answer", first, MAX_TITLE_BYTES)?;
-            if !second.is_empty() {
-                line("answer", second, MAX_TITLE_BYTES - first.len()).map_err(|_| {
-                    format!("`answer` must be one or two lines of 1 to {MAX_TITLE_BYTES} bytes")
-                })?;
+            let lines = || {
+                let (first, second) = match answer.split_once('\n') {
+                    Some((first, second)) => (first, Some(second)),
+                    None => (answer.as_str(), None),
+                };
+                line("answer", first, MAX_TITLE_BYTES)?;
+                second.map_or(Ok(()), |second| line("answer", second, MAX_TITLE_BYTES))
+            };
+            if answer.len() > MAX_TITLE_BYTES || lines().is_err() {
+                return Err(format!(
+                    "`answer` must be one or two lines of 1 to {MAX_TITLE_BYTES} bytes in all"
+                ));
             }
         }
         validate_actions(&self.actions, source)

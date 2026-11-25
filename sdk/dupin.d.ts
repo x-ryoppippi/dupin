@@ -809,9 +809,10 @@ declare module 'dupin' {
 	/** `calculator` capability. */
 	export const calculator: {
 		/**
-		 * Works out arithmetic, units and currencies, up to 512 bytes on one line, within 50 ms.
-		 * `null` when it isn't something the calculator answers: unbalanced or deeply nested
-		 * brackets, characters it doesn't take, an error or an answer longer than 256 bytes.
+		 * Works out arithmetic, units and currencies within 50 ms. An empty expression, one over 512
+		 * bytes or one with a control character such as a line break fails with `invalid`. `null`
+		 * when it isn't something the calculator answers: unbalanced or deeply nested brackets,
+		 * characters it doesn't take, an error or an answer longer than 256 bytes.
 		 */
 		evaluate(expression: string): Promise<Calculation | null>;
 	};

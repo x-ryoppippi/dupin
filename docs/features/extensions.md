@@ -641,7 +641,7 @@ Text the layout doesn't recognize stays in a sense's `definition` or a group's `
 
 ### Calculator
 
-`"calculator": ["evaluate"]` lets an extension work things out with the calculator the bundled [Calculator](./calculator.md) uses, while you type. It needs no macOS permission and reaches nothing outside Dupin. `calculator.evaluate(expression)` takes up to 512 bytes on one line and answers within 50 ms, or `null` for anything it doesn't answer: brackets that don't balance or nest more than 17 deep, characters other than letters, digits, spaces, `+ - − * × / ÷ ∕ ^ % ! . , _ °`, brackets and `$ € £ ¥ ₺`, an error, or an answer longer than 256 bytes.
+`"calculator": ["evaluate"]` lets an extension work things out with the calculator the bundled [Calculator](./calculator.md) uses, while you type. It needs no macOS permission and reaches nothing outside Dupin. `calculator.evaluate(expression)` takes up to 512 bytes on one line; an empty expression, a longer one or one with a line break or another control character fails with `invalid` before anything is worked out. It answers within 50 ms, or `null` for anything it doesn't answer: brackets that don't balance or nest more than 17 deep, characters other than letters, digits, spaces, `+ - − * × / ÷ ∕ ^ % ! . , _ °`, brackets and `$ € £ ¥ ₺`, an error, or an answer longer than 256 bytes.
 
 ```js
 const answer = await calculator.evaluate('5 km to mi');

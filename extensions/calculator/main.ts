@@ -70,14 +70,13 @@ async function calculate(source: string): Promise<Answer | null> {
 	const input = euroInput(temperatureInput(source));
 	const result = await calculator.evaluate(input);
 	if (!result) return null;
-	const exchange = result.exchange;
-	if (!exchange) {
+	if (!result.exchange) {
 		return isExpression(source, false, false)
 			? { display: result.result, number: result.number }
 			: null;
 	}
-	if (exchange.status === 'unavailable') return { display: 'Exchange rates unavailable' };
-	if (exchange.status === 'missing') return { display: `No ECB rate for ${exchange.currency}` };
+	let exchange = result.exchange;
+	if (exchange.status !== 'ok') return withoutRate(exchange);
 	let amount = result.result;
 	let number = result.number;
 	const code = resultCurrency(result, exchange.currencies);
@@ -87,6 +86,9 @@ async function calculate(source: string): Promise<Answer | null> {
 		const precision = ['ISK', 'JPY', 'KRW'].includes(target) ? 0 : 2;
 		const converted = await calculator.evaluate(`(${input}) to ${target} to ${precision}dp`);
 		if (!converted) return null;
+		// Dupin may have refreshed the rates in between: the date is the converted amount's.
+		exchange = converted.exchange ?? exchange;
+		if (exchange.status !== 'ok') return withoutRate(exchange);
 		number = padded(converted.number, precision);
 		const grouped = groupDigits(number);
 		const sign = SIGNS[target];
@@ -94,6 +96,14 @@ async function calculate(source: string): Promise<Answer | null> {
 	}
 	const status = exchange.stale ? 'Cached ECB rate' : 'ECB rate';
 	return { display: `${amount}\n${status} ${exchange.date}`, number };
+}
+
+function withoutRate(
+	exchange: { status: 'unavailable' } | { status: 'missing'; currency: string },
+): Answer {
+	return exchange.status === 'unavailable'
+		? { display: 'Exchange rates unavailable' }
+		: { display: `No ECB rate for ${exchange.currency}` };
 }
 
 /** Whether `source` reads as a calculation rather than a name, a bare number or half a sum. */

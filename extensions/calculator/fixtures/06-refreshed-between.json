@@ -1,0 +1,79 @@
+{
+	"fixture": 1,
+	"description": "When Dupin refreshes the rates between the two steps of a conversion, the date shown is that of the rates the amount was converted at.",
+	"environment": {
+		"now": "2026-01-01T09:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"calculator": {
+			"100 usd to jpy": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-19",
+					"stale": true,
+					"status": "ok"
+				},
+				"number": "14950",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "14950"
+					},
+					{
+						"kind": "ident",
+						"text": " JPY"
+					}
+				],
+				"result": "14950 JPY"
+			},
+			"(100 usd to jpy) to JPY to 0dp": {
+				"exchange": {
+					"currencies": ["CAD", "EUR", "GBP", "ISK", "JPY", "USD"],
+					"date": "2026-11-20",
+					"stale": false,
+					"status": "ok"
+				},
+				"number": "14950",
+				"parts": [
+					{
+						"kind": "number",
+						"text": "14950"
+					},
+					{
+						"kind": "ident",
+						"text": " JPY"
+					}
+				],
+				"result": "14950 JPY"
+			}
+		}
+	},
+	"steps": [
+		{
+			"query": "100 usd to jpy",
+			"expect": {
+				"rows": [
+					{
+						"id": "answer",
+						"title": "100 usd to jpy",
+						"answer": "≈ ¥14,950\nECB rate 2026-11-20",
+						"actions": [
+							{
+								"title": "Copy number",
+								"copy": "14950"
+							}
+						]
+					}
+				]
+			}
+		}
+	]
+}

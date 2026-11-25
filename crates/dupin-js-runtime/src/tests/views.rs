@@ -223,6 +223,26 @@ fn malformed_views_name_the_field_at_fault() {
 }
 
 #[test]
+fn a_row_from_another_process_answers_in_one_or_two_lines_within_the_limit() {
+    let answered = |answer: String| {
+        let mut row = crate::row::Row::new("a", "a");
+        row.answer = Some(answer);
+        row.validate(crate::row::Source::Search)
+    };
+    assert!(answered("≈ £42.50".into()).is_ok());
+    assert!(answered("≈ £42.50\nECB rate 2026-11-20".into()).is_ok());
+    for refused in [
+        String::new(),
+        "a\n".into(),
+        "\nb".into(),
+        "a\nb\nc".into(),
+        format!("{}\nb", "a".repeat(511)),
+    ] {
+        assert!(answered(refused.clone()).is_err(), "{refused:?}");
+    }
+}
+
+#[test]
 fn malformed_accessories_answers_and_pushes_are_refused() {
     for (item, code, field) in [
         (
