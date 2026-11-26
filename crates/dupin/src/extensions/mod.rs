@@ -1005,7 +1005,7 @@ pub fn watch(
     {
         deliver(catalog);
     }
-    watch_with(directory, scanner, crate::watch_source::FsEvents, deliver)
+    watch_with(directory, scanner, crate::watch_source::launcher(), deliver)
 }
 
 fn watch_with(
