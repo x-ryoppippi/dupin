@@ -196,12 +196,16 @@ def record-clip [
             (
                 ^ffmpeg -nostdin -hide_banner -loglevel error -y -f avfoundation -framerate 30
                 -capture_cursor 0 -i "Capture screen 0:none" -t ($seconds | into string) -an
-                -c:v libx264 -preset veryfast -crf 12 -pix_fmt yuv420p -progress $progress $movie
+                -c:v libx264 -preset veryfast -crf 12 -pix_fmt yuv420p -stats_period 0.1
+                -progress $progress $movie
             )
             true | job send 0 --tag 1
         } | ignore
-        wait-for "the recording's first frame" { ($progress | path exists) and ((open --raw $progress) =~ '(?m)^frame=[1-9]') }
-        let started = date now
+        wait-for "the recording's first frame" { ($progress | path exists) and ((open --raw $progress) =~ '(?m)^out_time_us=[1-9]') }
+        # When the recording began, from how far into it ffmpeg has written: the first progress
+        # report comes some way in.
+        let written = open --raw $progress | parse --regex '(?m)^out_time_us=(?P<us>\d+)' | last | get us | into int
+        let started = (date now) - ($written * 1us)
         wait-for $"($id) to open; see ($log)" {
             (
                 with-env $environment { ^$binary open | complete }
@@ -343,7 +347,8 @@ def dupin-pid [binary: path]: nothing -> int {
 }
 
 # The System Events script that plays a clip's events at their times from when it starts, which
-# it marks by touching `mark`: starting osascript takes long enough to throw the captions out.
+# it marks by touching `mark` once System Events answers: reaching it takes long enough to throw
+# the captions out.
 def steps-script [events: list<record>, mark: path]: nothing -> string {
     let played = $events | where type != mark | reduce --fold {t: 0, lines: []} {|event, run|
         let wait = [($event.t - $run.t) 0] | math max | math round --precision 3
@@ -354,6 +359,7 @@ def steps-script [events: list<record>, mark: path]: nothing -> string {
         {t: $event.t, lines: ($run.lines | append [$"    delay ($wait)" $stroke])}
     }
     [
+        'tell application "System Events" to get name of first process whose frontmost is true'
         $"do shell script \"touch \" & quoted form of \"($mark)\""
         'tell application "System Events"'
         ...$played.lines
