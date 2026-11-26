@@ -31,7 +31,7 @@ Dupin reloads changes while it runs, including atomic replacements and symlink r
 <details>
 <summary>How Settings saves</summary>
 
-Settings and `dupin config set` write changes to a writable `config.toml`, replacing its comments. For a symlink, Dupin writes to the target and keeps the link.
+Settings and `dupin config set` write changes to a writable `config.toml` in place: a save changes only the keys whose value changed, adds a key to the table that holds it (or a new one at the end), and removes a cleared binding or alias with its own lines. Your comments, key order, blank lines and inline tables stay as you wrote them. For a symlink, Dupin writes to the target and keeps the link.
 
 Saves merge the edited keys into the latest valid configuration, preserving unrelated external edits. If the same key changed differently on disk, or an active file is invalid, Dupin reports the problem and leaves both files untouched. An editor that writes between the final source check and the atomic replacement can still have its edit overwritten.
 

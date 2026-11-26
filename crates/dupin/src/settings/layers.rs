@@ -52,8 +52,13 @@ pub(super) struct Effective {
 }
 
 impl Layers {
+    /// config.toml as it was read, empty when there is none.
+    pub fn base_source(&self) -> &str {
+        self.base.as_deref().unwrap_or_default()
+    }
+
     pub fn effective(&self) -> Result<Effective, String> {
-        let base = self.base.as_deref().unwrap_or_default();
+        let base = self.base_source();
         let mut config = Config::parse(base).map_err(|e| parse_problem("config.toml", base, &e))?;
         let mut locked_keys = LockedKeys::new();
         let mut overlay = Table::new();
