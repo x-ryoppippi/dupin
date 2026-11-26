@@ -7,15 +7,22 @@ Five minutes with Dupin, from the first search to your own shortcuts.
 Press ⌘Space, type a few letters of an app's name and press ↩.
 
 <picture>
-<source media="(prefers-color-scheme: dark)" srcset="images/usage/search-dark.png" />
-<img alt="The Dupin panel with “ma” typed: Maps first, then the Search Apple Maps web search, Mail, Magnifier and other apps." src="images/usage/search-light.png" width="680" />
+<source media="(prefers-color-scheme: dark)" srcset="images/tutorial/apps-dark.webp" />
+<img alt="Typing “maps” narrows the apps to Maps; ⌘K then shows its actions: Open, Reveal in Finder, Quick Look and Send to." src="images/tutorial/apps-light.webp" width="680" />
 </picture>
 
-Esc, or ⌘Space again, hides the panel. Dupin learns what you pick, so the same letters find it first next time.
+⌘K shows what else you can do with the selected row. Esc, or ⌘Space again, hides the panel. Dupin learns what you pick, so the same letters find it first next time.
 
 ## Find a file
 
-Press Space on an empty query, then type part of a file's name. ↩ opens it, ⌘↩ reveals it in Finder and → shows what else you can do with it. Type `in` and Space instead to search inside files.
+With nothing typed, the panel lists what you opened recently. Tab on a folder lists what is in it, and typing filters it.
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="images/tutorial/files-dark.webp" />
+<img alt="Recent items with the Reports folder first; Tab lists the folder, and typing “ann” leaves Annual report 2026.pdf." src="images/tutorial/files-light.webp" width="680" />
+</picture>
+
+Press Space on an empty query to search every file by name with Spotlight, or type `in` and Space to search inside files. ↩ opens a file and ⌘↩ reveals it in Finder.
 
 ## Use a keyword
 
@@ -28,15 +35,20 @@ A keyword and Space enters a command:
 | `clip`, Space   | What you copied, once clipboard history is on in Settings → Search ([Clipboard](./features/clipboard.md))  |
 | `g rust`        | A Google search for “rust” ([Web searches](./features/web-searches.md))                                    |
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="images/tutorial/dictionary-dark.webp" />
+<img alt="Typing “d” and Space enters the Define mode; typing “serendipity” shows its pronunciation, meaning and origin." src="images/tutorial/dictionary-light.webp" width="680" />
+</picture>
+
 ⌫ on an empty query leaves the command.
 
 ## See every keyword
 
-Type `?`.
+Type `?`, and choose one to enter it.
 
 <picture>
-<source media="(prefers-color-scheme: dark)" srcset="images/keywords/list-dark.png" />
-<img alt="The panel with “?” typed, listing commands with their keywords as tags." src="images/keywords/list-light.png" width="680" />
+<source media="(prefers-color-scheme: dark)" srcset="images/tutorial/keywords-dark.webp" />
+<img alt="Typing “?” lists every command with its keywords as tags: Dictionary (d, define), Dupin (help), Emoji &amp; Symbols (emoji), File Contents (in), Files (Space) and web searches; ↓ moves through them." src="images/tutorial/keywords-light.webp" width="680" />
 </picture>
 
 ## Make it yours

@@ -190,7 +190,20 @@ A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` sourc
 </picture>
 ```
 
-Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image exists in both themes, `docs/images` holds nothing else, some page embeds each one and every image a page embeds exists.
+Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in both themes, `docs/images` holds nothing else, some page embeds each one and every image a page embeds exists.
+
+### Clips
+
+The same list's `[[clips]]` are short recordings: each plays its `steps` (typed text, keys and waits) into the panel in a headless `--realtime` run, in the same scratch home as the images, and saves `docs/images/<page>/<name>-<theme>.webp` in light and dark. `just docs-clips` (`nu scripts/docs-images.nu --kind clips`) renders only the clips; `just docs-images` renders both. Rune writes the frames at 15 fps and 1.5× scale, each clip is cut to the lowest edge the panel reaches in any frame, and a caption below the panel names each key pressed (`⇥ Tab`, `⌘K`) or the text typed so far (`type: cal`). ImageMagick draws the captions in Inter, the same on every Mac, which the dev shell provides as `DUPIN_CAPTION_FONT`, and `img2webp` encodes the frames as a lossy animated WebP, in which a frame that repeats the last costs nothing. A clip is embedded like an image, as a `<picture>` of its two WebP files:
+
+```html
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset="images/tutorial/apps-dark.webp" />
+	<img alt="What the clip shows" src="images/tutorial/apps-light.webp" width="680" />
+</picture>
+```
+
+Animated WebP, not video, because the same Markdown is read on GitHub, which shows a `<video>` only for files uploaded to an issue or pull request, never one in the repository; GitHub shows an animated WebP as an image, and so does every current browser, without a player or autoplay rules. A clip must never type into a Spotlight search (Space on an empty query, or `in`), since Spotlight answers from the rendering Mac's own index; the files clips start from Recent items and folder browsing instead, which read only the scratch home.
 
 ## Native E2E evidence
 

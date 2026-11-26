@@ -1,5 +1,5 @@
 use std/assert
-use ../docs-images.nu [embedded image-paths problems]
+use ../docs-images.nu [clip-timeline embedded image-paths key-caption problems]
 
 const SOURCES = [
     extensions/calendar
@@ -85,4 +85,59 @@ def main [] {
 
     let twice = problems {images: [$search $search]} ($files | skip 2) ($docs | first 1) $exists
     assert ($twice | any { str contains "lists usage/search more than once" })
+
+    let clip = {
+        page: tutorial
+        name: apps
+        steps: [
+            {type: "ab"}
+            {key: k, cmd: true}
+        ]
+    }
+    let clip_files = image-paths $clip
+    assert equal $clip_files [
+        docs/images/tutorial/apps-light.webp
+        docs/images/tutorial/apps-dark.webp
+    ]
+    let clip_doc = {
+        path: docs/tutorial.md
+        text: (picture "" tutorial/apps | str replace --all .png .webp)
+    }
+    let clip_exists = {|path| $path in ($files | append $clip_files | append $SOURCES) }
+    assert equal (
+        problems {images: [$search], clips: [$clip]} ($files | skip 2 | append $clip_files) [($docs | first) $clip_doc] $clip_exists
+    ) []
+    let unrendered = problems {images: [$search], clips: [$clip]} ($files | skip 2) [
+        ($docs | first)
+        $clip_doc
+    ] $clip_exists
+    assert (
+        $unrendered
+        | any { str contains "docs/images/tutorial/apps-dark.webp is missing" }
+    )
+    let stepless = problems {images: [], clips: [($clip | update steps [])]} $clip_files [$clip_doc] $clip_exists
+    assert ($stepless | any { str contains "tutorial/apps has no steps" })
+
+    let timeline = clip-timeline [
+        {type: "ab"}
+        {wait: 1.0}
+        {key: k, cmd: true}
+        {key: space}
+        {type: "cd", burst: true}
+    ]
+    assert equal ($timeline.events | where type != mark | each { reject t }) [
+        {type: type, text: a}
+        {type: type, text: b}
+        {type: key, name: k, cmd: true}
+        {type: type, text: " "}
+        {type: type, text: cd}
+    ]
+    assert equal ($timeline.captions | get text) ["type: a" "type: ab" "⌘K" "␣ Space" "type: cd"]
+    let times = $timeline.events | get t
+    assert equal $times ($times | sort)
+    assert equal ($timeline.events | last | get name) end
+
+    assert equal (key-caption {key: tab}) "⇥ Tab"
+    assert equal (key-caption {key: tab, shift: true}) "⇧⇥"
+    assert equal (key-caption {key: enter, cmd: true}) "⌘↩"
 }
