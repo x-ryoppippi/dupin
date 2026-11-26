@@ -126,9 +126,24 @@ pub enum UsageUpdate {
 
 type Notify = Arc<dyn Fn(UsageUpdate) + Send + Sync>;
 
+/// Where an answer goes: back down the control socket, or to Settings.
+enum Reply {
+    Call(Call),
+    Callback(Box<dyn FnOnce(Result<Value, String>) + Send>),
+}
+
+impl Reply {
+    fn send(self, result: Result<Value, String>) {
+        match self {
+            Reply::Call(call) => call.finish(result),
+            Reply::Callback(callback) => callback(result),
+        }
+    }
+}
+
 enum Job {
     Config(dupin_core::config::Sync),
-    Control(SyncAction, Call),
+    Control(SyncAction, Reply),
     SaveUsage(History),
 }
 
@@ -181,13 +196,22 @@ impl SyncService {
     }
 
     pub fn control(&self, action: SyncAction, call: Call) {
+        self.send(action, Reply::Call(call));
+    }
+
+    /// Asks the worker as `dupin sync` does, for Settings; `reply` runs on the worker.
+    pub fn request(&self, action: SyncAction, reply: impl FnOnce(Result<Value, String>) + Send + 'static) {
+        self.send(action, Reply::Callback(Box::new(reply)));
+    }
+
+    fn send(&self, action: SyncAction, reply: Reply) {
         match &self.jobs {
             Some(jobs) => {
-                if let Err(mpsc::SendError(Job::Control(_, call))) = jobs.send(Job::Control(action, call)) {
-                    call.finish(Err("sync stopped".into()));
+                if let Err(mpsc::SendError(Job::Control(_, reply))) = jobs.send(Job::Control(action, reply)) {
+                    reply.send(Err("sync stopped".into()));
                 }
             }
-            None => call.finish(Err("sync is not available in this build or session".into())),
+            None => reply.send(Err("sync is not available in this build or session".into())),
         }
     }
 }
@@ -309,9 +333,9 @@ impl Worker {
                     self.start();
                 }
             }
-            Job::Control(action, call) => {
+            Job::Control(action, reply) => {
                 let result = self.control(action);
-                call.finish(result);
+                reply.send(result);
             }
             Job::SaveUsage(own) => self.save_usage(&own),
         }

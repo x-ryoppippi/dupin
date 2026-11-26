@@ -51,6 +51,11 @@ objc2-foundation = { workspace = true, features = [
 ] }
 objc2-app-kit = { workspace = true, features = [
 	"std",
+	"NSAlert",
+	"NSButton",
+	"NSControl",
+	"NSSecureTextField",
+	"NSTextField",
 	"NSEvent",
 	"NSFontDescriptor",
 	"NSGraphics",

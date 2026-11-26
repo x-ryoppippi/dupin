@@ -23,6 +23,7 @@ pub mod pick;
 pub mod privacy;
 pub mod quick_look;
 mod recent;
+pub mod secret_prompt;
 pub mod selection;
 mod settings_search;
 pub mod sharing;

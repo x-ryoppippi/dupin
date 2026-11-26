@@ -106,6 +106,16 @@ line_icon!(
     r#"<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>"#
 );
 line_icon!(
+    CLOUD,
+    "cloud",
+    r#"<path d="M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z"/>"#
+);
+line_icon!(
+    LAPTOP,
+    "laptop",
+    r#"<rect x="5" y="5.5" width="14" height="10" rx="1.5"/><path d="M3 18.5h18"/>"#
+);
+line_icon!(
     INFO,
     "info",
     r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>"#

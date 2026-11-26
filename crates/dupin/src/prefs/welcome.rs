@@ -151,7 +151,7 @@ fn tour_step(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
         card(k, hair, rows),
         note(
             k,
-            "⌘, in the panel opens Settings, where Show Welcome brings this guide back.",
+            "⌘, in the panel opens Settings, where Show Welcome brings this guide back. To keep several Macs in step, turn on Settings → Sync whenever you like.",
         ),
     ]
 }

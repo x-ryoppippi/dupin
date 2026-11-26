@@ -6,7 +6,9 @@ Dupin can keep your Macs in step through a folder that some other tool already s
 
 ## Turning it on
 
-Sync is turned on from the command line for now (Settings → Sync comes later):
+In **Settings → Sync**, Turn On Sync uses iCloud Drive's `Dupin` folder when iCloud Drive is set up, or the folder you pick with **Choose Folder…**. Dupin makes a passphrase and shows it once on that page until you press **I've Written It Down**. On another Mac, pick the same folder and press **Join…**: a secure prompt, whose text is never shown, asks for the passphrase. Leave it empty to use iCloud Keychain where the build supports it. The page then shows the folder, how the key travels, when this Mac last synced with **Sync Now**, each other Mac with when it last synced and **Remove This Mac**, anything wrong, and **Turn Off**.
+
+The same is available from the command line:
 
 ```sh
 dupin sync on                          # in iCloud Drive's Dupin folder, with a generated passphrase
