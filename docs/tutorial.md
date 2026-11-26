@@ -24,6 +24,8 @@ With nothing typed, the panel lists what you opened recently. Tab on a folder li
 
 Press Space on an empty query to search every file by name with Spotlight, or type `in` and Space to search inside files. ↩ opens a file and ⌘↩ reveals it in Finder.
 
+To peek without opening, press ⌘Y on a file or an app: Quick Look shows it, and Esc brings you back to the list with your search and selection as they were ([File actions](./features/file-actions.md)).
+
 ## Use a keyword
 
 A keyword and Space enters a command:
