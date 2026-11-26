@@ -69,41 +69,16 @@ impl Query {
 pub(crate) struct Name {
     chars: Vec<char>,
     lower: Vec<char>,
-    /// Whether a word starts at each character.
-    starts: Vec<bool>,
-    /// For each character, how many words start at or before it, counting only words that
-    /// start with a letter or digit: a word's index plus one.
-    words: Vec<i32>,
-    /// `lower` without whitespace and a trailing ".app": what a query equals to match exactly.
-    bare: Vec<char>,
 }
 
 impl Name {
     pub(crate) fn new(name: &str) -> Self {
         let chars: Vec<char> = name.chars().collect();
-        let lower: Vec<char> = chars
+        let lower = chars
             .iter()
             .map(|c| c.to_lowercase().next().unwrap_or(*c))
             .collect();
-        let starts: Vec<bool> = (0..chars.len()).map(|j| starts_word(&chars, j)).collect();
-        let words = (0..chars.len())
-            .scan(0, |count, j| {
-                *count += i32::from(starts[j] && chars[j].is_alphanumeric());
-                Some(*count)
-            })
-            .collect();
-        let stem = match lower.strip_suffix(&['.', 'a', 'p', 'p']) {
-            Some(stem) if !stem.is_empty() => stem,
-            _ => &lower,
-        };
-        let bare = stem.iter().copied().filter(|c| !c.is_whitespace()).collect();
-        Self {
-            chars,
-            lower,
-            starts,
-            words,
-            bare,
-        }
+        Self { chars, lower }
     }
 }
 
@@ -145,7 +120,7 @@ fn search(
     mut from: Option<&mut Vec<Vec<usize>>>,
 ) -> Option<(usize, i32)> {
     let query = &query.0;
-    let (lower, starts) = (&name.lower, &name.starts);
+    let (chars, lower) = (&name.chars, &name.lower);
     if !is_subsequence(query, lower) {
         return None;
     }
@@ -178,7 +153,7 @@ fn search(
             if lower[j] != q {
                 continue;
             }
-            let bonus = MATCH + if starts[j] { WORD_START } else { 0 };
+            let bonus = MATCH + if starts_word(chars, j) { WORD_START } else { 0 };
             if i == 0 {
                 let lead = if j == 0 {
                     PREFIX
@@ -215,7 +190,7 @@ fn search(
         .filter_map(|(j, s)| s.map(|s| (j, s)))
         .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
     let length = LENGTH * n as i32;
-    let score = if name.bare == *query {
+    let score = if is_whole_name(query, name) {
         EXACT + total
     } else if runs_from_word_start(query, name) {
         RUN_FROM_WORD_START + total
@@ -229,11 +204,21 @@ fn search(
     Some((j, score - length))
 }
 
+/// Ignoring whitespace and a trailing ".app".
+fn is_whole_name(query: &[char], name: &Name) -> bool {
+    let lower = &name.lower;
+    let stem = match lower.strip_suffix(&['.', 'a', 'p', 'p']) {
+        Some(stem) if !stem.is_empty() => stem,
+        _ => lower,
+    };
+    stem.iter().filter(|c| !c.is_whitespace()).eq(query)
+}
+
 fn runs_from_word_start(query: &[char], name: &Name) -> bool {
-    let (lower, starts) = (&name.lower, &name.starts);
+    let (chars, lower) = (&name.chars, &name.lower);
     lower.len() >= query.len()
         && (0..=lower.len() - query.len())
-            .any(|start| starts[start] && lower[start..start + query.len()] == *query)
+            .any(|start| lower[start..start + query.len()] == *query && starts_word(chars, start))
 }
 
 /// When the query is the name's initials, what the words it skips and leaves after its last
@@ -247,9 +232,9 @@ fn initials(
     cost: &mut Vec<Option<i32>>,
     next: &mut Vec<Option<i32>>,
 ) -> Option<i32> {
-    let (chars, lower, starts, words) = (&name.chars, &name.lower, &name.starts, &name.words);
+    let (chars, lower) = (&name.chars, &name.lower);
     let n = lower.len();
-    let initial = |j: usize| starts[j] && chars[j].is_alphanumeric();
+    let initial = |j: usize| starts_word(chars, j) && chars[j].is_alphanumeric();
     if (0..n)
         .find(|&j| initial(j))
         .is_none_or(|first| lower[first] != query[0])
@@ -257,33 +242,34 @@ fn initials(
         return None;
     }
     // cost[j]: the least the words skipped so far cost, with the query so far matched and its
-    // last character at j. The word at j is the `words[j]`th, so a run beginning at j after a
-    // character at k skips `words[j] - words[k] - 1` words: a running minimum of
-    // `cost[k] - SKIPPED_WORD * words[k]` over the k a run may end at.
+    // last character at j. With `word` the number of words started by j, a run beginning at j
+    // after a character at k skips `word(j) - word(k) - 1` words: a running minimum of
+    // `cost[k] - SKIPPED_WORD * word(k)` over the k a run may end at.
     cost.clear();
     cost.resize(n, None);
     for (i, &q) in query.iter().enumerate() {
         next.clear();
         next.resize(n, None);
         let mut earlier: Option<i32> = None;
+        let mut word = 0;
         for j in 0..n {
             if j >= 1
                 && lower[j] != q
                 && let Some(c) = cost[j - 1]
             {
-                let lifted = c - SKIPPED_WORD * words[j - 1];
+                let lifted = c - SKIPPED_WORD * word;
                 earlier = Some(earlier.map_or(lifted, |e| e.min(lifted)));
             }
+            let starts = initial(j);
+            word += i32::from(starts);
             if lower[j] != q {
                 continue;
             }
             next[j] = if i == 0 {
-                (initial(j) && words[j] == 1).then_some(0)
+                (starts && word == 1).then_some(0)
             } else {
                 let run = (j >= 1).then(|| cost[j - 1]).flatten();
-                let jump = earlier
-                    .filter(|_| initial(j))
-                    .map(|e| e + SKIPPED_WORD * (words[j] - 1));
+                let jump = earlier.filter(|_| starts).map(|e| e + SKIPPED_WORD * (word - 1));
                 match (run, jump) {
                     (Some(run), Some(jump)) => Some(run.min(jump)),
                     (run, jump) => run.or(jump),
@@ -292,12 +278,17 @@ fn initials(
         }
         std::mem::swap(cost, next);
     }
-    let total = *words.last()?;
-    cost.iter()
-        .zip(words)
-        .filter_map(|(c, &word)| c.map(|c| c + TRAILING_WORD * (total - word)))
-        .min()
-        .map(|cost| -cost)
+    let total = (0..n).filter(|&j| initial(j)).count() as i32;
+    let mut word = 0;
+    let mut least: Option<i32> = None;
+    for (j, c) in cost.iter().enumerate() {
+        word += i32::from(initial(j));
+        if let Some(c) = c {
+            let c = c + TRAILING_WORD * (total - word);
+            least = Some(least.map_or(c, |l| l.min(c)));
+        }
+    }
+    least.map(|cost| -cost)
 }
 
 fn is_subsequence(query: &[char], name: &[char]) -> bool {
@@ -450,15 +441,13 @@ mod tests {
     /// Every way of matching the query, for [`initials`].
     fn naive_initials(query: &[char], name: &Name) -> Option<i32> {
         fn walk(query: &[char], name: &Name, picked: &mut Vec<usize>, best: &mut Option<i32>) {
-            let Name {
-                chars,
-                lower,
-                starts,
-                words,
-                ..
-            } = name;
+            let Name { chars, lower } = name;
+            let initial = |j: usize| starts_word(chars, j) && chars[j].is_alphanumeric();
+            // For each character, how many words start at or before it.
+            let words: Vec<i32> = (0..chars.len())
+                .map(|j| (0..=j).filter(|&k| initial(k)).count() as i32)
+                .collect();
             if picked.len() == query.len() {
-                let initial = |j: usize| starts[j] && chars[j].is_alphanumeric();
                 let mut skipped = 0;
                 for (i, &j) in picked.iter().enumerate() {
                     if i == 0 {
@@ -499,7 +488,7 @@ mod tests {
     fn naive(query: &str, name: &str) -> Option<Match> {
         let query = Query::new(query)?.0;
         let folded = Name::new(name);
-        let Name { lower, starts, .. } = &folded;
+        let Name { chars, lower } = &folded;
         if !is_subsequence(&query, lower) {
             return None;
         }
@@ -513,7 +502,7 @@ mod tests {
                 if lower[j] != q {
                     continue;
                 }
-                let bonus = MATCH + if starts[j] { WORD_START } else { 0 };
+                let bonus = MATCH + if starts_word(chars, j) { WORD_START } else { 0 };
                 if i == 0 {
                     let lead = if j == 0 {
                         PREFIX
@@ -546,7 +535,7 @@ mod tests {
             .enumerate()
             .filter_map(|(j, s)| s.map(|s| (j, s)))
             .max_by_key(|&(j, s)| (s, std::cmp::Reverse(j)))?;
-        let score = if folded.bare == query {
+        let score = if is_whole_name(&query, &folded) {
             EXACT + total
         } else if runs_from_word_start(&query, &folded) {
             RUN_FROM_WORD_START + total
