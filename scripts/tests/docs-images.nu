@@ -1,5 +1,12 @@
 use std/assert
-use ../docs-images.nu [clip-timeline embedded image-paths key-caption problems]
+use ../docs-images.nu [
+    clip-timeline
+    embedded
+    image-paths
+    key-caption
+    problems
+    script-captions
+]
 
 const SOURCES = [
     extensions/calendar
@@ -140,4 +147,38 @@ def main [] {
     assert equal (key-caption {key: tab}) "⇥ Tab"
     assert equal (key-caption {key: tab, shift: true}) "⇧⇥"
     assert equal (key-caption {key: enter, cmd: true}) "⌘↩"
+
+    let recorded = [
+        {
+            t: 1.0
+            type: type
+            text: "ab"
+            every: 0.1
+        }
+        {
+            t: 2.0
+            type: key
+            name: k
+            cmd: true
+        }
+        {t: 2.2, type: key, name: Enter}
+        {t: 3.0, type: type, text: " "}
+        {t: 4.0, type: key, name: Tab}
+        {t: 5.0, type: mark, name: end}
+    ]
+    assert equal (script-captions $recorded) [
+        {t: 1.0, text: "type: a"}
+        {t: 1.1, text: "type: ab"}
+        {t: 2.0, text: "⌘K  ↩ Return"}
+        {t: 3.0, text: "␣ Space"}
+        {t: 4.0, text: "⇥ Tab"}
+    ]
+    let clip = {
+        page: extensions
+        name: notes
+        extension: x
+        fixture: y.json
+        clip: true
+    }
+    assert equal (image-paths $clip | first) docs/images/extensions/notes-light.webp
 }

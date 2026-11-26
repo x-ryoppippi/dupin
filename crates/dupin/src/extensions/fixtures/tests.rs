@@ -691,7 +691,7 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
     .unwrap();
     let replayed = replay(&extension, "fixtures/x.json", &fixture, &|| false).unwrap();
     assert!(replayed.steps.iter().all(|step| step.problem.is_none()));
-    let events = script_for(&replayed.steps, &[]).0["events"].clone();
+    let events = script_for(&replayed.steps, &[], QUICK).0["events"].clone();
     let kinds: Vec<String> = events
         .as_array()
         .unwrap()
@@ -728,7 +728,7 @@ fn snap_scripts_type_each_query_and_move_to_each_selection() {
         .collect();
     assert!(times.windows(2).all(|pair| pair[0] < pair[1]), "{times:?}");
     assert_eq!(
-        script_for(&replayed.steps[..1], &[]).0["events"]
+        script_for(&replayed.steps[..1], &[], QUICK).0["events"]
             .as_array()
             .unwrap()
             .len(),

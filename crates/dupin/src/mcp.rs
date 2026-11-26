@@ -556,8 +556,8 @@ fn extension_tool(
                 .tempdir()
                 .map_err(|error| format!("couldn't make a scratch folder: {error}"))?;
             let output = scratch.path().join("panel.png");
-            let snapped =
-                crate::extensions::snap(&package, &fixture, step, &output, &cancelled).map_err(diagnostic)?;
+            let snapped = crate::extensions::snap(&package, &fixture, step, &output, None, &cancelled)
+                .map_err(diagnostic)?;
             let png = std::fs::read(&output).map_err(|error| format!("couldn't read the render: {error}"))?;
             let mut described = crate::cli::snapped_json(&snapped);
             if let Some(described) = described.as_object_mut() {

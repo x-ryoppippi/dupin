@@ -39,9 +39,31 @@ const ZONEINFO: &str = "/usr/share/zoneinfo";
 const RENDER_DEADLINE: Duration = Duration::from_secs(120);
 /// Realtime seconds before the first key, for the launcher to load the package.
 const FIRST_KEY: f64 = 1.0;
-const STEP_SECONDS: f64 = 0.75;
-/// Seconds between the characters of typed text.
-const TYPING: f64 = 0.035;
+
+/// How quickly a replay presses keys, in seconds.
+#[derive(Clone, Copy)]
+struct Pace {
+    /// Between the characters of typed text.
+    typing: f64,
+    /// Between the keys of one step.
+    press: f64,
+    /// After each step, for it to answer.
+    step: f64,
+}
+
+/// A still only needs each step to have answered.
+const QUICK: Pace = Pace {
+    typing: 0.035,
+    press: 0.05,
+    step: 0.75,
+};
+
+/// A recording is watched, so it presses keys at a pace a reader can follow.
+const READABLE: Pace = Pace {
+    typing: 0.1,
+    press: 0.45,
+    step: 1.2,
+};
 
 /// What `dupin ext test` found: every fixture and step, as JSON and as text.
 pub struct Report {
@@ -441,6 +463,7 @@ pub fn snap(
     fixture_path: &Path,
     step: Option<usize>,
     output: &Path,
+    frames: Option<&Path>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Snapped, Diagnostic> {
     let extension = load_folder(folder)?;
@@ -519,7 +542,8 @@ pub fn snap(
             )
         })
         .collect();
-    let (events, played) = script_for(steps, &clipboard_events);
+    let pace = if frames.is_some() { READABLE } else { QUICK };
+    let (events, played) = script_for(steps, &clipboard_events, pace);
     std::fs::write(&script, events.to_string())
         .map_err(|error| render_failed(format!("couldn't write the input script: {error}")))?;
     let handed = root.join("fixture.json");
@@ -592,6 +616,16 @@ pub fn snap(
         return Err(render_failed("the headless run wrote no PNG".into()));
     }
     let shown = shown_text(&drawn).map_err(render_failed)?;
+    if let Some(frames) = frames {
+        record_frames(
+            frames,
+            &script,
+            &launcher,
+            environment.window.width,
+            height,
+            &scale,
+        )?;
+    }
     Ok(Snapped {
         png: output.to_owned(),
         step: last,
@@ -600,6 +634,44 @@ pub fn snap(
         scale: environment.window.scale,
         shown,
     })
+}
+
+/// How many frames a second `--record` records.
+const FRAMES_PER_SECOND: u8 = 10;
+/// How tall `--record` draws the panel at least, in points, so it has room to grow at a step
+/// before the last.
+const FRAMES_HEIGHT: u32 = 720;
+
+/// Records the whole replay into `frames` as `frame_0000.png` and on, with the input script
+/// beside them as `script.json`, so a recording can caption the keys it shows.
+fn record_frames(
+    frames: &Path,
+    script: &Path,
+    launcher: &dyn Fn(&[&OsStr]) -> Result<(), Diagnostic>,
+    width: u16,
+    height: u32,
+    scale: &str,
+) -> Result<(), Diagnostic> {
+    std::fs::create_dir_all(frames)
+        .and_then(|()| std::fs::copy(script, frames.join("script.json")).map(|_| ()))
+        .map_err(|error| {
+            Diagnostic::new(
+                "render-failed",
+                format!("couldn't prepare {}: {error}", frames.display()),
+            )
+        })?;
+    let size = format!("{width}x{}", height.max(FRAMES_HEIGHT));
+    let fps = FRAMES_PER_SECOND.to_string();
+    launcher(&[
+        OsStr::new("--out"),
+        frames.as_os_str(),
+        OsStr::new("--size"),
+        OsStr::new(&size),
+        OsStr::new("--scale"),
+        OsStr::new(scale),
+        OsStr::new("--fps"),
+        OsStr::new(&fps),
+    ])
 }
 
 /// The scratch home's config.toml: Extensions on, the panel `width` points wide, and, for a
@@ -650,14 +722,14 @@ fn copy_package(folder: &Path, into: &Path) -> Result<(), Diagnostic> {
 /// The keys a person would press for `steps`, as the replay worked them out, a step's keys
 /// close together and each step given time to answer, and when each step that
 /// `clipboard_events` marks, by index, copies, which the launcher is handed at that time.
-fn script_for(steps: &[StepResult], clipboard_events: &[bool]) -> (Value, Vec<(usize, f64)>) {
+fn script_for(steps: &[StepResult], clipboard_events: &[bool], pace: Pace) -> (Value, Vec<(usize, f64)>) {
     let mut events = Vec::new();
     let mut copies = Vec::new();
     let mut at = FIRST_KEY;
     for (index, step) in steps.iter().enumerate() {
         if clipboard_events.get(index).copied().unwrap_or_default() {
             copies.push((index, at));
-            at += STEP_SECONDS;
+            at += pace.step;
             continue;
         }
         if step.presses.is_empty() {
@@ -666,9 +738,9 @@ fn script_for(steps: &[StepResult], clipboard_events: &[bool]) -> (Value, Vec<(u
         for press in &step.presses {
             events.push(match press {
                 Press::Type(text) => {
-                    let typed = json!({ "t": at, "type": "type", "text": text, "every": TYPING });
+                    let typed = json!({ "t": at, "type": "type", "text": text, "every": pace.typing });
                     // The headless run types one character at a time.
-                    at += TYPING * text.chars().count() as f64;
+                    at += pace.typing * text.chars().count() as f64;
                     typed
                 }
                 Press::Key { name, cmd: true } => {
@@ -676,11 +748,11 @@ fn script_for(steps: &[StepResult], clipboard_events: &[bool]) -> (Value, Vec<(u
                 }
                 Press::Key { name, cmd: false } => json!({ "t": at, "type": "key", "name": name }),
             });
-            at += 0.05;
+            at += pace.press;
         }
-        at += STEP_SECONDS;
+        at += pace.step;
     }
-    events.push(json!({ "t": at + STEP_SECONDS, "type": "mark", "name": "end" }));
+    events.push(json!({ "t": at + pace.step, "type": "mark", "name": "end" }));
     (json!({ "events": events }), copies)
 }
 

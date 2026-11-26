@@ -20,6 +20,21 @@ const CLIP_START = 0.6
 const CLIP_TYPING = 0.12
 const CLIP_PAUSE = 0.8
 const CLIP_HOLD = 1.6
+# Keys a replay presses closer together than this share one caption.
+const CAPTION_JOIN = 0.4
+
+# The keys a clip's steps name, as Rune names them and as a caption shows them.
+const KEYS = {
+    space: {name: " ", caption: "␣ Space"}
+    tab: {name: Tab, caption: "⇥ Tab"}
+    enter: {name: Enter, caption: "↩ Return"}
+    escape: {name: Escape, caption: "⎋ Esc"}
+    backspace: {name: Backspace, caption: "⌫ Delete"}
+    up: {name: Up, caption: "↑ Up"}
+    down: {name: Down, caption: "↓ Down"}
+    left: {name: Left, caption: "← Left"}
+    right: {name: Right, caption: "→ Right"}
+}
 
 # Render every image and clip scripts/docs-images/images.toml lists, in both themes: images to
 # docs/images/<page>/<name>-<theme>.png, compressed losslessly, and clips to
@@ -44,7 +59,7 @@ def main [
         "images" | "clips" => [$kind]
         _ => (error make {msg: $"--kind is `images`, `clips` or `all`, not `($kind)`"})
     }
-    let entries = $kinds | each {|kind| $manifest | get --optional $kind | default [] } | flatten
+    let entries = manifest-entries $manifest $kinds
     let entries = $entries | where {|entry| $only == null or (image-id $entry | str contains $only) }
     if ($entries | is-empty) {
         error make {msg: $"nothing in ($MANIFEST | path basename) matches ($only)"}
@@ -103,10 +118,19 @@ export def image-id [image: record]: nothing -> string {
     $"($image.page)/($image.name)"
 }
 
-# The repository paths an image or clip is saved at, one for each theme. A clip is an entry with
-# `steps`.
+# The manifest's entries of `kinds`, each clip marked as one.
+def manifest-entries [manifest: record, kinds: list<string>]: nothing -> list<record> {
+    $kinds | each {|kind|
+        $manifest | get --optional $kind | default [] | each {|entry|
+            if $kind == clips { $entry | upsert clip true } else { $entry }
+        }
+    } | flatten
+}
+
+# The repository paths an image or clip is saved at, one for each theme.
 export def image-paths [image: record]: nothing -> list<string> {
-    let extension = kind-extension (if $image.steps? == null { "images" } else { "clips" })
+    let clip = ($image.clip? | default false) or $image.steps? != null
+    let extension = kind-extension (if $clip { "clips" } else { "images" })
     $THEMES | each {|theme| $"docs/images/(image-id $image)-($theme).($extension)" }
 }
 
@@ -140,7 +164,7 @@ export def problems [
     docs: list<record>
     exists: closure
 ]: nothing -> list<string> {
-    let entries = $manifest.images | append ($manifest.clips? | default [])
+    let entries = manifest-entries $manifest [images clips]
     let expected = $entries | each {|image| image-paths $image } | flatten
     let embeds = $docs | each {|doc| embedded $doc.path $doc.text | each {|file| {doc: $doc.path, file: $file} } } | flatten
     let embedded = $embeds | get file? | default []
@@ -208,7 +232,9 @@ def render [
     print --stderr $"rendering ($id)"
     let folder = $"docs/images/($image.page)"
     mkdir $folder
-    let files = if $image.extension? != null {
+    let files = if $image.extension? != null and ($image.clip? | default false) {
+        render-extension-clip $image $bin $tmp
+    } else if $image.extension? != null {
         render-extension $image $bin $tmp
     } else if $image.steps? != null {
         render-clip $image $manifest $bin $tmp
@@ -299,21 +325,97 @@ def render-clip [
             )
         }
         let pngs = glob ($frames | path join frame_*.png) | sort
-        # The panel grows and shrinks as results change, so the clip is cut to the lowest edge
-        # it reaches in any frame, with room for the captions below.
-        let bottom = ^magick ...$pngs -background none -layers merge -format "%@" info: | parse "{w}x{h}+{x}+{y}" | first | ($in.h | into int) + ($in.y | into int)
-        let width = 680 * $CLIP_SCALE | math round
-        let height = $bottom + ($CAPTION_SPACE * $CLIP_SCALE | math round)
-        ^magick mogrify -gravity north -background none -crop $"($width)x($bottom)+0+0" +repage -extent $"($width)x($height)" ...$pngs
-        caption $pngs $timeline.captions ($tmp | path join $"($name)-captions")
-        # Lossy frames: lossless ones are several times larger, and the panel's soft glass hides
-        # the difference. Frames that repeat the last cost nothing.
-        let result = ^img2webp -loop 0 -lossy -q 75 -m 6 -d (1000 // $CLIP_FPS | into string) ...$pngs -o $pair.0 | complete
-        if $result.exit_code != 0 {
-            error make {msg: $"img2webp failed for ($pair.0):\n($result.stderr)"}
-        }
+        finish-clip $pngs $timeline.captions $pair.0 ($tmp | path join $"($name)-captions")
         $pair.0
     }
+}
+
+# Cuts `pngs`, a clip's frames at `CLIP_SCALE`, to the lowest edge the panel reaches in any
+# frame, since it grows and shrinks as results change, with room for the captions below; draws
+# the captions; and encodes them as an animated WebP at `out`.
+def finish-clip [
+    pngs: list<string>
+    captions: list<record>
+    out: path
+    folder: path
+]: nothing -> nothing {
+    let bottom = ^magick ...$pngs -background none -layers merge -format "%@" info: | parse "{w}x{h}+{x}+{y}" | first | ($in.h | into int) + ($in.y | into int)
+    let width = ^magick identify -format "%w" ($pngs | first) | into int
+    let height = $bottom + ($CAPTION_SPACE * $CLIP_SCALE | math round)
+    ^magick mogrify -gravity north -background none -crop $"($width)x($bottom)+0+0" +repage -extent $"($width)x($height)" ...$pngs
+    caption $pngs $captions $folder
+    # Lossy frames: lossless ones are several times larger, and the panel's soft glass hides
+    # the difference. Frames that repeat the last cost nothing.
+    let result = ^img2webp -loop 0 -lossy -q 75 -m 6 -d (1000 // $CLIP_FPS | into string) ...$pngs -o $out | complete
+    if $result.exit_code != 0 {
+        error make {msg: $"img2webp failed for ($out):\n($result.stderr)"}
+    }
+}
+
+# An extension's fixture played through `dupin ext snap --record`, up to `step` or its last
+# step, as a clip: the replay's own keys, captioned from the script it records beside the
+# frames.
+def render-extension-clip [clip: record, bin: path, tmp: path]: nothing -> list<string> {
+    let name = image-id $clip | str replace --all / -
+    let fixture = $clip.extension | path join fixtures $clip.fixture
+    let step = if $clip.step? == null {
+        []
+    } else {
+        [
+            --step
+            ($clip.step | into string)
+        ]
+    }
+    let scale = open $fixture | get --optional environment.window.scale | default 2
+    image-paths $clip | zip $THEMES | each {|pair|
+        let themed = $tmp | path join $"($name)-($pair.1).json"
+        open $fixture | upsert environment.theme $pair.1 | to json | save --force $themed
+        let frames = $tmp | path join $"($name)-($pair.1)-frames"
+        let still = $tmp | path join $"($name)-($pair.1).png"
+        headless $bin ext snap $clip.extension $themed $still ...$step --record $frames
+        let pngs = glob ($frames | path join frame_*.png) | sort
+        let points = (^magick identify -format "%w" ($pngs | first) | into int) / $scale
+        ^magick mogrify -resize $"($points * $CLIP_SCALE | math round)x" ...$pngs
+        let captions = script-captions (open ($frames | path join script.json)).events
+        finish-clip $pngs $captions $pair.0 ($tmp | path join $"($name)-captions")
+        $pair.0
+    }
+}
+
+# Captions for a recorded Rune script: typed text as it grows, and keys pressed within
+# `CAPTION_JOIN` seconds of each other as one caption, since a replay presses them faster than a
+# caption could be read.
+export def script-captions [events: list<record>]: nothing -> list<record> {
+    let names = $KEYS | transpose key spec | each {|key| {name: $key.spec.name, key: $key.key} }
+    $events | each {|event|
+        match $event.type {
+            "type" if ($event.text | str trim | is-empty) => {
+                [{t: $event.t, text: (key-caption {key: space}), key: true}]
+            }
+            "type" => {
+                let chars = $event.text | split chars
+                $chars | enumerate | each {|char|
+                    {
+                        t: ($event.t + $char.index * ($event.every? | default 0))
+                        text: $"type: ($chars | first ($char.index + 1) | str join | str trim)"
+                        key: false
+                    }
+                }
+            }
+            "key" => {
+                let key = $names | where name == $event.name | get --optional 0.key | default ($event.name | str lowercase)
+                [{t: $event.t, text: (key-caption ($event | reject t type name | insert key $key)), key: true}]
+            }
+            _ => []
+        }
+    } | flatten | where text != "type: " | insert latest {|caption| $caption.t } | reduce --fold [] {|caption, joined|
+        let last = if ($joined | is-empty) { null } else { $joined | last }
+        if ($last != null and $caption.key and $last.key and $caption.t - $last.latest < $CAPTION_JOIN) {
+            $joined | drop | append ($last | update text $"($last.text)  ($caption.text)" | update latest $caption.t)
+        } else {
+            $joined | append $caption
+        }
+    } | reject key latest
 }
 
 # Draws each caption on the frames it is shown in, as a pill centred at the bottom: from its
@@ -413,18 +515,6 @@ def clip-step [step: record, run: record]: nothing -> record {
     } else {
         error make {msg: $"a clip step is `type`, `key` or `wait`, not ($step | to nuon)"}
     }
-}
-
-const KEYS = {
-    space: {name: " ", caption: "␣ Space"}
-    tab: {name: Tab, caption: "⇥ Tab"}
-    enter: {name: Enter, caption: "↩ Return"}
-    escape: {name: Escape, caption: "⎋ Esc"}
-    backspace: {name: Backspace, caption: "⌫ Delete"}
-    up: {name: Up, caption: "↑ Up"}
-    down: {name: Down, caption: "↓ Down"}
-    left: {name: Left, caption: "← Left"}
-    right: {name: Right, caption: "→ Right"}
 }
 
 def key-name [key: string]: nothing -> string {

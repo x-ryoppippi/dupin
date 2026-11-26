@@ -11,15 +11,15 @@ dupin ext test greeter                     # replay its fixtures
 dupin ext snap greeter greeter/fixtures/search.json search.png
 ```
 
-| Command                                                                                     | Does                                                                        |
-| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                             | Creates a package in a new or empty folder.                                 |
-| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                     | Publishes a development copy to the extensions folder and keeps it current. |
-| [`dupin ext check <dir>`](#checking-and-running)                                            | Loads and compiles the package and says what it exports.                    |
-| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                           | Answers one query as the launcher would.                                    |
-| [`dupin ext test <dir> [--update] [--json]`](#testing-and-snapshots)                        | Replays every fixture and compares each step with its `expect`.             |
-| [`dupin ext snap <dir> <fixture> <output.png> [--step N] [--json]`](#testing-and-snapshots) | Renders the panel after a fixture's step.                                   |
-| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)      | Bundles a package with npm dependencies.                                    |
+| Command                                                                                                    | Does                                                                              |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [`dupin ext new <dir> [--ts \| --bundle]`](#creating-a-package)                                            | Creates a package in a new or empty folder.                                       |
+| [`dupin ext dev <dir> [--sourcemap]`](#developing-live)                                                    | Publishes a development copy to the extensions folder and keeps it current.       |
+| [`dupin ext check <dir>`](#checking-and-running)                                                           | Loads and compiles the package and says what it exports.                          |
+| [`dupin ext run <dir> --query Q [--json]`](#checking-and-running)                                          | Answers one query as the launcher would.                                          |
+| [`dupin ext test <dir> [--update] [--json]`](#testing-and-snapshots)                                       | Replays every fixture and compares each step with its `expect`.                   |
+| [`dupin ext snap <dir> <fixture> <output.png> [--step N] [--record DIR] [--json]`](#testing-and-snapshots) | Renders the panel after a fixture's step, and with `--record` records the replay. |
+| [`dupin ext build <dir> [--sourcemap]`](./extension-distribution.md#building-a-bundle)                     | Bundles a package with npm dependencies.                                          |
 
 <details>
 <summary>Packages and the host</summary>
@@ -170,6 +170,8 @@ Each difference names the path in the outcome and both values; something the out
 `snap` starts this Dupin headless in a scratch home that holds only a copy of the package's `package.json` and modules, with **Extensions** on and nothing else from your configuration, history or Mac, types each query after the keyword and moves the selection as the steps do, and saves the panel as Dupin draws it. A package Dupin ships for a built-in, such as Calendar or Calculator, answers that built-in as it does in the launcher: the render turns the built-in on, types the query after its keyword, or in the main search for one that answers there, and hands the package the fixture's `preferences` in place of the built-in's settings and only the grants the fixture's `consent` gives. It chooses a step's `push` and `run` actions from the row's action panel, fills in and submits forms and closes pages with the keys a person would press, so the panel shows the page an action opened and the toast it showed; a `clipboard` event reaches the package as a copy does, at its step. Copy, Paste, Open URL and Reveal actions and other events change nothing on screen and aren't replayed. To show what the package had stored before the first step, seed `replies.storage` with it.
 
 The fixture's theme, panel width, scale and, if it gives one, height are used; otherwise the panel's own height. The guest sees the fixture's clock, seed and time zone, and Dupin says how long ago a row's `time` was by the same clock, so two renders of one fixture on one Mac are the same bytes on any day. Every build of Dupin can render, the released app included; only a build made with `--no-default-features` leaves Rune's headless renderer out, and `snap` then fails with `render-failed`. `--json` prints `{ "png", "step", "width", "height", "scale", "shown" }`, where `shown` is every text the panel shows, in the order it lays them out.
+
+`--record DIR` also records the replay, up to the same step, as `DIR/frame_0000.png` and on, 10 frames a second at the fixture's scale and at least 720 points tall, so the panel has room to grow, with the keys it pressed in `DIR/script.json` (Rune's script format). A recording presses keys at a pace a reader can follow, slower than a still needs; the still at `output.png` is the same either way. `scripts/docs-images.nu` turns such a recording into a clip for these docs.
 
 </details>
 

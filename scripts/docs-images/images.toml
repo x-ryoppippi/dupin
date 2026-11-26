@@ -391,3 +391,12 @@ page = "extensions"
 name = "clip"
 fixtures = "scripts/headless/extension-js.json"
 steps = [{ type = "wc" }, { key = "space" }, { type = "two words" }]
+
+# An extension's own fixture as a clip: `dupin ext snap --record` replays its steps, up to `step`,
+# at a pace a reader can follow, and the keys it presses are captioned from its script.
+[[clips]]
+page = "extensions"
+name = "notes"
+extension = "examples/extensions/notes-js"
+fixture = "notes.json"
+step = 5

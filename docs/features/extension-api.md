@@ -473,6 +473,11 @@ A `push` action opens a page of the package's own above the list: the module's `
 <img alt="The Notes example's New Note form: a required Title, a multi-line Note, a Pinned checkbox and a Label picker, with ⌘↩ Save at the foot." src="../images/extensions/form-light.png" width="680" />
 </picture>
 
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="../images/extensions/notes-dark.webp" />
+<img alt="The Notes example: note and Space lists New note; ⌘K and Return open its form, which is filled in with a title, a note, Pinned and a label, and ⌘Return saves it, leaving Groceries in the list." src="../images/extensions/notes-light.webp" width="680" />
+</picture>
+
 ```js
 export const views = {
 	async edit(ctx) {

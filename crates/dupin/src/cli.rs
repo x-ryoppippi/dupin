@@ -1,7 +1,7 @@
 use crate::control::{self, Command, Request, exchange};
 use serde_json::Value;
 use std::io::{self, Read};
-const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
+const HELP: &str = "dupin open [--query QUERY] [--json]\ndupin pick [--input-json] [--json]\ndupin snapshots list|close [--json]\ndupin snapshots open [--id ID] [--json]\ndupin config get [--json]\ndupin config set BASE.json DESIRED.json [--json]\ndupin snap VIEW.json OUTPUT.png [--json]\ndupin ext check DIR [--json]\ndupin ext run DIR --query QUERY [--json]\ndupin ext test DIR [--update] [--json]\ndupin ext snap DIR FIXTURE.json OUTPUT.png [--step N] [--record DIR] [--json]\ndupin ext revision DIR [--json]\ndupin ext new DIR [--ts | --bundle] [--json]\ndupin ext build DIR [--sourcemap] [--json]\ndupin ext dev DIR [--sourcemap] [--json]\ndupin ext search [QUERY] [--json]\ndupin ext install github:OWNER/REPO[@REF]|URL[@REF]|DIR [--json]\ndupin ext list|sync [--json]\ndupin ext update [NAME] [--json]\ndupin ext remove NAME [--json]\ndupin ext eject NAME [--json]\ndupin sync status|now|off [--json]\ndupin sync on|join [--folder DIR] [--passphrase-stdin] [--json]\ndupin sync remove-device ID [--json]\ndupin mcp [--workspace DIR]\ndupin --licenses [--json]\n\nNo subcommand starts the resident launcher. Existing Rune tooling flags remain available.";
 /// The usage lines of `dupin ext`, taken from [`HELP`] so the two can't disagree.
 fn ext_help() -> String {
     HELP.lines()
@@ -31,7 +31,7 @@ enum Action {
     /// Replay an extension folder's fixtures, rewriting their expectations with `true`.
     ExtTest(String, bool),
     /// Render a fixture's step: the folder, the fixture, the PNG and the step.
-    ExtSnap(String, String, String, Option<usize>),
+    ExtSnap(String, String, String, Option<usize>, Option<String>),
     /// Print the revision declared grants name for an extension folder.
     ExtRevision(String),
     /// Install, list, update, remove or restore packages in the extensions folder.
@@ -97,6 +97,9 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let step: Option<usize> = parser
         .opt_value_from_str("--step")
         .map_err(|_| "--step takes a step number, counting from 1".to_owned())?;
+    let frames: Option<String> = parser
+        .opt_value_from_str("--record")
+        .map_err(|_| "--record takes a folder".to_owned())?;
     let workspace: Option<String> = parser
         .opt_value_from_str("--workspace")
         .map_err(|_| "--workspace takes a folder".to_owned())?;
@@ -106,7 +109,7 @@ fn parse(args: &[String]) -> Result<Action, String> {
     let passphrase_stdin = parser.contains("--passphrase-stdin");
     let build_flags = typescript || bundled || options.sourcemap;
     let sync_flags = folder.is_some() || passphrase_stdin;
-    let other_flags = update || step.is_some() || workspace.is_some() || sync_flags;
+    let other_flags = update || step.is_some() || frames.is_some() || workspace.is_some() || sync_flags;
     let rest = parser.finish();
     let args: Vec<_> = rest
         .iter()
@@ -129,7 +132,11 @@ fn parse(args: &[String]) -> Result<Action, String> {
             Ok(Action::ExtDev(folder.to_string(), options))
         }
         ["ext", "test", folder]
-            if !folder.starts_with('-') && !build_flags && step.is_none() && workspace.is_none() =>
+            if !folder.starts_with('-')
+                && !build_flags
+                && step.is_none()
+                && frames.is_none()
+                && workspace.is_none() =>
         {
             Ok(Action::ExtTest(folder.to_string(), update))
         }
@@ -145,13 +152,14 @@ fn parse(args: &[String]) -> Result<Action, String> {
                 fixture.to_string(),
                 output.to_string(),
                 step,
+                frames,
             ))
         }
-        ["mcp"] if !json && !build_flags && !update && step.is_none() && !sync_flags => {
+        ["mcp"] if !json && !build_flags && !update && step.is_none() && frames.is_none() && !sync_flags => {
             Ok(Action::Mcp(workspace))
         }
         ["sync", verb @ ("on" | "join")]
-            if !build_flags && !update && step.is_none() && workspace.is_none() =>
+            if !build_flags && !update && step.is_none() && frames.is_none() && workspace.is_none() =>
         {
             use crate::control::SyncAction;
             let action = match *verb {
@@ -531,12 +539,13 @@ fn execute(action: Action, json: bool) -> Result<Value, Failure> {
             crate::out::out!("{}", report.text);
             Ok(Value::Null)
         }
-        Action::ExtSnap(folder, fixture, output, step) => {
+        Action::ExtSnap(folder, fixture, output, step, frames) => {
             let snapped = crate::extensions::snap(
                 std::path::Path::new(&folder),
                 std::path::Path::new(&fixture),
                 step,
                 std::path::Path::new(&output),
+                frames.as_deref().map(std::path::Path::new),
                 &|| false,
             )?;
             if json {
@@ -1288,9 +1297,30 @@ mod tests {
                 "greeter".into(),
                 "fixtures/search.json".into(),
                 "out.png".into(),
-                Some(2)
+                Some(2),
+                None
             )
         );
+        assert_eq!(
+            parse(&args(&[
+                "ext",
+                "snap",
+                "greeter",
+                "fixtures/search.json",
+                "out.png",
+                "--record",
+                "frames"
+            ]))
+            .unwrap(),
+            Action::ExtSnap(
+                "greeter".into(),
+                "fixtures/search.json".into(),
+                "out.png".into(),
+                None,
+                Some("frames".into())
+            )
+        );
+        assert!(parse(&args(&["ext", "test", "greeter", "--record", "frames"])).is_err());
         for invalid in [
             &[
                 "ext",
