@@ -19,6 +19,8 @@ export const homeMarkdown = `# ${siteName}
 
 > ${siteDescription}
 
+A launcher should be the doorway to your desktop, not a replacement for it. ${siteName} is pronounced /dy.pɛ̃/ (French). Philosophy: ${siteUrl}/docs/philosophy/
+
 ${siteName} is a launcher for Apple silicon Macs on macOS 14 or later. It stays resident and draws its panel ahead of time, so ⌘Space shows it at once. It fuzzy-searches apps by any name macOS knows them by, searches files with Spotlight after Space on an empty query, and searches inside files after \`in\` and Space.
 
 ## Install

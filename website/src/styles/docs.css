@@ -295,8 +295,7 @@
 	background: var(--bg-elev);
 }
 
-.docs-content .doc-loop ol,
-.docs-content .doc-choices {
+.docs-content .doc-loop ol {
 	list-style: none;
 	margin: 0;
 	padding: 0;
@@ -309,8 +308,7 @@
 }
 
 .docs-content .doc-loop li,
-.docs-content .doc-handoff .box,
-.docs-content .doc-choices li {
+.docs-content .doc-handoff .box {
 	position: relative;
 	display: flex;
 	flex-direction: column;
@@ -348,8 +346,7 @@
 }
 
 .docs-content .doc-loop .label,
-.docs-content .doc-handoff .label,
-.docs-content .doc-choices strong {
+.docs-content .doc-handoff .label {
 	color: var(--fg);
 	font-weight: 600;
 }
@@ -365,12 +362,6 @@
 	line-height: 1.5;
 }
 
-.docs-content .doc-choices span {
-	color: var(--fg-muted);
-	font-size: 14px;
-	line-height: 1.5;
-}
-
 .docs-content .doc-loop figcaption,
 .docs-content .doc-handoff figcaption {
 	margin-top: 16px;
@@ -380,8 +371,6 @@
 
 .docs-content .doc-choices {
 	margin: 28px 0;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 16px;
 }
 
 .docs-content .doc-handoff .row {
@@ -435,7 +424,6 @@
 		transform: rotate(135deg);
 	}
 
-	.docs-content .doc-choices,
 	.docs-content .doc-handoff .row {
 		grid-template-columns: 1fr;
 	}

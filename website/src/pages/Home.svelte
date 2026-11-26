@@ -1,5 +1,6 @@
 <script lang="ts">
 	import CopyButton from '../components/CopyButton.svelte';
+	import DesignChoices from '../components/docs/DesignChoices.svelte';
 	import Footer from '../components/Footer.svelte';
 	import Nav from '../components/Nav.svelte';
 	import PanelDemo from '../components/PanelDemo.svelte';
@@ -11,6 +12,9 @@
 	<section class="hero">
 		<div class="hero-grid" aria-hidden="true"></div>
 		<div class="container hero-inner">
+			<a class="pronunciation rise" style="--d: 0ms" href="/docs/name/">
+				Dupin <span lang="fr">/dy.pɛ̃/</span>
+			</a>
 			<h1 class="display hero-title rise" style="--d: 0ms">Press ⌘Space. It's there.</h1>
 			<p class="hero-sub rise" style="--d: 100ms">
 				A fast, simple and beautiful app launcher for your mac.<br />
@@ -66,6 +70,15 @@
 			</ul>
 		</div>
 	</section>
+	<section class="philosophy">
+		<div class="container">
+			<p class="principle">
+				A launcher should be the doorway to your desktop, not a replacement for it.
+			</p>
+			<DesignChoices />
+			<a class="link-arrow" href="/docs/philosophy/">Read the philosophy <span class="arrow">→</span></a>
+		</div>
+	</section>
 </main>
 <Footer />
 
@@ -95,10 +108,21 @@
 		align-items: center;
 	}
 
+	.pronunciation {
+		margin-top: 8px;
+		font-size: 13px;
+		color: var(--fg-dim);
+		letter-spacing: 0.02em;
+	}
+
+	.pronunciation:hover {
+		color: var(--fg-muted);
+	}
+
 	.hero-title {
 		font-size: clamp(40px, 6.4vw, 84px);
 		max-width: 20ch;
-		margin: 32px auto 22px;
+		margin: 20px auto 22px;
 		text-wrap: balance;
 	}
 
@@ -236,7 +260,45 @@
 		color: var(--fg-muted);
 	}
 
+	.philosophy {
+		padding: 0 0 96px;
+	}
+
+	.philosophy .container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 32px;
+		max-width: 1080px;
+	}
+
+	.philosophy :global(.doc-choices) {
+		grid-template-columns: repeat(4, 1fr);
+		width: 100%;
+	}
+
+	.principle {
+		margin: 0;
+		max-width: 28ch;
+		font-size: clamp(22px, 3vw, 32px);
+		font-weight: 600;
+		line-height: 1.25;
+		letter-spacing: -0.02em;
+		text-align: center;
+		text-wrap: balance;
+	}
+
+	@media (max-width: 1000px) {
+		.philosophy :global(.doc-choices) {
+			grid-template-columns: repeat(2, 1fr);
+		}
+	}
+
 	@media (max-width: 820px) {
+		.philosophy :global(.doc-choices) {
+			grid-template-columns: 1fr;
+		}
+
 		.traits {
 			grid-template-columns: 1fr;
 			gap: 20px;
