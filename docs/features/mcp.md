@@ -2,7 +2,7 @@
 
 `dupin mcp` serves the [Model Context Protocol](https://modelcontextprotocol.io) over stdio, so an agent such as Claude Code can read Dupin's configuration and use its panel. Dupin itself has no chat or model features: the agent runs elsewhere, and Dupin is a tool it calls.
 
-The server is a thin client of the same local control socket as the [`dupin` commands](../../README.md#local-cli). It starts no window and holds no state of its own, and each agent session starts its own `dupin mcp` process. Tools that act on the panel need the resident launcher running; the configuration tools work without it.
+The server is a thin client of the same local control socket as the [`dupin` commands](./cli.md). It starts no window and holds no state of its own, and each agent session starts its own `dupin mcp` process. Tools that act on the panel need the resident launcher running; the configuration tools work without it.
 
 ## Setting it up in Claude Code
 
