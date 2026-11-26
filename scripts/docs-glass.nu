@@ -20,7 +20,7 @@ const STAGE = path self docs-glass/Stage.swift
 # Wallpaper around the panel, in points, so the glass's edge shows against it.
 const MARGIN = 32
 # The website's demo frame in points, whose shape every clip is cut to.
-const STAGE = {width: 680, height: 578}
+const FRAME = {width: 680, height: 578}
 
 # The wallpapers the glass is recorded over, drawn here rather than shipped: soft blobs of colour
 # for the glass to bend, with nothing sharp to read through the text. Positions and radii are in
@@ -310,12 +310,12 @@ def finish-glass [
         ($panel.y - $margin)
         0
     ] | math max
-    # Every clip is cut to the same rectangle: the aspect ratio of the page's demo frame (`STAGE`)
+    # Every clip is cut to the same rectangle: the aspect ratio of the page's demo frame (`FRAME`)
     # with the wallpaper around the panel, so the frame is filled whichever tab shows and
     # switching never moves it. It must cover the tallest panel with its captions, and end above
     # the Dock, which is not wallpaper. H.264 takes only even sides.
-    let width = ($STAGE.width * $scale + 2 * $margin) // 2 * 2
-    let height = ($width * $STAGE.height / $STAGE.width | math ceil) // 2 * 2 + 2
+    let width = ($FRAME.width * $scale + 2 * $margin) // 2 * 2
+    let height = ($width * $FRAME.height / $FRAME.width | math ceil) // 2 * 2 + 2
     if $y + $height > $panel.bottom {
         error make {
             msg: $"($id): a ($width)x($height) cut from ($y) ends below the wallpaper, at ($panel.bottom)"
