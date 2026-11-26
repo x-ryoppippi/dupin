@@ -19,7 +19,7 @@ use serde_json::value::RawValue;
 
 /// Raised whenever a message changes shape. The helper states its version first, and Dupin
 /// stops a helper that states another.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 /// Above the largest answer, part of a catalogue with [`MAX_PAGE_BYTES`] of text. JSON writes a
 /// control character, which copy text and Markdown may hold, as six bytes (`\u0001`), and the
 /// rest covers the field names and punctuation of the most rows and fields a part may have.
@@ -151,24 +151,17 @@ impl<'de> Deserialize<'de> for Preferences {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FromHelper {
     /// Sent once, after the sandbox is in place.
-    Hello {
-        version: u32,
-        engine: String,
-    },
+    Hello { version: u32, engine: String },
     /// Sent instead of `hello` when the helper can't confine itself, before it exits.
-    Refused {
-        reason: String,
-    },
+    Refused { reason: String },
     Done {
         id: u64,
         answer: Answer,
+        /// The host requests whose replies the guest took before the run ended.
+        answered: Vec<u32>,
     },
     /// A host request of run `id`, numbered `call` from one, with its JSON arguments as the tail.
-    Host {
-        id: u64,
-        call: u32,
-        op: String,
-    },
+    Host { id: u64, call: u32, op: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -462,6 +455,7 @@ mod tests {
         let message = FromHelper::Done {
             id: u64::MAX,
             answer: Answer::Catalogue { page },
+            answered: Vec::new(),
         };
         let mut bytes = Vec::new();
         write(&mut bytes, &message, &[]).unwrap();
@@ -695,16 +689,16 @@ mod tests {
                 },
             ]
             .into_iter()
-            .chain(
-                answers
-                    .into_iter()
-                    .map(|answer| FromHelper::Done { id: 1, answer }),
-            )
+            .chain(answers.into_iter().map(|answer| FromHelper::Done {
+                id: 1,
+                answer,
+                answered: vec![2],
+            }))
             .map(|message| serde_json::to_string(&message).unwrap()),
         );
         assert_eq!(
             (VERSION, shapes),
-            (11, SHAPES.map(str::to_owned).to_vec()),
+            (12, SHAPES.map(str::to_owned).to_vec()),
             "a message changed shape: raise VERSION and record the new shapes here"
         );
     }
@@ -724,19 +718,19 @@ mod tests {
         r#"{"kind":"hello","version":0,"engine":"e"}"#,
         r#"{"kind":"refused","reason":"r"}"#,
         r#"{"kind":"host","id":1,"call":2,"op":"storage"}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A","image":"h"}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A","image":"h"}],"replace":[{"id":"a","title":"A","image":"h","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"list","rows":[{"id":"a","title":"A","image":"h","actions":[{"title":"Open","effect":{"kind":"push","view":"note","state":1}}],"accessories":[{"tag":"t"}],"answer":"1"}],"empty_text":"none"}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"form","title":"F","fields":[{"id":"a","title":"A","kind":{"type":"select","options":[{"value":"x","title":"X"}],"default":"x"}}],"submit":"save"}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":false,"effect":{"type":"push","view":"note","state":{"id":7},"toast":"t"}}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"filtered","hits":[{"index":0,"score":1,"positions":[0]},{"index":1}]}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}}}"#,
-        r#"{"kind":"done","id":1,"answer":{"kind":"missing"}}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"compiled","modules":[{"name":"main.js","len":1}]},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"checked","exports":{"search":true,"items":true}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"rows","items":[{"id":"a","title":"A","image":"h"}]},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"catalogue","page":{"change":{"kind":"update","append":[{"id":"a","title":"A","image":"h"}],"replace":[{"id":"a","title":"A","image":"h","web_search":{"alias":"g","url":"https://example.com/?q={query}","title":"G {query}","fallback":0}}],"remove":["b"]},"ttl":1,"cursor":"c","more":true}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"list","rows":[{"id":"a","title":"A","image":"h","actions":[{"title":"Open","effect":{"kind":"push","view":"note","state":1}}],"accessories":[{"tag":"t"}],"answer":"1"}],"empty_text":"none"}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"view","view":{"kind":"form","title":"F","fields":[{"id":"a","title":"A","kind":{"type":"select","options":[{"value":"x","title":"X"}],"default":"x"}}],"submit":"save"}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":true,"effect":{"type":"toast","text":"t"}}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"acted","acted":{"invalidated":false,"effect":{"type":"push","view":"note","state":{"id":7},"toast":"t"}}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"handled","handled":{"invalidated":true}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"filtered","hits":[{"index":0,"score":1,"positions":[0]},{"index":1}]},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"cancelled"},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"failed","diagnostic":{"code":"code","message":"message"}},"answered":[2]}"#,
+        r#"{"kind":"done","id":1,"answer":{"kind":"missing"},"answered":[2]}"#,
     ];
 
     #[test]

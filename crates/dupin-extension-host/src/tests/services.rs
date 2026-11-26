@@ -12,7 +12,14 @@ struct Fixture {
 }
 
 impl Services for Fixture {
-    fn call(&self, op: &str, args: &[u8], _deadline: Instant, cancelled: &AtomicBool) -> Vec<u8> {
+    fn call(
+        &self,
+        _request: HostRequest,
+        op: &str,
+        args: &[u8],
+        _deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Vec<u8> {
         let args: serde_json::Value = serde_json::from_slice(args).unwrap();
         self.seen.lock().unwrap().push((op.into(), args.clone()));
         std::thread::sleep(self.delay);
@@ -300,7 +307,14 @@ struct Issued;
 const ISSUED: &str = "ical://ekevent/issued?method=show&options=more";
 
 impl Services for Issued {
-    fn call(&self, _op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+    fn call(
+        &self,
+        _request: HostRequest,
+        _op: &str,
+        _args: &[u8],
+        _deadline: Instant,
+        _cancelled: &AtomicBool,
+    ) -> Vec<u8> {
         br#"{"ok":null}"#.to_vec()
     }
 
@@ -360,4 +374,110 @@ fn a_row_opens_a_dictionary_word_no_reply_gave() {
         )
         .unwrap();
     assert_eq!(titles(&rows), ["serendipity"]);
+}
+
+/// Fails `storage.get('fail')` at once and answers any other request only once its run has
+/// ended, recording what each run's end reported.
+#[derive(Default)]
+struct Outlived {
+    ended: Mutex<Vec<(u64, Vec<u32>)>>,
+    over: std::sync::Condvar,
+    /// The requests answered after their run ended, and whether `cancelled` was set for them.
+    late: Mutex<Vec<(HostRequest, bool)>>,
+    answered_late: std::sync::Condvar,
+}
+
+impl Services for Outlived {
+    fn call(
+        &self,
+        request: HostRequest,
+        _op: &str,
+        args: &[u8],
+        _deadline: Instant,
+        cancelled: &AtomicBool,
+    ) -> Vec<u8> {
+        let args: serde_json::Value = serde_json::from_slice(args).unwrap();
+        if args["id"] == "fail" {
+            return br#"{"error":{"code":"failed","message":"fails at once"}}"#.to_vec();
+        }
+        if args["id"] == "quick" {
+            return br#"{"ok":null}"#.to_vec();
+        }
+        let ended = self.ended.lock().unwrap();
+        let (ended, _) = self
+            .over
+            .wait_timeout_while(ended, Duration::from_secs(10), |ended| {
+                !ended.iter().any(|(run, _)| *run == request.run)
+            })
+            .unwrap();
+        drop(ended);
+        self.late
+            .lock()
+            .unwrap()
+            .push((request, cancelled.load(Ordering::Relaxed)));
+        self.answered_late.notify_all();
+        br#"{"ok":null}"#.to_vec()
+    }
+
+    fn ended(&self, run: u64, answered: &[u32]) {
+        self.ended.lock().unwrap().push((run, answered.to_vec()));
+        self.over.notify_all();
+    }
+}
+
+#[test]
+fn a_run_ends_every_request_it_left_running_and_names_the_replies_its_guest_took() {
+    skip_inside_a_sandbox!();
+    let host = host();
+    let package = package(
+        r#"import { storage } from 'dupin';
+           export async function search(query) {
+             if (query === 'together') {
+               await Promise.all([storage.get('fail'), storage.get('hold')]);
+             }
+             await storage.get('quick');
+             try { await storage.get('fail'); } catch {}
+             return [{ title: query }];
+           }"#,
+    );
+    let outlived = Arc::new(Outlived::default());
+    let services: Arc<dyn Services> = outlived.clone();
+    let search = |query: &str| {
+        host.search(
+            &package,
+            query,
+            10,
+            Instant::now() + Duration::from_secs(5),
+            &|| false,
+            &services,
+        )
+    };
+    let Err(RunError::Failed(diagnostic)) = search("together") else {
+        panic!("the failed request didn't end the call");
+    };
+    assert!(diagnostic.message.contains("fails at once"), "{diagnostic:?}");
+    assert_eq!(titles(&search("apart").unwrap()), ["apart"]);
+    let ended = outlived.ended.lock().unwrap().clone();
+    let [(together, first), (apart, second)] = &ended[..] else {
+        panic!("{ended:?}");
+    };
+    assert_ne!(together, apart);
+    assert_eq!((&first[..], &second[..]), (&[1][..], &[1, 2][..]));
+    // The request still running when its run ended sees the end however late it answers.
+    let (late, _) = outlived
+        .answered_late
+        .wait_timeout_while(outlived.late.lock().unwrap(), Duration::from_secs(10), |late| {
+            late.is_empty()
+        })
+        .unwrap();
+    assert_eq!(
+        late[..],
+        [(
+            HostRequest {
+                run: *together,
+                call: 2
+            },
+            true
+        )]
+    );
 }

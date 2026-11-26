@@ -66,6 +66,7 @@ Dupin checks every request against the declaration, the version you allowed and 
 - **Each item is a scope you allow on its own**: one origin, one named folder, one profile. Its name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `rows:file` or `query`, is what errors, Settings and grant files call it.
 - **It starts off.** An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - **Each scope asks once.** A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer.
+- **Requests end with their call.** A request still running when its call ends, by returning, failing, being cancelled or running out of time, asks nothing, stores nothing and runs nothing, and a question it asked that the extension never saw is withdrawn.
 - **Choices belong to a version.** A change to `package.json` or any module is another revision: one that declares a scope no wider keeps your choice, one that widens it asks again, and one that drops it forgets it.
 
 </details>

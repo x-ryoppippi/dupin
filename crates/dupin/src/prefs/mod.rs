@@ -997,12 +997,15 @@ mod tests {
         bridge.allow(&id, &revision, &http, None).unwrap();
         // A request that needs consent leaves one waiting, as a guest's would.
         let call = bridge.call(&id, Trigger::Query);
+        let asked = dupin_extension_bridge::HostRequest { run: 1, call: 1 };
         let reply = call.services.call(
+            asked,
             "dictionary.lookup",
             br#"{"word":"dupin"}"#,
             std::time::Instant::now() + Duration::from_secs(1),
             &Default::default(),
         );
+        call.services.ended(asked.run, &[asked.call]);
         assert!(String::from_utf8(reply).unwrap().contains("needs-consent"));
         state.reflect_extensions(
             vec![crate::extensions::packages::Listed {

@@ -637,12 +637,14 @@ fn rogue_helper_entry() {
         let answer = FromHelper::Done {
             id,
             answer: rows("genuine"),
+            answered: Vec::new(),
         };
         wire::write(&mut socket, &answer, &[]).unwrap();
         for forged in id + 1.. {
             let forged = FromHelper::Done {
                 id: forged,
                 answer: rows("forged"),
+                answered: Vec::new(),
             };
             if wire::write(&mut socket, &forged, &[]).is_err() {
                 std::process::exit(0);
@@ -716,7 +718,16 @@ fn implant_helper_entry() {
             }
         }
         let answer = Answer::Rows { items: Vec::new() };
-        wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).unwrap();
+        wire::write(
+            &mut socket,
+            &FromHelper::Done {
+                id,
+                answer,
+                answered: Vec::new(),
+            },
+            &[],
+        )
+        .unwrap();
     }
     std::process::exit(0);
 }
@@ -726,7 +737,14 @@ fn implant_helper_entry() {
 struct Recorded(std::sync::Mutex<Vec<String>>);
 
 impl Services for Recorded {
-    fn call(&self, op: &str, _args: &[u8], _deadline: Instant, _cancelled: &AtomicBool) -> Vec<u8> {
+    fn call(
+        &self,
+        _request: HostRequest,
+        op: &str,
+        _args: &[u8],
+        _deadline: Instant,
+        _cancelled: &AtomicBool,
+    ) -> Vec<u8> {
         self.0.lock().unwrap().push(op.into());
         br#"{"ok":null}"#.to_vec()
     }
@@ -1187,7 +1205,16 @@ fn forgetful_helper_entry() {
                 }],
             },
         };
-        wire::write(&mut socket, &FromHelper::Done { id, answer }, &[]).unwrap();
+        wire::write(
+            &mut socket,
+            &FromHelper::Done {
+                id,
+                answer,
+                answered: Vec::new(),
+            },
+            &[],
+        )
+        .unwrap();
     }
     std::process::exit(0);
 }
