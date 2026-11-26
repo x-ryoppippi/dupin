@@ -11,6 +11,7 @@ import Docs from '../pages/Docs.svelte';
 import NotFound from '../pages/NotFound.svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
+import { docComponents } from '../docs/components.ts';
 import { keepSidebarScroll } from '../docs/sidebar-scroll.ts';
 import { imageRoute, imageTypes, linkedImages } from '../docs/links.ts';
 import {
@@ -224,7 +225,8 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 			inputPath,
 			source,
 			async render(context) {
-				const { html } = await context.markdown.render({ source, documentPath: inputPath });
+				const rendered = await context.markdown.render({ source, documentPath: inputPath });
+				const html = docComponents(rendered.html);
 				const title = titles.get(page) ?? siteName;
 				return {
 					...renderDocument(
