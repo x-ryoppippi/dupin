@@ -31,7 +31,47 @@ impl Ui {
             Some(Target::Configured(HotkeyTarget::Script { script, args })) => {
                 self.run_hotkey_script(&script, args, tx);
             }
+            Some(Target::Configured(HotkeyTarget::Dupin { command, query })) => {
+                self.open_bound_command(shortcut, &command, query.as_deref().unwrap_or_default(), tx);
+            }
             None => (),
+        }
+    }
+
+    /// Shows the panel in the command `name`, or hides it when it already shows that command,
+    /// as the panel's own hotkey toggles it.
+    fn open_bound_command(&mut self, shortcut: &rune::Shortcut, name: &str, query: &str, tx: &mut Tx) {
+        let command = match crate::features::aliases::command(name, &self.session.command_ids()) {
+            Ok(command) => command,
+            Err(problem) => {
+                let keys = shortcut.keycaps().join("");
+                self.show_notice(format!("Couldn't open {keys}'s command: it {problem}."), tx);
+                return;
+            }
+        };
+        if self.picker.is_some() {
+            self.finish_pick(None, tx);
+        } else if self.me.is_visible() && self.session.command_id() == &command {
+            self.dismiss(tx);
+            return;
+        }
+        let Some(effects) = self.session.enter_command(&command, query) else {
+            return;
+        };
+        self.action_screen = None;
+        self.apply(effects, tx);
+        self.show(tx);
+    }
+
+    /// Whether the command each `target = "dupin"` binding names opens now. One no built-in
+    /// answers waits quietly while the extensions are still loading, since one of them may.
+    pub(super) fn bound_commands(&self) -> impl Fn(&str) -> Result<(), Option<String>> + use<> {
+        let registered = self.session.command_ids();
+        let settled = self.extensions.settled();
+        move |name| match crate::features::aliases::command(name, &registered) {
+            Ok(_) => Ok(()),
+            Err(_) if !settled && crate::features::aliases::built_in(name).is_none() => Err(None),
+            Err(problem) => Err(Some(problem)),
         }
     }
 
@@ -93,12 +133,14 @@ impl Ui {
     }
 
     pub(super) fn apply_hotkeys(&mut self, config: &Config, previous: &Config) -> Result<(), String> {
+        let commands = self.bound_commands();
         let problem = {
             let scripts = self.scripts.read().unwrap();
             self.configuration.hotkey.apply_config(
                 config,
                 previous,
                 self.scripts_catalog_ready.then_some(&*scripts),
+                &commands,
             )?
         };
         self.bindings_applied = true;

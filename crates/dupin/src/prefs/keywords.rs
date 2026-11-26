@@ -3,13 +3,13 @@
 
 use std::collections::BTreeMap;
 
-use dupin_core::config::{AliasTarget, check_alias};
+use dupin_core::config::{AliasTarget, HotkeyTarget, check_alias};
 use dupin_core::{Config, KeywordEntry, KeywordTarget};
-use rune::{El, TextEdit, col, row, text, text_input};
-use rune_kit::{Button, Kit};
+use rune::{El, Shortcut, ShortcutError, TextEdit, col, row, text, text_input};
+use rune_kit::{Button, ButtonVariant, Kit, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message};
 
 use super::Prefs;
-use super::controls::{DESCRIPTION, ROW_PX, card, note, setting, setting_with_lock};
+use super::controls::{DESCRIPTION, ROW_PX, card, note, setting_with_lock};
 use crate::icons;
 
 /// What the page shows and what is being typed on it.
@@ -24,6 +24,10 @@ pub(super) struct Keywords {
     snippets: TextEdit,
     /// Why the last edit on the page wasn't saved.
     pub(super) problem: Option<String>,
+    /// Each command's shortcut recorder, by the name a binding gives the command.
+    shortcuts: BTreeMap<String, ShortcutRecorderState>,
+    /// Why the chord last recorded for a command was refused, by command.
+    pub(super) shortcut_problems: BTreeMap<String, String>,
 }
 
 impl Keywords {
@@ -36,6 +40,8 @@ impl Keywords {
             dictionary: TextEdit::new(""),
             snippets: TextEdit::new(""),
             problem: None,
+            shortcuts: BTreeMap::new(),
+            shortcut_problems: BTreeMap::new(),
         };
         keywords.reflect(config, None);
         keywords
@@ -48,6 +54,18 @@ impl Keywords {
             self.entries = configured.registry.entries();
             self.problems = configured.alias_problems;
         }
+        let bound = command_shortcuts(config);
+        for (name, recorder) in &mut self.shortcuts {
+            if !bound.contains_key(name) && recorder.shortcut().is_some() {
+                *recorder = ShortcutRecorderState::new(None);
+            }
+        }
+        for (name, shortcut) in bound {
+            let recorder = self.shortcuts.entry(name).or_default();
+            if recorder.shortcut() != Some(&shortcut) {
+                *recorder = ShortcutRecorderState::new(Some(shortcut));
+            }
+        }
         if previous.is_none_or(|previous| previous.dictionary_keywords != config.dictionary_keywords) {
             self.dictionary = TextEdit::new(config.dictionary_keywords.join(" "));
         }
@@ -55,6 +73,30 @@ impl Keywords {
             self.snippets = TextEdit::new(config.snippet_keywords.join(" "));
         }
     }
+}
+
+/// The shortcut of each command a `target = "dupin"` binding without a query opens, by the
+/// command's name.
+fn command_shortcuts(config: &Config) -> BTreeMap<String, Shortcut> {
+    config
+        .bindings
+        .iter()
+        .filter_map(|(accelerator, target)| match target {
+            HotkeyTarget::Dupin { command, query: None } => {
+                Some((command.clone(), accelerator.parse().ok()?))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The key in `[bindings]` of the shortcut that opens the command `name`.
+fn command_binding(config: &Config, name: &str) -> Option<String> {
+    config
+        .bindings
+        .iter()
+        .find(|(_, target)| matches!(target, HotkeyTarget::Dupin { command, query: None } if command == name))
+        .map(|(accelerator, _)| accelerator.clone())
 }
 
 /// The keywords in `text`, separated by spaces or commas, each one a keyword can be.
@@ -127,6 +169,41 @@ impl Prefs {
         }
     }
 
+    /// Binds `next` to the command `name` in config.toml, in place of the shortcut it had,
+    /// unless something else already has `next`.
+    pub(super) fn change_command_shortcut(
+        &mut self,
+        name: &str,
+        next: Option<&Shortcut>,
+    ) -> Result<(), ShortcutError> {
+        let base = self.current.borrow().clone();
+        let existing = command_binding(&base, name);
+        self.keywords.shortcut_problems.remove(name);
+        if let Some(next) = next {
+            let keys = next.keycaps().join("");
+            let taken = crate::hotkey::holder(&base, next, existing.as_deref())
+                .map(|holder| format!("{keys} is assigned to {holder}."))
+                .or_else(|| self.binding.used_elsewhere(next));
+            if let Some(taken) = taken {
+                self.keywords.shortcut_problems.insert(name.to_owned(), taken);
+                return Err(ShortcutError::Conflict);
+            }
+        }
+        let target = HotkeyTarget::Dupin {
+            command: name.to_owned(),
+            query: None,
+        };
+        self.set(|config| {
+            if let Some(existing) = existing {
+                config.bindings.remove(&existing);
+            }
+            if let Some(next) = next {
+                config.bindings.insert(next.to_string(), target);
+            }
+        });
+        Ok(())
+    }
+
     pub(super) fn refresh_keywords(&mut self, base: &Config) {
         self.keywords.reflect(&self.config, Some(base));
     }
@@ -159,7 +236,7 @@ pub(super) fn page(s: &Prefs, k: &Kit, hair: f32) -> Vec<El> {
     body.push(card(k, hair, command_rows(s, k)));
     body.push(note(
         k,
-        "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all.",
+        "Type a keyword, then Space, in the launcher to enter its command; type ? to list them all. Record a shortcut to open a command from any app; pressing it again hides the panel.",
     ));
     body.push(card(k, hair, alias_rows(s, k)));
     body.push(note(
@@ -183,7 +260,11 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
                 .iter()
                 .map(|keyword| (keyword.as_str(), aliases.contains(&keyword.as_str())));
             let space = matches!(entry.target, KeywordTarget::Command(_)) && entry.keywords.is_empty();
-            command_row(k, &entry.title, &entry.subtitle, tags, space)
+            let name = match &entry.target {
+                KeywordTarget::Command(id) => crate::features::aliases::binding_name(id.as_str()),
+                _ => None,
+            };
+            command_row(s, k, (&entry.title, &entry.subtitle), tags, space, name)
         })
         .collect();
     for listed in s.extensions.0.iter().filter(|listed| !listed.built_in) {
@@ -205,17 +286,26 @@ fn command_rows(s: &Prefs, k: &Kit) -> Vec<El> {
         } else {
             format!("Extension · `{}` reaches another command", listed.keyword)
         };
-        rows.push(command_row(k, &listed.title, &detail, tags.into_iter(), false));
+        rows.push(command_row(
+            s,
+            k,
+            (&listed.title, &detail),
+            tags.into_iter(),
+            false,
+            Some(package),
+        ));
     }
     rows
 }
 
+/// A command's row: its keywords, and the shortcut that opens it when a binding can name it.
 fn command_row<'a>(
+    s: &Prefs,
     k: &Kit,
-    title: &str,
-    detail: &str,
+    (title, detail): (&str, &str),
     keywords: impl Iterator<Item = (&'a str, bool)>,
     space: bool,
+    name: Option<&str>,
 ) -> El {
     let mut tags = row().gap(6.0).center_y();
     if space {
@@ -224,7 +314,71 @@ fn command_row<'a>(
     for (keyword, alias) in keywords {
         tags = tags.child(tag(k, keyword, alias));
     }
-    setting(k, &icons::KEYBOARD, title, Some(detail), tags)
+    let Some(name) = name else {
+        return setting_with_lock(k, &icons::KEYBOARD, title, Some(detail), tags, None);
+    };
+    let locked = s.locked("bindings");
+    let control = col()
+        .gap(6.0)
+        .items_end()
+        .child(tags)
+        .child(shortcut_recorder(s, k, name, title, locked));
+    setting_with_lock(
+        k,
+        &icons::KEYBOARD,
+        title,
+        Some(detail),
+        control,
+        s.lock_note(locked),
+    )
+}
+
+/// The recorder for the shortcut that opens the command `name`, and a button to clear it.
+fn shortcut_recorder(s: &Prefs, k: &Kit, name: &str, title: &str, locked: bool) -> El {
+    let state = s.keywords.shortcuts.get(name).cloned().unwrap_or_default();
+    let problem = s.keywords.shortcut_problems.get(name).cloned();
+    let refusal = move |error: &ShortcutError, chord: Option<&Shortcut>| {
+        problem
+            .as_ref()
+            .filter(|_| *error == ShortcutError::Conflict)
+            .cloned()
+            .unwrap_or_else(|| shortcut_error_message(error, chord))
+    };
+    let owned = name.to_owned();
+    let changed = name.to_owned();
+    let recorder = ShortcutRecorder::new(format!("shortcut-{name}"), &state, move |s: &mut Prefs| {
+        s.keywords.shortcuts.entry(owned.clone()).or_default()
+    })
+    .label(format!("Open {title}"))
+    .width(140.0)
+    .on_change(move |s: &mut Prefs, next, _| s.change_command_shortcut(&changed, next))
+    .error_message(refusal)
+    .disabled(locked)
+    .build(k);
+    // Rune disables recorder input without applying the kit's usual disabled dimming.
+    let recorder = if locked {
+        recorder.layer_opacity(0.5)
+    } else {
+        recorder
+    };
+    let mut controls = row().gap(4.0).child(recorder);
+    if state.shortcut().is_some() && !locked {
+        let cleared = name.to_owned();
+        controls = controls.child(
+            Button::new("Clear")
+                .variant(ButtonVariant::Ghost)
+                .on_press(move |s: &mut Prefs| {
+                    if s.change_command_shortcut(&cleared, None).is_ok() {
+                        s.keywords
+                            .shortcuts
+                            .insert(cleared.clone(), ShortcutRecorderState::new(None));
+                    }
+                })
+                .build(k)
+                .key(format!("clear-shortcut-{name}")),
+        );
+    }
+    controls
 }
 
 /// A keyword as a label; an alias is drawn quieter, as the user's own.

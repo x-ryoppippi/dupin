@@ -39,6 +39,32 @@ pub(crate) fn built_in(name: &str) -> Option<&'static str> {
         .or_else(|| super::ported_command(name))
 }
 
+/// The command `name` reaches among the `registered` command IDs, as an alias or a binding
+/// names it: a built-in's name or an extension's package name; or why it reaches none.
+pub(crate) fn command(name: &str, registered: &[String]) -> Result<CommandId, String> {
+    let (command, off) = match built_in(name) {
+        Some(command) => (command.to_owned(), format!("names `{name}`, which is off")),
+        None => (
+            format!("extension.{name}"),
+            format!("names `{name}`, which is neither a command nor an extension that is on"),
+        ),
+    };
+    if !registered.contains(&command) {
+        return Err(off);
+    }
+    Ok(id(&command))
+}
+
+/// The name an alias or a binding gives the command `id`, for a built-in or an extension.
+pub(crate) fn binding_name(id: &str) -> Option<&str> {
+    COMMANDS
+        .iter()
+        .find(|(_, command)| *command == id)
+        .map(|(name, _)| *name)
+        .or_else(|| super::ported_package(id))
+        .or_else(|| id.strip_prefix("extension."))
+}
+
 fn register(config: &Config, commands: &mut Configure, application: impl Fn(&str) -> Option<PathBuf>) {
     for (alias, target) in &config.aliases.0 {
         if let Err(problem) = add(commands, alias, target, &application) {

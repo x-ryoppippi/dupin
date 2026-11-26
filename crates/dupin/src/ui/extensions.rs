@@ -35,7 +35,17 @@ struct Folder {
     watch: Option<Watch>,
     /// Identifies the current watch, so a scan from a stopped one is ignored.
     epoch: u64,
+    /// Whether the current watch's first scan has landed.
+    scanned: bool,
     problems: Vec<String>,
+}
+
+impl Folder {
+    /// Whether its packages are known: it was scanned, or there is nothing to wait for. The
+    /// bundled folder is always read, so it waits until its first start.
+    fn settled(&self, always_read: bool) -> bool {
+        self.scanned || (self.watch.is_none() && (!always_read || self.epoch > 0))
+    }
 }
 
 impl Extensions {
@@ -85,8 +95,15 @@ impl Extensions {
         }
     }
 
+    /// Whether every folder Dupin reads has been scanned, so a command no extension answers
+    /// now won't appear without a change.
+    pub(super) fn settled(&self) -> bool {
+        self.bundled.settled(true) && self.user.settled(false)
+    }
+
     /// Takes a folder's latest scan.
     pub(crate) fn scanned(&mut self, origin: Origin, catalog: Catalog) {
+        self.folder(origin).scanned = true;
         self.folder(origin).problems = catalog.problems;
         self.packages.set(origin, catalog.extensions);
     }
@@ -96,6 +113,7 @@ impl Extensions {
     pub(crate) fn stop(&mut self, origin: Origin) {
         let folder = self.folder(origin);
         folder.epoch += 1;
+        folder.scanned = false;
         folder.problems.clear();
         folder.watch = None;
         self.packages.set(origin, Vec::new());

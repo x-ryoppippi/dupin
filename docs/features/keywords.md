@@ -18,11 +18,13 @@ The row never pushes the best match down for a short query:
 - The start of a keyword, such as `ca` or `e`, follows the first result, with up to three commands, exact and shortest keywords first.
 - A web search's own alias already shows its search first, so it adds no second row.
 
+A command with a [shortcut](#shortcuts) shows it as a tag after its keywords, such as **Clipboard** `clip ␣` `⇧⌘V`.
+
 Type `?` alone to list every command, web search and the files search with their keywords; choose one to enter it. A row shows the command's icon, which its chip shows too once it is entered: a bundled extension's or a package's own [`dupin.icon`](./extensions.md#a-javascript-extension). An empty query shows what it always did. Snippets, with no snippet at all, is neither suggested nor listed, though `snip` still enters it to add the first one ([Snippets](./snippets.md#adding-and-editing)).
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/keywords/list-dark.png" />
-<img alt="The panel with “?” typed, listing commands with their keywords as tags: Calendar (cal), Dictionary (d, define), Dupin (help), Emoji &amp; Symbols (emoji), File Contents (in), Files (Space) and web searches." src="../images/keywords/list-light.png" width="680" />
+<img alt="The panel with “?” typed, listing commands with their keywords as tags: Calendar (cal), Clipboard History (clip, and its shortcut ⇧⌘V), Dictionary (d, define), Dupin (help), Emoji &amp; Symbols (emoji), File Contents (in), Files (Space) and web searches." src="../images/keywords/list-light.png" width="680" />
 </picture>
 
 Keywords are case-sensitive when typed with Space; the rows match them in any case, and Enter or Tab types them as configured.
@@ -65,11 +67,21 @@ An alias is 1 to 32 ASCII letters, digits, underscores or hyphens, and config.to
 
 `dictionary_keywords` and `snippet_keywords` keep working as before, beside any alias for the same command.
 
+## Shortcuts
+
+A global shortcut can open a command from any app, with the panel already in that command; pressing it again hides the panel. Record one in Settings → Keywords, or write a `target = "dupin"` binding that names the command as an alias does, as [Hotkeys](./hotkeys.md#configuration) describes:
+
+```toml
+[bindings."cmd+shift+v"]
+target = "dupin"
+command = "clipboard"
+```
+
 ## Settings
 
-Settings → Keywords lists every command, web search, app and file a keyword reaches with its keywords, the aliases among them drawn quieter, and each extension with its keyword. Below that it lists your aliases, each with what it reaches and, if it is left out, why, with Remove, and fields to add one. The last card edits `dictionary_keywords` and `snippet_keywords`, separated by spaces. A key set in a read-only config.toml, such as one Home Manager writes, is shown locked. With Home Manager, set them in `programs.dupin.settings.aliases`.
+Settings → Keywords lists every command, web search, app and file a keyword reaches with its keywords, the aliases among them drawn quieter, and each extension with its keyword. Each command a binding can name has a shortcut recorder below its keywords: click it and press the chord to save it to `[bindings]`, press Backspace while recording or choose **Clear** to remove it, and Escape to cancel. A chord the panel, the selection hotkey, another binding or macOS already uses is refused with what holds it. When `bindings` is set in a read-only config.toml, such as one Home Manager writes, the recorders are locked and say so; otherwise a read-only config.toml's other keys stay locked and the shortcut is saved with Dupin's own settings, as [Configuration](../configuration.md) describes. Below that it lists your aliases, each with what it reaches and, if it is left out, why, with Remove, and fields to add one. The last card edits `dictionary_keywords` and `snippet_keywords`, separated by spaces. A key set in a read-only config.toml, such as one Home Manager writes, is shown locked. With Home Manager, set them in `programs.dupin.settings.aliases`.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="../images/settings/keywords-dark.png" />
-<img alt="Settings → Keywords, listing each command and web search with its keywords, the aliases section and the Dictionary and snippet keyword fields." src="../images/settings/keywords-light.png" width="760" />
+<img alt="Settings → Keywords, listing each command and web search with its keywords and each command's shortcut recorder, Clipboard's set to ⇧⌘V, the aliases section and the Dictionary and snippet keyword fields." src="../images/settings/keywords-light.png" width="760" />
 </picture>

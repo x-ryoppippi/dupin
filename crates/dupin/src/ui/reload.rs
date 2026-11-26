@@ -17,6 +17,8 @@ impl Ui {
             self.extensions.forget_catalogues();
         }
         let feature_changed = crate::features::reload(self, config, &mut registration) || recomposed.any();
+        // The extensions' commands joined the registry just now.
+        crate::hotkey::mark_shortcuts(config, &mut registration.registry);
         let sources = registration.registry.ids();
         self.snapshots.update(move |s, _| s.set_sources(sources));
         let effects = self
@@ -24,6 +26,18 @@ impl Ui {
             .set_commands(registration.registry)
             .expect("built-in command registration is valid");
         self.registration_notice = registration.notice;
+        let bound = (
+            config.bindings.clone(),
+            self.session.command_ids(),
+            self.extensions.settled(),
+        );
+        if self.bound_against.as_ref() != Some(&bound) {
+            self.bound_against = Some(bound);
+            // A pending `dupin config set` holds its new chords until its save lands.
+            if self.control_save.is_none() {
+                self.refresh_hotkeys();
+            }
+        }
         if !effects.is_empty() {
             self.apply(effects, tx);
         } else if feature_changed || self.session.command().result_limit != previous_limit {

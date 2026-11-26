@@ -714,6 +714,88 @@ mod tests {
     }
 
     #[test]
+    fn a_shortcut_recorded_for_a_command_is_written_as_a_binding_unless_locked() {
+        use dupin_core::config::HotkeyTarget;
+        use rune::accesskit::Role;
+
+        let config = Config::parse(
+            "[bindings.\"ctrl+alt+c\"]\ntarget = \"app\"\nbundle_id = \"com.apple.calculator\"",
+        )
+        .unwrap();
+        let current = Rc::new(RefCell::new(config));
+        let settings = Arc::new(crate::settings::Service::new(Default::default(), |_| {}));
+        let mut state = state(current, settings, false);
+        state.show(Page::Keywords);
+        let mut runtime = rune::Runtime::new(state, view, SIZE, rune::Env::default());
+        let dictionary = |s: &Prefs| {
+            s.config
+                .bindings
+                .iter()
+                .filter(|(_, target)| matches!(target, HotkeyTarget::Dupin { .. }))
+                .map(|(chord, target)| (chord.clone(), target.clone()))
+                .collect::<Vec<_>>()
+        };
+        runtime.update(|s, _| {
+            let chord: Shortcut = "ctrl+alt+cmd+d".parse().unwrap();
+            assert_eq!(s.change_command_shortcut("dictionary", Some(&chord)), Ok(()));
+            assert_eq!(
+                dictionary(s),
+                [(
+                    chord.to_string(),
+                    HotkeyTarget::Dupin {
+                        command: "dictionary".into(),
+                        query: None,
+                    }
+                )]
+            );
+            for (taken, problem) in [
+                ("cmd+space", "⌘Space is assigned to the panel shortcut."),
+                (
+                    "ctrl+alt+c",
+                    "⌃⌥C is assigned to the binding for com.apple.calculator.",
+                ),
+            ] {
+                let taken: Shortcut = taken.parse().unwrap();
+                assert_eq!(
+                    s.change_command_shortcut("dictionary", Some(&taken)),
+                    Err(ShortcutError::Conflict)
+                );
+                assert_eq!(s.keywords.shortcut_problems["dictionary"], problem);
+            }
+            // Recording another chord replaces the first.
+            let other: Shortcut = "ctrl+alt+cmd+e".parse().unwrap();
+            assert_eq!(s.change_command_shortcut("dictionary", Some(&other)), Ok(()));
+            assert_eq!(dictionary(s).len(), 1);
+            assert_eq!(dictionary(s)[0].0, other.to_string());
+            assert!(s.keywords.shortcut_problems.is_empty());
+        });
+        for locked in [false, true] {
+            runtime.update(|s, _| {
+                s.locked_keys = locked.then(|| "bindings".to_owned()).into_iter().collect();
+            });
+            runtime.frame(0.0);
+            let tree = runtime.accessibility_tree();
+            let (_, recorder) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Open Dictionary"))
+                .expect("Dictionary's shortcut recorder");
+            assert_eq!(recorder.is_disabled(), locked);
+            let clear = tree
+                .nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::Button && node.label() == Some("Clear"));
+            assert_eq!(clear, !locked);
+        }
+        runtime.update(|s, _| {
+            s.locked_keys = Default::default();
+            assert_eq!(s.change_command_shortcut("dictionary", None), Ok(()));
+            assert!(dictionary(s).is_empty());
+            assert_eq!(s.config.bindings.len(), 1, "the app binding stays");
+        });
+    }
+
+    #[test]
     fn a_store_that_failed_closed_is_named_on_every_page() {
         const STORE: &str = "A store under test";
         let shown = |runtime: &mut rune::Runtime<Prefs>| {

@@ -141,6 +141,7 @@ impl Ui {
                     call.finish(Err(error));
                     return;
                 }
+                let commands = self.bound_commands();
                 let previous = self.configuration.values.borrow();
                 {
                     let scripts = self.scripts.read().unwrap();
@@ -148,6 +149,7 @@ impl Ui {
                         desired,
                         &previous,
                         self.scripts_catalog_ready.then_some(&*scripts),
+                        &commands,
                     ) {
                         call.finish(Err(error));
                         return;

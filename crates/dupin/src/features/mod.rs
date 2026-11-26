@@ -116,6 +116,15 @@ fn bundled(package: &str) -> Option<Bundled> {
         .find(|bundled| bundled.package == package)
 }
 
+/// The package that ships as the built-in `command`, if a bundled extension answers it.
+pub(crate) fn ported_package(command: &str) -> Option<&'static str> {
+    MANIFEST
+        .iter()
+        .filter_map(|feature| feature.bundled)
+        .find(|bundled| bundled.command == command)
+        .map(|bundled| bundled.package)
+}
+
 /// The built-in command the extension called `package` answers, if a feature ships as it.
 pub(crate) fn ported_command(package: &str) -> Option<&'static str> {
     bundled(package).map(|bundled| bundled.command)
