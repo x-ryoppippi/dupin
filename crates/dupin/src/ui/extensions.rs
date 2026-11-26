@@ -628,6 +628,13 @@ impl Ui {
             Some(ActionEffect::Pop { .. }) => self.session.close_page(anchor),
             Some(ActionEffect::Refresh { .. }) => self.session.refresh_page(anchor),
             Some(ActionEffect::ReplaceState { state, .. }) => self.session.replace_page_state(anchor, state),
+            Some(ActionEffect::Enter { command, .. }) if !extension.may_enter(&command) => {
+                self.show_notice(
+                    format!("{name} failed: only a package that ships with Dupin may enter another command"),
+                    tx,
+                );
+                Navigated::Done(Vec::new())
+            }
             Some(ActionEffect::Enter { command, query }) => {
                 match crate::features::aliases::command(&command, &self.session.command_ids()) {
                     Ok(id) => self.session.enter_command_from(anchor, &id, &query),

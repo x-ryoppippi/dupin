@@ -240,7 +240,8 @@ fn render_opens_views_and_fills_forms_as_the_fixture_does() {
 }
 
 /// A row's freshness is written by the fixture's clock and its state as a label, both by the
-/// production panel, and an action that enters another command says so to `test`.
+/// production panel, and an action that enters a command says so to `test`, which refuses one
+/// that would hand another package its text.
 #[test]
 fn render_writes_freshness_and_state_and_test_records_an_entered_command() {
     dupin_extension_host::skip_inside_a_sandbox!();
@@ -257,10 +258,13 @@ fn render_writes_freshness_and_state_and_test_records_an_entered_command() {
         package.join("main.js"),
         r#"export const search = () => [
                { title: 'api', accessories: [{ freshness: Date.now() - 12000 }, { state: 'offline' }],
-                 actions: [{ title: 'Show Port', run: 'port', data: 3000 }] },
+                 actions: [{ title: 'Show Port', run: 'port', data: 3000 }, { title: 'Narrow', run: 'narrow' }] },
                { title: 'cache', accessories: [{ freshness: Date.now() - 300000 }, { state: 'stale' }] },
            ];
-           export const actions = { port: (port) => ({ type: 'enter', command: 'port', query: String(port) }) };"#,
+           export const actions = {
+               port: (port) => ({ type: 'enter', command: 'port', query: String(port) }),
+               narrow: () => ({ type: 'enter', command: 'status', query: 'api' }),
+           };"#,
     )
     .unwrap();
     let fixture = package.join("fixtures/status.json");
@@ -268,7 +272,9 @@ fn render_writes_freshness_and_state_and_test_records_an_entered_command() {
         &fixture,
         r#"{ "fixture": 1, "steps": [
                { "query": "x", "expect": { "selected": 0 } },
-               { "activate": "Show Port", "expect": { "panel": { "enter": { "command": "port", "query": "3000" } } } }
+               { "activate": "Narrow", "expect": { "panel": { "enter": { "command": "status", "query": "api" } } } },
+               { "query": "x" },
+               { "activate": "Show Port", "expect": { "panel": null } }
            ] }"#,
     )
     .unwrap();
@@ -280,7 +286,10 @@ fn render_writes_freshness_and_state_and_test_records_an_entered_command() {
         "--json".as_ref(),
     ]);
     assert!(tested.status.success(), "{tested:?}");
-    assert_eq!(json(&tested)["passed"], true);
+    let report = json(&tested);
+    assert_eq!(report["passed"], true, "{report}");
+    let refused = &report["fixtures"][0]["steps"][3]["outcome"]["error"];
+    assert_eq!(refused["code"], "invalid-effect", "{report}");
 
     let png = root.path().join("status.png");
     let output = dupin(&[

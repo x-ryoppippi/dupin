@@ -102,6 +102,13 @@ impl std::fmt::Debug for Extension {
 }
 
 impl Extension {
+    /// Whether an `enter` effect of this package may hand its query to the command `command`
+    /// names. The command's package receives the text, so only a package that ships with Dupin
+    /// may name another: any other could pass what it read to one allowed to send it elsewhere.
+    pub(crate) fn may_enter(&self, command: &str) -> bool {
+        command == self.id || self.package.as_str().starts_with(BUNDLED_PREFIX)
+    }
+
     /// Links the package and reports which of `search` and `items` its entry exports, which
     /// must be at least one.
     pub fn check(&self, deadline: Instant) -> Result<Exports, RunError> {
