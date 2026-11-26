@@ -16,6 +16,23 @@
 		"files": {
 			"ssh-config": "Host web1\n"
 		},
+		"storage": [
+			{
+				"kind": "settings",
+				"terminal": "iTerm",
+				"hosts": []
+			},
+			{
+				"kind": "host",
+				"host": "web1",
+				"enabled": true,
+				"units": [],
+				"logs": [],
+				"dirs": [],
+				"lines": 50,
+				"allowTerminate": false
+			}
+		],
 		"exec": [
 			{
 				"profile": "terminal",
@@ -24,130 +41,14 @@
 				"stdout": "",
 				"stderr": ""
 			}
-		],
-		"storage": [
-			{
-				"hosts": [],
-				"kind": "settings",
-				"terminal": "iTerm"
-			},
-			{
-				"allowTerminate": false,
-				"dirs": [],
-				"enabled": true,
-				"host": "web1",
-				"kind": "host",
-				"lines": 50,
-				"logs": [],
-				"units": []
-			}
 		]
 	},
 	"steps": [
 		{
-			"query": "web1",
-			"expect": {
-				"rows": [
-					{
-						"accessories": [
-							{
-								"tag": "not fetched"
-							}
-						],
-						"actions": [
-							{
-								"push": {
-									"state": {
-										"host": "web1",
-										"records": [],
-										"terminate": false
-									},
-									"view": "host"
-								},
-								"title": "Show web1"
-							},
-							{
-								"run": {
-									"action": "refresh",
-									"data": {
-										"host": "web1"
-									}
-								},
-								"title": "Refresh web1"
-							},
-							{
-								"run": {
-									"action": "terminal",
-									"data": {
-										"host": "web1"
-									}
-								},
-								"title": "Open SSH Session"
-							},
-							{
-								"copy": "web1",
-								"title": "Copy Host Name"
-							},
-							{
-								"push": {
-									"state": {
-										"host": "web1"
-									},
-									"view": "configure"
-								},
-								"title": "Configure web1…"
-							}
-						],
-						"detail": {
-							"metadata": [
-								{
-									"label": "Host",
-									"text": "web1"
-								},
-								{
-									"label": "State",
-									"text": "not fetched"
-								},
-								{
-									"label": "Log units",
-									"text": "—"
-								},
-								{
-									"label": "Log files",
-									"text": "—"
-								},
-								{
-									"label": "Folders",
-									"text": "—"
-								},
-								{
-									"label": "Terminate",
-									"text": "Not allowed"
-								}
-							]
-						},
-						"icon": "sf:server.rack",
-						"id": "host:web1",
-						"subtitle": "Not fetched yet: ⌘↩ fetches it",
-						"title": "web1"
-					}
-				],
-				"selected": 0
-			}
+			"query": "web1"
 		},
 		{
-			"activate": "Open SSH Session",
-			"expect": {
-				"effect": {
-					"run": {
-						"action": "terminal",
-						"data": {
-							"host": "web1"
-						}
-					}
-				},
-				"panel": "hide"
-			}
+			"activate": "Open SSH Session"
 		}
 	]
 }

@@ -1,4 +1,4 @@
-import type { Action, CatalogueItem, Metadata } from 'dupin';
+import type { Accessory, Action, CatalogueItem, Metadata } from 'dupin';
 import { processName } from './parse.ts';
 import type { PortRow, ProcessRow } from './parse.ts';
 import { probesOf, unanswered } from './probes.ts';
@@ -15,6 +15,9 @@ export const LABEL: Record<State, string> = {
 	timeout: 'timed out',
 	consent: 'needs consent',
 };
+
+/** How old a host's last answer may be before its row says it is stale. */
+const STALE_MS = 60 * 60 * 1000;
 
 export type Fetched = Map<string, { id: string; probed: Probed }>;
 
@@ -48,6 +51,16 @@ function details(ref: RowRef): Action {
 	return { title: 'Show Details', push: { view: 'details', state: { ...ref } } };
 }
 
+/**
+ * Whether the host answered last time, or its last answer is old: Dupin draws these in its own
+ * words and colours, beside the freshness.
+ */
+function condition(first: Probed | undefined): Accessory[] {
+	if (first === undefined) return [];
+	if (unanswered(first.state)) return [{ state: 'offline' }];
+	return Date.now() - first.fetchedAt > STALE_MS ? [{ state: 'stale' }] : [];
+}
+
 /** The host's row: how it answered last, and how long ago Dupin says that was. */
 export function hostItem(config: HostSettings, fetched: Fetched | undefined): CatalogueItem {
 	const host = config.host;
@@ -78,8 +91,11 @@ export function hostItem(config: HostSettings, fetched: Fetched | undefined): Ca
 		subtitle: line(subtitle, 512),
 		section: 'Hosts',
 		icon: 'sf:server.rack',
-		...(first === undefined ? {} : { time: first.triedAt ?? first.fetchedAt }),
-		accessories: [{ tag: state }],
+		accessories: [
+			...(first === undefined ? [] : [{ freshness: first.triedAt ?? first.fetchedAt }]),
+			...condition(first),
+			{ tag: state },
+		],
 		matchText: `${host} host`,
 		detail: {
 			metadata: [
@@ -93,17 +109,7 @@ export function hostItem(config: HostSettings, fetched: Fetched | undefined): Ca
 			],
 		},
 		actions: [
-			{
-				title: `Show ${host}`,
-				push: {
-					view: 'host',
-					state: {
-						host,
-						records: [...(fetched?.values() ?? [])].map((entry) => entry.id).slice(0, 64),
-						terminate: config.allowTerminate,
-					},
-				},
-			},
+			{ title: `Show ${host}`, run: 'scope', data: { host } },
 			{ title: `Refresh ${host}`, run: 'refresh', data: { host }, alternate: true },
 			{ title: 'Open SSH Session', run: 'terminal', data: { host } },
 			{ title: 'Copy Host Name', copy: host },
@@ -226,7 +232,8 @@ export function probeItems(
 	const host = config.host;
 	const { probed } = entry;
 	const section = line(`${host} · ${probe.title}`, 128);
-	const stale = hostState !== undefined && unanswered(hostState) ? [{ tag: LABEL[hostState] }] : [];
+	const offline: Accessory[] =
+		hostState !== undefined && unanswered(hostState) ? [{ state: 'offline' }] : [];
 	const ref = (index: number): RowRef => ({
 		host,
 		record: entry.id,
@@ -255,8 +262,7 @@ export function probeItems(
 	return rows.map((row) => ({
 		...row,
 		section,
-		time: probed.fetchedAt,
-		...(stale.length > 0 ? { accessories: stale } : {}),
+		accessories: [{ freshness: probed.fetchedAt }, ...offline],
 	}));
 }
 

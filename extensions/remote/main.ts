@@ -3,7 +3,6 @@ import type {
 	ActionContext,
 	ActionEffect,
 	CatalogueItem,
-	Item,
 	ItemsContext,
 	ItemsResult,
 	Json,
@@ -25,7 +24,7 @@ import { processName } from './parse.ts';
 import type { PortRow, ProcessRow } from './parse.ts';
 import { limited, probesOf, refresh, run } from './probes.ts';
 import { hostItem, hostRows } from './rows.ts';
-import type { Fetched, RowRef } from './rows.ts';
+import type { RowRef } from './rows.ts';
 import { configHosts } from './ssh-config.ts';
 import {
 	defaultHost,
@@ -44,7 +43,6 @@ const PART_ITEMS = 400;
 const PART_CHARS = 700_000;
 /** The most hosts one Refresh All fetches, so it ends inside an action's 30 seconds. */
 const REFRESH_ALL_HOSTS = 6;
-const PAGE_ROWS = 50;
 
 function hostsOf(
 	stored: Stored,
@@ -196,81 +194,7 @@ function readRow(record: { data: Json } | undefined, ref: RowRef) {
 	return row === undefined ? null : { probe: String(data.probe ?? ''), row };
 }
 
-/** A catalogue row as a page's row, which Dupin doesn't date or match itself. */
-function pageItem(row: CatalogueItem, now: number): Item {
-	const {
-		matchText: _match,
-		time,
-		keywords: _keywords,
-		aliases: _aliases,
-		file: _file,
-		webSearch: _web,
-		...rest
-	} = row;
-	return {
-		...rest,
-		subtitle: line(
-			time === undefined ? (row.subtitle ?? '') : `${ago(now, time)} · ${row.subtitle ?? ''}`,
-			2048,
-		),
-	};
-}
-
 export const views = {
-	/**
-	 * One host's rows, found again as the page's query changes: the same words that find them
-	 * after `remote <host>` in the launcher.
-	 */
-	async host(ctx: ViewContext): Promise<View> {
-		const state = ctx.state as { host?: unknown; records?: unknown; terminate?: unknown } | null;
-		const host = validHost(state?.host);
-		if (host === null) return { type: 'list', items: [], emptyText: 'No such host' };
-		const ids = Array.isArray(state?.records)
-			? state.records.filter((id) => typeof id === 'string')
-			: [];
-		const fetched: Fetched = new Map();
-		for (const id of ids.slice(0, 64)) {
-			const record = await storage.get(id as string);
-			const data = record?.data as Partial<Probed> | null | undefined;
-			if (record && data && data.host === host && typeof data.probe === 'string') {
-				fetched.set(data.probe, { id: record.id, probed: data as Probed });
-			}
-		}
-		const config: HostSettings = {
-			...defaultHost(host),
-			enabled: true,
-			allowTerminate: state?.terminate === true,
-		};
-		for (const probed of fetched.values()) {
-			const id = probed.probed.probe;
-			if (id.startsWith('unit:')) config.units.push(id.slice(5));
-			else if (id.startsWith('log:')) config.logs.push(id.slice(4));
-			else if (id.startsWith('dir:')) config.dirs.push(id.slice(4));
-		}
-		const words = ctx.query.toLowerCase().split(/\s+/).filter(Boolean);
-		const now = Date.now();
-		const header = hostItem(config, fetched);
-		const rows = hostRows(config, fetched).filter((row) => {
-			const text = `${row.title} ${row.matchText ?? ''}`.toLowerCase();
-			return words.every((word) => text.includes(word));
-		});
-		const first = fetched.get('ps')?.probed;
-		const shown: Item[] = [
-			{
-				...pageItem(header, now),
-				section: undefined,
-				actions: [
-					{ title: `Refresh ${host}`, run: 'refresh', data: { host } },
-					{ title: 'Open SSH Session', run: 'terminal', data: { host }, alternate: true },
-					{ title: 'Copy Host Name', copy: host },
-				],
-				...(first ? {} : { subtitle: 'Not fetched yet: ↩ fetches it' }),
-			},
-			...rows.slice(0, PAGE_ROWS - 1).map((row) => pageItem(row, now)),
-		];
-		return { type: 'list', items: shown, emptyText: `Nothing on ${host} matches` };
-	},
-
 	/** Everything Remote knows of one row, in full. */
 	async details(ctx: ViewContext): Promise<View> {
 		const ref = ctx.state as unknown as RowRef | null;
@@ -429,7 +353,7 @@ async function terminalFor(host: string): Promise<ActionEffect> {
 }
 
 export const actions = {
-	async refresh(data: Json, ctx: ActionContext): Promise<ActionEffect> {
+	async refresh(data: Json): Promise<ActionEffect> {
 		const host = hostOf(data);
 		if (host === null) return { type: 'toast', text: 'No such host' };
 		const stored = await load();
@@ -437,18 +361,14 @@ export const actions = {
 		if (!config?.enabled) return { type: 'toast', text: `Enable ${host} first` };
 		const result = await refresh(config, 3, stored.probes.get(host));
 		catalogue.invalidate();
-		const page = ctx.state as { host?: unknown } | null;
-		if (page?.host !== host) return { type: 'refresh', toast: summary(host, result) };
-		// The host's page reads the records it was opened with, and a first fetch adds new ones.
-		const fetched = (await load()).probes.get(host);
-		return {
-			type: 'replaceState',
-			state: {
-				...page,
-				records: [...(fetched?.values() ?? [])].map((entry) => entry.id).slice(0, 64),
-			} as Json,
-			toast: summary(host, result),
-		};
+		return { type: 'refresh', toast: summary(host, result) };
+	},
+
+	/** Types the host after `remote`, so only its rows are found, as typing it does. */
+	scope(data: Json): ActionEffect {
+		const host = hostOf(data);
+		if (host === null) return { type: 'toast', text: 'No such host' };
+		return { type: 'enter', command: 'remote', query: `${host} ` };
 	},
 
 	async refreshAll(): Promise<ActionEffect> {
