@@ -30,6 +30,8 @@ let
     (root + /examples/extensions/notes-js)
     # The bundled extensions, which a test build finds in the source tree.
     (root + /extensions)
+    # The collector's ping schema, which dupin-telemetry's test holds to the Rust type.
+    (root + /telemetry/src/v1/ping-schema.gen.ts)
   ];
   bundleFiles = lib.fileset.unions [
     (root + /packaging)

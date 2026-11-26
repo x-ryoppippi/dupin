@@ -30,6 +30,8 @@ let
         "flake.lock"
         "VERSION"
         "*.png"
+        # Generated from crates/dupin-telemetry, whose test compares it byte for byte.
+        "telemetry/src/v1/ping-schema.gen.ts"
       ];
 
       settings.formatter = {

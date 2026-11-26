@@ -38,8 +38,9 @@ jobs:
               (builtins.attrNames (removeAttrs checks [ "dupin" "lint-and-test" "hawk" ])))')"
           nix build --no-link "${checks[@]}"
 
-  # A pull request that only touches website/ cannot change the app, so build and e2e skip;
-  # skipped jobs still satisfy required checks, which paths-ignore would not.
+  # A pull request that only touches website/ or telemetry/ cannot change the app, so build and
+  # e2e skip; skipped jobs still satisfy required checks, which paths-ignore would not. The
+  # collector's ping schema is the exception: dupin-telemetry's test holds it to the Rust type.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -69,9 +70,26 @@ jobs:
             (gh api --paginate $"repos/($env.GITHUB_REPOSITORY)/pulls/($env.PR)/files"
               --jq '.[] | .filename, (.previous_filename // empty)')
             | lines
-            | any {|path| not ($path | str starts-with 'website/') }
+            | any {|path|
+              let web = ($path | str starts-with 'website/') or ($path | str starts-with 'telemetry/')
+              (not $web) or ($path == 'telemetry/src/v1/ping-schema.gen.ts')
+            }
           }
           $"app=($app)\n" | save --append $env.GITHUB_OUTPUT
+
+  # The collector Worker in telemetry/: its tests, type check and build, which need no Mac.
+  telemetry:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nix-cache
+      - run: nix profile install --inputs-from . nixpkgs#nodejs nixpkgs#pnpm_12 nixpkgs#just
+      - run: just telemetry::test
+      - run: just telemetry::typecheck
+      - run: just telemetry::build
 
   build:
     needs: changes

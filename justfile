@@ -1,3 +1,4 @@
+mod telemetry
 mod website
 
 [private]
