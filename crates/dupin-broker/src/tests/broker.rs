@@ -971,7 +971,7 @@ fn local_decisions_read_again_replace_those_in_memory() {
         .approve(&package, &key("http:https://api.github.com"), None)
         .unwrap();
     let in_flight = permit(check(&broker, &package, &get(API), Trigger::Query));
-    let saved = Local::parse(&broker.local_toml().unwrap()).unwrap();
+    let saved = broker.decisions();
     assert!(
         broker.replace_local(saved).is_empty(),
         "reading back its own save changes nothing"
@@ -985,7 +985,7 @@ fn local_decisions_read_again_replace_those_in_memory() {
     assert!(!broker.validate(&in_flight));
     assert!(!broker.is_enabled(&package));
     assert!(
-        !broker.local_toml().unwrap().contains("bookmarks"),
+        broker.decisions().records().unwrap().is_empty(),
         "the next save keeps the removal"
     );
 
@@ -1022,11 +1022,24 @@ fn unreadable_local_grants_fail_closed() {
         broker.revoke(&package, &ScopeKey::Dictionary),
         Err(BrokerError::GrantsUnreadable)
     );
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("grants.toml");
-    std::fs::write(&path, "not toml").unwrap();
-    assert!(matches!(broker.save(&path), Err(StoreError::Unreadable)));
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "not toml");
+    let mut store = MemoryLocal::default();
+    store.insert(
+        package.clone(),
+        json!({ "package": "bookmarks", "enabled": false }),
+    );
+    assert!(matches!(
+        broker.save(&mut store, &Local::default()),
+        Err(StoreError::Unreadable)
+    ));
+    assert!(matches!(
+        broker.change_saved(&mut store, |broker| broker.forget(&package)),
+        Err(SaveError::Refused(BrokerError::GrantsUnreadable))
+    ));
+    assert_eq!(
+        store.records()[&package],
+        json!({ "package": "bookmarks", "enabled": false }),
+        "what is stored is never overwritten"
+    );
 }
 
 #[test]
@@ -1102,35 +1115,30 @@ fn only_a_choice_to_turn_a_package_off_counts_as_turned_off() {
 #[test]
 fn a_change_that_cannot_be_saved_is_undone() {
     let (mut broker, package) = enabled(github());
-    let dir = tempfile::tempdir().unwrap();
-    let blocked = dir.path().join("file");
-    std::fs::write(&blocked, "").unwrap();
-    let unwritable = blocked.join("grants.toml");
+    let mut store = MemoryLocal::default();
+    store.set_unwritable(Some("the disk is full"));
 
-    let failed = broker.change_saved(&unwritable, |broker| broker.set_enabled(&package, false));
+    let failed = broker.change_saved(&mut store, |broker| broker.set_enabled(&package, false));
     assert!(
-        matches!(failed, Err(SaveError::Store(StoreError::Io(_)))),
+        matches!(failed, Err(SaveError::Store(StoreError::Write(_)))),
         "{failed:?}"
     );
     assert!(broker.is_enabled(&package));
     assert!(!broker.is_turned_off(&package));
 
-    let refused = broker.change_saved(&dir.path().join("grants.toml"), |broker| {
-        broker.set_enabled(&id("missing"), false)
-    });
+    store.set_unwritable(None);
+    let refused = broker.change_saved(&mut store, |broker| broker.set_enabled(&id("missing"), false));
     assert!(matches!(
         refused,
         Err(SaveError::Refused(BrokerError::NotInstalled))
     ));
-    assert!(!dir.path().join("grants.toml").exists());
+    assert!(store.records().is_empty());
 
-    let path = dir.path().join("grants.toml");
     broker
-        .change_saved(&path, |broker| broker.set_enabled(&package, false))
+        .change_saved(&mut store, |broker| broker.set_enabled(&package, false))
         .unwrap();
     assert!(broker.is_turned_off(&package));
-    let saved = Local::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let mut relaunched = Broker::new(Base::default(), saved);
+    let mut relaunched = Broker::new(Base::default(), Local::load(&mut store).unwrap());
     let _ = relaunched.install(package.clone(), rev(R1), github());
     assert!(relaunched.is_turned_off(&package));
 }

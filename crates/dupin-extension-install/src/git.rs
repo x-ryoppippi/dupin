@@ -291,7 +291,7 @@ impl Git {
 
     /// Fetches `rev` from `url` into the bare `repo`: a tag, branch or full commit SHA, or, with
     /// none, the newest version tag, or the default branch when there is no version tag. `on` is
-    /// the branch or tag a pinned commit was installed from, as extensions.lock records it.
+    /// the branch or tag a pinned commit was installed from, as the installed extensions list records it.
     pub(crate) fn resolve(
         &self,
         repo: &Path,

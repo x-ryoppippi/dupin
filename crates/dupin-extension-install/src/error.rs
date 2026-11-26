@@ -12,7 +12,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -32,7 +32,7 @@ impl Error {
         self
     }
 
-    pub(crate) fn hint(mut self, hint: impl Into<String>) -> Self {
+    pub fn hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
     }

@@ -155,13 +155,15 @@ impl Override {
     fn run(&self) {
         let shipped = bundled::directory().unwrap();
         let grants = tempfile::tempdir().unwrap();
-        let local = grants.path().join("grants.toml");
+        let storage_root = grants.path().join("storage");
+        let storage = Arc::new(Storage::new(&storage_root, MemoryKey::random()));
         let reached = Arc::new(AtomicUsize::new(0));
         let bridge = Bridge::open(
             &grants.path().join("base.toml"),
-            &local,
+            Box::new(super::grants::Grants::new(Some(storage.clone()))),
             services(reached.clone()),
         );
+        bridge.open_grants();
         for permission in OsPermission::ALL {
             bridge.set_os_access(permission, OsAccess::Allowed);
         }
@@ -193,16 +195,10 @@ impl Override {
             launcher.extensions.scanned(Origin::User, catalog);
         };
         rescan(&mut launcher);
-        let storage_root = grants.path().join("storage");
-        let storage = Storage::new(&storage_root, MemoryKey::random());
-        let eject = |grants: &Path| {
-            crate::extension_install::eject_into(
-                &shipped,
-                user.path(),
-                Some(grants),
-                Some(&storage),
-                self.name,
-            )
+        // The bridge holds the grants as the running launcher does, so ejecting asks it.
+        let running = |command| super::grants::answer(&bridge, &command);
+        let eject = |launcher: crate::extension_install::Launcher<'_>| {
+            crate::extension_install::eject_into(&shipped, user.path(), Some(&storage), self.name, launcher)
         };
         let may_use = |launcher: &Launcher, package: &PackageId| match &self.uses {
             None => true,
@@ -252,7 +248,7 @@ impl Override {
             launcher.install(&self.on);
         }
 
-        let copy = eject(&local).unwrap();
+        let copy = eject(&running).unwrap();
         rescan(&mut launcher);
         launcher.install(&self.on);
         let unchanged = self.listed(&launcher);
@@ -399,9 +395,7 @@ impl Override {
         rescan(&mut launcher);
         launcher.install(&self.on);
 
-        let unreadable = grants.path().join("unreadable.toml");
-        std::fs::create_dir(&unreadable).unwrap();
-        let refused = eject(&unreadable).unwrap_err();
+        let refused = eject(&|_| Err("Dupin is not running".into())).unwrap_err();
         assert_eq!(refused.code, "grants-unsaved");
         assert!(
             user.path().join(self.name).symlink_metadata().is_err(),
@@ -412,11 +406,12 @@ impl Override {
             "nothing it stored is deleted before its grants are forgotten"
         );
 
-        let copy = eject(&local).unwrap();
+        let copy = eject(&running).unwrap();
         assert!(
             !storage_root.join(namespace(self.name)).exists(),
             "what the earlier copy stored is deleted"
         );
+
         std::fs::write(copy.join(entry(&copy)), EDITED_AGAIN).unwrap();
         rescan(&mut launcher);
         launcher.install(&self.on);

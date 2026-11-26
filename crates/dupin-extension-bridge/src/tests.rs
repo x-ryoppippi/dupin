@@ -61,6 +61,7 @@ struct World {
     clipboard: Arc<fixture::Clipboard>,
     windows: Arc<fixture::Windows>,
     snippets: fixture::Snippets,
+    grants: MemoryLocal,
     folder: tempfile::TempDir,
 }
 
@@ -112,8 +113,12 @@ fn world_with(
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
     };
-    let grants = folder.path().join("grants.toml");
-    let bridge = Bridge::new(Broker::new(base, Local::default()), Some(grants), services);
+    let grants = MemoryLocal::default();
+    let bridge = Bridge::new(
+        Broker::new(base, Local::default()),
+        Some(Box::new(grants.clone())),
+        services,
+    );
     let id = PackageId::new("weather").unwrap();
     let capabilities = Capabilities::parse(&capabilities).unwrap();
     bridge.install(&id, revision(), capabilities);
@@ -129,6 +134,7 @@ fn world_with(
         clipboard,
         windows,
         snippets,
+        grants,
         folder,
     };
     adjust(&mut world);
@@ -258,8 +264,8 @@ fn an_allowed_request_reaches_its_service_and_returns_the_result() {
         [("accept".to_owned(), "application/json".to_owned())]
     );
     // The grant was saved for the next launch.
-    let saved = std::fs::read_to_string(world.folder.path().join("grants.toml")).unwrap();
-    assert!(saved.contains("decision = \"granted\""), "{saved}");
+    let saved = world.grants.records()[&world.id].to_string();
+    assert!(saved.contains(r#""decision":"granted""#), "{saved}");
 }
 
 #[test]
@@ -1085,11 +1091,16 @@ fn wait_for(done: impl Fn() -> bool) {
 #[test]
 fn a_choice_that_cannot_be_saved_changes_nothing() {
     let folder = tempfile::tempdir().unwrap();
-    let local = folder.path().join("grants.toml");
-    let bridge = Bridge::open(&folder.path().join("base.toml"), &local, Services::none());
+    let local = MemoryLocal::default();
+    let bridge = Bridge::open(
+        &folder.path().join("base.toml"),
+        Box::new(local.clone()),
+        Services::none(),
+    );
+    bridge.open_grants();
     let id = PackageId::new("weather").unwrap();
     bridge.install(&id, revision(), Capabilities::default());
-    std::fs::create_dir(folder.path().join("grants.toml.tmp")).unwrap();
+    local.set_unwritable(Some("the disk is full"));
     assert!(matches!(bridge.set_enabled(&id, true), Err(SaveError::Store(_))));
     assert!(!bridge.is_enabled(&id));
     assert!(!bridge.is_turned_off(&id));
@@ -1104,7 +1115,8 @@ fn settings_hears_of_a_base_entry_set_aside_and_its_package_stays_off() {
         "version = 1\n[packages.weather]\ndeny = [\"dictionery\"]\n[packages.news]\nenabled = false\n",
     )
     .unwrap();
-    let bridge = Bridge::open(&base, &folder.path().join("grants.toml"), Services::none());
+    let bridge = Bridge::open(&base, Box::new(MemoryLocal::default()), Services::none());
+    bridge.open_grants();
     let [problem] = bridge.problems().try_into().unwrap();
     assert!(
         problem.contains("weather") && problem.contains("dictionery"),
@@ -1143,7 +1155,8 @@ fn an_unusable_base_withholds_bundled_grants_and_says_why() {
         .unwrap()
     };
     let open = || {
-        let bridge = Bridge::open(&base, &folder.path().join("grants.toml"), Services::none());
+        let bridge = Bridge::open(&base, Box::new(MemoryLocal::default()), Services::none());
+        bridge.open_grants();
         bridge.set_bundled(&calendar, revision(), true);
         bridge.install_bundled(&calendar, revision(), capabilities());
         bridge
@@ -1181,13 +1194,21 @@ fn an_unusable_base_withholds_bundled_grants_and_says_why() {
 }
 
 #[test]
-fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
+fn unreadable_grants_grant_nothing_are_never_overwritten_and_are_read_once_they_can_be() {
     let folder = tempfile::tempdir().unwrap();
-    let local = folder.path().join("grants.toml");
-    std::fs::write(&local, "not = [valid").unwrap();
-    let bridge = Bridge::open(&folder.path().join("base.toml"), &local, Services::none());
-    assert_eq!(bridge.problems().len(), 1);
     let id = PackageId::new("weather").unwrap();
+    let local = MemoryLocal::default();
+    let saved = serde_json::json!({ "package": "weather", "enabled": false });
+    local.insert(id.clone(), saved.clone());
+    local.set_unreadable(Some("the Keychain is locked"));
+    let bridge = Bridge::open(
+        &folder.path().join("base.toml"),
+        Box::new(local.clone()),
+        Services::none(),
+    );
+    bridge.open_grants();
+    let [problem] = bridge.problems().try_into().unwrap();
+    assert!(problem.contains("the Keychain is locked"), "{problem}");
     bridge.install(
         &id,
         revision(),
@@ -1197,17 +1218,49 @@ fn an_unreadable_grant_file_grants_nothing_and_is_never_overwritten() {
         bridge.set_enabled(&id, true),
         Err(SaveError::Refused(BrokerError::GrantsUnreadable))
     ));
-    assert_eq!(std::fs::read_to_string(&local).unwrap(), "not = [valid");
-}
+    assert!(matches!(
+        bridge.forget_grants(&id),
+        Err(SaveError::Refused(BrokerError::GrantsUnreadable))
+    ));
+    assert_eq!(local.records()[&id], saved, "what is stored is never overwritten");
 
-/// A bridge over grant files in `folder`, with `weather` declaring the dictionary and
-/// `notes` declaring nothing, both on and `weather`'s dictionary allowed.
-fn granted_on_disk(folder: &Path) -> (Bridge, PackageId, PackageId, Arc<Mutex<Vec<Notice>>>) {
+    assert!(!bridge.grants_read());
+    local.set_unreadable(None);
+    bridge.open_grants();
+    assert!(bridge.grants_read());
+    bridge.set_enabled(&id, true).unwrap();
+    assert!(bridge.problems().is_empty(), "reading them clears the problem");
+    assert!(bridge.is_enabled(&id));
+
+    let invalid = MemoryLocal::default();
+    invalid.insert(
+        id.clone(),
+        serde_json::json!({ "package": "weather", "surprise": 1 }),
+    );
     let bridge = Bridge::open(
-        &folder.join("base.toml"),
-        &folder.join("grants.toml"),
+        &folder.path().join("base.toml"),
+        Box::new(invalid.clone()),
         Services::none(),
     );
+    bridge.open_grants();
+    bridge.install(&id, revision(), Capabilities::default());
+    assert_eq!(bridge.problems().len(), 1);
+    assert!(bridge.set_enabled(&id, true).is_err());
+    assert_eq!(
+        invalid.records()[&id],
+        serde_json::json!({ "package": "weather", "surprise": 1 })
+    );
+}
+
+/// A bridge over a base file in `folder` and the grants in `local`, with `weather` declaring
+/// the dictionary and `notes` declaring nothing, both on and `weather`'s dictionary allowed.
+fn granted(folder: &Path, local: &MemoryLocal) -> (Bridge, PackageId, PackageId, Arc<Mutex<Vec<Notice>>>) {
+    let bridge = Bridge::open(
+        &folder.join("base.toml"),
+        Box::new(local.clone()),
+        Services::none(),
+    );
+    bridge.open_grants();
     let notices = Arc::new(Mutex::new(Vec::new()));
     bridge.set_listener({
         let notices = notices.clone();
@@ -1232,24 +1285,22 @@ fn granted_on_disk(folder: &Path) -> (Bridge, PackageId, PackageId, Arc<Mutex<Ve
 }
 
 #[test]
-fn grants_another_process_forgets_stay_forgotten() {
+fn forgotten_grants_stay_forgotten() {
     let folder = tempfile::tempdir().unwrap();
-    let (bridge, weather, notes, notices) = granted_on_disk(folder.path());
+    let local = MemoryLocal::default();
+    let (bridge, weather, notes, notices) = granted(folder.path(), &local);
+    let call = bridge.call(&weather, Trigger::Activation);
 
-    // What `dupin ext remove weather` does while Dupin runs.
-    let local = folder.path().join("grants.toml");
-    let mut other = Broker::new(
-        Base::default(),
-        Local::parse(&std::fs::read_to_string(&local).unwrap()).unwrap(),
-    );
-    other.uninstall(&weather);
-    other.save(&local).unwrap();
+    // What `dupin ext remove weather` asks the running app to do.
+    bridge.forget_grants(&weather).unwrap();
+    assert!(!local.records().contains_key(&weather));
+    assert!(!bridge.is_current(&weather, call.generation));
 
     // Any save of the app's own must not write the removed grants back.
     bridge.set_enabled(&notes, false).unwrap();
-    let saved = std::fs::read_to_string(&local).unwrap();
-    assert!(!saved.contains("weather"), "{saved}");
-    assert!(saved.contains("notes"), "{saved}");
+    let saved = local.records();
+    assert!(!saved.contains_key(&weather), "{saved:?}");
+    assert!(saved.contains_key(&notes), "{saved:?}");
     assert!(!bridge.is_enabled(&weather));
     assert_eq!(bridge.scopes(&weather)[0].state, ConsentState::Undecided);
     assert!(
@@ -1269,7 +1320,8 @@ fn grants_another_process_forgets_stay_forgotten() {
 #[test]
 fn a_declared_base_changed_while_running_applies_its_denials_at_once() {
     let folder = tempfile::tempdir().unwrap();
-    let (bridge, weather, notes, notices) = granted_on_disk(folder.path());
+    let (bridge, weather, notes, notices) = granted(folder.path(), &MemoryLocal::default());
+
     let call = bridge.call(&weather, Trigger::Activation);
 
     std::fs::write(

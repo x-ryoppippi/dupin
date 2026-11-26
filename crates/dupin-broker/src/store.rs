@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,11 +11,14 @@ const VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub enum StoreError {
-    /// The file isn't valid TOML of the expected shape.
+    /// The declared base or a saved record isn't of the expected shape.
     Invalid(String),
     /// The local grants couldn't be read, so nothing may overwrite them.
     Unreadable,
-    Io(std::io::Error),
+    /// The [`LocalStore`] couldn't be read.
+    Read(String),
+    /// The [`LocalStore`] couldn't be written.
+    Write(String),
 }
 
 impl fmt::Display for StoreError {
@@ -23,7 +26,8 @@ impl fmt::Display for StoreError {
         match self {
             Self::Invalid(message) => f.write_str(message),
             Self::Unreadable => f.write_str("the saved extension grants couldn't be read"),
-            Self::Io(error) => write!(f, "couldn't save extension grants: {error}"),
+            Self::Read(error) => write!(f, "couldn't read extension grants: {error}"),
+            Self::Write(error) => write!(f, "couldn't save extension grants: {error}"),
         }
     }
 }
@@ -166,7 +170,7 @@ impl Base {
     }
 }
 
-/// The user's own choices, kept in the writable data directory.
+/// The user's own choices, one record per package in a [`LocalStore`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Local {
     pub(crate) packages: Option<BTreeMap<PackageId, LocalPackage>>,
@@ -179,6 +183,12 @@ pub(crate) struct LocalPackage {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub scopes: BTreeMap<ScopeKey, Record>,
+}
+
+impl LocalPackage {
+    fn is_empty(&self) -> bool {
+        self.enabled.is_none() && self.scopes.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,12 +205,26 @@ pub(crate) enum Record {
     Revoked,
 }
 
+/// One package's decisions as a [`LocalStore`] keeps them: `{ "package": …, "enabled": …,
+/// "scopes": { … } }`.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LocalFile {
-    version: u32,
+struct LocalRecord {
+    package: PackageId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
     #[serde(default)]
-    packages: BTreeMap<PackageId, LocalPackage>,
+    scopes: BTreeMap<ScopeKey, Record>,
+}
+
+/// Where the user's decisions are kept: one record per package with any, which only the broker
+/// encodes and reads. The store itself must keep a record from being read as another
+/// package's.
+pub trait LocalStore: Send {
+    /// Every record [`LocalStore::write`] was handed and didn't delete since.
+    fn read(&mut self) -> Result<Vec<serde_json::Value>, String>;
+    /// Replaces the record of each package in `changes`, or deletes it for `None`.
+    fn write(&mut self, changes: Vec<(PackageId, Option<serde_json::Value>)>) -> Result<(), String>;
 }
 
 impl Default for Local {
@@ -212,14 +236,22 @@ impl Default for Local {
 }
 
 impl Local {
-    pub fn parse(source: &str) -> Result<Self, StoreError> {
-        let file: LocalFile = toml::from_str(source).map_err(|e| invalid("the saved grants", e))?;
-        check_version(file.version)?;
-        for (id, package) in &file.packages {
-            for (key, record) in &package.scopes {
+    /// Reads every package's decisions from `store`. A store that can't be read, or a record
+    /// that isn't valid, is an error, since what it would deny is unknown.
+    pub fn load(store: &mut dyn LocalStore) -> Result<Self, StoreError> {
+        Self::from_records(store.read().map_err(StoreError::Read)?)
+    }
+
+    pub fn from_records(records: Vec<serde_json::Value>) -> Result<Self, StoreError> {
+        let mut packages = BTreeMap::new();
+        for record in records {
+            let record: LocalRecord = serde_json::from_value(record)
+                .map_err(|error| StoreError::Invalid(format!("the saved grants are invalid: {error}")))?;
+            let id = record.package;
+            for (key, decision) in &record.scopes {
                 if let Record::Granted {
                     approved, binding, ..
-                } = record
+                } = decision
                 {
                     let problem = |message: &str| {
                         Err(StoreError::Invalid(format!(
@@ -237,29 +269,76 @@ impl Local {
                     }
                 }
             }
+            let package = LocalPackage {
+                enabled: record.enabled,
+                scopes: record.scopes,
+            };
+            if packages.insert(id.clone(), package).is_some() {
+                return Err(StoreError::Invalid(format!(
+                    "the saved grants for {id} are saved twice"
+                )));
+            }
         }
         Ok(Self {
-            packages: Some(file.packages),
+            packages: Some(packages),
         })
     }
 
-    /// Stands in for a grant file that exists but couldn't be read or parsed. Every grant it
-    /// might have revoked is unknown, so nothing is granted, bundled packages lose their
-    /// pre-grants, and saving is refused rather than overwriting the user's file.
+    /// The package a record of [`Local::record`] names, for a store that checks it was kept
+    /// under that package.
+    pub fn record_package(record: &serde_json::Value) -> Option<PackageId> {
+        PackageId::new(record.get("package")?.as_str()?).ok()
+    }
+
+    /// Stands in for grants that exist but couldn't be read. Every grant they might have
+    /// revoked is unknown, so nothing is granted, bundled packages lose their pre-grants, and
+    /// saving is refused rather than overwriting what is stored.
     pub fn unreadable() -> Self {
         Self { packages: None }
     }
 
-    pub(crate) fn to_toml(&self) -> Result<String, StoreError> {
-        let packages = self.packages.clone().ok_or(StoreError::Unreadable)?;
-        let file = LocalFile {
-            version: VERSION,
-            packages: packages
-                .into_iter()
-                .filter(|(_, package)| package.enabled.is_some() || !package.scopes.is_empty())
-                .collect(),
-        };
-        toml::to_string(&file).map_err(|e| StoreError::Invalid(format!("couldn't encode grants: {e}")))
+    fn record(id: &PackageId, package: &LocalPackage) -> Result<serde_json::Value, StoreError> {
+        serde_json::to_value(LocalRecord {
+            package: id.clone(),
+            enabled: package.enabled,
+            scopes: package.scopes.clone(),
+        })
+        .map_err(|error| StoreError::Invalid(format!("couldn't encode grants: {error}")))
+    }
+
+    /// The record of each package whose decisions differ from `before`, or `None` for one left
+    /// with none, which has no record.
+    pub(crate) fn changes(
+        &self,
+        before: &Self,
+    ) -> Result<Vec<(PackageId, Option<serde_json::Value>)>, StoreError> {
+        let packages = self.packages.as_ref().ok_or(StoreError::Unreadable)?;
+        let empty = BTreeMap::new();
+        let previous = before.packages.as_ref().unwrap_or(&empty);
+        let ids: BTreeSet<_> = packages.keys().chain(previous.keys()).collect();
+        let mut changes = Vec::new();
+        for id in ids {
+            let now = packages.get(id).filter(|package| !package.is_empty());
+            let was = previous.get(id).filter(|package| !package.is_empty());
+            if now == was && before.packages.is_some() {
+                continue;
+            }
+            changes.push((
+                id.clone(),
+                now.map(|package| Self::record(id, package)).transpose()?,
+            ));
+        }
+        Ok(changes)
+    }
+
+    /// Every package's record, as [`LocalStore::write`] is handed them.
+    pub fn records(&self) -> Result<Vec<serde_json::Value>, StoreError> {
+        let packages = self.packages.as_ref().ok_or(StoreError::Unreadable)?;
+        packages
+            .iter()
+            .filter(|(_, package)| !package.is_empty())
+            .map(|(id, package)| Self::record(id, package))
+            .collect()
     }
 }
 
@@ -273,18 +352,62 @@ fn check_version(version: u32) -> Result<(), StoreError> {
     }
 }
 
-/// Replaces `path` whole, so a crash leaves the old grants or the new ones, never a mix.
-pub(crate) fn write_atomically(path: &Path, contents: &str) -> Result<(), StoreError> {
-    let parent = path
-        .parent()
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    std::fs::create_dir_all(parent).map_err(StoreError::Io)?;
-    let mut temp = path.as_os_str().to_owned();
-    temp.push(".tmp");
-    let temp = PathBuf::from(temp);
-    let mut file = std::fs::File::create(&temp).map_err(StoreError::Io)?;
-    file.write_all(contents.as_bytes()).map_err(StoreError::Io)?;
-    file.sync_all().map_err(StoreError::Io)?;
-    std::fs::rename(&temp, path).map_err(StoreError::Io)
+#[derive(Debug, Default)]
+struct Memory {
+    records: BTreeMap<PackageId, serde_json::Value>,
+    unreadable: Option<String>,
+    unwritable: Option<String>,
+}
+
+/// Decisions kept in memory, for tests and fixtures. Clones share the records.
+#[derive(Clone, Debug, Default)]
+pub struct MemoryLocal(Arc<Mutex<Memory>>);
+
+impl MemoryLocal {
+    fn memory(&self) -> MutexGuard<'_, Memory> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn records(&self) -> BTreeMap<PackageId, serde_json::Value> {
+        self.memory().records.clone()
+    }
+
+    /// Stores `record` under `id`, as another writer would.
+    pub fn insert(&self, id: PackageId, record: serde_json::Value) {
+        self.memory().records.insert(id, record);
+    }
+
+    /// Makes every read fail with `problem` while it is set.
+    pub fn set_unreadable(&self, problem: Option<&str>) {
+        self.memory().unreadable = problem.map(str::to_owned);
+    }
+
+    /// Makes every write fail with `problem` while it is set.
+    pub fn set_unwritable(&self, problem: Option<&str>) {
+        self.memory().unwritable = problem.map(str::to_owned);
+    }
+}
+
+impl LocalStore for MemoryLocal {
+    fn read(&mut self) -> Result<Vec<serde_json::Value>, String> {
+        let memory = self.memory();
+        match &memory.unreadable {
+            Some(problem) => Err(problem.clone()),
+            None => Ok(memory.records.values().cloned().collect()),
+        }
+    }
+
+    fn write(&mut self, changes: Vec<(PackageId, Option<serde_json::Value>)>) -> Result<(), String> {
+        let mut memory = self.memory();
+        if let Some(problem) = &memory.unwritable {
+            return Err(problem.clone());
+        }
+        for (id, record) in changes {
+            match record {
+                Some(record) => memory.records.insert(id, record),
+                None => memory.records.remove(&id),
+            };
+        }
+        Ok(())
+    }
 }
