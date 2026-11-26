@@ -1,7 +1,13 @@
 use std/assert
 use ../latency.nu [
+    COMPARE_FLOOR
+    COMPARE_TOLERANCE
     CONTROL
     PARITY_FLOOR
+    against-main
+    checked-main
+    checked-results
+    render
     parity-pairs
     stale
     uncontrolled
@@ -414,4 +420,250 @@ def main [] {
             assert ($has_native or $recorded or $setup.budget_ms? != null) $"($feature.name).($label) has no native implementation, recorded native baseline or budget_ms"
         }
     }
+
+    pull-request-report
+}
+
+def timed [
+    id: string
+    feature: string
+    implementation: string
+    p95: float
+    merge: float
+]: nothing -> record {
+    {
+        id: $id
+        feature: $feature
+        implementation: $implementation
+        p95_ms: $p95
+        stages: {
+            dispatch_ms: {p50: 0.05, p95: 0.1}
+            provider_ms: {p50: 0.2, p95: 0.4}
+            merge_ms: {p50: 0.3, p95: $merge}
+            layout_ms: {p50: 0.2, p95: 0.5}
+        }
+    }
+}
+
+def checked-timed [...rows: record]: nothing -> list<record> {
+    $rows | checked-results
+}
+
+def json-block []: string -> record {
+    $in | split row "```json\n" | get 1 | split row "\n```" | first | from json
+}
+
+# The pull request comment: main's results scaled by the native control as `parity` scales a
+# recorded baseline, held to `compare`'s tolerance, and rendered for a person or an agent.
+def pull-request-report [] {
+    let control = {|p95: float|
+        [
+            (timed search.a $CONTROL native $p95 1.0)
+            (timed search.b $CONTROL native $p95 1.0)
+        ]
+    }
+    let main = (checked-timed
+        ...(do $control 2.0)
+        (timed x.k x extension 2.0 1.0)
+        (timed gone.k gone extension 1.0 0.5)
+    )
+    let run = {|search: float, x: float, merge: float| (checked-timed
+        ...(do $control $search)
+        (timed x.k x extension $x $merge)
+        (timed fresh.k fresh extension 1.0 0.5)
+    ) }
+    let tolerance = $COMPARE_TOLERANCE
+    let floor = $COMPARE_FLOOR
+
+    # A runner half as fast again measures everything half as slow again; scaled by the control,
+    # that is no regression, though unscaled it would be.
+    let slower_runner = against-main (do $run 3.0 3.2 1.5) $main $tolerance $floor
+    assert equal $slower_runner.scale 1.5
+    let x = $slower_runner.rows | where id == x.k | first
+    assert equal ($x | select scale held_p95_ms limit_ms verdict) {scale: 1.5, held_p95_ms: 3.0, limit_ms: 4.0, verdict: ok}
+    assert equal (
+        against-main (do $run 3.0 3.2 1.5) ($main | where feature != $CONTROL) $tolerance $floor
+        | get rows
+        | where id == x.k
+        | get 0.verdict
+    ) regressed
+    assert equal ($slower_runner.rows | get verdict) [ok ok ok new removed]
+    assert equal ($slower_runner.rows | where id == fresh.k | get 0.pr_p95_ms) 1.0
+    assert equal ($slower_runner.rows | where id == gone.k | get 0.main_p95_ms) 1.0
+
+    # A regression on the same runner is flagged, with its stages scaled like the total.
+    let slower_pr = against-main (do $run 3.0 4.3 2.9) $main $tolerance $floor
+    let x = $slower_pr.rows | where id == x.k | first
+    assert equal $x.verdict regressed
+    assert equal ($x.delta_ms | math round --precision 3) 1.3
+    assert equal ($x.delta_percent | math round --precision 2) 43.33
+    assert equal (
+        $x.stages
+        | where stage == merge_ms
+        | get 0
+        | update cells { if ($in | describe) == float { math round --precision 3 } else { $in } }
+    ) {
+        stage: merge_ms
+        main_ms: 1.5
+        pr_ms: 2.9
+        delta_ms: 1.4
+    }
+
+    # The control is what the scale is made of, so it is held to main's unscaled.
+    let slower_control = against-main (do $run 3.5 2.0 1.0) $main $tolerance $floor
+    let search = $slower_control.rows | where id == search.a | first
+    assert equal ($search | select control scale limit_ms verdict) {control: true, scale: null, limit_ms: 3.0, verdict: regressed}
+
+    # Nothing is scaled without the same control scenarios on both sides.
+    assert equal (
+        against-main (do $run 3.0 3.2 1.5) ($main | where id != search.b) $tolerance $floor
+        | get scale
+    ) null
+    assert equal (
+        against-main (checked-timed (timed x.k x extension 2.0 1.0)) $main $tolerance $floor
+        | get scale
+    ) null
+
+    let run_record = {
+        id: 7
+        commit: ("b" | fill --character b --width 40)
+        merge_base: true
+        base: ("b" | fill --character b --width 40)
+    }
+    let context = {
+        repo: "o/r"
+        commit: ("c" | fill --character c --width 40)
+        run_url: "https://example.com/run"
+    }
+
+    # Nothing regressed: one line, with the rest collapsed.
+    let quiet = render $slower_runner $run_record $context
+    let lines = $quiet | lines
+    assert equal $lines.0 "<!-- dupin-latency -->"
+    assert equal $lines.1 "### Keypress latency on ccccccc"
+    assert equal $lines.3 "No scenario is slower than [main at bbbbbbb](https://github.com/o/r/actions/runs/7) beyond 10% or 1 ms, whichever is larger, after scaling by the native `search` control (×1.500)."
+    assert equal $lines.5 "<details><summary>Every scenario</summary>"
+    assert not ($quiet | str contains "What to do")
+    assert (
+        "| `x.k` (extension) | 2.00 ms | 3.00 ms | 3.20 ms | +0.20 ms (+6.7%) | 4.00 ms |  |" in $lines
+    )
+    assert (
+        "| `search.a` (native, control) | 2.00 ms | 2.00 ms | 3.00 ms | +1.00 ms (+50.0%) | 3.00 ms |  |" in $lines
+    )
+    assert (
+        "| `fresh.k` (extension) | – | – | 1.00 ms | – | – | new |" in $lines
+    )
+    assert (
+        "| `gone.k` (extension) | 1.00 ms | – | – | – | – | removed |" in $lines
+    )
+    assert equal ($quiet | json-block | get regressed) []
+
+    # A regression says what is slower, where the time went and what to do, and repeats it as JSON.
+    let loud = render $slower_pr $run_record $context
+    let lines = $loud | lines
+    assert equal $lines.3 ":warning: **1 scenario is slower than main after scaling, beyond 10% or 1 ms, whichever is larger: `x.k`.** Latency never blocks merging; this comment is for whoever works on or reviews this pull request."
+    assert (
+        "- `x.k` (extension) p95 is 1.30 ms (43.3%) slower than main after scaling: 4.30 ms against a limit of 4.00 ms. The largest share is in `merge_ms` (+1.40 ms)." in $lines
+    )
+    assert ("| `merge_ms` | 1.50 ms | 2.90 ms | +1.40 ms |" in $lines)
+    assert ($loud | str contains "`nu scripts/latency.nu run --only x --out")
+    assert not ($loud | str contains "they are slower themselves")
+    let summary = $loud | json-block
+    assert equal ($summary | reject regressed) {
+        schema: 1
+        commit: $context.commit
+        main: {commit: $run_record.commit, run_id: 7, merge_base: true}
+        control: $CONTROL
+        scale: 1.5
+        tolerance_percent: 10.0
+        floor_ms: 1.0
+    }
+    assert equal ($summary.regressed | select id scaled delta_ms largest_stage) [
+        {
+            id: x.k
+            scaled: true
+            delta_ms: 1.3
+            largest_stage: merge_ms
+        }
+    ]
+    assert equal $summary.regressed.0.stages.merge_ms {main_ms: 1.5, pr_ms: 2.9, delta_ms: 1.4}
+
+    # A slower control warns that scaling may hide a slowdown every keypress pays for.
+    assert (
+        render $slower_control $run_record $context
+        | str contains "they are slower themselves"
+    )
+
+    # Without main's results there is only this run's.
+    let alone = render (against-main (do $run 3.0 3.2 1.5) null $tolerance $floor) null $context
+    assert (
+        $alone
+        | str contains "No main build has measured latency yet, so there is nothing to compare with."
+    )
+    assert not ($alone | str contains "Machine-readable")
+
+    # The report reads a pull request's results with a token that can comment, so anything that
+    # is not a scenario's name or a time is refused.
+    let good = timed x.k x extension 2.0 1.0
+    assert equal ([$good] | checked-results | get 0.stages) {
+        dispatch_ms: {p95: 0.1}
+        provider_ms: {p95: 0.4}
+        merge_ms: {p95: 1.0}
+        layout_ms: {p95: 0.5}
+    }
+    # `fetch-main` writes main's results checked, and `report` checks them again.
+    assert equal ([$good] | checked-results | checked-results) ([$good] | checked-results)
+    assert error { [($good | update id "[x](https://example.com)")] | checked-results }
+    assert error { [($good | update implementation "native\n# heading")] | checked-results }
+    assert error { [($good | update p95_ms "2.0")] | checked-results }
+    assert error { [($good | update p95_ms (-1.0))] | checked-results }
+    assert error { [($good | reject stages.merge_ms)] | checked-results }
+    assert error { [$good $good] | checked-results }
+    assert error { {results: []} | checked-results }
+    let fetched = {
+        schema: 1
+        run: $run_record
+        results: [$good]
+    }
+    assert equal ($fetched | checked-main | get run) $run_record
+    assert error { $fetched | update run.commit "main" | checked-main }
+    assert error { $fetched | update run.id "7" | checked-main }
+    assert error { $fetched | update run.merge_base "yes" | checked-main }
+    assert equal (
+        $fetched
+        | update run.base ""
+        | checked-main
+        | get run.base
+    ) ""
+
+    # `report` renders the files `run` and `fetch-main` write, and fails on one it refuses.
+    let tmp = mktemp --directory
+    let script = $env.FILE_PWD | path dirname | path join latency.nu
+    let written = {|search: float, x: float, merge: float|
+        [
+            (timed search.a $CONTROL native $search 1.0)
+            (timed search.b $CONTROL native $search 1.0)
+            (timed x.k x extension $x $merge)
+        ]
+    }
+    {
+        schema: 1
+        results: (do $written 3.0 4.3 2.9)
+    } | to json | save ($tmp | path join results.json)
+    {
+        schema: 1
+        run: $run_record
+        results: (do $written 2.0 2.0 1.0)
+    } | to json | save ($tmp | path join main.json)
+    let report = ^$nu.current-exe $script report ($tmp | path join results.json) ($tmp | path join main.json) --repo o/r --commit $context.commit
+    assert ($report | str contains "#### What to do")
+    {
+        schema: 1
+        results: [
+            ($good | update id "<img src=x>")
+        ]
+    } | to json | save ($tmp | path join forged.json)
+    let forged = do { ^$nu.current-exe $script report ($tmp | path join forged.json) } | complete
+    assert not equal $forged.exit_code 0
+    rm --recursive $tmp
 }

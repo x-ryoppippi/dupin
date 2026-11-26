@@ -11,6 +11,7 @@ import Docs from '../pages/Docs.svelte';
 import NotFound from '../pages/NotFound.svelte';
 import { pages, type PageName, type PageProps } from '../pages/index.ts';
 import { downloadMarkdown, homeMarkdown } from '../markdown.ts';
+import { keepSidebarScroll } from '../docs/sidebar-scroll.ts';
 import { imageRoute, imageTypes, linkedImages } from '../docs/links.ts';
 import {
 	docPaths,
@@ -226,7 +227,7 @@ async function docsRoutes(root: string): Promise<OxContentCustomHostRoute[]> {
 								sections: nav,
 							},
 						}),
-						`<script type="application/json" id="docs-pages">${json(searchPages)}</script>`,
+						`<script type="application/json" id="docs-pages">${json(searchPages)}</script>\n<script>(${keepSidebarScroll.toString()})()</script>`,
 					),
 					lastUpdatedPaths: [inputPath],
 				};

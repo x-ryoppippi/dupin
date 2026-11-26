@@ -7,6 +7,11 @@
 - [Configuration](./configuration.md): `config.toml`, the home-manager module, the hotkey and what happens when it's taken
 - [Keywords](./features/keywords.md)
 
+## About
+
+- [Philosophy](./philosophy.md): why Dupin exists: built for searching, a launcher and nothing more, fast by rule, extensions agents can write
+- [The name](./name.md): why Dupin, and the Mac launchers it descends from
+
 ## Built-in features
 
 Native to Dupin and always there.
@@ -61,8 +66,3 @@ Write, install and test extensions of your own.
 - [Sync design](./design/sync.md): syncing Dupin between Macs through an end-to-end encrypted synced folder
 - [Working around Rune](./rune-workarounds.md): what Dupin patches around in its UI framework
 - [Releasing](./releasing.md): tagpr and CI
-
-## About
-
-- [Philosophy](./philosophy.md): why Dupin exists: built for searching, a launcher and nothing more, fast by rule, extensions agents can write
-- [The name](./name.md): why Dupin, and the Mac launchers it descends from

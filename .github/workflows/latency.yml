@@ -1,8 +1,9 @@
 name: Latency
 
 # Keypress-to-results latency (scripts/latency.nu). Main's runs are the baseline pull requests
-# are compared with; a pull request only reports against it, because a shared runner's noise
-# is larger than many real changes. A feature whose bundled extension is declared beside its
+# are compared with; a pull request only reports against it, in its summary and in the comment
+# latency-comment.yml keeps, because a shared runner's noise is larger than many real changes
+# and some slowdowns are worth what they buy. A feature whose bundled extension is declared beside its
 # native implementation must match it, or, once the native one is deleted, match what this job
 # measured of it at its last commit (scripts/latency/native-baseline.json), so that comparison
 # fails the job. CI calls this workflow whenever the app could have changed, and its required
@@ -63,26 +64,38 @@ jobs:
           nu scripts/latency.nu run --bin result-latency/bin/dupin --out "$RUNNER_TEMP/latency/results.json"
           ${IMPLEMENTATION:+--implementation "$IMPLEMENTATION"}
 
+      # Comparing with main is informational, so none of its steps can fail the job: a pull
+      # request's artifact also carries main's results it was compared with, and
+      # latency-comment.yml comments with the comparison.
+      - name: Fetch main's results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/latency.nu fetch-main "$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          --out "$RUNNER_TEMP/latency/main.json"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: latency
-          path: ${{ runner.temp }}/latency/results.json
+          path: ${{ runner.temp }}/latency/
           if-no-files-found: error
 
       - name: Compare with main
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          run="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --event push \
-            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$run" ] || ! gh run download "$run" --repo "$GITHUB_REPOSITORY" --name latency --dir "$RUNNER_TEMP/main"; then
-            echo "No latency baseline from main yet." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          main=()
+          if [[ -f $RUNNER_TEMP/latency/main.json ]]; then
+            main=("$RUNNER_TEMP/latency/main.json")
           fi
-          nix shell --inputs-from . nixpkgs#nushell --command nu scripts/latency.nu compare \
-            "$RUNNER_TEMP/main/results.json" "$RUNNER_TEMP/latency/results.json" \
-            --report --summary "$GITHUB_STEP_SUMMARY"
+          nix shell --inputs-from . nixpkgs#nushell --command nu --no-config-file scripts/latency.nu report \
+            "$RUNNER_TEMP/latency/results.json" "${main[@]}" --repo "$GITHUB_REPOSITORY" --commit "$HEAD" \
+            >> "$GITHUB_STEP_SUMMARY"
 
       # A baseline run measures only native implementations, so it has no port to hold.
       - name: Hold extensions to native parity
