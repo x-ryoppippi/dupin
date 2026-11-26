@@ -204,7 +204,10 @@ pub(crate) fn run() {
                     },
                     updater,
                     configuration,
-                    dupin_core::History::default(),
+                    match rune::tooling::is_headless() {
+                        true => crate::store::headless_history(),
+                        false => dupin_core::History::default(),
+                    },
                     calendar_access,
                     quick_look,
                     running,
