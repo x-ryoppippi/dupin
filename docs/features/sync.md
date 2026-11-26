@@ -33,7 +33,7 @@ Each Mac keeps its own copy of the key in its Keychain (this Mac only, never syn
 
 ## Status and other Macs
 
-`dupin sync status` shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong: files that failed to open (they are retried and never deleted), a Mac whose clock is more than five minutes ahead (its changes wait until the clocks agree), or a newer Dupin having written to the folder. `dupin sync now` syncs at once; otherwise Dupin syncs every five minutes. Add `--json` for scripts.
+`dupin sync status` shows the folder, how the key travels, this Mac's device ID, the other Macs with when they last synced, and anything wrong: files that failed to open (they are retried and never deleted), a Mac whose clock is more than five minutes ahead (its changes wait until the clocks agree), or a newer Dupin having written to the folder. A change goes to the folder about two seconds after you make it, and another Mac's changes are read as soon as the folder shows them, with a full pass every five minutes besides; `dupin sync now` syncs at once. Add `--json` for scripts.
 
 `dupin sync remove-device ID` removes a Mac you no longer use, for example one that has been away for more than 90 days: the other Macs take over what only it held, then its files leave the folder. If it comes back, it rejoins under a new device ID.
 
