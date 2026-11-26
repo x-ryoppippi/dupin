@@ -5,6 +5,7 @@ import { cloudflareRedirect } from '@ryoppippi/vite-plugin-cloudflare-redirect';
 import path from 'node:path';
 import { defineConfig } from 'vite';
 import { docsLinks } from './src/docs/links.ts';
+import { japaneseFont } from './src/fonts/index.ts';
 import { repo, siteName, siteUrl } from './src/site.ts';
 
 const oxContentOptions = {
@@ -22,6 +23,7 @@ const oxContentOptions = {
 		siteUrl,
 		minifyHtml: true,
 		markdownSource: { alternate: true },
+		theme: { fonts: { named: { japanese: japaneseFont } } },
 	},
 } satisfies OxContentOptions;
 
