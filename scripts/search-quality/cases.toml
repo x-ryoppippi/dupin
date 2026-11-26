@@ -1039,6 +1039,48 @@ intent = "app:BetterTouchTool"
 query = "touch"
 tags = ["word-start"]
 
+[[cases]]
+id = "word.camel-edit"
+intent = "app:TextEdit"
+query = "edit"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
+[[cases]]
+id = "word.camel-cleaner"
+intent = "app:AppCleaner"
+query = "cleaner"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
+[[cases]]
+id = "word.camel-stack"
+intent = "app:OrbStack"
+query = "stack"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
+[[cases]]
+id = "word.camel-guard"
+intent = "app:AdGuard Mini"
+query = "guard"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
+[[cases]]
+id = "word.camel-plus"
+intent = "app:TablePlus"
+query = "plus"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
+[[cases]]
+id = "word.camel-gpt"
+intent = "app:ChatGPT"
+query = "gpt"
+history = []
+tags = ["word-start", "camel-case", "fresh"]
+
 # Initials and other abbreviations. Recorded as Dupin ranks them today.
 [[cases]]
 id = "initials.vsc"
@@ -1137,6 +1179,47 @@ intent = "app:1Password"
 query = "1p"
 history = []
 tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.dcm"
+intent = "app:Digital Color Meter"
+query = "dcm"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.ipm"
+intent = "app:iPhone Mirroring"
+query = "ipm"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.stp"
+intent = "app:Safari Technology Preview"
+query = "stp"
+history = []
+tags = ["initials", "fresh"]
+
+[[cases]]
+id = "initials.mt"
+intent = "app:Microsoft Teams"
+query = "mt"
+history = []
+tags = ["initials", "fresh"]
+
+# Initials against usage of an app holding the same letters scattered.
+[[cases]]
+id = "initials.mc-history"
+intent = "app:Mission Control"
+query = "mc"
+tags = ["initials", "history"]
+
+[[cases]]
+id = "initials.tm-history"
+intent = "app:Time Machine"
+query = "tm"
+tags = ["initials", "history"]
 
 # Names Spotlight knows an app by besides its own.
 [[cases]]
@@ -1645,6 +1728,21 @@ intent = "app:Telegram"
 query = "tele"
 history = ["base", "same-query"]
 tags = ["history", "prefix"]
+
+# A name typed in full, against usage of a longer name it starts.
+[[cases]]
+id = "exact.pages"
+intent = "app:Pages"
+query = "pages"
+history = ["base", "pages-creator"]
+tags = ["exact", "history"]
+
+[[cases]]
+id = "exact.notion"
+intent = "app:Notion"
+query = "notion"
+history = ["base", "notion-calendar"]
+tags = ["exact", "history"]
 
 # Habits that fade: an old pick or a dropped app gives way to the new one.
 [[cases]]
