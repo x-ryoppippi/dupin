@@ -16,6 +16,7 @@
 	"position": "center",
 	"input_source": "ascii",
 	"auto_update": true,
+	"telemetry": true,
 	"system_automation": false,
 	"backdrop": "off",
 	"extensions": false,
