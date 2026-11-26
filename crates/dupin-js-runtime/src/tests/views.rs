@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::output::ActionEffect;
-use crate::row::{Accessory, RowEffect};
+use crate::row::{Accessory, RowEffect, RowState};
 use crate::view::{FieldKind, ViewAnswer};
 
 const VIEWS: &str = r#"
@@ -73,6 +73,27 @@ fn rows_carry_accessories_answers_and_push_actions() {
         }
     );
     rows[0].validate(crate::row::Source::Search).unwrap();
+}
+
+#[test]
+fn rows_say_when_their_data_was_read_and_whether_its_source_answered() {
+    let rows = run(
+        "export const search = () => [{ title: 'a', accessories: [{ freshness: 1700000000000 }, { state: 'offline' }, { state: 'stale' }] }];",
+        "x",
+    )
+    .unwrap();
+    assert_eq!(
+        rows[0].accessories,
+        [
+            Accessory::Freshness(1_700_000_000_000),
+            Accessory::State(RowState::Offline),
+            Accessory::State(RowState::Stale),
+        ]
+    );
+    rows[0].validate(crate::row::Source::Search).unwrap();
+    let mut forged = rows[0].clone();
+    forged.accessories = vec![Accessory::Freshness(crate::row::MAX_TIME_MS + 1)];
+    assert!(forged.validate(crate::row::Source::Search).is_err());
 }
 
 #[test]
@@ -261,6 +282,31 @@ fn malformed_accessories_answers_and_pushes_are_refused() {
             "items[0].accessories[0].text",
         ),
         (
+            "{ title: 'a', accessories: [{ freshness: -1 }] }",
+            "invalid-field",
+            "items[0].accessories[0].freshness",
+        ),
+        (
+            "{ title: 'a', accessories: [{ freshness: '1700000000000' }] }",
+            "invalid-field",
+            "items[0].accessories[0].freshness",
+        ),
+        (
+            "{ title: 'a', accessories: [{ freshness: 1.5 }] }",
+            "invalid-field",
+            "items[0].accessories[0].freshness",
+        ),
+        (
+            "{ title: 'a', accessories: [{ state: 'down' }] }",
+            "invalid-field",
+            "items[0].accessories[0].state",
+        ),
+        (
+            "{ title: 'a', accessories: [{ state: 'offline', tag: 'x' }] }",
+            "invalid-field",
+            "items[0].accessories[0]",
+        ),
+        (
             "{ title: 'a', answer: 'a\\nb\\nc' }",
             "invalid-field",
             "items[0].answer",
@@ -397,6 +443,20 @@ fn actions_see_their_page_and_return_navigation_effects() {
             errors: [("title".to_owned(), "Taken".to_owned())].into()
         })
     );
+    assert_eq!(
+        effect("({ type: 'enter', command: 'port', query: '3000' })").unwrap(),
+        Some(ActionEffect::Enter {
+            command: "port".into(),
+            query: "3000".into()
+        })
+    );
+    assert_eq!(
+        effect("({ type: 'enter', command: 'calendar' })").unwrap(),
+        Some(ActionEffect::Enter {
+            command: "calendar".into(),
+            query: String::new()
+        })
+    );
     for effect in [
         ActionEffect::Push {
             view: "note".into(),
@@ -407,8 +467,28 @@ fn actions_see_their_page_and_return_navigation_effects() {
         ActionEffect::FieldErrors {
             errors: [("title".to_owned(), "Taken".to_owned())].into(),
         },
+        ActionEffect::Enter {
+            command: "port".into(),
+            query: "3000".into(),
+        },
     ] {
         effect.validate().unwrap();
+    }
+    for forged in [
+        ActionEffect::Enter {
+            command: "Port".into(),
+            query: String::new(),
+        },
+        ActionEffect::Enter {
+            command: "port".into(),
+            query: "a\nb".into(),
+        },
+        ActionEffect::Enter {
+            command: "port".into(),
+            query: "x".repeat(crate::output::MAX_ENTER_QUERY_BYTES + 1),
+        },
+    ] {
+        assert!(forged.validate().is_err(), "{forged:?}");
     }
 }
 
@@ -439,6 +519,18 @@ fn malformed_effects_are_refused_before_dupin_acts_on_them() {
             "errors",
         ),
         ("({ type: 'navigate', view: 'v' })", "type"),
+        ("({ type: 'enter' })", "command"),
+        ("({ type: 'enter', command: '' })", "command"),
+        ("({ type: 'enter', command: 'Port' })", "command"),
+        ("({ type: 'enter', command: 'a/b' })", "command"),
+        ("({ type: 'enter', command: 'x'.repeat(65) })", "command"),
+        ("({ type: 'enter', command: 'port', query: 3000 })", "query"),
+        ("({ type: 'enter', command: 'port', query: 'a\\nb' })", "query"),
+        (
+            "({ type: 'enter', command: 'port', query: 'x'.repeat(1025) })",
+            "query",
+        ),
+        ("({ type: 'enter', command: 'port', toast: 'x' })", "toast"),
     ] {
         let diagnostic = match effect(answer) {
             Err(RunError::Failed(diagnostic)) => diagnostic,

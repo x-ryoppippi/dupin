@@ -177,25 +177,70 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     uses: ./.github/workflows/latency.yml
 
+  # How many keystrokes the main search needs before the row each case wants is first
+  # (scripts/search-quality.nu). Main's runs are the baseline pull requests are compared with, in
+  # the summary and in the comment search-quality-comment.yml keeps. A regression never fails
+  # the job; the benchmark itself failing, such as a case the corpus can't answer, does.
+  search-quality:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nix-cache
+        with:
+          cache-scope: search-quality
+
+      - run: nix build .#dupin-search-quality --out-link result-search-quality
+
+      - name: Measure
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/search-quality.nu run --bin result-search-quality/bin/dupin-search-quality
+          --commit "$GITHUB_SHA" --out "$RUNNER_TEMP/search-quality/results.json"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: search-quality
+          path: ${{ runner.temp }}/search-quality/results.json
+          if-no-files-found: error
+
+      - name: Compare with main
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          nix shell --inputs-from . nixpkgs#nushell --command
+          nu --no-config-file scripts/search-quality.nu report "$RUNNER_TEMP/search-quality/results.json"
+          --repo "$GITHUB_REPOSITORY" --commit "$HEAD" >> "$GITHUB_STEP_SUMMARY"
+
   # Required, along with check. A job whose needs failed is skipped, and a skipped job satisfies
   # a required check, so e2e runs whenever the app could have changed and fails itself when the
-  # build, the extension host tests or the latency parity check did.
+  # build, the extension host tests, the latency parity check or the search-quality benchmark
+  # did.
   e2e:
-    needs: [changes, build, extension-host, latency]
+    needs: [changes, build, extension-host, latency, search-quality]
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: blacksmith-6vcpu-macos-latest
     timeout-minutes: 20
     steps:
-      - name: Require the build, the extension host tests and latency parity
+      - name: Require the build, the extension host tests, latency parity and search quality
         if: >-
           needs.build.result != 'success' || needs.extension-host.result != 'success' ||
-          needs.latency.result != 'success'
+          needs.latency.result != 'success' || needs.search-quality.result != 'success'
         env:
           BUILD: ${{ needs.build.result }}
           EXTENSION_HOST: ${{ needs.extension-host.result }}
           LATENCY: ${{ needs.latency.result }}
+          SEARCH_QUALITY: ${{ needs.search-quality.result }}
         run: |
-          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY"
+          echo "build: $BUILD, extension-host: $EXTENSION_HOST, latency: $LATENCY, search-quality: $SEARCH_QUALITY"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

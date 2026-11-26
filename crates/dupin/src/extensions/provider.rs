@@ -6,7 +6,7 @@ use dupin_core::form::{FieldKind, Form};
 use dupin_core::kind::{Kinds, Producer, Subject};
 use dupin_core::{
     Accessory, Action, Batch, Detail, ExtensionRequest, HostImage, HostImageSource, Icon, Item, ItemAction,
-    Page, Payload, Provider, ProviderError, Request, View, snippets,
+    Page, Payload, Provider, ProviderError, Request, RowState, View, snippets,
 };
 use dupin_extension_bridge::{Bridge, Call, ConsentReason, ConsentRequest, PackageId, Trigger};
 use dupin_js_runtime::row::{self, Row, RowEffect, RowImage};
@@ -457,6 +457,9 @@ fn row_item_with(kinds: &Kinds, extension: &Extension, row: Row, catalogue: bool
         .map(|accessory| match accessory {
             row::Accessory::Text(text) => Accessory::Text(text),
             row::Accessory::Tag(text) => Accessory::Tag(text),
+            row::Accessory::Freshness(time) => Accessory::Freshness(time),
+            row::Accessory::State(row::RowState::Offline) => Accessory::State(RowState::Offline),
+            row::Accessory::State(row::RowState::Stale) => Accessory::State(RowState::Stale),
         })
         .collect();
     let detail = detail.map(|detail| {
@@ -953,7 +956,7 @@ mod tests {
     }
 
     const VIEWS: &str = r#"
-        export const search = () => [{ title: 'Note', accessories: [{ text: '2 KB' }, { tag: 'New' }], answer: '4',
+        export const search = () => [{ title: 'Note', accessories: [{ tag: 'New' }, { freshness: 1700000000000 }, { state: 'offline' }], answer: '4',
             actions: [{ title: 'Read', push: { view: 'note', state: { id: 7 } } }] }];
         export const views = {
             note: (ctx) => ({ type: 'detail', title: `Note ${ctx.state.id}`, markdown: ctx.query,
@@ -985,7 +988,11 @@ mod tests {
         );
         assert_eq!(
             batches[0].accessories[&row.id],
-            [Accessory::Text("2 KB".into()), Accessory::Tag("New".into())]
+            [
+                Accessory::Tag("New".into()),
+                Accessory::Freshness(1_700_000_000_000),
+                Accessory::State(RowState::Offline)
+            ]
         );
         assert_eq!(
             row.action("action-0"),

@@ -184,7 +184,7 @@ impl History {
     }
 
     /// The item with this id was opened, after typing `query`, at `now` (Unix seconds).
-    pub(crate) fn record(&mut self, id: &str, query: &str, now: u64) {
+    pub fn record(&mut self, id: &str, query: &str, now: u64) {
         let entry = self.items.entry(id.to_owned()).or_default();
         entry.count = entry.count.saturating_add(1);
         entry.visits.push(now);

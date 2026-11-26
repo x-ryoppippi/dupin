@@ -336,7 +336,7 @@ fn the_host_hook_is_gone_before_package_code_runs() {
         "",
     )
     .unwrap();
-    assert_eq!(rows[0].title, "4 undefined undefined");
+    assert_eq!(rows[0].title, "5 undefined undefined");
 }
 
 #[test]

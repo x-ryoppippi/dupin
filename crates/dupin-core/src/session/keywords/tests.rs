@@ -95,6 +95,7 @@ fn shown(session: &mut Session, query: &str, apps: &[&str]) -> Shown {
                 .iter()
                 .map(|accessory| match accessory {
                     Accessory::Tag(tag) | Accessory::Text(tag) => tag.clone(),
+                    other => panic!("keyword rows show only tags, not {other:?}"),
                 })
                 .collect();
             (session.items()[index].display_title().to_owned(), tags)
