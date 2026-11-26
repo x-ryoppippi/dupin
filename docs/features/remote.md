@@ -21,7 +21,7 @@ Typing keeps the rows that hold every word, in this order: `remote web1 ports 54
 | ----------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | <kbd>↩</kbd> **Show _host_**        | A host                          | Opens the host on a page of its own; type there to narrow it, as after `remote web1`                            |
 | <kbd>⌘↩</kbd> **Refresh _host_**    | A host                          | Fetches the host again over SSH; the panel stays usable while it runs                                           |
-| **Open SSH Session**                | Any row (<kbd>⌘↩</kbd> on rows) | Opens `ssh://host` in Terminal or iTerm, as Remote Settings choose                                              |
+| <kbd>⌘↩</kbd> **Open SSH Session**  | A process, port, log line, file | Opens `ssh://host` in Terminal or iTerm, as Remote Settings choose; a host offers it too                        |
 | <kbd>↩</kbd> **Copy**               | A process, port, log line, file | Copies the command line, the address, the line or the path                                                      |
 | **Copy PID**, **Copy as host:path** | A process, a file               | Copies the PID, or `host:/path` for `scp`                                                                       |
 | **Show Details**                    | Any row                         | Shows everything Remote has of it, a command line or log line in full                                           |
