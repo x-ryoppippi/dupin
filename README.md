@@ -17,8 +17,8 @@
 
 ## Why Dupin
 
-- **Built for searching.** Type a keyword, reach anything, at once: Dupin stays resident, so the panel is already there.
-- **Stays simple.** The launcher stays a launcher.
+- **Fast.** The panel is already drawn when you press the hotkey, and app search shows its results under 3 ms after each keystroke (p95, measured in CI on every change to the app).
+- **Built for searching, and simple.** Type a keyword, reach anything; the launcher stays a launcher.
 - **Extensible by anyone, agents included.** Extensions are plain TypeScript you write, test and install from Git, sandboxed with the permissions you grant.
 
 ## Install
