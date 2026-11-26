@@ -6,6 +6,8 @@ Settings' Updates page (⌘, in the panel) shows the running version and what th
 
 When Dupin can't replace its own app (its folder isn't writable by you, or macOS runs it from a translocated copy because it wasn't moved out of Downloads), it only checks: Settings says "Download only" and offers a Download link to the newer build instead of installing it. Move Dupin to `/Applications` or `~/Applications` to let it update itself.
 
+The main search runs the same steps: **Update Dupin** restarts into a downloaded update, or checks now and reports the outcome in the launcher, and **Restart Dupin** relaunches. See [System commands](system-commands.md).
+
 A build from Nix or `cargo run` never updates itself and has no Updates page in Settings; update it through Nix. Set `DUPIN_DISABLE_UPDATES=1` in Dupin's environment to turn the updater off for a launch.
 
 ## Configuration

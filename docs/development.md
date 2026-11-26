@@ -342,6 +342,21 @@ CI runs the Latency workflow as its `latency` job whenever the app could have ch
 
 Scripts in this repository are written in Nushell.
 
+## App size
+
+CI's `build` job measures the `nix build .#dupin` bundle it already builds, the release profile (fat LTO, one codegen unit, stripped) that `scripts/package-app.nu` signs and ships, so no second build is made. `scripts/size.nu measure` records the bytes of `Contents/MacOS/dupin`, of the whole `Dupin.app`, of a zip made the way the release's `Dupin.zip` is (`ditto -c -k --keepParent`), and of the Resources: the bundled extensions (each one too), `ThirdPartyNotices.txt`, the EFF word list, the icons and everything else. The release copy differs from it only by its Developer ID signature and notarization ticket, a few KiB. CI uploads the figures from every build, on `main` and on pull requests, as the `size` artifact.
+
+On a pull request, `scripts/size.nu report` compares them with those of the CI run on the `main` commit the pull request's merge commit sits on, its merge base with `main`, or, when that run measured nothing (it was cancelled, or hasn't finished), with the latest `main` run that did, and says which. The comparison goes to the job's summary, and the Size comment workflow (`size-comment.yml`) keeps one comment on the pull request up to date with it. Growth over 1% or 100 KiB is marked, but size is informational: nothing fails on it. The comment workflow runs on `workflow_run`, so it has a token that can comment even on a pull request from a fork; it runs only the default branch's code, and `report` reads the pull request's figures as data, refusing any that aren't whole byte counts under the names it knows. `main`'s figures are only recorded.
+
+```sh
+nix build .#dupin
+nu scripts/size.nu measure result/Applications/Dupin.app --out target/size.json
+nu scripts/size.nu report target/size.json                              # the sizes alone
+nu scripts/size.nu report target/size.json --repo x-ryoppippi/dupin    # against main's (needs gh)
+```
+
+There is no per-crate breakdown: the shipped binary is stripped, and `cargo bloat --crates` would need a second fat-LTO build with symbols, which takes several times the minute it could cost.
+
 ## Rust visibility
 
 `just hawk` checks workspace API visibility and fails on warnings. The same
@@ -387,10 +402,10 @@ just website::install # dependencies from the lockfile
 just website::dev     # local server, rendering the real pages
 just website::preview # build, then serve the result with the redirects
 just website::lint    # oxlint, type-aware and type-checked through tsrs
-just website::deploy  # build and deploy the Worker and its static assets
+just website::deploy  # build and deploy the static site
 ```
 
-Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. `dupin.app/gh` redirects to the repository; the redirects are declared in `website/vite.config.ts`.
+Building and deploying go through `cf`, with the Cloudflare Vite plugin producing the Build Output. Workers Builds runs `pnpm run deploy` on `main` (the `dupin` Worker on `dupin.app`) and `cf previews deploy` on other branches, whenever `website/` or `assets/logo/` changes. The site is static assets only, with no Worker code: HTTP reaches HTTPS through the `dupin.app` zone's Always Use HTTPS setting, and `dupin.app/gh` redirects to the repository through `_redirects`, declared in `website/vite.config.ts`.
 
 Icons are `icon-[set--name]` classes that ox-content turns into one self-hosted stylesheet from the `@iconify-json/*` collections installed in `website/`; add the collection before using a new set. For agents and crawlers the site also serves `/llms.txt`, a Markdown twin of each page (`/index.md`, `/download.md`), `sitemap.xml` and `robots.txt`; the Markdown is built in `website/src/markdown.ts` from the same data as the pages, and `website/public/_headers` sets their content types.
 

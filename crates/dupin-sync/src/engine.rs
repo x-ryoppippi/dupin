@@ -91,6 +91,8 @@ pub struct Report {
     pub reminted: bool,
     /// Namespaces this device has finished leaving.
     pub left: Vec<String>,
+    /// Namespaces whose records this pass changed with other devices' versions.
+    pub changed: BTreeSet<String>,
     /// Leaving devices whose files can't be taken over until a file of theirs opens.
     pub blocked_adoption: BTreeSet<DeviceId>,
     pub devices: Vec<DeviceStatus>,
@@ -667,7 +669,10 @@ impl Engine {
                 continue;
             };
             match store.import_record(&version.id, &bytes, MAX_DRIFT) {
-                Ok(Imported::Applied | Imported::Pending) => report.imported += 1,
+                Ok(Imported::Applied | Imported::Pending) => {
+                    report.imported += 1;
+                    report.changed.insert(namespace.name.to_owned());
+                }
                 Ok(Imported::Held) => {
                     report.clock_ahead.insert(version.stamp.device);
                 }

@@ -33,6 +33,7 @@ mod stored;
 mod symbols;
 mod sync;
 mod sync_cli;
+mod synced;
 mod trace;
 mod ui;
 mod update;

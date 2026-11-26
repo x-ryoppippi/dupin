@@ -35,6 +35,7 @@ in
               nu scripts/tests/e2e-file-fixtures.nu
               nu scripts/tests/e2e-script-fixtures.nu
               nu scripts/tests/latency.nu
+              nu scripts/tests/size.nu
               nu scripts/tests/update-rune.nu
             '';
         inherit (dupin) hawk;

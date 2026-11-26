@@ -364,6 +364,7 @@ impl Worker {
         if let Some(vault) = &self.vault {
             self.storage.hold_vault_key(vault.clone());
         }
+        crate::synced::set_vault(self.vault.clone());
         self.open_usage(first);
         self.pass();
     }
@@ -570,23 +571,40 @@ impl Worker {
         let fold = UsageFold {
             notify: self.notify.clone(),
         };
-        let result = match (&self.usage, leaving) {
-            (Some(store), false) => engine.run(
-                &[dupin_sync::Namespace {
-                    name: USAGE,
-                    store,
-                    mode: dupin_sync::Mode::PerDevice,
-                    fold: Some(&fold),
-                }],
-                &[],
-            ),
-            (_, true) => engine.run(&[], &[USAGE]),
-            (None, false) => engine.run(&[], &[]),
+        let owned = crate::synced::open_stores();
+        let mut namespaces: Vec<dupin_sync::Namespace<'_>> = owned
+            .iter()
+            .map(|(name, mode, store)| dupin_sync::Namespace {
+                name,
+                store,
+                mode: *mode,
+                fold: None,
+            })
+            .collect();
+        if let Some(store) = &self.usage {
+            namespaces.push(dupin_sync::Namespace {
+                name: USAGE,
+                store,
+                mode: dupin_sync::Mode::PerDevice,
+                fold: Some(&fold),
+            });
+        }
+        let all: Vec<&str> = crate::synced::SYNCED.iter().map(|(name, _)| *name).collect();
+        let result = match leaving {
+            false => engine.run(&namespaces, &[]),
+            true => engine.run(&[], &all),
         };
+        drop(namespaces);
+        drop(owned);
         match result {
             Ok(report) => {
                 self.problem = None;
-                let left = report.left.iter().any(|name| name == USAGE);
+                for name in &report.changed {
+                    if name != USAGE {
+                        crate::synced::changed(name);
+                    }
+                }
+                let left = all.iter().all(|name| report.left.iter().any(|left| left == name));
                 let reminted = report.reminted;
                 self.last = Some((now_millis(), report));
                 let (_, others) = self.read_usage();
@@ -714,6 +732,7 @@ impl Worker {
         self.state = Some(state);
         self.vault = Some(joined.key.clone());
         self.storage.hold_vault_key(joined.key.clone());
+        crate::synced::set_vault(Some(joined.key.clone()));
         self.engine = Some(self.engine_for(folder, joined)?);
         self.open_usage(false);
         self.pass();
@@ -730,6 +749,7 @@ impl Worker {
         write_state(Some(&state))?;
         self.state = Some(state);
         self.vault = None;
+        crate::synced::set_vault(None);
         self.open_usage(false);
         self.pass();
         if self.engine.is_none() {
@@ -786,7 +806,10 @@ impl Worker {
                 dupin_sync::KeyMode::Passphrase => "passphrase",
             }),
             "device": self.device_key(),
-            "namespaces": if self.vault.is_some() { vec![USAGE] } else { Vec::new() },
+            "namespaces": match self.vault.is_some() {
+                true => crate::synced::SYNCED.iter().map(|(name, _)| *name).collect(),
+                false => Vec::new(),
+            },
             "problem": self.problem,
             "last": report,
         })

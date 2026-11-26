@@ -140,6 +140,37 @@
 	vertical-align: top;
 }
 
+.docs-content details {
+	margin: 16px 0;
+	padding: 8px 16px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.docs-content summary {
+	cursor: pointer;
+	color: var(--fg);
+	font-weight: 600;
+}
+
+.docs-content details[open] summary {
+	margin-bottom: 8px;
+}
+
+.docs-content blockquote {
+	margin: 16px 0;
+	padding: 8px 16px;
+	border-left: 3px solid var(--accent);
+	background: var(--bg-card);
+	border-radius: var(--radius-sm);
+}
+
+.docs-content .ox-callout-title {
+	margin: 0;
+	color: var(--fg);
+	font-weight: 600;
+}
+
 @media (max-width: 820px) {
 	.docs {
 		grid-template-columns: 1fr;

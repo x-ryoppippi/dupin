@@ -2,7 +2,9 @@
 
 Dupin can keep your Macs in step through a folder that some other tool already syncs: iCloud Drive, Dropbox, Syncthing or any synced folder. There is no Dupin server or account. Everything Dupin puts in the folder is encrypted on your Mac with a key the folder never sees, apart from one small plaintext header, `vault.dupin`, that names the vault and holds the key wrapped under your passphrase. How it works and why is in the [sync design](../design/sync.md).
 
-**What syncs today:** usage history, the ranking Dupin learns from what you open. Each Mac keeps its own log and every Mac ranks with all of them added together, so a Mac you rarely use still benefits from the others. Item paths under your home folder are compared relative to it, so the same file counts as one item on Macs with different user names; a path another Mac recorded is never checked on this one, and only affects ranking when a search here finds that item anyway. Settings, snippets, extensions and, if you choose, clipboard history follow.
+**What syncs today:** usage history, the ranking Dupin learns from what you open. Each Mac keeps its own log and every Mac ranks with all of them added together, so a Mac you rarely use still benefits from the others. Item paths under your home folder are compared relative to it, so the same file counts as one item on Macs with different user names; a path another Mac recorded is never checked on this one, and only affects ranking when a search here finds that item anyway.
+
+The [snippets](./snippets.md) you add in Dupin sync too, one per keyword: the later edit of a keyword wins, deleting one deletes it on every Mac, and `config.toml`'s snippets stay on each Mac, winning a keyword both hold. Settings, extensions and, if you choose, clipboard history follow.
 
 ## Turning it on
 
