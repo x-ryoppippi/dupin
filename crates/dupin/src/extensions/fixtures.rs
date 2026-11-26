@@ -23,7 +23,7 @@ use dupin_js_runtime::{Diagnostic, Preferences, RunError};
 use serde_json::{Map, Value, json};
 
 use super::catalogue::{Asking, Cached, Convert};
-use super::{Extension, QUERY_DEADLINE, helper_command, load_folder, manifest};
+use super::{Extension, QUERY_DEADLINE, bundled, helper_command, load_folder, manifest};
 
 mod replay;
 mod services;
@@ -72,11 +72,25 @@ pub struct Report {
     pub text: String,
 }
 
+/// The package in `folder` as the launcher runs it: one in the folder this Dupin's bundled
+/// extensions are in as that bundled package, so its fixtures replay what it may do that a
+/// third-party package may not, and any other as itself. It goes by where the folder is
+/// rather than by the build's seal, which every edit to a fixture would break until the next
+/// build.
+fn load_as_launched(folder: &Path) -> Result<Arc<Extension>, Diagnostic> {
+    let canonical = |path: &Path| path.canonicalize().ok();
+    let shipped = bundled::directory().as_deref().and_then(canonical);
+    if shipped.is_some() && canonical(folder).as_deref().and_then(Path::parent) == shipped.as_deref() {
+        return super::load(folder, None, true).map(|loaded| loaded.extension);
+    }
+    load_folder(folder)
+}
+
 /// Replays every fixture in `folder/fixtures`. With `update`, a fixture whose steps all ran is
 /// rewritten to expect what they answered. Once `cancelled` answers true, the running call is
 /// stopped and no further fixture starts.
 pub fn test(folder: &Path, update: bool, cancelled: &dyn Fn() -> bool) -> Result<Report, Diagnostic> {
-    let extension = load_folder(folder)?;
+    let extension = load_as_launched(folder)?;
     let found = fixture::discover(folder)?;
     let mut fixtures = Vec::new();
     let mut text = String::new();
@@ -472,7 +486,7 @@ pub fn render(
     frames: Option<&Path>,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Rendered, Diagnostic> {
-    let extension = load_folder(folder)?;
+    let extension = load_as_launched(folder)?;
     let name = fixture_path.display().to_string();
     let parsed = fixture::read(&name, fixture_path)?;
     let last = step.unwrap_or(parsed.steps.len());

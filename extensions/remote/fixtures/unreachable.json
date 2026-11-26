@@ -247,7 +247,7 @@
 										"fetchedAt": 1795680000000,
 										"host": "db1",
 										"index": 0,
-										"record": "767d68c9166e985f2f5dc072b0b9c99f"
+										"record": "32cfb7eea1d9344b259c5f8e35d32fef"
 									},
 									"view": "details"
 								},
@@ -432,7 +432,7 @@
 										"fetchedAt": 1795680000000,
 										"host": "db1",
 										"index": 0,
-										"record": "0bd257561ea91a274600f62da35b9018"
+										"record": "b330f067cfc8fb994542a1dd39a72c49"
 									},
 									"view": "details"
 								},
@@ -668,7 +668,7 @@
 										"fetchedAt": 1795680000000,
 										"host": "db1",
 										"index": 0,
-										"record": "0bd257561ea91a274600f62da35b9018"
+										"record": "b330f067cfc8fb994542a1dd39a72c49"
 									},
 									"view": "details"
 								},

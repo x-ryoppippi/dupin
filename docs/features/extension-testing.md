@@ -285,7 +285,7 @@ A step's `activate` may name an action by the ID the launcher gives it: `copy`, 
 
 A query step answers as the keyword does: `search`'s rows for a query that isn't blank, then the `items()` catalogue's matches, ranked by Dupin's own matcher (without usage history, which a fixture doesn't have) and losing their `section` once the query ranks them, then its web searches filled with the query.
 
-The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers.
+The fixture holds the catalogue from step to step as the launcher does, so an `activate` or `event` step whose handler calls `items.invalidate()` has `invalidated: true` in its outcome, and the next query asks `items` with `reason` `"invalidated"` and the cursor and applies the update it answers. A package in the folder Dupin's bundled extensions are in, such as the repository's `extensions/`, replays as that bundled package, as the launcher runs it: with its own storage, and entering another package's command, which only a bundled package may.
 
 </details>
 
