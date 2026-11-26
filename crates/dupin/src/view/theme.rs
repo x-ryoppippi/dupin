@@ -77,18 +77,33 @@ fn preview_geometry(theme: &dupin_core::config::Theme, avail_w: f32) -> (f32, f3
     (w, h, scale, n)
 }
 
+/// How far the miniature's glass blurs the desk behind it, in the panel's own points.
+const GLASS_BLUR: f32 = 24.0;
+/// How much of the card colour covers the miniature's glass: the system glass's own frost
+/// plus the panel's `FROST` over it.
+const GLASS_TINT: f32 = 0.6;
+
+/// The miniature panel on a small desk of colour, so its glass has something to show through it.
+/// The desk spans the width it is given; the caller sizes its height, rounds and clips it.
 pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32) -> El {
     let t = ResolvedTheme::new(theme, dark);
     let (w, h, scale, n) = preview_geometry(theme, avail_w);
     let radius = theme.corner_radius as f32;
+    let ink = if dark { Color::WHITE } else { Color::BLACK };
     let panel = col()
         .w(w)
         .h(h)
         .radius(radius)
         .continuous_corners()
         .clip_rounded(radius)
-        .fill(t.card)
-        .border(1.0, t.text.alpha(0.08))
+        .backdrop_blur(GLASS_BLUR)
+        .fill(t.card.alpha(GLASS_TINT))
+        .border_gradient(
+            1.0,
+            Color::WHITE.alpha(if dark { 0.22 } else { 0.7 }),
+            ink.alpha(0.08),
+        )
+        .shadow(10.0, 32.0, Color::BLACK.alpha(if dark { 0.35 } else { 0.16 }))
         .child(
             row()
                 .w_full()
@@ -131,13 +146,42 @@ pub fn theme_preview(theme: &dupin_core::config::Theme, dark: bool, avail_w: f32
                 },
             )
         })));
-    el().size((w * scale).round(), (h * scale).round())
-        .a11y_hidden()
+    let miniature = el()
+        .size((w * scale).round(), (h * scale).round())
         .child(panel.scale(scale).pin(
             Some((w * scale - w) / 2.0),
             Some((h * scale - h) / 2.0),
             None,
             None,
+        ));
+    desk(&t, dark).a11y_hidden().child(miniature)
+}
+
+/// A soft wallpaper of the theme's accent and two fixed hues, drawn once: Settings has no
+/// backdrop compositor, and a still desk keeps the window idle while it is open.
+fn desk(t: &ResolvedTheme, dark: bool) -> El {
+    let (l, top, bottom) = if dark {
+        (
+            0.55,
+            rune::oklch(0.27, 0.04, 265.0),
+            rune::oklch(0.22, 0.05, 320.0),
+        )
+    } else {
+        (0.8, rune::oklch(0.94, 0.03, 250.0), rune::oklch(0.9, 0.04, 330.0))
+    };
+    let blob = |center: [f32; 2], radius: [f32; 2], color: Color| {
+        el().pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+            .radial_gradient(center, radius, [(0.0, color), (1.0, color.alpha(0.0))])
+    };
+    el().w_full()
+        .center()
+        .gradient(top, bottom)
+        .child(blob([0.22, 0.8], [190.0, 110.0], t.accent.alpha(0.85)))
+        .child(blob([0.8, 0.15], [170.0, 100.0], rune::oklch(l, 0.14, 45.0)))
+        .child(blob(
+            [0.62, 1.0],
+            [150.0, 80.0],
+            rune::oklch(l - 0.05, 0.16, 300.0),
         ))
 }
 

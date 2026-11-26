@@ -63,8 +63,9 @@ Geometry uses integer points: width 400–1200, row height 52–100, radius 0–
 font size 12–20. Rows must be at least `3 * font_size + 7` points tall. Invalid
 reloads keep the last good configuration and show an error.
 
-Settings → Appearance shows light and dark previews at the configured width (scroll
-to see wide panels), with a menu for colors, font and geometry presets. Edit TOML
+Settings → Appearance shows a scaled-down preview of the panel in light, dark or the
+system appearance, as glass over a still wallpaper tinted by the palette's accent (the
+backdrop shader doesn't run there), with controls for colors, font and geometry presets. Edit TOML
 for precise values. Changes use the usual settings save/conflict handling; the theme
 section is one setting for conflict detection. The menu is locked only when a read-only
 `config.toml` sets `[theme]`; otherwise edits are saved in Dupin's encrypted storage.
