@@ -672,7 +672,7 @@ export def render [compared: record, main, context: record]: nothing -> string {
         $"[main at (do $short $main.commit)]\(https://github.com/($context.repo)/actions/runs/($main.id)\)"
     }
     let against = if $main == null {
-        "No main build has measured latency yet, so there is nothing to compare with."
+        "This run carries no results from main to compare with: no main build had measured latency, or this branch's Latency workflow predates the comparison, which merging main fixes."
     } else if $main.merge_base {
         $"Against ($main_link), which this pull request merged onto."
     } else if $main.base != "" {
