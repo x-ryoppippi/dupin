@@ -32,7 +32,10 @@ use crate::icons;
 use crate::ui::Ui;
 use crate::update::Updater;
 
-pub const SIZE: (f32, f32) = (760.0, 480.0);
+/// The window's first size, before AppKit restores the one the user left it at.
+pub const SIZE: (f32, f32) = (820.0, 640.0);
+/// The smallest window the sidebar's pages and footer links, and a page's rows, fit in.
+pub const MIN_SIZE: (f32, f32) = (760.0, 480.0);
 
 /// Room above the sidebar's rows for the traffic lights, which sit over a full-size content view.
 const SIDEBAR_TOP: f32 = 38.0;
