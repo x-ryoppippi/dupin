@@ -31,7 +31,7 @@ ${siteName} is a launcher for Apple silicon Macs on macOS 14 or later. It stays 
 - Snapshots of a calculation, search or extension view, and an MCP server (\`dupin mcp\`) for agents.
 - Extensions: TypeScript or JavaScript packages installed from Git, run in a sandbox with the capabilities you grant, and tested against fixtures with \`dupin ext test\`.
 - Backdrop shaders: Flow, built in, and example WGSL shaders behind the panel, or your own; off by default.
-- No account. History, clipboard and snippets are encrypted on disk, and sync between Macs is end-to-end encrypted through a folder you already sync. Official releases send one anonymous usage ping a day, which one switch turns off: ${siteUrl}/docs/features/telemetry/
+- No account: what Dupin keeps stays on your Mac, encrypted, and can sync between your Macs through a folder you already sync. Official releases send one anonymous usage ping a day, which one switch turns off: ${siteUrl}/docs/features/telemetry/
 
 ## Install
 

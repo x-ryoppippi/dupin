@@ -38,13 +38,13 @@
 			href: '/docs/features/extensions/',
 		},
 		{
-			title: 'Your data stays yours',
-			text: 'No account. History, clipboard and snippets are encrypted on disk, and sync between Macs is end-to-end encrypted through a folder you already sync.',
+			title: 'No account',
+			text: 'What Dupin keeps stays on your Mac, encrypted, and can sync between your Macs through a folder you already sync.',
 			href: '/docs/features/storage/',
 		},
 		{
 			title: 'Snapshots and MCP',
-			text: 'Save a calculation, search or extension view to read again later, and let an agent such as Claude Code read and drive Dupin over MCP.',
+			text: 'Save a calculation, search or extension view to read again later, and let an AI agent read and drive Dupin over MCP.',
 			href: '/docs/features/snapshots/',
 		},
 	];
