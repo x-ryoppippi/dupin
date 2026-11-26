@@ -73,9 +73,9 @@ enabled = true
 Every command is fixed in Remote's `package.json`, so consent shows each one in full; Remote supplies only the values in braces, and checks each before Dupin does. `ssh` gets the same options first each time:
 
 ```text
-ssh -n -T -a -x -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=2
-    -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o ClearAllForwardings=yes -o PermitLocalCommand=no
-    -o RemoteCommand=none -o ControlMaster=no -o LogLevel=ERROR {host} -- <command>
+ssh -n -T -a -x -oBatchMode=yes -oConnectTimeout=5 -oServerAliveInterval=5 -oServerAliveCountMax=2
+    -oStrictHostKeyChecking=yes -oUpdateHostKeys=no -oClearAllForwardings=yes -oPermitLocalCommand=no
+    -oRemoteCommand=none -oControlMaster=no -oLogLevel=ERROR {host} -- <command>
 ```
 
 | Profile     | `<command>`                                                   |

@@ -52,20 +52,19 @@ function details(ref: RowRef): Action {
 export function hostItem(config: HostSettings, fetched: Fetched | undefined): CatalogueItem {
 	const host = config.host;
 	const first = fetched?.get('ps')?.probed;
-	const counts: string[] = [];
+	const totals = new Map<Probe['kind'], number>();
 	for (const probe of probesOf(config)) {
 		const probed = fetched?.get(probe.id)?.probed;
-		if (probed === undefined) continue;
-		const noun =
-			probe.kind === 'processes'
-				? 'processes'
-				: probe.kind === 'ports'
-					? 'ports'
-					: probe.kind === 'log'
-						? 'log lines'
-						: 'files';
-		counts.push(`${probed.rows.length} ${noun}`);
+		if (probed !== undefined)
+			totals.set(probe.kind, (totals.get(probe.kind) ?? 0) + probed.rows.length);
 	}
+	const nouns: Record<Probe['kind'], [string, string]> = {
+		processes: ['process', 'processes'],
+		ports: ['port', 'ports'],
+		log: ['log line', 'log lines'],
+		files: ['file', 'files'],
+	};
+	const counts = [...totals].map(([kind, count]) => `${count} ${nouns[kind][count === 1 ? 0 : 1]}`);
 	const subtitle =
 		first === undefined
 			? 'Not fetched yet: ⌘↩ fetches it'
@@ -79,7 +78,7 @@ export function hostItem(config: HostSettings, fetched: Fetched | undefined): Ca
 		subtitle: line(subtitle, 512),
 		section: 'Hosts',
 		icon: 'sf:server.rack',
-		...(first === undefined ? {} : { time: first.fetchedAt }),
+		...(first === undefined ? {} : { time: first.triedAt ?? first.fetchedAt }),
 		accessories: [{ tag: state }],
 		matchText: `${host} host`,
 		detail: {

@@ -16,96 +16,6 @@
 		"files": {
 			"ssh-config": "Host web1 web2\n"
 		},
-		"storage": [
-			{
-				"kind": "host",
-				"host": "web1",
-				"enabled": true,
-				"units": [],
-				"logs": [],
-				"dirs": [],
-				"lines": 50,
-				"allowTerminate": true
-			},
-			{
-				"kind": "host",
-				"host": "web2",
-				"enabled": true,
-				"units": [],
-				"logs": [],
-				"dirs": [],
-				"lines": 50,
-				"allowTerminate": false
-			},
-			{
-				"kind": "probe",
-				"host": "web1",
-				"probe": "ps",
-				"fetchedAt": 1795683558000,
-				"state": "ok",
-				"truncated": false,
-				"rows": [
-					{
-						"pid": "812",
-						"user": "root",
-						"cpu": "0.0",
-						"mem": "0.0",
-						"elapsed": "41-03:11:58",
-						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
-					},
-					{
-						"pid": "813",
-						"user": "www-data",
-						"cpu": "0.3",
-						"mem": "0.4",
-						"elapsed": "41-03:11:58",
-						"command": "nginx: worker process"
-					},
-					{
-						"pid": "2417",
-						"user": "deploy",
-						"cpu": "4.2",
-						"mem": "6.1",
-						"elapsed": "03:12:45",
-						"command": "/usr/bin/node /srv/app/server.js --port 3000"
-					}
-				]
-			},
-			{
-				"kind": "probe",
-				"host": "web2",
-				"probe": "ps",
-				"fetchedAt": 1795683558000,
-				"state": "ok",
-				"truncated": false,
-				"rows": [
-					{
-						"pid": "812",
-						"user": "root",
-						"cpu": "0.0",
-						"mem": "0.0",
-						"elapsed": "41-03:11:58",
-						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;"
-					},
-					{
-						"pid": "813",
-						"user": "www-data",
-						"cpu": "0.3",
-						"mem": "0.4",
-						"elapsed": "41-03:11:58",
-						"command": "nginx: worker process"
-					},
-					{
-						"pid": "2417",
-						"user": "deploy",
-						"cpu": "4.2",
-						"mem": "6.1",
-						"elapsed": "03:12:45",
-						"command": "/usr/bin/node /srv/app/server.js --port 3000"
-					}
-				]
-			}
-		],
 		"exec": [
 			{
 				"profile": "terminate",
@@ -114,28 +24,17 @@
 					"-T",
 					"-a",
 					"-x",
-					"-o",
-					"BatchMode=yes",
-					"-o",
-					"ConnectTimeout=5",
-					"-o",
-					"ServerAliveInterval=5",
-					"-o",
-					"ServerAliveCountMax=2",
-					"-o",
-					"StrictHostKeyChecking=yes",
-					"-o",
-					"UpdateHostKeys=no",
-					"-o",
-					"ClearAllForwardings=yes",
-					"-o",
-					"PermitLocalCommand=no",
-					"-o",
-					"RemoteCommand=none",
-					"-o",
-					"ControlMaster=no",
-					"-o",
-					"LogLevel=ERROR",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
 					"web1",
 					"--",
 					"kill",
@@ -154,28 +53,17 @@
 					"-T",
 					"-a",
 					"-x",
-					"-o",
-					"BatchMode=yes",
-					"-o",
-					"ConnectTimeout=5",
-					"-o",
-					"ServerAliveInterval=5",
-					"-o",
-					"ServerAliveCountMax=2",
-					"-o",
-					"StrictHostKeyChecking=yes",
-					"-o",
-					"UpdateHostKeys=no",
-					"-o",
-					"ClearAllForwardings=yes",
-					"-o",
-					"PermitLocalCommand=no",
-					"-o",
-					"RemoteCommand=none",
-					"-o",
-					"ControlMaster=no",
-					"-o",
-					"LogLevel=ERROR",
+					"-oBatchMode=yes",
+					"-oConnectTimeout=5",
+					"-oServerAliveInterval=5",
+					"-oServerAliveCountMax=2",
+					"-oStrictHostKeyChecking=yes",
+					"-oUpdateHostKeys=no",
+					"-oClearAllForwardings=yes",
+					"-oPermitLocalCommand=no",
+					"-oRemoteCommand=none",
+					"-oControlMaster=no",
+					"-oLogLevel=ERROR",
 					"web1",
 					"--",
 					"ps",
@@ -197,20 +85,419 @@
 				"stdout": "    1 root      0.0  0.1 41-03:12:09 /sbin/init\n  812 root      0.0  0.0 41-03:11:58 nginx: master process /usr/sbin/nginx -g daemon on; master_process on;\n  813 www-data  0.3  0.4 41-03:11:58 nginx: worker process\n 3301 postgres  1.1  3.2 10-02:01:33 postgres: 16/main: checkpointer\n",
 				"stderr": ""
 			}
+		],
+		"storage": [
+			{
+				"allowTerminate": true,
+				"dirs": [],
+				"enabled": true,
+				"host": "web1",
+				"kind": "host",
+				"lines": 50,
+				"logs": [],
+				"units": []
+			},
+			{
+				"allowTerminate": false,
+				"dirs": [],
+				"enabled": true,
+				"host": "web2",
+				"kind": "host",
+				"lines": 50,
+				"logs": [],
+				"units": []
+			},
+			{
+				"fetchedAt": 1795683558000,
+				"host": "web1",
+				"kind": "probe",
+				"probe": "ps",
+				"rows": [
+					{
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+						"cpu": "0.0",
+						"elapsed": "41-03:11:58",
+						"mem": "0.0",
+						"pid": "812",
+						"user": "root"
+					},
+					{
+						"command": "nginx: worker process",
+						"cpu": "0.3",
+						"elapsed": "41-03:11:58",
+						"mem": "0.4",
+						"pid": "813",
+						"user": "www-data"
+					},
+					{
+						"command": "/usr/bin/node /srv/app/server.js --port 3000",
+						"cpu": "4.2",
+						"elapsed": "03:12:45",
+						"mem": "6.1",
+						"pid": "2417",
+						"user": "deploy"
+					}
+				],
+				"state": "ok",
+				"truncated": false
+			},
+			{
+				"fetchedAt": 1795683558000,
+				"host": "web2",
+				"kind": "probe",
+				"probe": "ps",
+				"rows": [
+					{
+						"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+						"cpu": "0.0",
+						"elapsed": "41-03:11:58",
+						"mem": "0.0",
+						"pid": "812",
+						"user": "root"
+					},
+					{
+						"command": "nginx: worker process",
+						"cpu": "0.3",
+						"elapsed": "41-03:11:58",
+						"mem": "0.4",
+						"pid": "813",
+						"user": "www-data"
+					},
+					{
+						"command": "/usr/bin/node /srv/app/server.js --port 3000",
+						"cpu": "4.2",
+						"elapsed": "03:12:45",
+						"mem": "6.1",
+						"pid": "2417",
+						"user": "deploy"
+					}
+				],
+				"state": "ok",
+				"truncated": false
+			}
 		]
 	},
 	"steps": [
 		{
-			"query": "web2 ps node"
+			"query": "web2 ps node",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "/usr/bin/node /srv/app/server.js --port 3000",
+								"title": "Copy"
+							},
+							{
+								"copy": "2417",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683558000,
+										"host": "web2",
+										"index": 2,
+										"record": "f60a14620d7d5107e4e0f81a5dbcc076"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "web2"
+									}
+								},
+								"title": "Open SSH Session"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "web2"
+								},
+								{
+									"label": "PID",
+									"text": "2417"
+								},
+								{
+									"label": "User",
+									"text": "deploy"
+								},
+								{
+									"label": "CPU",
+									"text": "4.2%"
+								},
+								{
+									"label": "Memory",
+									"text": "6.1%"
+								},
+								{
+									"label": "Running for",
+									"text": "03:12:45"
+								},
+								{
+									"label": "Command",
+									"text": "/usr/bin/node /srv/app/server.js --port 3000"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:web2:2417",
+						"subtitle": "web2 · PID 2417 · deploy · 4.2% CPU · 6.1% memory · up 03:12:45",
+						"title": "/usr/bin/node /srv/app/server.js --port 3000"
+					}
+				],
+				"selected": 0
+			}
 		},
 		{
-			"query": "web1 ps node"
+			"query": "web1 ps node",
+			"expect": {
+				"rows": [
+					{
+						"actions": [
+							{
+								"copy": "/usr/bin/node /srv/app/server.js --port 3000",
+								"title": "Copy"
+							},
+							{
+								"copy": "2417",
+								"title": "Copy PID"
+							},
+							{
+								"push": {
+									"state": {
+										"fetchedAt": 1795683558000,
+										"host": "web1",
+										"index": 2,
+										"record": "767d68c9166e985f2f5dc072b0b9c99f"
+									},
+									"view": "details"
+								},
+								"title": "Show Details"
+							},
+							{
+								"run": {
+									"action": "terminal",
+									"data": {
+										"host": "web1"
+									}
+								},
+								"title": "Open SSH Session"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"host": "web1",
+										"name": "node",
+										"pid": "2417"
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"detail": {
+							"metadata": [
+								{
+									"label": "Host",
+									"text": "web1"
+								},
+								{
+									"label": "PID",
+									"text": "2417"
+								},
+								{
+									"label": "User",
+									"text": "deploy"
+								},
+								{
+									"label": "CPU",
+									"text": "4.2%"
+								},
+								{
+									"label": "Memory",
+									"text": "6.1%"
+								},
+								{
+									"label": "Running for",
+									"text": "03:12:45"
+								},
+								{
+									"label": "Command",
+									"text": "/usr/bin/node /srv/app/server.js --port 3000"
+								}
+							]
+						},
+						"icon": "sf:gearshape",
+						"id": "ps:web1:2417",
+						"subtitle": "web1 · PID 2417 · deploy · 4.2% CPU · 6.1% memory · up 03:12:45",
+						"title": "/usr/bin/node /srv/app/server.js --port 3000"
+					}
+				],
+				"selected": 0
+			}
 		},
 		{
-			"activate": "Terminate"
+			"activate": "Terminate",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "terminate",
+						"data": {
+							"host": "web1",
+							"name": "node",
+							"pid": "2417"
+						}
+					}
+				},
+				"invalidated": true,
+				"rows": [],
+				"storage": [
+					{
+						"allowTerminate": true,
+						"dirs": [],
+						"enabled": true,
+						"host": "web1",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"allowTerminate": false,
+						"dirs": [],
+						"enabled": true,
+						"host": "web2",
+						"kind": "host",
+						"lines": 50,
+						"logs": [],
+						"units": []
+					},
+					{
+						"fetchedAt": 1795683558000,
+						"host": "web1",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							},
+							{
+								"command": "nginx: worker process",
+								"cpu": "0.3",
+								"elapsed": "41-03:11:58",
+								"mem": "0.4",
+								"pid": "813",
+								"user": "www-data"
+							},
+							{
+								"command": "/usr/bin/node /srv/app/server.js --port 3000",
+								"cpu": "4.2",
+								"elapsed": "03:12:45",
+								"mem": "6.1",
+								"pid": "2417",
+								"user": "deploy"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795683558000,
+						"host": "web2",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							},
+							{
+								"command": "nginx: worker process",
+								"cpu": "0.3",
+								"elapsed": "41-03:11:58",
+								"mem": "0.4",
+								"pid": "813",
+								"user": "www-data"
+							},
+							{
+								"command": "/usr/bin/node /srv/app/server.js --port 3000",
+								"cpu": "4.2",
+								"elapsed": "03:12:45",
+								"mem": "6.1",
+								"pid": "2417",
+								"user": "deploy"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					},
+					{
+						"fetchedAt": 1795683600000,
+						"host": "web1",
+						"kind": "probe",
+						"probe": "ps",
+						"rows": [
+							{
+								"command": "/sbin/init",
+								"cpu": "0.0",
+								"elapsed": "41-03:12:09",
+								"mem": "0.1",
+								"pid": "1",
+								"user": "root"
+							},
+							{
+								"command": "nginx: master process /usr/sbin/nginx -g daemon on; master_process on;",
+								"cpu": "0.0",
+								"elapsed": "41-03:11:58",
+								"mem": "0.0",
+								"pid": "812",
+								"user": "root"
+							},
+							{
+								"command": "nginx: worker process",
+								"cpu": "0.3",
+								"elapsed": "41-03:11:58",
+								"mem": "0.4",
+								"pid": "813",
+								"user": "www-data"
+							},
+							{
+								"command": "postgres: 16/main: checkpointer",
+								"cpu": "1.1",
+								"elapsed": "10-02:01:33",
+								"mem": "3.2",
+								"pid": "3301",
+								"user": "postgres"
+							}
+						],
+						"state": "ok",
+						"truncated": false
+					}
+				],
+				"toasts": ["Sent TERM to 2417 on web1"]
+			}
 		},
 		{
-			"query": "web1 ps node"
+			"query": "web1 ps node",
+			"expect": {
+				"rows": []
+			}
 		}
 	]
 }

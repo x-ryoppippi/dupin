@@ -18,33 +18,22 @@ use crate::scripts::runner::Runner;
 /// What every ssh profile passes before the host: no terminal, no agent or X11 forwarding, no
 /// prompts, a bounded connection and nothing from the user's configuration that would run or
 /// forward something else.
-const SSH: [&str; 26] = [
+const SSH: [&str; 15] = [
     "-n",
     "-T",
     "-a",
     "-x",
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    "ConnectTimeout=5",
-    "-o",
-    "ServerAliveInterval=5",
-    "-o",
-    "ServerAliveCountMax=2",
-    "-o",
-    "StrictHostKeyChecking=yes",
-    "-o",
-    "UpdateHostKeys=no",
-    "-o",
-    "ClearAllForwardings=yes",
-    "-o",
-    "PermitLocalCommand=no",
-    "-o",
-    "RemoteCommand=none",
-    "-o",
-    "ControlMaster=no",
-    "-o",
-    "LogLevel=ERROR",
+    "-oBatchMode=yes",
+    "-oConnectTimeout=5",
+    "-oServerAliveInterval=5",
+    "-oServerAliveCountMax=2",
+    "-oStrictHostKeyChecking=yes",
+    "-oUpdateHostKeys=no",
+    "-oClearAllForwardings=yes",
+    "-oPermitLocalCommand=no",
+    "-oRemoteCommand=none",
+    "-oControlMaster=no",
+    "-oLogLevel=ERROR",
 ];
 
 struct NoScripts;

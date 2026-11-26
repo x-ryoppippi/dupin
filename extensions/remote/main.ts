@@ -50,7 +50,9 @@ function hostsOf(
 	stored: Stored,
 	configured: string[],
 ): { enabled: HostSettings[]; other: string[] } {
-	const enabled = [...stored.hosts.values()].filter((host) => host.enabled);
+	const enabled = [...stored.hosts.values()]
+		.filter((host) => host.enabled)
+		.sort((a, b) => (a.host < b.host ? -1 : a.host > b.host ? 1 : 0));
 	const on = new Set(enabled.map((host) => host.host));
 	const other = [
 		...new Set([...configured, ...stored.settings.hosts, ...stored.hosts.keys()]),
@@ -428,9 +430,10 @@ export const actions = {
 	async refresh(data: Json, ctx: ActionContext): Promise<ActionEffect> {
 		const host = hostOf(data);
 		if (host === null) return { type: 'toast', text: 'No such host' };
-		const config = (await load()).hosts.get(host);
+		const stored = await load();
+		const config = stored.hosts.get(host);
 		if (!config?.enabled) return { type: 'toast', text: `Enable ${host} first` };
-		const result = await refresh(config, 3);
+		const result = await refresh(config, 3, stored.probes.get(host));
 		catalogue.invalidate();
 		const page = ctx.state as { host?: unknown } | null;
 		if (page?.host !== host) return { type: 'refresh', toast: summary(host, result) };
@@ -455,9 +458,11 @@ export const actions = {
 			.sort((a, b) => fetchedAt(a) - fetchedAt(b));
 		const chosen = hosts.slice(0, REFRESH_ALL_HOSTS);
 		// Dupin runs four extension commands at once, so two hosts fetch two commands each.
-		const results = await limited(
-			chosen.map((host) => () => refresh(host, 2)),
-			2,
+		const results = await Promise.all(
+			limited(
+				chosen.map((host) => () => refresh(host, 2, stored.probes.get(host.host))),
+				2,
+			),
 		);
 		catalogue.invalidate();
 		const down = results.filter((result) => result.first.state !== 'ok').length;
@@ -477,7 +482,7 @@ export const actions = {
 		}
 		const config = { ...settingsFor(stored, host), enabled: true };
 		await saveHost(config);
-		const result = await refresh(config, 3);
+		const result = await refresh(config, 3, stored.probes.get(host));
 		catalogue.invalidate();
 		return { type: 'toast', text: line(`Enabled ${host}. ${summary(host, result)}`, 512) };
 	},
@@ -493,7 +498,8 @@ export const actions = {
 		const host = hostOf(data);
 		const pid = validPid((data as { pid?: unknown } | null)?.pid);
 		if (host === null || pid === null) return { type: 'toast', text: 'No such process' };
-		const config = (await load()).hosts.get(host);
+		const stored = await load();
+		const config = stored.hosts.get(host);
 		if (!config?.enabled || !config.allowTerminate) {
 			return {
 				type: 'toast',
@@ -510,7 +516,7 @@ export const actions = {
 			};
 		}
 		const processes = probesOf(config)[0];
-		if (processes) await run(processes, config.lines);
+		if (processes) await run(processes, config.lines, stored.probes.get(host)?.get('ps')?.probed);
 		catalogue.invalidate();
 		return {
 			type: 'refresh',

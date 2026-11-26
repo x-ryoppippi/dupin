@@ -96,14 +96,14 @@ function rowsOf(probe: Probe, stdout: string, lines: number): Row[] {
 
 function refused(error: unknown): { state: State; message: string } {
 	const code = (error as { code?: unknown } | null)?.code;
-	const description = (error as { description?: unknown } | null)?.description;
+	const scope = (error as { scope?: unknown } | null)?.scope;
 	if (code === 'needs-consent' || code === 'revoked' || code === 'denied' || code === 'disabled') {
 		return {
 			state: 'consent',
 			message: line(
-				typeof description === 'string'
-					? `Allow Remote to ${description} in Settings → Extensions`
-					: 'Allow Remote to run ssh in Settings → Extensions',
+				code === 'disabled'
+					? 'Turn Remote on in Settings → Extensions'
+					: `Allow ${typeof scope === 'string' ? scope : 'ssh'} in Settings → Extensions`,
 				256,
 			),
 		};
@@ -114,60 +114,88 @@ function refused(error: unknown): { state: State; message: string } {
 	};
 }
 
-/** Runs `probe` and keeps what it found in the package's storage. */
-export async function run(probe: Probe, lines: number): Promise<Probed> {
+/**
+ * Runs `probe`. When the host doesn't answer, the rows `previous` fetched stay, with when they
+ * were fetched, so they still show, marked.
+ */
+async function fetchProbe(probe: Probe, lines: number, previous?: Probed): Promise<Probed> {
 	const host = probe.inputs.host ?? '';
+	const now = Date.now();
 	let probed: Probed;
 	try {
 		const result = await exec.run(probe.profile, probe.inputs);
 		const ended = outcome(result);
-		probed = {
-			host,
-			probe: probe.id,
-			fetchedAt: Date.now(),
-			...ended,
-			truncated: result.truncated === true,
-			rows: unanswered(ended.state) ? [] : rowsOf(probe, result.stdout ?? '', lines),
-		};
+		probed = unanswered(ended.state)
+			? { host, probe: probe.id, fetchedAt: now, ...ended, rows: [] }
+			: {
+					host,
+					probe: probe.id,
+					fetchedAt: now,
+					...ended,
+					truncated: result.truncated === true,
+					rows: rowsOf(probe, result.stdout ?? '', lines),
+				};
 	} catch (error) {
-		probed = { host, probe: probe.id, fetchedAt: Date.now(), ...refused(error), rows: [] };
+		probed = { host, probe: probe.id, fetchedAt: now, ...refused(error), rows: [] };
 	}
+	if (probed.state !== 'ok' && probed.rows.length === 0 && previous && previous.rows.length > 0) {
+		probed = { ...probed, fetchedAt: previous.fetchedAt, triedAt: now, rows: previous.rows };
+	}
+	return probed;
+}
+
+/** Runs `probe` and keeps what it found in the package's storage. */
+export async function run(probe: Probe, lines: number, previous?: Probed): Promise<Probed> {
+	const probed = await fetchProbe(probe, lines, previous);
 	await saveProbed(probed);
 	return probed;
 }
 
-/** At most `limit` of `tasks` at once, so a refresh never queues more requests than Dupin takes. */
-export async function limited<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
-	const results: T[] = [];
-	let next = 0;
-	const worker = async () => {
-		while (next < tasks.length) {
-			const index = next++;
-			const task = tasks[index];
-			if (task) results[index] = await task();
+/**
+ * Starts `tasks`, at most `limit` at once, so a refresh never asks for more commands than Dupin
+ * runs together, and returns each one's promise in the order of `tasks`.
+ */
+export function limited<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T>[] {
+	let active = 0;
+	const waiting: (() => void)[] = [];
+	return tasks.map(async (task) => {
+		if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+		active++;
+		try {
+			return await task();
+		} finally {
+			active--;
+			waiting.shift()?.();
 		}
-	};
-	await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
-	return results;
+	});
 }
 
 /**
  * Fetches everything `config` asks for. Processes go first: when the host doesn't answer, the
- * rest would only wait out the same timeout, so they are left as they were.
+ * rest would only wait out the same timeout, so they are left as they were. The rest run side by
+ * side and are kept in the order the settings list them, as each one and those before it end.
  */
 export async function refresh(
 	config: HostSettings,
 	concurrency: number,
+	previous?: Map<string, { probed: Probed }>,
 ): Promise<{ first: Probed; failed: number }> {
 	const [first, ...rest] = probesOf(config);
-	const processes = await run(first as Probe, config.lines);
+	const before = (probe: Probe) => previous?.get(probe.id)?.probed;
+	const processes = await run(first as Probe, config.lines, before(first as Probe));
 	if (unanswered(processes.state)) {
 		return { first: processes, failed: 1 };
 	}
-	const others = await limited(
-		rest.map((probe) => () => run(probe, config.lines)),
+	const pending = limited(
+		rest.map((probe) => () => fetchProbe(probe, config.lines, before(probe))),
 		concurrency,
 	);
+	const others: Probed[] = [];
+	for (const next of pending) {
+		const probed = await next;
+		await saveProbed(probed);
+		others.push(probed);
+	}
 	return {
 		first: processes,
 		failed: [processes, ...others].filter((probed) => probed.state !== 'ok').length,

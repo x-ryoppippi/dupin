@@ -85,6 +85,6 @@ export function paths(output: string): { path: string }[] {
 
 /** The process's name from its command line, as a row's title shows it. */
 export function processName(row: ProcessRow): string {
-	const first = row.command.split(' ')[0] ?? '';
+	const first = (row.command.split(' ')[0] ?? '').replace(/:$/, '');
 	return first.split('/').pop() || row.command || `PID ${row.pid}`;
 }

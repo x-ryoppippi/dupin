@@ -41,7 +41,10 @@ export type State = 'ok' | 'failed' | 'unreachable' | 'auth' | 'host-key' | 'tim
 export interface Probed {
 	host: string;
 	probe: string;
+	/** When its rows were fetched. */
 	fetchedAt: number;
+	/** When the host last failed to answer, if it did since. */
+	triedAt?: number;
 	state: State;
 	message?: string;
 	truncated?: boolean;
@@ -119,6 +122,7 @@ function readProbed(data: Record<string, unknown>): Probed | null {
 		host,
 		probe: data.probe,
 		fetchedAt: data.fetchedAt,
+		...(typeof data.triedAt === 'number' ? { triedAt: data.triedAt } : {}),
 		state,
 		message: typeof data.message === 'string' ? data.message : undefined,
 		truncated: data.truncated === true,
