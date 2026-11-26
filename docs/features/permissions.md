@@ -69,7 +69,7 @@ macOS grants access to Dupin as a whole, but that never lets an extension use it
 <details>
 <summary>Extensions and macOS access</summary>
 
-An extension that reads calendar events needs Calendars access, one that reads or watches the clipboard needs Dupin allowed to paste from other apps, and one that pastes or reads and moves windows needs Accessibility. Until macOS allows it, the extension's request fails and asks for it with **Request Access**.
+An extension that reads calendar events needs Calendars access, one that reads or watches the clipboard needs Dupin allowed to paste from other apps, and one that pastes or reads and moves windows needs Accessibility. Until macOS allows it, the extension's request fails and asks for it with **Request Access**. An extension allowed to see the file you were viewing ([`context:document`](./extension-permissions.md#context)) uses Accessibility only once another feature has it, and never asks for it.
 
 Besides **Request Access**, only turning on a bundled extension that ships off, such as Window Management, asks macOS, and only for what its grants need, since its switch is the feature's switch. Turning on any other extension, Calendar or Clipboard history among them, never asks; their features' own settings do. Turning on the extensions folder itself never asks macOS for any of them.
 

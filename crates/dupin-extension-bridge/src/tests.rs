@@ -112,6 +112,7 @@ fn world_with(
         snippets: Box::new(snippets.clone()),
         calendar: Box::new(fixture::Calendar { today: 0 }),
         windows: Box::new(windows.clone()),
+        context: Box::new(fixture::Context),
     };
     let grants = MemoryLocal::default();
     let bridge = Bridge::new(
@@ -238,7 +239,7 @@ const report = async (run) => { try { return `ok ${JSON.stringify(await run())}`
 
 fn guest(body: &str) -> String {
     format!(
-        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows }} from 'dupin';\n{REPORT}\n{body}"
+        "import {{ http, files, exec, storage, clipboard, dictionary, calculator, snippets, calendar, windows, context }} from 'dupin';\n{REPORT}\n{body}"
     )
 }
 
@@ -737,6 +738,8 @@ fn hostile_requests_are_refused_before_any_service_runs() {
         ("dictionary.lookup", br#"{"word":"\u0007"}"#),
         ("calendar.events", br#"{"from":1,"to":0}"#),
         ("windows.focused", br#"{"pid":1}"#),
+        ("context.frontmost", br#"{"pid":1}"#),
+        ("context.document", br#"{"path":"/etc/passwd"}"#),
         ("windows.setFrame", br#"{"x":0,"y":0,"width":10}"#),
         (
             "windows.setFrame",
@@ -1494,6 +1497,56 @@ fn a_row_draws_only_images_from_its_own_package() {
             .code(),
         "not-installed"
     );
+}
+
+#[test]
+fn context_reaches_a_search_only_scope_by_scope_and_only_while_allowed() {
+    dupin_extension_host::skip_inside_a_sandbox!();
+    let world = world(
+        serde_json::json!({ "context": ["frontmost"] }),
+        &guest(
+            "export async function search() {
+               return [{ title: `${await report(() => context.frontmost())} ${await report(() => context.document())}` }];
+             }",
+        ),
+    );
+    world.enable();
+    assert_eq!(
+        world.first(""),
+        "needs-consent undeclared",
+        "nothing reaches the package until it is allowed, and an undeclared scope never does"
+    );
+    world.grant("context:frontmost");
+    assert_eq!(
+        world.first(""),
+        r#"ok {"bundleId":"com.example.editor","name":"Editor","pid":4242} undeclared"#,
+        "while typing, with no macOS access of its own, and never the document it didn't declare"
+    );
+    world
+        .bridge
+        .revoke(&world.id, &"context:frontmost".parse().unwrap())
+        .unwrap();
+    assert_eq!(world.first(""), "revoked undeclared");
+
+    let world = world_with_document();
+    world.enable();
+    world.grant("context:document");
+    assert_eq!(
+        world.first(""),
+        r#"needs-consent ok {"path":"/Users/me/notes.md"}"#,
+        "each scope is allowed on its own"
+    );
+}
+
+fn world_with_document() -> World {
+    world(
+        serde_json::json!({ "context": ["frontmost", "document"] }),
+        &guest(
+            "export async function search() {
+               return [{ title: `${await report(() => context.frontmost())} ${await report(() => context.document())}` }];
+             }",
+        ),
+    )
 }
 
 #[test]

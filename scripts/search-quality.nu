@@ -300,7 +300,7 @@ export def summary-line [figures: record]: nothing -> string {
     let within = $figures.within
     | each {|share| $"($share.keys) key(if $share.keys == 1 { '' } else { 's' }) (fixed $share.percent 0)%" }
     | str join ", "
-    $"(fixed $figures.mean_keystrokes 2) keystrokes on average until the wanted row is first; first within ($within); never first in ($figures.never_first) of ($figures.cases) cases; ($figures.dropped_out) drop out of the visible rows."
+    $"(fixed $figures.mean_keystrokes 2) keystrokes on average until the wanted row is first; first within ($within); never first in ($figures.never_first) of ($figures.cases) cases; ($figures.dropped_out) (if $figures.dropped_out == 1 { 'drops' } else { 'drop' }) out of the visible rows."
 }
 
 # The comment's Markdown. `main` is `find-main-artifact`'s record with main's results as `data`,

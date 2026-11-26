@@ -279,6 +279,15 @@ export const windows = Object.freeze({
 		return (await call('windows.setFrame', { x, y, width, height })).frame;
 	},
 });
+
+export const context = Object.freeze({
+	async frontmost() {
+		return (await call('context.frontmost', {})).app;
+	},
+	async document() {
+		return (await call('context.document', {})).document;
+	},
+});
 "#;
 
 /// Carries a call's host requests to Dupin and its replies back.

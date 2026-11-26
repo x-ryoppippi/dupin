@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use dupin_broker::{
-    ClipboardAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey, ScopeName, StorageOp,
-    WindowsAccess,
+    ClipboardAccess, ContextAccess, FilesAccess, FilesKind, Method, Permit, Request, Scope, ScopeKey,
+    ScopeName, StorageOp, WindowsAccess,
 };
 use dupin_extension_http as http;
 use dupin_host_services::{calendar, exec, files, windows};
@@ -440,6 +440,20 @@ impl Session {
                     .windows
                     .set_frame(windows::Frame::new(x, y, width, height))?;
                 Ok(json!({ "frame": frame }))
+            }
+            "context.frontmost" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Context(ContextAccess::Frontmost))?;
+                let app = self.bridge.services.context.frontmost()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "app": app }))
+            }
+            "context.document" => {
+                let Nothing {} = decode(args)?;
+                let permit = self.permit(&Request::Context(ContextAccess::Document))?;
+                let document = self.bridge.services.context.document()?;
+                self.release(&permit, cancelled)?;
+                Ok(json!({ "document": document }))
             }
             _ => Err(Failure::new(
                 "unknown-operation",

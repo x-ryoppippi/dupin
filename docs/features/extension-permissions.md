@@ -20,6 +20,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 | [`snippets`](#snippets)            | `snippets`                                     |                  | Changing snippets         |               |
 | [`calendar`](#calendar)            | `calendar`                                     | Reading events   |                           | Calendars     |
 | [`windows`](#windows)              | `windows:read`, `windows:arrange`              | Reading          | Moving a window           | Accessibility |
+| [`context`](#context)              | `context:frontmost`, `context:document`        | Reading          |                           |               |
 | [`clipboard`](#clipboard)          | `clipboard:read`, `:write`, `:watch`, `:paste` | Watching         | Reading, writing, pasting | Yes           |
 | [`rows`, `query`](#rows-and-query) | `rows:<kind>`, `query`                         | Filters          | Kind actions              |               |
 
@@ -38,6 +39,7 @@ An extension reaches nothing on its own. It declares the host services it wants 
 	"snippets": ["write"],
 	"calendar": { "access": ["read"], "pastDays": 0, "futureDays": 30 },
 	"windows": ["read", "arrange"],
+	"context": ["frontmost", "document"],
 	"rows": { "app": ["title"], "file": ["path"] },
 	"query": ["read"]
 }
@@ -61,7 +63,7 @@ Dupin checks every request against the declaration, the version you allowed and 
 <summary>The rules in full</summary>
 
 - **A declaration is the most an extension can get.** Anything malformed, unknown or out of range rejects the package with a diagnostic naming the field, such as `dupin.capabilities.http[0].origin`.
-- **Each item is a scope you allow on its own**: one origin, one named folder, one profile. Its name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `rows:file` or `query`, is what errors, Settings and grant files call it.
+- **Each item is a scope you allow on its own**: one origin, one named folder, one profile. Its name, such as `http:https://api.github.com`, `files:notes`, `exec:git-status`, `script:open-in-zed`, `storage`, `clipboard:read`, `dictionary`, `calculator`, `snippets`, `calendar`, `windows:arrange`, `context:document`, `rows:file` or `query`, is what errors, Settings and grant files call it.
 - **It starts off.** An extension that declares capabilities starts off. Its first request while off fails with `disabled`, and the panel offers **Turn on _Name_?**. Turning it on grants nothing.
 - **Each scope asks once.** A request for a scope you haven't decided on fails with `needs-consent`, and the panel shows **Allow _Name_ to …?** above the extension's rows, with **Allow** and **Deny**, until you answer.
 - **Choices belong to a version.** A change to `package.json` or any module is another revision: one that declares a scope no wider keeps your choice, one that widens it asks again, and one that drops it forgets it.
@@ -80,7 +82,7 @@ Revoking a scope or turning an extension off takes effect at once: a request in 
 <details>
 <summary>What needs an action you chose</summary>
 
-While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard, moving a window and changing your snippets need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
+While you type, an extension may use what you allowed to read: GET and HEAD, files, the dictionary, the calculator, calendars, the displays and the focused window, the app and file you were using, and its own `storage`, writes included. Any other HTTP method, a program or script, reading, writing or pasting from the clipboard, moving a window and changing your snippets need an action you chose. Dupin, not the extension, says which: a query, an event or an action of yours.
 
 </details>
 
@@ -535,6 +537,41 @@ export const actions: Actions = {
 Frames are in points, in one space for every display: the origin is the primary display's top-left corner and `y` grows downwards. The extension computes where a window goes; Dupin only reads and moves it.
 
 A frame that lies off every display is `out-of-scope`, and one that isn't finite, starts more than 1,000,000 points from the origin or is not from above 0 to 100,000 points wide and tall is `invalid`.
+
+</details>
+
+## Context
+
+`"context": ["frontmost", "document"]` lets an extension read where you were when the panel opened: `context.frontmost()` is the app that was in front, and `context.document()` the file its focused window showed. Each is a scope of its own, so a package can know you were in your editor without seeing which file you had open.
+
+```js
+const app = await context.frontmost(); // { name: "Zed", bundleId: "dev.zed.Zed", pid: 501 } or null
+const document = await context.document(); // { path: "/Users/me/dupin/README.md" } or null
+```
+
+<details>
+<summary>What each returns, and when it is null</summary>
+
+| Access      | Function              | Returns                                                                                                                         |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `frontmost` | `context.frontmost()` | `{ name, bundleId, pid }` of the app in front when the panel opened, or `null` when Dupin itself was; `bundleId` may be `null`. |
+| `document`  | `context.document()`  | `{ path }`, the absolute path of the local file that app's focused window showed, or `null`.                                    |
+
+Dupin notes the app as the panel opens, and reads the document the first time a package asks after that, once, so every answer holds until the panel opens again and typing never waits on the other app. Neither needs an action you chose, and neither asks macOS for anything:
+
+- The document is what the app itself reports through Accessibility, as editors such as TextEdit, Xcode and Preview do. It is `null` for an app that reports none, such as a terminal or a browser, for anything that isn't a local file, and while Dupin isn't allowed Accessibility; Dupin uses that access only if another feature, such as Window Management or Selected text, already has it, and never asks for it for this.
+- Text you had selected reaches a package as the query when you open Dupin with the [Selection hotkey](./selected-text.md), so there is no capability for it.
+
+A package can put first what belongs to where you were, such as the project holding the open file:
+
+```js
+import { context } from 'dupin';
+
+export async function search() {
+	const document = await context.document().catch(() => null);
+	return document ? [{ title: document.path.split('/').at(-1), subtitle: document.path }] : [];
+}
+```
 
 </details>
 

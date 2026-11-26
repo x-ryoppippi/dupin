@@ -11,7 +11,7 @@ use dupin_extension_bridge::{
     Base, Bridge, Broker, Failure, Local, OsAccess, OsPermission, PackageStorage, Scope, Trigger,
 };
 use dupin_extension_http::{HttpConfig, HttpService, Limits};
-use dupin_host_services::{calendar, clipboard, dictionary, exec, windows};
+use dupin_host_services::{calendar, clipboard, context, dictionary, exec, windows};
 use dupin_mac::privacy::CalendarAccess;
 use serde_json::Value;
 
@@ -151,7 +151,10 @@ pub fn open(platform: Platform) -> Bridge {
             platform.calendar_access,
         )))),
         windows: Box::new(Windows(windows::Service::new(
-            dupin_mac::window_management::Windows(platform.front),
+            dupin_mac::window_management::Windows(platform.front.clone()),
+        ))),
+        context: Box::new(Context(context::Service::new(
+            dupin_mac::window_management::Context(platform.front),
         ))),
     };
     let bridge = match base_path() {
@@ -352,6 +355,18 @@ impl services::Windows for Windows {
 
     fn set_frame(&self, frame: windows::Frame) -> Result<Value, Failure> {
         encoded(self.0.set_frame(frame).map_err(Failure::from)?)
+    }
+}
+
+struct Context(context::Service<dupin_mac::window_management::Context>);
+
+impl services::Context for Context {
+    fn frontmost(&self) -> Result<Value, Failure> {
+        encoded(self.0.frontmost())
+    }
+
+    fn document(&self) -> Result<Value, Failure> {
+        encoded(self.0.document())
     }
 }
 

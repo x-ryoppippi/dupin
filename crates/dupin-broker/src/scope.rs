@@ -263,6 +263,25 @@ impl WindowsAccess {
     }
 }
 
+/// What Dupin noted about where the user was when the panel opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContextAccess {
+    /// The app that was in front: its name, bundle ID and process.
+    Frontmost,
+    /// The file the front app's focused window shows.
+    Document,
+}
+
+impl ContextAccess {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Frontmost => "frontmost",
+            Self::Document => "document",
+        }
+    }
+}
+
 /// A kind of row Dupin's own sources show, whose fields a package may be let see.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -420,6 +439,9 @@ pub enum Scope {
     Windows {
         access: WindowsAccess,
     },
+    Context {
+        access: ContextAccess,
+    },
     /// Fields of the rows of one kind that Dupin's own sources show, which the package's
     /// filters and kind actions receive. Another package's rows never reach it.
     Rows {
@@ -446,6 +468,7 @@ impl Scope {
             Self::Snippets => ScopeKey::Snippets,
             Self::Calendar { .. } => ScopeKey::Calendar,
             Self::Windows { access } => ScopeKey::Windows(*access),
+            Self::Context { access } => ScopeKey::Context(*access),
             Self::Rows { kind, .. } => ScopeKey::Rows(*kind),
             Self::Query => ScopeKey::Query,
         }
@@ -520,6 +543,7 @@ impl Scope {
                 },
             ) => past_days >= p && future_days >= f,
             (Self::Windows { access }, Self::Windows { access: a }) => access == a,
+            (Self::Context { access }, Self::Context { access: a }) => access == a,
             (Self::Rows { kind, fields }, Self::Rows { kind: k, fields: f }) => {
                 kind == k && fields.is_superset(f)
             }
@@ -640,6 +664,10 @@ impl fmt::Display for Scope {
                 WindowsAccess::Read => f.write_str("see your displays and the focused window"),
                 WindowsAccess::Arrange => f.write_str("move and resize the focused window"),
             },
+            Self::Context { access } => match access {
+                ContextAccess::Frontmost => f.write_str("see which app you were using when Dupin opened"),
+                ContextAccess::Document => f.write_str("see which file you were viewing when Dupin opened"),
+            },
             Self::Rows { kind, fields } => write!(
                 f,
                 "see the {} of {} Dupin finds, where you compose its filters or actions",
@@ -671,6 +699,7 @@ pub enum ScopeKey {
     Snippets,
     Calendar,
     Windows(WindowsAccess),
+    Context(ContextAccess),
     Rows(RowKind),
     Query,
 }
@@ -690,6 +719,7 @@ impl fmt::Display for ScopeKey {
             Self::Snippets => f.write_str("snippets"),
             Self::Calendar => f.write_str("calendar"),
             Self::Windows(access) => write!(f, "windows:{}", access.as_str()),
+            Self::Context(access) => write!(f, "context:{}", access.as_str()),
             Self::Rows(kind) => write!(f, "rows:{}", kind.as_str()),
             Self::Query => f.write_str("query"),
         }
@@ -722,6 +752,8 @@ impl FromStr for ScopeKey {
             Some(("clipboard", "paste")) => Self::Clipboard(ClipboardAccess::Paste),
             Some(("windows", "read")) => Self::Windows(WindowsAccess::Read),
             Some(("windows", "arrange")) => Self::Windows(WindowsAccess::Arrange),
+            Some(("context", "frontmost")) => Self::Context(ContextAccess::Frontmost),
+            Some(("context", "document")) => Self::Context(ContextAccess::Document),
             Some(("rows", kind)) => Self::Rows(
                 RowKind::ALL
                     .into_iter()

@@ -7,6 +7,7 @@ use ../search-quality.nu [
     ranks-text
     render
     summary
+    summary-line
 ]
 
 def case [id: string, query: string, ranks: list<any>]: nothing -> record {
@@ -50,6 +51,10 @@ def main [] {
     assert equal ($figures.within | get cases) [1 1 2 2]
     assert equal $figures.never_first 1
     assert equal (hardest [$first $never] | get id) [two one]
+    assert (
+        summary-line $figures
+        | str ends-with "never first in 1 of 3 cases; 1 drops out of the visible rows."
+    )
 
     # The report reads a pull request's results with a token that can comment.
     let good = results [
