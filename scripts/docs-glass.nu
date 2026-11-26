@@ -291,12 +291,24 @@ def finish-glass [
         ($panel.y + $panel.height + $margin + $space)
         $panel.bottom
     ] | math min) - $y | $in // 2 * 2
+    let crop = $"crop=($width):($height):($x):($y)"
+    # A key shows in the panel some way after System Events presses it, so the clip is lined up
+    # on the frame the first key changed, not on when the script started.
+    let first = $timeline.events | where type != mark | first | get t
+    let changed = (first-change
+        $movie
+        $crop
+        $offset
+        ($first + 3)
+        ($tmp | path join $"($name)-align")
+    )
+    let offset = if $changed == null { $offset } else { $changed - $first }
     let frames = $tmp | path join $"($name)-frames"
     mkdir $frames
     let duration = $timeline.events | last | get t
     (
         ^ffmpeg -nostdin -hide_banner -loglevel error -y -ss ($offset | into string) -i $movie
-        -t ($duration | into string) -vf $"crop=($width):($height):($x):($y),fps=($CLIP_FPS)"
+        -t ($duration | into string) -vf $"($crop),fps=($CLIP_FPS)"
         ($frames | path join frame_%05d.png)
     )
     let pngs = glob ($frames | path join frame_*.png) | sort
@@ -311,6 +323,29 @@ def finish-glass [
         bytes: ($files | each { ls $in | get size.0 } | math sum)
         scale: $scale
     }
+}
+
+# How far into `movie`, from `from` and within `span` seconds, the `crop` first changes by more
+# than the caret's blink, or null if it never does.
+def first-change [
+    movie: path
+    crop: string
+    from: float
+    span: float
+    folder: path
+] {
+    mkdir $folder
+    (
+        ^ffmpeg -nostdin -hide_banner -loglevel error -y -ss ($from | into string) -i $movie
+        -t ($span | into string) -vf $"($crop),fps=30" ($folder | path join frame_%05d.png)
+    )
+    let pngs = glob ($folder | path join frame_*.png) | sort
+    let base = $pngs | first
+    let at = $pngs | enumerate | skip 1 | where {|frame|
+        let compared = ^magick compare -metric AE -fuzz 8% $base $frame.item null: | complete
+        ($compared.stderr | str trim | split row " " | first | into float) > 400
+    } | get --optional 0.index
+    if $at == null { null } else { $from + $at / 30 }
 }
 
 # The smallest rectangle holding both.
