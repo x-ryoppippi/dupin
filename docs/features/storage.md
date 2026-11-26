@@ -1,14 +1,46 @@
 # Encrypted storage
 
-`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear, such as clipboard history. Each owner opens its own namespace: a native feature by name, and an extension, such as the bundled clipboard history, through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
+Dupin keeps what it learns about you, such as clipboard history, snippets, snapshots, usage history and extension grants, encrypted on disk under a key in your Keychain.
+
+## Open it
+
+There is nothing to set up or open: Dupin creates and uses it by itself. The files are in `~/Library/Application Support/Dupin/storage` (or `$XDG_DATA_HOME/dupin/storage` when set), and the key is a Keychain item that never leaves the Mac.
+
+## What you see
+
+- Nothing day to day: features read and write their data as usual.
+- If a store can't be opened, a notice on every Settings page says why.
+- In the storage folder, only unreadable sealed files named by random IDs or hashes.
+
+## What you can do
+
+| Key / action                                  | What it does                                           |
+| --------------------------------------------- | ------------------------------------------------------ |
+| **Delete Data** in Settings → Extensions      | Discards that extension's stored data                  |
+| `dupin ext remove`                            | Removes the extension and discards its data            |
+| A fresh `dupin ext install` of the name       | Discards the data an earlier install of that name left |
+| **Revoke** `storage` in Settings → Extensions | Stops the extension storing, but keeps what it stored  |
+
+## Notes
+
+- A backup or copy of the data directory is unreadable without the Keychain item that holds the [data key](#the-data-key).
+- If the key is missing or the data was sealed with another, Dupin keeps what it holds untouched, saves nothing until it opens, and never falls back to a file in the clear. It never answers a missing key by making a new one that would orphan the stored data.
+- It protects against other user accounts, backups without the Keychain and a lost disk, not against code running as you; see [Threat model](#threat-model).
+
+<details>
+<summary>How owners use it</summary>
+
+`dupin-storage` is the host's store for data that must outlive a restart but should not sit on disk in the clear. Each owner opens its own namespace: a native feature by name, and an extension, such as the bundled clipboard history, through the broker's `storage` capability, which maps the installed package to a namespace of its own (see [Extension namespaces](#extension-namespaces)). The owner never sees paths or keys; it stores JSON records and the blobs they refer to, and reads them back.
+
+</details>
 
 ## What Dupin keeps where
 
-What Dupin learns about its user belongs in encrypted storage, in the namespace the [sync design](../design/sync.md#what-syncs) assigns it; the table lists every file that holds such data and where each stands. A built-in store that can't be opened, because the key is missing or the data was sealed with another, keeps what it holds untouched, saves nothing until it opens and says why on every Settings page; it never falls back to a file in the clear.
+What Dupin learns about its user belongs in encrypted storage, in the namespace the [sync design](../design/sync.md#what-syncs) assigns it. This table lists every file that holds such data and where each stands.
 
 | What                                   | Where                                                                        | Form                                                        | Syncs                                            |
 | -------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------ |
-| Snippets added in Dupin                | `snippets` namespace, one record per snippet                                 | Encrypted                                                   | `snippets`, last writer wins, when it ships      |
+| Snippets added in Dupin                | `snippets` namespace, one record per snippet                                 | Encrypted                                                   | `snippets`, last writer wins, when sync is on    |
 | Saved snapshots                        | `snapshots` namespace, one record per snapshot                               | Encrypted                                                   | Never                                            |
 | Clipboard history                      | The bundled clipboard history package's namespace                            | Encrypted                                                   | Opt-in, when clipboard sync ships                |
 | An extension's stored data             | `ext-u-…` or `ext-b-…`, its own namespace                                    | Encrypted                                                   | Only with `storage.sync`, when it ships          |
@@ -22,7 +54,8 @@ What Dupin learns about its user belongs in encrypted storage, in the namespace 
 | `storage.state`                        | Beside `storage/`                                                            | Sealed under the data key                                   | Never                                            |
 | `sync.json`                            | Beside `storage/`, while sync is on                                          | Plain JSON: the sync folder, vault ID and key epoch, no key | Never                                            |
 
-Dupin also writes, in the clear, files that hold no user data:
+<details>
+<summary>Files in the clear that hold no user data</summary>
 
 - `~/Library/Logs/Dupin/dupin.log`: startup problems, updates and failures by kind. It never holds what you typed, a result's title or path, clipboard contents or snippet text; an extension's failure is logged by its code and line only, since its message is the extension's own text.
 - `~/Library/Caches/Dupin/calculator` (or `$XDG_CACHE_HOME/dupin/calculator`): the European Central Bank's published exchange rates and when they were last fetched.
@@ -30,7 +63,89 @@ Dupin also writes, in the clear, files that hold no user data:
 - `copy-staging/`, while a copy runs: links to the destination's staging folder, removed when the copy finishes or on the next launch. The copied file itself goes to its destination as it would without Dupin.
 - An update download in a hidden `.Dupin-update-` folder beside the app, the extensions folder's package code, and the control socket in the per-user temporary folder.
 
-## What a namespace holds
+</details>
+
+## The data key
+
+One random 256-bit data key protects every namespace. On macOS it is a Keychain item: service `app.dupin.Dupin.storage`, account `data-key`, never synchronized.
+
+<details>
+<summary>Security details</summary>
+
+A `KeyProvider` supplies the key, and creates it only if none exists; a locked or refused key store is reported as an error, never answered with a new key that would orphan the stored data.
+
+- **macOS:** a generic password item, service `app.dupin.Dupin.storage`, account `data-key`, never synchronized. A build with the data protection keychain entitlement stores it there as accessible after first unlock, this device only. Builds without that entitlement (ad hoc and Developer ID builds without a provisioning profile) fall back to the login keychain, which ignores the accessibility class and whose access control trusts the app that created the item, so a differently signed build may be asked for the login password before it can read the key.
+- **Linux and others:** `FileKey`, a `0600` file meant to sit at `storage.key` beside `storage/`, never inside it, where every name belongs to a namespace. It is refused if other users can read it. This is weaker than a key store: anyone who can read the file, or a backup that contains it alongside the data, can decrypt everything.
+- **Tests and fixtures** use an in-memory key and never touch the real Keychain. A test that runs the `dupin` executable, such as `dupin ext install`, sets `DUPIN_DEBUG_STORAGE_KEY_FILE` to a `FileKey` of its own, which only a debug build reads; a release build always uses the Keychain.
+
+</details>
+
+## Extension namespaces
+
+Each extension stores its data in a namespace of its own, `ext-u-<hash>` for a package you installed and `ext-b-<hash>` for one bundled with Dupin, bounded by Dupin's maxima (64 MiB, 10,000 records, 1 MiB per record, 3,650 days).
+
+<details>
+<summary>How it works</summary>
+
+The broker bridge names the namespace; the hash is the first 160 bits of SHA-256 over the origin and the package ID. Native features use plain names without the `ext-` prefix, so the two never meet; neither do two packages, nor a user's copy of a bundled package and the bundled package itself, even when the copy is unmodified.
+
+The namespace opens with the quota and retention the package declares, bounded by the maxima above, stays open while Dupin runs, and a sweeper applies its retention hourly; every request also applies it first. Revoking `storage` keeps the namespace. `Bridge::delete_data`, which Settings' Delete Data, `dupin ext remove` and a fresh `dupin ext install` of the name call, discards it: it waits for requests already running, and a request that opened the namespace before then fails instead of writing into it.
+
+</details>
+
+## Built-in namespaces
+
+A native feature opens its namespace by the name the [sync design](../design/sync.md#what-syncs) gives it, so sync can later carry its records without a migration. Each shares the launcher's one `Storage` with the extensions' namespaces, so all of them follow one device clock.
+
+| Namespace                        | Holds                                                               | Syncs                                                  |
+| -------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------ |
+| `snippets`                       | [Snippets](./snippets.md) you add in Dupin                          | `lww` when [sync](./sync.md) is on                     |
+| `settings`, `settings-local`     | What [Settings](./settings.md) saves over a read-only `config.toml` | `settings` will; `settings-local` never                |
+| `snapshots`                      | [Saved snapshots](./snapshots.md)                                   | Never                                                  |
+| `extension-grants`               | The [capability broker](../capability-broker.md)'s local grants     | Never                                                  |
+| `extensions`, `extensions-local` | The installed extensions list `dupin ext install` keeps             | `extensions` when sync ships; `extensions-local` never |
+| `usage`                          | Usage history, the ranking log, one record per device               | `per_device` when [sync](./sync.md) is on              |
+
+<details>
+<summary>Namespace details</summary>
+
+- **`snippets`**: one record per snippet upserted under its keyword, holding `{ keyword, name, text }`. A record whose keyword doesn't name it is left out. Its limits leave room for every snippet Dupin lists (10,000), and writes use `upsert_within_limits`, so storing one never evicts another. Dupin opens it on a worker thread at launch only when the directory exists, so the data key is first read when you store a snippet, and a failure to open it is reported in the panel and retried on the next edit, never answered by deleting anything. It syncs `lww` while [sync](./sync.md) is on: it is then sealed under the vault key, and the snippets another Mac changed are read again after each pass.
+- **`settings`** and **`settings-local`**: one record per top-level key upserted under the key, holding `{ key, value }`. Keys every Mac shares (`dupin_core::config::is_shared`, such as `[theme]`, `file_limit` and web searches) go to `settings`, which sync will carry; every other key, including any added later, goes to `settings-local`, which never leaves the Mac. A record whose key doesn't name it is left out. The launcher's settings worker owns both while it runs and reads them at launch only when they exist; another process, such as `dupin ext install` or `dupin mcp`, asks the running launcher for them instead (`ConfigOverlay` over the control socket). A failure to open them leaves the stored keys untouched, shows the problem in Settings and refuses saves until they open.
+- **`snapshots`**: one record per snapshot upserted under its ID, holding the snapshot as the Snapshots window shows it. A record whose ID doesn't name it is left out. Its limits are the feature's own (100 snapshots, 512 KiB each, 8 MiB in all), and writes use `upsert_within_limits`, so a full store refuses a save rather than evicting one. One store per process owns it, on the snapshot writer's thread and the `snap` keyword's worker; it opens only when the directory exists, and a failure to open it is shown in the Snapshots window and on every Settings page and retried on the next save. It never syncs.
+- **`extension-grants`**: one record per package with any decision, upserted under its package ID and holding `{ package, enabled, scopes }`: whether it is on, and each scope granted, with the revision and scope approved and the path the user picked, or revoked. A package left with no decisions has no record. A record whose package doesn't name it is left out; a record that can't be read, or one sealed under another key, makes the whole store unreadable, so nothing is granted, bundled pre-grants are withheld and nothing is written. Writes use `upsert_within_limits` (10,000 packages, 1 MiB each), so a decision is never evicted. The launcher reads it on a thread of its own at launch, opening it only when the directory exists, and again when the panel shows or Settings regains focus while it couldn't; until it is read, extensions are granted nothing. It never syncs.
+- **`extensions`** and **`extensions-local`**: one record per package upserted under its name and holding `{ name, source, ref, commit, content_hash, installed_at, version, keyword, requested }`. A package installed from Git goes in `extensions`, one copied from a folder, whose path means nothing on another Mac, in `extensions-local`. A record whose name doesn't name it is left out; one that can't be read, or one sealed under another key, makes the list unreadable, which keeps every folder in the extensions folder off. Each holds at most 256 packages in 192 KiB, so the whole list fits one control message, and writes use `upsert_within_limits`, since an entry evicted would let its folder run unchecked. `extensions` syncs when sync ships; `extensions-local` never does.
+- **`usage`**: one record per device keyed by its device ID: what this Mac opened, how often, its latest ten visits and the queries it was picked for. Ranking adds every device's record together. Paths under the home folder are stored relative to it. The sync worker opens it at launch only when it exists, so a Mac with nothing recorded first reads the data key at its first pick; an older `history.json` is moved into it and removed. It syncs `per_device` when [sync](./sync.md) is on.
+
+</details>
+
+<details>
+<summary>Who opens the extension namespaces</summary>
+
+The launcher owns `extension-grants`, `extensions` and `extensions-local` from when it first opens them until it quits. `dupin ext` opens them itself only while the launcher doesn't hold them, each read or write on its own so a launcher starting meanwhile can take them; while the launcher does, the command finds them busy and asks it over the control socket (`extension_lock_get`, `extension_lock_set`, `extension_grants_forget`, `extension_grants_list`), as it asks it to delete a removed package's data. `extensions.lock.guard`, an empty file beside `storage/`, still takes `dupin ext` commands one at a time.
+
+</details>
+
+## Threat model
+
+Encryption at rest protects stored data from other user accounts on the Mac, from backups and synced copies of the data directory that don't include the Keychain, and from a lost or stolen disk, and rejects tampered files. It does not protect against code running as the same user.
+
+<details>
+<summary>Security details</summary>
+
+Encryption at rest also detects tampering: a modified, truncated, swapped or renamed file is rejected rather than read.
+
+It does not protect against code running as the same user. Anything that can read the Keychain item, or that runs inside Dupin, can read everything stored. File sizes and modification times are not hidden: blob sizes and when each record last changed are visible to anyone who can list the directory. Record names are random or keyed hashes, so they reveal neither when a record was stored nor an owner's logical keys. The device ID in each record file is not a secret.
+
+Deleting a record replaces its file with a tombstone, then removes that, and does not overwrite the old contents, because without the key the remains are ciphertext. Dupin zeroizes plaintext buffers it owns once it has used them: serialized JSON, blob contents passed to `put`, decrypted bodies and blobs, and key material. Values handed to callers, such as a parsed JSON record or a blob returned for display, are the caller's to clear, and copies made by the operating system, the allocator or Core Foundation are outside Dupin's reach. Zeroizing narrows how long plaintext stays in memory; it is not a guarantee against memory inspection.
+
+</details>
+
+## Format and internals
+
+These are for contributors and the curious; nothing here needs action.
+
+<details>
+<summary>What a namespace holds</summary>
 
 - **Records** are JSON values under a stable 128-bit ID. `put` stores a new record under a random ID; `upsert` stores the record for an owner's logical key, replacing the one stored before. The ID comes from the key through a keyed hash (`key_id`), so the key itself is never written. Every write is a new version stamped by the device's hybrid logical clock, and the record keeps the wall-clock time it was first stored, across replacements. `list` pages newest version first, with a `before` cursor (the last record's stamp and ID, which stays valid if that record is replaced or deleted), and returns at most 200 records a page.
 - **Blobs** are byte strings stored beside a record: an image, a file snapshot, a video. A blob is named by a keyed hash of its contents, so the same image copied twice is stored once and kept until no record refers to it. `put` returns a handle per blob; `read_blob` takes the handle and returns the bytes.
@@ -41,24 +156,10 @@ Dupin also writes, in the clear, files that hold no user data:
 
 Every call blocks on file I/O and must run on a worker thread, never the UI thread. A `Store` can be shared between threads; calls on it are serialized. Only one `Store` per namespace can be open at a time, in this process or another, which an advisory lock on the namespace enforces.
 
-## Extension namespaces
+</details>
 
-The broker bridge names an extension's namespace `ext-u-<hash>` for a package the user installed and `ext-b-<hash>` for one bundled with Dupin, where the hash is the first 160 bits of SHA-256 over the origin and the package ID. Native features use plain names without the `ext-` prefix, so the two never meet; neither do two packages, nor a user's copy of a bundled package and the bundled package itself, even when the copy is unmodified. The namespace opens with the quota and retention the package declares, bounded by Dupin's maxima (64 MiB, 10,000 records, 1 MiB per record, 3,650 days), stays open while Dupin runs, and a sweeper applies its retention hourly; every request also applies it first. Revoking `storage` keeps the namespace; `Bridge::delete_data`, which Settings' Delete Data, `dupin ext remove` and a fresh `dupin ext install` of the name call, discards it: it waits for requests already running, and a request that opened the namespace before then fails instead of writing into it.
-
-## Built-in namespaces
-
-A native feature opens its namespace by the name the [sync design](../design/sync.md#what-syncs) gives it, so sync can later carry its records without a migration. Each shares the launcher's one `Storage` with the extensions' namespaces, so all of them follow one device clock.
-
-- **`snippets`**: the [snippets](./snippets.md) you add in Dupin, one record per snippet upserted under its keyword, holding `{ keyword, name, text }`. A record whose keyword doesn't name it is left out. Its limits leave room for every snippet Dupin lists (10,000), and writes use `upsert_within_limits`, so storing one never evicts another. Dupin opens it on a worker thread at launch only when the directory exists, so the data key is first read when you store a snippet, and a failure to open it is reported in the panel and retried on the next edit, never answered by deleting anything. It syncs `lww` while [sync](./sync.md) is on: it is then sealed under the vault key, and the snippets another Mac changed are read again after each pass.
-- **`settings`** and **`settings-local`**: what [Settings](./settings.md) saves over a read-only `config.toml`, one record per top-level key upserted under the key, holding `{ key, value }`. Keys every Mac shares (`dupin_core::config::is_shared`, such as `[theme]`, `file_limit` and web searches) go to `settings`, which sync will carry; every other key, including any added later, goes to `settings-local`, which never leaves the Mac. A record whose key doesn't name it is left out. The launcher's settings worker owns both while it runs and reads them at launch only when they exist; another process, such as `dupin ext install` or `dupin mcp`, asks the running launcher for them instead (`ConfigOverlay` over the control socket). A failure to open them leaves the stored keys untouched, shows the problem in Settings and refuses saves until they open.
-- **`snapshots`**: [saved snapshots](./snapshots.md), one record per snapshot upserted under its ID, holding the snapshot as the Snapshots window shows it. A record whose ID doesn't name it is left out. Its limits are the feature's own (100 snapshots, 512 KiB each, 8 MiB in all), and writes use `upsert_within_limits`, so a full store refuses a save rather than evicting one. One store per process owns it, on the snapshot writer's thread and the `snap` keyword's worker; it opens only when the directory exists, and a failure to open it is shown in the Snapshots window and on every Settings page and retried on the next save. It never syncs.
-- **`extension-grants`**: the [capability broker](../capability-broker.md)'s local grants, one record per package with any decision, upserted under its package ID and holding `{ package, enabled, scopes }`: whether it is on, and each scope granted, with the revision and scope approved and the path the user picked, or revoked. A package left with no decisions has no record. A record whose package doesn't name it is left out; a record that can't be read, or one sealed under another key, makes the whole store unreadable, so nothing is granted, bundled pre-grants are withheld and nothing is written. Writes use `upsert_within_limits` (10,000 packages, 1 MiB each), so a decision is never evicted. The launcher reads it on a thread of its own at launch, opening it only when the directory exists, and again when the panel shows or Settings regains focus while it couldn't; until it is read, extensions are granted nothing. It never syncs.
-- **`extensions`** and **`extensions-local`**: the installed extensions list `dupin ext install` keeps, one record per package upserted under its name and holding `{ name, source, ref, commit, content_hash, installed_at, version, keyword, requested }`. A package installed from Git goes in `extensions`, one copied from a folder, whose path means nothing on another Mac, in `extensions-local`. A record whose name doesn't name it is left out; one that can't be read, or one sealed under another key, makes the list unreadable, which keeps every folder in the extensions folder off. Each holds at most 256 packages in 192 KiB, so the whole list fits one control message, and writes use `upsert_within_limits`, since an entry evicted would let its folder run unchecked. `extensions` syncs when sync ships; `extensions-local` never does.
-- **`usage`**: usage history, the ranking log, one record per device keyed by its device ID: what this Mac opened, how often, its latest ten visits and the queries it was picked for. Ranking adds every device's record together. Paths under the home folder are stored relative to it. The sync worker opens it at launch only when it exists, so a Mac with nothing recorded first reads the data key at its first pick; an older `history.json` is moved into it and removed. It syncs `per_device` when [sync](./sync.md) is on.
-
-The launcher owns `extension-grants`, `extensions` and `extensions-local` from when it first opens them until it quits. `dupin ext` opens them itself only while the launcher doesn't hold them, each read or write on its own so a launcher starting meanwhile can take them; while the launcher does, the command finds them busy and asks it over the control socket (`extension_lock_get`, `extension_lock_set`, `extension_grants_forget`, `extension_grants_list`), as it asks it to delete a removed package's data. `extensions.lock.guard`, an empty file beside `storage/`, still takes `dupin ext` commands one at a time.
-
-## On disk
+<details>
+<summary>On disk</summary>
 
 The host roots the store at `storage/` in Dupin's writable data directory: `~/Library/Application Support/Dupin/storage`, or `$XDG_DATA_HOME/dupin/storage` when that is set. Directories are created `0700` and files `0600`.
 
@@ -83,9 +184,19 @@ Keys are derived with HKDF-SHA256 (salt `dupin-storage v2`) from the key the tag
 
 A header field this version does not know is ignored, and a file in a newer format, or tagged with a key this device does not hold, is skipped: left on disk untouched, not listed, and counted in the open report. While any record is skipped, every blob found when the namespace opened is kept, even once no record of this key uses it, since a skipped record's blobs cannot be told apart from this key's; kept blobs are still shared by new records and count towards the namespace's byte limit. A blob first written while the namespace is open is removed as usual once nothing uses it.
 
-Every write goes to `tmp/`, is flushed, then renamed into place and the directory flushed, so a crash leaves either the old state or the new one. There is no separate index to fall out of step: the record files are the index. Opening a namespace deletes leftover temporary files, records that fail authentication or have lost a blob, and blobs that no record uses. A damaged record is dropped on its own; the rest stay readable. Before anything is deleted as damaged, the key must be confirmed: the namespace's `key.check`, which is tagged like every other file, opens, or, if that file is missing or damaged, at least one record opens and the check is written again. A `key.check` in a newer format, or tagged with a key this device does not hold, is never judged or replaced: the records alone confirm the key, and a namespace holding only files this version cannot read opens without deleting anything. A wrong or missing key therefore reports an error and leaves every file untouched; the owner can then discard the namespace deliberately. A read or permission error is reported as an error too, never taken for damage. A blob that turns out to be damaged when read is dropped with the records that use it, so the next copy of the same content is stored afresh.
+</details>
 
-## Synced namespaces
+<details>
+<summary>Crash safety and damaged files</summary>
+
+Every write goes to `tmp/`, is flushed, then renamed into place and the directory flushed, so a crash leaves either the old state or the new one. There is no separate index to fall out of step: the record files are the index. Opening a namespace deletes leftover temporary files, records that fail authentication or have lost a blob, and blobs that no record uses. A damaged record is dropped on its own; the rest stay readable.
+
+Before anything is deleted as damaged, the key must be confirmed: the namespace's `key.check`, which is tagged like every other file, opens, or, if that file is missing or damaged, at least one record opens and the check is written again. A `key.check` in a newer format, or tagged with a key this device does not hold, is never judged or replaced: the records alone confirm the key, and a namespace holding only files this version cannot read opens without deleting anything. A wrong or missing key therefore reports an error and leaves every file untouched; the owner can then discard the namespace deliberately. A read or permission error is reported as an error too, never taken for damage. A blob that turns out to be damaged when read is dropped with the records that use it, so the next copy of the same content is stored afresh.
+
+</details>
+
+<details>
+<summary>Synced namespaces</summary>
 
 A namespace that [syncs between Macs](../design/sync.md) is opened with `Storage::open_synced` and a `VaultKey`, one epoch of the sync vault's key, instead of the data key. Its files are then tagged and sealed under keys derived from the vault key, and its namespace ID and record IDs come from the vault key too, so every Mac in the vault names the same record the same way and exporting a version to the folder is a byte copy. Opening a namespace re-seals every file sealed under another key the storage holds: the data key, or a vault key handed to `Storage::hold_vault_key`. Turning sync on or off for a namespace is therefore a copy, never a migration; a record keeps its stamp, an upserted record moves to the ID its logical key has under the new key, and anything that fails to open stays on disk, skipped, for a later open. A record upserted by a nightly build from before logical keys were sealed keeps its old ID when re-sealed.
 
@@ -97,18 +208,4 @@ A synced namespace differs from a local one in what it keeps:
 
 The sync engine reads the versions a namespace holds and their sealed files, and imports another device's file only when its stamp is newer than the version held here. An import opens the whole file under the namespace's key first, a blob must hold the content its handle names, a version stamped more than five minutes ahead of the wall clock is held back without moving this device's clock, and a version the namespace's limits would evict at once is never stored.
 
-## The data key
-
-One random 256-bit data key protects every namespace. A `KeyProvider` supplies it, and creates it only if none exists; a locked or refused key store is reported as an error, never answered with a new key that would orphan the stored data.
-
-- **macOS:** a generic password item, service `app.dupin.Dupin.storage`, account `data-key`, never synchronized. A build with the data protection keychain entitlement stores it there as accessible after first unlock, this device only. Builds without that entitlement (ad hoc and Developer ID builds without a provisioning profile) fall back to the login keychain, which ignores the accessibility class and whose access control trusts the app that created the item, so a differently signed build may be asked for the login password before it can read the key.
-- **Linux and others:** `FileKey`, a `0600` file meant to sit at `storage.key` beside `storage/`, never inside it, where every name belongs to a namespace. It is refused if other users can read it. This is weaker than a key store: anyone who can read the file, or a backup that contains it alongside the data, can decrypt everything.
-- **Tests and fixtures** use an in-memory key and never touch the real Keychain. A test that runs the `dupin` executable, such as `dupin ext install`, sets `DUPIN_DEBUG_STORAGE_KEY_FILE` to a `FileKey` of its own, which only a debug build reads; a release build always uses the Keychain.
-
-## Threat model
-
-Encryption at rest protects stored data from other user accounts on the Mac, from backups and synced copies of the data directory that do not include the Keychain, and from a lost or stolen disk. It also detects tampering: a modified, truncated, swapped or renamed file is rejected rather than read.
-
-It does not protect against code running as the same user. Anything that can read the Keychain item, or that runs inside Dupin, can read everything stored. File sizes and modification times are not hidden: blob sizes and when each record last changed are visible to anyone who can list the directory. Record names are random or keyed hashes, so they reveal neither when a record was stored nor an owner's logical keys. The device ID in each record file is not a secret.
-
-Deleting a record replaces its file with a tombstone, then removes that, and does not overwrite the old contents, because without the key the remains are ciphertext. Dupin zeroizes plaintext buffers it owns once it has used them: serialized JSON, blob contents passed to `put`, decrypted bodies and blobs, and key material. Values handed to callers, such as a parsed JSON record or a blob returned for display, are the caller's to clear, and copies made by the operating system, the allocator or Core Foundation are outside Dupin's reach. Zeroizing narrows how long plaintext stays in memory; it is not a guarantee against memory inspection.
+</details>

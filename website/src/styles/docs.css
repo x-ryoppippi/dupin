@@ -111,6 +111,17 @@
 	border: 1px solid var(--border);
 }
 
+.docs-content kbd {
+	font-family: var(--font-mono);
+	font-size: 0.85em;
+	padding: 0.1em 0.4em;
+	border-radius: 4px;
+	background: var(--bg-card);
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	white-space: nowrap;
+}
+
 .docs-content pre {
 	overflow-x: auto;
 	padding: 16px;

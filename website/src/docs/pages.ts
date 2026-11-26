@@ -23,6 +23,7 @@ export const sections = [
 			'features/system-commands.md',
 			'features/settings.md',
 			'features/appearance.md',
+			'features/shaders.md',
 			'features/permissions.md',
 			'features/storage.md',
 			'features/sync.md',

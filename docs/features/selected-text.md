@@ -1,13 +1,38 @@
 # Search selected text
 
-Set a **Selection hotkey** in Settings → General. Select text in another app and press the shortcut to open Dupin with that text in the query field. Type to replace the selection. If the app exposes no selected text, Dupin opens with an empty query.
+A hotkey opens Dupin with the text selected in another app already in the query field.
 
-Dupin needs macOS Accessibility access for this shortcut. If access is missing, choose **Open System Settings** in the panel and enable Dupin under **Privacy & Security → Accessibility**, then try again.
+## Open it
+
+Select text in another app and press your **Selection hotkey**.
+
+## What you see
+
+- The panel, with the selected text as the query.
+- An empty query if the app exposes no selected text.
+
+## What you can do
+
+| Key / action | What it does                           |
+| ------------ | -------------------------------------- |
+| Type         | Replace the selection with a new query |
+
+Other keys: [Keys](../usage.md#keys).
+
+## Notes
+
+- Off until you set a **Selection hotkey**.
+- Needs macOS Accessibility access. Recording the first **Selection hotkey** in Settings → General requests it when needed; if you set `selection_hotkey` in `config.toml`, Dupin requests it on the first press that needs it.
+- If access is missing, choose **Open System Settings** in the panel and enable Dupin under **Privacy & Security → Accessibility**, then try again.
 
 ## Configuration
-
-Leave `selection_hotkey` empty to keep selected-text search off. Recording the first **Selection hotkey** in Settings → General requests Accessibility access when needed. If you set `selection_hotkey` in `config.toml`, Dupin requests access on the first press that needs it.
 
 ```toml
 selection_hotkey = "" # optional shortcut for searching selected text
 ```
+
+| Key                | Default | Meaning                                                                                       |
+| ------------------ | ------- | --------------------------------------------------------------------------------------------- |
+| `selection_hotkey` | `""`    | The shortcut; empty keeps selected-text search off. Settings → General → **Selection hotkey** |
+
+[Hotkeys](./hotkeys.md) · [Permissions](./permissions.md)
