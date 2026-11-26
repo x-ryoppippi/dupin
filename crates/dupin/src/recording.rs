@@ -20,7 +20,7 @@ pub fn active() -> bool {
     *ACTIVE.get_or_init(|| {
         std::env::var_os(RECORDING).is_some_and(|value| value == "1")
             && std::env::var_os("HOME")
-                .is_some_and(|home| account_home().is_some_and(|account| account != PathBuf::from(home)))
+                .is_some_and(|home| account_home().is_some_and(|account| account != home))
     })
 }
 
