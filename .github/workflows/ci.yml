@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # On main a run that started finishes, so every merge that waits gets checked; a newer push
+  # still replaces a queued run there, and supersedes a running one on a pull request.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
