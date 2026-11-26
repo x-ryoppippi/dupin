@@ -61,12 +61,12 @@ c = "calendar" # c, then Space, enters Calendar search
 ff = "app:org.mozilla.firefox" # ff shows Firefox first
 ```
 
-And give a command a global shortcut of its own with `[bindings]`, here one that opens the panel in clipboard history:
+And give a command a global shortcut of its own with `[bindings]`, here ⇧⌘V for clipboard history, or record one in Settings → Keywords:
 
 ```toml
 [bindings."cmd+shift+v"]
-target = "command"
-command = "dupin open --query 'clip '"
+target = "dupin"
+command = "clipboard"
 ```
 
 ## Next
