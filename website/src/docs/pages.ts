@@ -5,7 +5,10 @@ import { repo } from '../site.ts';
 // to them go there. What is native and what is a bundled extension follows the built-ins table
 // in docs/design/extension-platform.md.
 export const sections = [
-	{ title: 'Getting started', pages: ['usage.md', 'configuration.md', 'features/keywords.md'] },
+	{
+		title: 'Getting started',
+		pages: ['usage.md', 'tutorial.md', 'configuration.md', 'features/keywords.md'],
+	},
 	{
 		title: 'Built-in features',
 		intro: 'Native to Dupin and always there.',
@@ -50,7 +53,7 @@ export const sections = [
 		intro: 'Write, install and test extensions of your own.',
 		pages: ['features/extensions.md', 'features/mcp.md'],
 	},
-	{ title: 'About', pages: ['name.md'] },
+	{ title: 'About', pages: ['philosophy.md', 'name.md'] },
 ] as const satisfies readonly { title: string; intro?: string; pages: readonly string[] }[];
 
 export type DocPath = (typeof sections)[number]['pages'][number];
