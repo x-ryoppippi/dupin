@@ -53,9 +53,12 @@ func panel(_ pid: Int32) -> Never {
         fail("no window of \(pid) is on screen")
     }
     // Window bounds are in points from the main screen's top left; recordings are in its pixels.
-    let scale = NSScreen.screens.first?.backingScaleFactor ?? 1
-    let pixels = [frame.minX, frame.minY, frame.width, frame.height].map { Int(($0 * scale).rounded()) }
-    print("{\"x\":\(pixels[0]),\"y\":\(pixels[1]),\"width\":\(pixels[2]),\"height\":\(pixels[3]),\"scale\":\(scale)}")
+    // `bottom` is where the Dock or the screen's edge begins, below which nothing is wallpaper.
+    guard let screen = NSScreen.screens.first else { fail("no screen") }
+    let scale = screen.backingScaleFactor
+    let bottom = screen.frame.maxY - screen.visibleFrame.minY
+    let pixels = [frame.minX, frame.minY, frame.width, frame.height, bottom].map { Int(($0 * scale).rounded()) }
+    print("{\"x\":\(pixels[0]),\"y\":\(pixels[1]),\"width\":\(pixels[2]),\"height\":\(pixels[3]),\"bottom\":\(pixels[4]),\"scale\":\(scale)}")
     exit(0)
 }
 

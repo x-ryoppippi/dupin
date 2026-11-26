@@ -143,8 +143,8 @@
 		},
 	];
 
-	// The tabs scripts/docs-glass.nu has recorded over real Liquid Glass; the others are still
-	// their headless stand-ins over Flow.
+	// The tabs scripts/docs-glass.nu has recorded over real Liquid Glass; the others are headless
+	// recordings over Flow.
 	const captured: Record<string, unknown> = glass.clips;
 
 	let tab = $state('apps');
@@ -257,7 +257,7 @@
 	<p class="note" aria-live="polite">
 		{shownBackdrop.text}
 		{#if standIn}
-			This tab is shown over Flow until its Liquid Glass recording is made.
+			This tab is a headless recording over the Flow shader, not Liquid Glass.
 		{:else if backdrop !== 'glass'}
 			Shaders are shown on the Apps tab. Pick one in Settings → Appearance, or
 			<a href="/docs/features/shaders/">write your own in WGSL</a>.

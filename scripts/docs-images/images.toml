@@ -485,7 +485,8 @@ steps = [{ type = "?" }, { key = "down" }, { key = "down" }, { key = "down" }]
 [[clips]]
 page = "home"
 name = "clipboard"
-glass = true
+# Not `glass`: the real app records copies only once macOS lets it read the clipboard in the
+# background, which a recording must not grant, so this stays headless over Flow.
 fixtures = "scripts/headless/clipboard-images.json"
 backdrop = "flow"
 themes = ["dark"]

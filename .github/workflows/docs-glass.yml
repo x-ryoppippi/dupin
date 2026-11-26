@@ -66,9 +66,11 @@ jobs:
             docs/images/home/
           if-no-files-found: error
 
-      - if: failure()
+      - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-glass-logs
-          path: target/docs-glass/
+          path: |
+            target/docs-glass/*.log
+            target/docs-glass/*-home/Library/Logs/
           if-no-files-found: ignore

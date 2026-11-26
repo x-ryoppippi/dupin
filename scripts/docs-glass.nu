@@ -92,7 +92,7 @@ def main [
             msg: $"no `glass = true` clip in ($MANIFEST | path basename) matches ($only)"
         }
     }
-    # Kept when a recording fails, with each instance's log and the raw recording.
+    # Each instance's log, scratch home and raw recording, kept until the next run.
     let tmp = "target/docs-glass" | path expand
     rm --recursive --force $tmp
     mkdir $tmp
@@ -111,7 +111,6 @@ def main [
         | insert wallpaper $chosen
         | insert macos $macos
     }
-    rm --recursive --force $tmp
     let captured = if ($GLASS | path exists) {
         open $GLASS | get clips
     } else {
@@ -182,12 +181,6 @@ def record-clip [
     ^chmod 700 $runtime
     let environment = $environment | merge {XDG_RUNTIME_DIR: $runtime}
     let log = $tmp | path join $"($name).log"
-    let clipboard = $clip.fixtures? | default "" | str contains clipboard
-    let pasteboard = if $clipboard {
-        ^pbpaste | complete
-    } else {
-        null
-    }
     let backdrop = job spawn { ^$stage wallpaper $wallpaper }
     let dupin = job spawn { with-env $environment { ^$binary o+e> $log } }
     let outcome = try {
@@ -196,7 +189,6 @@ def record-clip [
             glob ($runtime | path join "**" "*") | is-not-empty
         }
         sleep 1sec
-        if $clipboard { copy-history }
         let movie = $tmp | path join $"($name).mp4"
         let progress = $tmp | path join $"($name).progress"
         let seconds = ($timeline.events | last | get t) + 10
@@ -215,10 +207,12 @@ def record-clip [
                 with-env $environment { ^$binary open | complete }
             ).exit_code == 0
         }
-        let opened = date now
         let pid = dupin-pid $binary
+        wait-for $"($id)'s panel to show; see ($log)" { (^$stage panel ($pid | into string) | complete).exit_code == 0 }
+        # The script touches this as it starts, which is when the clip's time 0 is.
+        let mark = $tmp | path join $"($name).start"
         job spawn {
-            ^osascript -e (steps-script $timeline.events) | complete | ignore
+            ^osascript -e (steps-script $timeline.events $mark) | complete | ignore
             true | job send 0 --tag 2
         } | ignore
         # Where the panel is, as it grows and shrinks, until the last key.
@@ -247,7 +241,7 @@ def record-clip [
                     $timeline
                     $movie
                     $frame
-                    (($opened - $started) / 1sec)
+                    (((ls $mark | get modified.0) - $started) / 1sec)
                     $tmp
                 )
             )
@@ -255,10 +249,6 @@ def record-clip [
     } catch {|error| {error: $error} }
     job kill $dupin
     job kill $backdrop
-    # Put back what was copied before, now that this Dupin can no longer record it.
-    if $pasteboard != null and $pasteboard.exit_code == 0 {
-        $pasteboard.stdout | ^pbcopy
-    }
     if $outcome.error? != null {
         error make $outcome.error.raw
     }
@@ -280,9 +270,6 @@ def finish-glass [
     let scale = $panel.scale
     let margin = $MARGIN * $scale | math round
     let space = $CAPTION_SPACE * $scale | math round
-    # H.264 takes only even sides.
-    let width = ($panel.width + 2 * $margin) // 2 * 2
-    let height = ($panel.height + 2 * $margin + $space) // 2 * 2
     let x = [
         ($panel.x - $margin)
         0
@@ -291,6 +278,13 @@ def finish-glass [
         ($panel.y - $margin)
         0
     ] | math max
+    # H.264 takes only even sides. The Dock and the menu bar are above the wallpaper, so the cut
+    # stops short of them.
+    let width = ($panel.width + 2 * $margin) // 2 * 2
+    let height = ([
+        ($panel.y + $panel.height + $margin + $space)
+        $panel.bottom
+    ] | math min) - $y | $in // 2 * 2
     let frames = $tmp | path join $"($name)-frames"
     mkdir $frames
     let duration = $timeline.events | last | get t
@@ -331,6 +325,7 @@ def union [a: record, b: record]: nothing -> record {
         width: ($right - $x)
         height: ($bottom - $y)
         scale: $a.scale
+        bottom: $a.bottom
     }
 }
 
@@ -345,8 +340,9 @@ def dupin-pid [binary: path]: nothing -> int {
     | into int
 }
 
-# The System Events script that plays a clip's events at their times from when it starts.
-def steps-script [events: list<record>]: nothing -> string {
+# The System Events script that plays a clip's events at their times from when it starts, which
+# it marks by touching `mark`: starting osascript takes long enough to throw the captions out.
+def steps-script [events: list<record>, mark: path]: nothing -> string {
     let played = $events | where type != mark | reduce --fold {t: 0, lines: []} {|event, run|
         let wait = [($event.t - $run.t) 0] | math max | math round --precision 3
         let stroke = match $event.type {
@@ -355,7 +351,12 @@ def steps-script [events: list<record>]: nothing -> string {
         }
         {t: $event.t, lines: ($run.lines | append [$"    delay ($wait)" $stroke])}
     }
-    ['tell application "System Events"' ...$played.lines 'end tell'] | str join (char nl)
+    [
+        $"do shell script \"touch \" & quoted form of \"($mark)\""
+        'tell application "System Events"'
+        ...$played.lines
+        'end tell'
+    ] | str join (char nl)
 }
 
 # A clip event's key as scripts/e2e/keys.nu names it, with its modifiers: `cmd+k`.
@@ -372,18 +373,6 @@ def chord [event: record]: nothing -> string {
     }
     let key = $names | get --optional $event.name | default ($event.name | str lowercase)
     [ctrl alt shift cmd] | where {|modifier| $event | get --optional $modifier | default false } | append $key | str join +
-}
-
-# A clipboard history to show, copied as a person would: the fixture's text entries, oldest first.
-def copy-history []: nothing -> nothing {
-    open scripts/headless/clipboard-images.clipboard/history.json
-    | where text? != null
-    | last 8
-    | each {|entry|
-        $entry.text | ^pbcopy
-        sleep 400ms
-    }
-    | ignore
 }
 
 def wait-for [what: string, ready: closure] {
