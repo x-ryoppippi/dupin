@@ -21,6 +21,7 @@ fn every_capability_parses_into_its_scopes() {
                 program: None,
                 background: false,
                 ssh_agent: false,
+                output_bytes: None,
             },
             Scope::Script {
                 name: name("open-in-zed"),
@@ -217,7 +218,33 @@ fn an_exec_profile_may_ask_for_the_ssh_agent() {
             program: None,
             background: false,
             ssh_agent: true,
+            output_bytes: None,
         }]
+    );
+}
+
+#[test]
+fn a_profile_bounds_only_output_it_reads_and_at_most_1_mib() {
+    let parsed =
+        caps(json!({ "exec": { "ps": { "args": ["-ax"], "output": true, "outputBytes": 1_048_576 } } }));
+    assert!(matches!(
+        parsed.get(&key("exec:ps")),
+        Some(Scope::Exec {
+            output_bytes: Some(1_048_576),
+            ..
+        })
+    ));
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "outputBytes": 10 } } })),
+        ("invalid-value", "capabilities.exec.run.outputBytes".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "output": true, "outputBytes": 1_048_577 } } })),
+        ("out-of-range", "capabilities.exec.run.outputBytes".into())
+    );
+    assert_eq!(
+        problem(json!({ "exec": { "run": { "args": [], "output": true, "outputBytes": 0 } } })),
+        ("out-of-range", "capabilities.exec.run.outputBytes".into())
     );
 }
 

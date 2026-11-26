@@ -1,0 +1,102 @@
+{
+	"fixture": 1,
+	"description": "Show Process hands the port's process over to the Processes keyword.",
+	"environment": {
+		"now": "2026-11-26T12:00:00Z",
+		"seed": 1,
+		"locale": "en-GB",
+		"timeZone": "UTC",
+		"theme": "dark",
+		"window": {
+			"width": 680,
+			"scale": 2
+		}
+	},
+	"replies": {
+		"exec": [
+			{
+				"profile": "sockets",
+				"args": ["-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-iUDP", "-F", "cnPpu"],
+				"status": 0,
+				"stdout": "p4242\ncnode\nu501\nf23\nPTCP\nn127.0.0.1:5173\nf24\nPTCP\nn[::1]:5173\np321\ncSafari\nu501\nf40\nPUDP\nn*:*\nf41\nPUDP\nn[2a01::1]:62063->[2a01::2]:443\np1127\ncrapportd\nu501\nf13\nPTCP\nn*:49205\nf19\nPUDP\nn*:3722\np600\ncpostgres\nu501\nf7\nPTCP\nn127.0.0.1:5432\nf8\nPTCP\nn127.0.0.1:5432\n",
+				"stderr": ""
+			}
+		]
+	},
+	"steps": [
+		{
+			"query": "5173",
+			"expect": {
+				"rows": [
+					{
+						"accessories": [
+							{
+								"tag": "TCP"
+							},
+							{
+								"freshness": 1795694400000
+							}
+						],
+						"actions": [
+							{
+								"title": "Open in Browser",
+								"url": "http://localhost:5173"
+							},
+							{
+								"copy": "localhost:5173",
+								"title": "Copy Address"
+							},
+							{
+								"copy": "5173",
+								"title": "Copy Port"
+							},
+							{
+								"run": {
+									"action": "showProcess",
+									"data": {
+										"pid": 4242
+									}
+								},
+								"title": "Show Process"
+							},
+							{
+								"run": {
+									"action": "terminate",
+									"data": {
+										"name": "node",
+										"pid": 4242
+									}
+								},
+								"title": "Terminate"
+							}
+						],
+						"id": "TCP-5173-4242",
+						"keywords": ["node", "4242"],
+						"subtitle": "node · 4242 · 127.0.0.1, [::1]",
+						"title": "5173"
+					}
+				],
+				"selected": 0
+			}
+		},
+		{
+			"activate": "Show Process",
+			"expect": {
+				"effect": {
+					"run": {
+						"action": "showProcess",
+						"data": {
+							"pid": 4242
+						}
+					}
+				},
+				"panel": {
+					"enter": {
+						"command": "proc",
+						"query": "4242"
+					}
+				}
+			}
+		}
+	]
+}

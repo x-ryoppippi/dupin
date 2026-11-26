@@ -115,6 +115,7 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
         program: None,
         background: false,
         ssh_agent,
+        output_bytes: None,
     };
     assert!(exec(&["status"], true, false).covers(&exec(&["status"], false, false)));
     assert!(!exec(&["status"], false, false).covers(&exec(&["status"], true, false)));
@@ -123,6 +124,21 @@ fn an_approval_covers_the_same_or_a_narrower_declaration_only() {
     assert!(
         !exec(&["status"], false, false).covers(&exec(&["status"], false, true)),
         "handing over the SSH agent widens the profile"
+    );
+    let bounded = |output_bytes| Scope::Exec {
+        name: name("ps"),
+        args: vec!["-ax".into()],
+        output: true,
+        program: None,
+        background: false,
+        ssh_agent: false,
+        output_bytes,
+    };
+    assert!(bounded(Some(1 << 20)).covers(&bounded(None)));
+    assert!(bounded(None).covers(&bounded(Some(1024))));
+    assert!(
+        !bounded(None).covers(&bounded(Some(1 << 20))),
+        "reading more output asks again"
     );
 
     let script = |output| Scope::Script {
@@ -242,6 +258,7 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
             program: None,
             background: false,
             ssh_agent: false,
+            output_bytes: None,
         }
         .to_string()
     };
@@ -257,10 +274,11 @@ fn exec_consent_shows_where_each_argument_starts_and_ends() {
         program: None,
         background: false,
         ssh_agent: true,
+        output_bytes: Some(1_048_576),
     };
     assert_eq!(
         agent.to_string(),
-        "run the program you pick for “ssh” with \"{host}\", using the keys your SSH agent holds, and read its output"
+        "run the program you pick for “ssh” with \"{host}\", using the keys your SSH agent holds, and read up to 1048576 bytes of its output"
     );
 }
 

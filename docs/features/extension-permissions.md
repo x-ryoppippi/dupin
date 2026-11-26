@@ -232,6 +232,7 @@ Each profile's `{input}` placeholders take one line of text. A script needs no p
 | `output`      | Asks to receive stdout and stderr.                                                                                                                                                                                                         |
 | `program`     | The program's absolute path, such as `/usr/bin/git`. Allowing the profile binds it to that program without a pick, and consent names it.                                                                                                   |
 | `background`  | The profile may run while you type, in `items` and in event handlers, not only in an action you chose. Consent says so: **…, even while you type and without an action you chose**. Declaring it later is a wider scope, which asks again. |
+| `outputBytes` | With `output`, the most of each stream it receives: 1 byte to 1 MiB, 64 KiB without it. Declaring more later asks again.                                                                                                                   |
 | `sshAgent`    | Hands the program your `SSH_AUTH_SOCK`, so `ssh` can use your agent's keys; the extension never sees the socket or the keys.                                                                                                               |
 
 ```js

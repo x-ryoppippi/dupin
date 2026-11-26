@@ -125,6 +125,10 @@ let
         enable = true;
         deny = [ "exec:terminate" ];
       };
+      proc = {
+        enable = true;
+        deny = [ "exec:force-quit" ];
+      };
       repo = {
         enable = true;
         grants = [ "files:ghq" ];
@@ -186,6 +190,11 @@ assert
     "files:ssh-include"
     "storage"
   ];
+assert lib.all (name: lib.elem "exec:terminate" bundledExtensions.${name}) [
+  "proc"
+  "port"
+  "agent"
+];
 assert bundledExtensions.dupin == [ ];
 assert
   lib.elem "files:ghq" bundledExtensions.repo && lib.elem "exec:git-status" bundledExtensions.repo;
@@ -261,6 +270,10 @@ pkgs.runCommand "dupin-home-manager-module"
         "bundled:remote" = {
           enabled = true;
           deny = [ "exec:terminate" ];
+        };
+        "bundled:proc" = {
+          enabled = true;
+          deny = [ "exec:force-quit" ];
         };
         "bundled:repo" = {
           enabled = true;

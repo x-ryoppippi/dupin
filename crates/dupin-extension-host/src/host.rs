@@ -324,13 +324,36 @@ impl Host {
             preferences: preferences.clone(),
         };
         let request = Request::run(package, call, Work::Items);
-        match self.call(package.domain, request, deadline, is_cancelled, services)? {
-            (Answer::Catalogue { page }, _) => {
-                page.validate().map_err(|problem| unshowable(problem, package))?;
-                Ok(page)
-            }
-            _ => Err(mismatch()),
-        }
+        catalogue_page(
+            self.call(package.domain, request, deadline, is_cancelled, services)?,
+            package,
+        )
+    }
+
+    /// As [`Host::items`], in a helper of its own, as Dupin refreshing a catalogue nobody is
+    /// waiting for does: however long the package's programs take, it never holds up the
+    /// searches of the resident helper.
+    #[allow(clippy::too_many_arguments)]
+    pub fn items_alone(
+        &self,
+        package: &Compiled,
+        cursor: Option<&str>,
+        reason: Reason,
+        preferences: &Preferences,
+        deadline: Instant,
+        is_cancelled: &dyn Fn() -> bool,
+        services: &Arc<dyn Services>,
+    ) -> Result<CataloguePage, RunError> {
+        let call = Call::Items {
+            cursor: cursor.map(str::to_owned),
+            reason,
+            preferences: preferences.clone(),
+        };
+        let request = Request::run(package, call, Work::Items);
+        catalogue_page(
+            self.alone(request, |_| deadline, || deadline, is_cancelled, services)?,
+            package,
+        )
     }
 
     /// Calls `search(query, { limit })` in `package`, answering its host requests with
@@ -1306,6 +1329,16 @@ fn host_error(message: impl Into<String>) -> Diagnostic {
 
 fn mismatch() -> RunError {
     host_error("the extension host gave an answer that doesn't fit the call").into()
+}
+
+fn catalogue_page(answer: (Answer, Vec<u8>), package: &Compiled) -> Result<CataloguePage, RunError> {
+    match answer {
+        (Answer::Catalogue { page }, _) => {
+            page.validate().map_err(|problem| unshowable(problem, package))?;
+            Ok(page)
+        }
+        _ => Err(mismatch()),
+    }
 }
 
 fn crashed() -> Diagnostic {

@@ -85,6 +85,9 @@ fn case(name: &str) -> Option<Override> {
         )
         .ships_off(),
         "web-search" => Override::extension("web-search", None),
+        "proc" => Override::signals("proc"),
+        "port" => Override::signals("port"),
+        "agent" => Override::signals("agent"),
         "window-management" => Override::extension(
             "window-management",
             Some(Use::Effect(Request::Windows(WindowsAccess::Arrange))),
@@ -144,6 +147,12 @@ impl Override {
             uses,
             ships_off: false,
         }
+    }
+
+    /// A package that ships off and only runs programs, each of which the user allows before
+    /// it runs, bundled or not, so it holds nothing as it ships.
+    fn signals(name: &'static str) -> Self {
+        Self::extension(name, None).ships_off()
     }
 
     fn ships_off(self) -> Self {
