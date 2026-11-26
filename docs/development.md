@@ -190,7 +190,7 @@ A page embeds an image as a `<picture>` whose `prefers-color-scheme: dark` sourc
 </picture>
 ```
 
-Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in both themes, `docs/images` holds nothing else, some page embeds each one and every image a page embeds exists.
+Pixels differ from Mac to Mac (fonts, app icons and the GPU), so CI doesn't render the images again. `checks.docs-images` runs `nu scripts/docs-images.nu check` instead: every listed image and clip exists in each of its themes, `docs/images` holds nothing else, some page or the website embeds each one and every image either embeds exists.
 
 ### Clips
 
@@ -204,6 +204,8 @@ The same list's `[[clips]]` are short recordings: each plays its `steps` (typed 
 ```
 
 Animated WebP, not video, because the same Markdown is read on GitHub, which shows a `<video>` only for files uploaded to an issue or pull request, never one in the repository; GitHub shows an animated WebP as an image, and so does every current browser, without a player or autoplay rules. A clip must never type into a Spotlight search (Space on an empty query, or `in`), since Spotlight answers from the rendering Mac's own index; the files clips start from Recent items and folder browsing instead, which read only the scratch home.
+
+The website's home page plays clips of its own, on page `home`: the hero, a search from apps through Files and a keyword to the `?` list, and one per backdrop shader. A page outside GitHub can play video, and a [backdrop shader](./features/shaders.md) changes every pixel of every frame, where an animated WebP is several times larger than a video, so these set `video = true`: `ffmpeg` encodes the frames over the page's black (`background`) as an H.264 MP4, and the last frame is saved as `<name>-<theme>-poster.webp`, which the page shows before the video plays and in its place under reduced motion. `themes = ["dark"]` renders only the theme the site uses, `scale` sets the scale (2 for the hero, so its text stays sharp on a Retina screen), `backdrop` names the shader as `config.toml` would (the example shaders are in the scratch configuration's `shaders` folder), and `captions = false` leaves the captions off. The website names each file at the path it serves it from (`/docs/images/home/hero-dark.mp4`), and `check` counts those as embeds.
 
 ## Native E2E evidence
 
@@ -422,7 +424,7 @@ Run them locally with `nix build .#checks.aarch64-darwin.licences .#checks.aarch
 
 ## Website
 
-`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the panel demo, the copy buttons and the download channel switch. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
+`website/` holds <https://dupin.app>, with its own pnpm project. Pages are Svelte components in `website/src/pages/` that [ox-content](https://github.com/ubugeeei-prod/ox-content)'s custom host (`website/src/host/index.ts`) renders to static HTML; the browser then hydrates the same component from the props written into the page, which runs the home page's recordings, the copy buttons and the download channel switch. The development shell provides Node.js and the pnpm version that `website/package.json` pins (`nix flake check` fails when they differ).
 
 ```sh
 just website::install # dependencies from the lockfile

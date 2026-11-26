@@ -213,7 +213,13 @@ width = 760
 # once with `burst = true`, for a search that would answer each prefix), presses a key (`key`,
 # with `cmd`, `shift`, `alt` or `ctrl`) or waits (`wait`, in seconds). `fixtures` names a scenario
 # whose sidecar fixtures the clip runs with, and `config` a configuration in place of the default
-# one. Every clip is embedded under the steps of its page.
+# one, and `backdrop` a backdrop shader as `config.toml` names it. Every clip is embedded under
+# the steps of its page.
+#
+# The website's clips, on page `home`, play on a dark page only (`themes = ["dark"]`), at the
+# `scale` that keeps them sharp on a Retina screen at the size the page shows them. A backdrop shader changes every pixel
+# of every frame, so they are MP4 videos over the page's black (`video = true`, with a WebP
+# poster of the last frame), and the shader clips have no captions (`captions = false`).
 #
 # A clip never types into a Spotlight search (Files after Space, or `in`): Spotlight answers
 # from this Mac's index, whatever the scratch home holds. Files clips start from Recent items and
@@ -400,3 +406,80 @@ name = "notes"
 extension = "examples/extensions/notes-js"
 fixture = "notes.json"
 step = 5
+
+[[clips]]
+page = "home"
+name = "hero"
+backdrop = "flow"
+themes = ["dark"]
+scale = 2
+video = true
+steps = [
+	{ type = "ma" },
+	{ key = "down" },
+	{ key = "a", cmd = true },
+	{ key = "backspace" },
+	{ key = "space" },
+	{ wait = 0.6 },
+	{ key = "backspace" },
+	{ type = "d" },
+	{ key = "space" },
+	{ type = "serendipity", burst = true },
+	{ wait = 1.4 },
+	{ key = "a", cmd = true },
+	{ key = "backspace" },
+	{ key = "backspace" },
+	{ type = "?" },
+	{ key = "down" },
+	{ key = "down" },
+]
+
+[[clips]]
+page = "home"
+name = "flow"
+backdrop = "flow"
+themes = ["dark"]
+scale = 1
+video = true
+captions = false
+steps = [{ wait = 4.0 }]
+
+[[clips]]
+page = "home"
+name = "aurora"
+backdrop = "shaders/aurora.wgsl"
+themes = ["dark"]
+scale = 1
+video = true
+captions = false
+steps = [{ wait = 4.0 }]
+
+[[clips]]
+page = "home"
+name = "embers"
+backdrop = "shaders/embers.wgsl"
+themes = ["dark"]
+scale = 1
+video = true
+captions = false
+steps = [{ wait = 4.0 }]
+
+[[clips]]
+page = "home"
+name = "snow"
+backdrop = "shaders/snow.wgsl"
+themes = ["dark"]
+scale = 1
+video = true
+captions = false
+steps = [{ wait = 4.0 }]
+
+[[clips]]
+page = "home"
+name = "matrix"
+backdrop = "shaders/matrix.wgsl"
+themes = ["dark"]
+scale = 1
+video = true
+captions = false
+steps = [{ wait = 4.0 }]
