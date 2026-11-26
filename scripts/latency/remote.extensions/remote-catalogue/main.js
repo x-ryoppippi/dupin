@@ -82,7 +82,9 @@ export function items(ctx) {
 	const all = rows();
 	const start = ctx.reason === 'more' ? Number(ctx.cursor) : 0;
 	const end = Math.min(start + PART, all.length);
-	return end < all.length
-		? { items: all.slice(start, end), more: true, cursor: String(end) }
-		: { items: all.slice(start, end) };
+	const part = all.slice(start, end);
+	const more = end < all.length;
+	return start === 0
+		? { items: part, cursor: String(end), more }
+		: { type: 'update', append: part, cursor: String(end), more };
 }

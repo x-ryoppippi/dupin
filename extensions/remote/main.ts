@@ -149,9 +149,11 @@ export async function items(ctx: ItemsContext): Promise<ItemsResult> {
 		end++;
 	}
 	const part = rows.slice(start, end);
-	return end < rows.length
-		? { ttl: 60, items: part, more: true, cursor: String(end) }
-		: { ttl: 60, items: part };
+	const rest = end < rows.length ? { more: true, cursor: String(end) } : {};
+	// Only the first part replaces what Dupin holds; the later ones add to it.
+	return start === 0
+		? { ttl: 60, items: part, ...rest }
+		: { type: 'update', ttl: 60, append: part, ...rest };
 }
 
 function hostOf(data: Json): string | null {
